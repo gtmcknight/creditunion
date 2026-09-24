@@ -35,12 +35,13 @@ async function route() {
   if (run === seq) requestAnimationFrame(() => app.classList.add('in'));
 }
 
-/// Test networks only: a banner and a nav link to the Mint page.
+/// Test networks only: a network tag by the logo (links to Mint) and the Mint nav link.
 function drawTestnet() {
   if (config.chainId === 1) return;
-  const el = document.getElementById('testnet')!;
-  el.hidden = false;
-  el.innerHTML = `<span><strong>${chain.name}</strong> test mode. Credits here are test mints with the real art.</span><a class="small" href="#/mint">Mint test Credits →</a>`;
+  const net = document.getElementById('net')!;
+  net.hidden = false;
+  net.textContent = chain.name;
+  net.title = 'Test mode: Credits here are test mints with the real art. Mint some →';
   document.querySelector<HTMLElement>('nav a[data-nav="mint"]')?.removeAttribute('hidden');
 }
 

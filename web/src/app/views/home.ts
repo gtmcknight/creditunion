@@ -4,13 +4,6 @@ import { hydrate, pct, who } from '../ens';
 import { describeFilter } from '../traits';
 import { eth, esc, same, sheet, until } from '../ui';
 
-const STEPS = [
-  ['Pool', '10+ Credits opens one. Anyone fills it.'],
-  ['Withdraw', 'Take yours back any time before 80.'],
-  ['Burn', 'At 80 it locks. Anyone burns it.'],
-  ['Auction', 'Sold onchain. Split 80 ways.'],
-];
-
 function status(s: Summary) {
   switch (s.state) {
     case 'Open':
@@ -77,16 +70,51 @@ export function card({ s, ids, depositors }: Listed) {
   </a>`;
 }
 
+/// Hero data: the open batches nearest 80, and totals across every batch.
+function drawHero(list: Listed[]) {
+  const closest = [...list]
+    .filter((b) => b.s.state === 'Open')
+    .sort((a, b) => b.s.count - a.s.count)
+    .slice(0, 3);
+  const el = document.getElementById('closest');
+  if (el) {
+    el.innerHTML = closest.length
+      ? `<h2 class="eyebrow">Closest to 80</h2>${closest
+          .map(
+            (b) => `<a class="near" href="#/b/${b.s.address}">
+          <span class="near-body">
+            <span class="row"><strong>${esc(b.s.name || 'Untitled')}${mineIn(b).size ? ` <span class="tag you">You · ${mineIn(b).size}</span>` : ''}</strong><span class="num">${b.s.count}/80</span></span>
+            <span class="bar"><i style="width:${(b.s.count / 80) * 100}%"></i></span>
+            <span class="row muted small">${who(b.s.creator)}${fee(b.s)}</span>
+          </span>
+        </a>`,
+          )
+          .join('')}`
+      : `<h2 class="eyebrow">Closest to 80</h2><p class="muted">No open batches. <a href="#/new">Open the first →</a></p>`;
+    hydrate(el);
+  }
+  const stats = document.getElementById('stats');
+  if (stats) {
+    const pooled = list.filter((b) => b.s.state === 'Open' || b.s.state === 'Full').reduce((n, b) => n + b.s.count, 0);
+    const made = list.filter((b) => b.s.statement !== '0x0000000000000000000000000000000000000000').length;
+    const sold = list.filter((b) => b.s.state === 'Settled').reduce((a, b) => a + b.s.highBid, 0n);
+    const vals = [String(list.filter((b) => b.s.state === 'Open').length), String(pooled), String(made), sold ? eth(sold, 2) : '0'];
+    stats.querySelectorAll('dd').forEach((dd, i) => (dd.textContent = vals[i]));
+  }
+}
+
 export async function home(app: HTMLElement) {
   app.innerHTML = `
   <section class="hero">
     <div class="hero-text">
       <h1>Eighty Credits make a Statement.</h1>
-      <p class="lede">Most holders have one. Eighty pools them: 80 in, one Statement out, sale split 80 ways.</p>
+      <p class="lede">Pool yours with others. At 80 it burns into a Statement, sold onchain, split 80 ways.</p>
       <div class="actions"><a class="btn primary" href="#/new">Open a batch</a><a class="btn" href="#/how">How it works</a></div>
     </div>
-    <a class="hero-art" id="hero-art" aria-hidden="true" tabindex="-1"></a>
-    <ol class="steps">${STEPS.map(([h, t], i) => `<li style="--i:${i}"><span class="n">0${i + 1}</span><strong>${h}</strong><span>${t}</span></li>`).join('')}</ol>
+    <div class="closest" id="closest" aria-live="polite"></div>
+    <dl class="stats hero-stats" id="stats">
+      ${['Open batches', 'Credits pooled', 'Statements made', 'Sold'].map((k) => `<div><dt>${k}</dt><dd class="num">–</dd></div>`).join('')}
+    </dl>
   </section>
   <section>
     <div class="section-head"><h2>Batches</h2><span class="muted" id="batch-count"></span>
@@ -100,13 +128,7 @@ export async function home(app: HTMLElement) {
     const el = document.getElementById('batches');
     if (!el) return; // navigated away
     document.getElementById('batch-count')!.textContent = list.length ? `${list.length}` : '';
-    const lead = [...list].sort((a, b) => b.s.count - a.s.count).find((x) => x.s.state === 'Open') ?? list[0];
-    const hero = document.getElementById('hero-art') as HTMLAnchorElement | null;
-    if (hero && lead) {
-      hero.href = `#/b/${lead.s.address}`;
-      hero.innerHTML = `${sheet(lead.ids)}<span class="legend muted small"><span>${esc(lead.s.name || 'Untitled')}</span><span class="num">${lead.s.count}/80</span></span>`;
-      hero.classList.add('in');
-    }
+    drawHero(list);
     const draw = () => {
       sortList(list, sortKey());
       el.innerHTML = list.length
