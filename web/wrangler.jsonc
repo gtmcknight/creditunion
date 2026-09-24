@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "eighty",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/rpc", "/art/*", "/config.json"]
+  },
+  // Public config served at /config.json. Set RPC_URL as a secret: `wrangler secret put RPC_URL`.
+  "vars": {
+    "CHAIN_ID": "31337",
+    "CREDITS": "0x0000000000000000000000000000000000000000",
+    "FACTORY": "0x0000000000000000000000000000000000000000",
+    "FALLBACK_RPC": "http://127.0.0.1:8545"
+  },
+  "observability": { "enabled": true }
+}
