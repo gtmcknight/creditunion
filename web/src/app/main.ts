@@ -1,5 +1,6 @@
 import type { Address } from 'viem';
-import { connect, disconnect, loadConfig, onSession, restore, session, wallets } from './chain';
+import { parseAbi } from 'viem';
+import { chain, config, connect, disconnect, loadConfig, onSession, restore, send, session, wallets } from './chain';
 import { batch } from './views/batch';
 import { create } from './views/create';
 import { home, how } from './views/home';
@@ -25,6 +26,30 @@ async function route() {
     if (run === seq) app.innerHTML = `<section class="prose"><h1>Something went wrong</h1><p class="error">${esc(errText(e))}</p></section>`;
   }
   if (run === seq) requestAnimationFrame(() => app.classList.add('in'));
+}
+
+/// Test networks only: the mock Credits contract lets anyone mint, so testers can fill batches themselves.
+function drawTestnet() {
+  const el = document.getElementById('testnet')!;
+  if (config.chainId === 1) return;
+  el.hidden = false;
+  el.innerHTML = `<span><strong>${chain.name}</strong> test mode. Credits here are mocks.</span>${
+    session.account ? '<button class="link small" id="faucet">Get 20 test Credits</button>' : ''
+  }`;
+  document.getElementById('faucet')?.addEventListener('click', async (e) => {
+    const b = e.currentTarget as HTMLButtonElement;
+    b.disabled = true;
+    b.textContent = 'Minting…';
+    try {
+      await send({ address: config.credits, abi: parseAbi(['function mint(address,uint256) returns (uint256)']), functionName: 'mint', args: [session.account!, 20n] });
+      toast('20 test Credits minted.', 'ok');
+      route();
+    } catch (x) {
+      toast(errText(x), 'err');
+    }
+    b.disabled = false;
+    b.textContent = 'Get 20 test Credits';
+  });
 }
 
 function drawAccount() {
@@ -72,6 +97,7 @@ document.addEventListener('click', (e) => {
 
 onSession(() => {
   drawAccount();
+  drawTestnet();
   route();
 });
 window.addEventListener('hashchange', () => {
@@ -87,6 +113,7 @@ window.addEventListener('hashchange', () => {
     app.innerHTML = `<section class="prose"><h1>Offline</h1><p class="muted">Couldn’t load config.</p></section>`;
     return;
   }
+  drawTestnet();
   await restore().catch(() => {});
   route();
 })();

@@ -10,12 +10,15 @@
   },
   // Public config served at /config.json. Secrets: `wrangler secret put RPC_URL` and `wrangler secret put OPENSEA_API_KEY`.
   "vars": {
-    "CHAIN_ID": "31337",
-    "CREDITS": "0x0000000000000000000000000000000000000000",
-    "FACTORY": "0x0000000000000000000000000000000000000000",
+    "CHAIN_ID": "11155111",
+    "CREDITS": "0x642DE8953Ba93C5b9085F7012AEfE98d970b20E4",
+    "FACTORY": "0xab9161cECB975Fd9963Cf6c6DaD797F0C134c924",
     "SWEEPER": "0x0000000000000000000000000000000000000000",
     "OPENSEA_SLUG": "credits",
-    "FALLBACK_RPC": "http://127.0.0.1:8545"
+    "FALLBACK_RPC": "https://ethereum-sepolia-rpc.publicnode.com"
   },
+  // Sepolia: SWEEPER stays zero (OpenSea can't list the mock Credits), which hides buy-in.
+  // Mainnet addresses go here after DeployMainnet.
+  "routes": [{ "pattern": "eighty.rhps.fun", "custom_domain": true }],
   "observability": { "enabled": true }
 }
