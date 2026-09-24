@@ -15,6 +15,7 @@
   --err: #c4231c;
   --cyan: #00b5e2;
   --img-outline: rgba(0, 0, 0, 0.1);
+  --pick-dim: 0.35;
 
   --r: 6px;
   --r-lg: 12px; /* = --r + 6px padding */
@@ -42,6 +43,7 @@
     --ok: #3ccf6e;
     --err: #ff5a4f;
     --img-outline: rgba(255, 255, 255, 0.1);
+    --pick-dim: 0.55;
     color-scheme: dark;
   }
 }
@@ -59,6 +61,7 @@
   --ok: #3ccf6e;
   --err: #ff5a4f;
   --img-outline: rgba(255, 255, 255, 0.1);
+  --pick-dim: 0.55;
   color-scheme: dark;
 }
 
@@ -858,7 +861,7 @@ nav .short {
   outline-offset: -1px;
 }
 .picker:has([aria-pressed='true']) .pick[aria-pressed='false'] {
-  opacity: 0.35;
+  opacity: var(--pick-dim);
 }
 .picker .pick:hover {
   opacity: 1;
@@ -870,11 +873,29 @@ nav .short {
   opacity: 1;
 }
 .pick[aria-pressed='true']::after {
+  /* Inside the tile: never clipped by the scroller, never touches a neighbour.
+     Fixed ink, because Credit art is always on white in both themes. */
   content: '';
   position: absolute;
-  inset: -2px;
-  border-radius: 4px;
-  box-shadow: 0 0 0 2px var(--fg);
+  inset: 0;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 2px #0a0a0a;
+  pointer-events: none;
+}
+.pick[aria-pressed='true'] img {
+  outline: none;
+}
+.pick[aria-pressed='true']::before {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  top: 4px;
+  right: 4px;
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  background: #0a0a0a url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 5.2l2 2L8 3' fill='none' stroke='%23fff' stroke-width='1.6' stroke-linecap='square'/%3E%3C/svg%3E") center / 10px no-repeat;
+  pointer-events: none;
 }
 
 .bid-now {
