@@ -40,7 +40,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
   const artHtml = burned
     ? `<figure class="statement">${sheet(b.ids, { closed: true })}<figcaption class="legend muted small"><span>Statement #${s.statementId}</span><span>80 Credits, burned in deposit order</span></figcaption></figure>`
     : `${sheet(b.ids, { mine: myIds, fresh: seen < s.count ? seen : undefined, closing: s.state === 'Full' })}
-       <div class="legend muted small">${myIds.size ? `<button type="button" class="spot" aria-pressed="false"><i class="dot mine"></i>Yours: ${myIds.size}</button>` : ''}<span>In deposit order</span></div>`;
+       <div class="legend muted small">${myIds.size ? `<button type="button" class="spot" aria-pressed="false"><i class="dot mine"></i><span>Highlight yours</span><span class="num muted">${myIds.size}</span></button>` : ''}<span>In deposit order</span></div>`;
 
   app.innerHTML = `
   <a class="back" href="#/">← Batches</a>

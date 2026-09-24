@@ -202,9 +202,7 @@ main.in > *:nth-child(3) {
   margin: 0 auto;
   height: 64px;
   padding: 0 var(--gutter);
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: saturate(1.4) blur(12px);
-  -webkit-backdrop-filter: saturate(1.4) blur(12px);
+  background: var(--bg);
 }
 .top::after {
   content: '';
@@ -393,11 +391,11 @@ nav .short {
   background: var(--ok);
 }
 .dot.mine {
-  width: 6px;
-  height: 6px;
+  width: 12px;
+  height: 12px;
   border-radius: 0;
-  background: #0a0a0a;
-  box-shadow: 0 0 0 1.5px #fff;
+  background: #fff;
+  box-shadow: inset 0 0 0 3px #0a0a0a, 0 0 0 1px var(--line-strong);
 }
 
 /* ---------------------------------------------------------------- hero */
@@ -658,42 +656,57 @@ nav .short {
   }
 }
 .cell.mine::after {
-  /* Credit art is always on white, so the marker is fixed ink, not a theme token */
+  /* Heavy ink frame inside the cell. Credit art is always on white, so fixed ink reads in both themes. */
   content: '';
   position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 6px;
-  height: 6px;
-  background: #0a0a0a;
-  box-shadow: 0 0 0 1.5px #fff;
+  inset: 0;
+  box-shadow: inset 0 0 0 3px #0a0a0a;
+  pointer-events: none;
 }
 .sheet.sm .cell.mine::after {
   display: none;
 }
-.batch-art.spotlight .cell:not(.mine),
-.batch-art:has(.spot:hover) .cell:not(.mine) {
-  opacity: 0.15;
+.cell img {
+  transition: opacity 200ms var(--ease);
+}
+/* Fade the art, not the cell, so the sheet stays paper-white */
+.batch-art.spotlight .cell:not(.mine) img {
+  opacity: 0.12;
 }
 .spot {
   position: relative;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 0;
+  height: 32px;
+  padding: 0 12px 0 10px;
   border: 0;
+  border-radius: 999px;
   background: none;
-  color: inherit;
-  font: inherit;
+  color: var(--fg);
+  font: 500 13px/1 var(--sans);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
   cursor: pointer;
+  transition-property: background-color, color, box-shadow, scale;
+  transition-duration: 150ms;
+  transition-timing-function: var(--ease);
+}
+.spot:active {
+  scale: 0.96;
+}
+.spot[aria-pressed='true'] {
+  background: var(--fg);
+  color: var(--bg);
+  box-shadow: none;
+}
+.spot[aria-pressed='true'] .muted {
+  color: inherit;
+  opacity: 0.6;
 }
 .spot::after {
   content: '';
   position: absolute;
   inset: -12px -8px;
-}
-.spot[aria-pressed='true'] {
-  color: var(--fg);
 }
 .statement {
   margin: 0;
@@ -730,6 +743,7 @@ nav .short {
 .legend {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
   gap: 6px 16px;
 }

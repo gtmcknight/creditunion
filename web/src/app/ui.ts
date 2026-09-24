@@ -1,4 +1,5 @@
 import { formatEther, type Address } from 'viem';
+import { config } from './chain';
 
 export const $ = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) => root.querySelector<T>(s)!;
 export const $$ = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) =>
@@ -30,7 +31,8 @@ export function until(ts: number) {
   return `${m}m ${String(s).padStart(2, '0')}s`;
 }
 
-export const art = (id: bigint | number) => `/art/${id}.svg`;
+/// Art URL includes the Credits contract, so a new contract (testnets) never shows a browser-cached image.
+export const art = (id: bigint | number) => `/art/${config.credits.toLowerCase()}/${id}.svg`;
 
 /// 8×10 sheet on a hairline grid. Filled cells show the Credit; the rest are empty slots.
 /// `closed`: no gaps, the 80 read as one image (a Statement). `closing`: animates to closed.

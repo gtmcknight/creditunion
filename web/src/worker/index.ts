@@ -118,7 +118,7 @@ export default {
       return res;
     }
 
-    const art = url.pathname.match(/^\/art\/(\d{1,7})\.svg$/);
+    const art = url.pathname.match(/^\/art\/(?:0x[0-9a-fA-F]{40}\/)?(\d{1,7})\.svg$/);
     if (art) {
       // Keyed by contract too: art never changes for a given Credits, but the contract can (testnets).
       const cache = caches.default;
