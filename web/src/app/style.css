@@ -1436,3 +1436,22 @@ nav a[hidden] {
     flex-basis: 100%;
   }
 }
+
+/* Header account: avatar + ENS name, capped so long names never crowd the nav */
+.btn.acct {
+  padding: 0 12px 0 6px;
+}
+.btn.acct .who {
+  max-width: 160px;
+  font-size: 14px;
+  font-weight: 500;
+}
+.btn.acct .who img {
+  width: 24px;
+  height: 24px;
+}
+@media (max-width: 560px) {
+  .btn.acct .who {
+    max-width: 120px;
+  }
+}

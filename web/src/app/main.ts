@@ -3,9 +3,10 @@ import { chain, config, connect, loadConfig, onSession, restore, session, wallet
 import { batch } from './views/batch';
 import { create } from './views/create';
 import { home, how } from './views/home';
+import { hydrate, who } from './ens';
 import { mint } from './views/mint';
 import { profile } from './views/profile';
-import { esc, errText, short, toast } from './ui';
+import { esc, errText, toast } from './ui';
 
 const app = document.getElementById('app')!;
 let seq = 0;
@@ -46,8 +47,9 @@ function drawTestnet() {
 function drawAccount() {
   const el = document.getElementById('account')!;
   el.innerHTML = session.account
-    ? `<a class="btn sm" href="#/me" data-nav="me"><i class="dot live"></i><span class="mono">${short(session.account)}</span></a>`
+    ? `<a class="btn sm acct" href="#/me" data-nav="me">${who(session.account)}</a>`
     : `<button class="btn sm primary" data-connect>Connect</button>`;
+  hydrate(el);
 }
 
 async function openConnect() {
