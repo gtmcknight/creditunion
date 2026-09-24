@@ -113,7 +113,14 @@ export async function home(app: HTMLElement) {
     </div>
     <div class="closest" id="closest" aria-live="polite"></div>
     <dl class="stats hero-stats" id="stats">
-      ${['Open batches', 'Credits pooled', 'Statements made', 'Sold'].map((k) => `<div><dt>${k}</dt><dd class="num">–</dd></div>`).join('')}
+      ${[
+        ['Open batches', 'Open'],
+        ['Credits pooled', 'Pooled'],
+        ['Statements made', 'Statements'],
+        ['Sold', 'Sold'],
+      ]
+        .map(([long, short]) => `<div><dt><span class="long">${long}</span><span class="short">${short}</span></dt><dd class="num">–</dd></div>`)
+        .join('')}
     </dl>
   </section>
   <section>
