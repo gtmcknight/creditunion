@@ -1299,26 +1299,6 @@ dialog form {
   }
 }
 
-#testnet {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: center;
-  gap: 4px 16px;
-  width: 100%;
-  max-width: var(--max);
-  margin: 12px auto 0;
-  padding: 10px var(--gutter);
-  font-size: 13px;
-  color: var(--muted);
-}
-#testnet[hidden] {
-  display: none;
-}
-#testnet strong {
-  color: var(--fg);
-  font-weight: 500;
-}
 
 nav a[hidden] {
   display: none;
@@ -1465,6 +1445,33 @@ nav a[hidden] {
   display: inline-flex;
   align-items: center;
   gap: 10px;
+}
+.testnet {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 10px var(--gutter);
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.testnet[hidden] {
+  display: none;
+}
+.testnet strong {
+  color: inherit;
+  font-weight: 600;
+}
+.testnet a {
+  color: inherit;
+  white-space: nowrap;
+}
+.wallet-list a.wallet {
+  justify-content: space-between;
+  text-decoration: none;
 }
 .net {
   display: inline-flex;

@@ -89,6 +89,10 @@ const ERRORS: Record<string, string> = {
   NothingToClaim: 'Nothing to claim.',
   NameTooLong: 'Name is too long (64 bytes max).',
   BadDuration: 'Duration must be 3–90 days.',
+  NoSpecifiedOrdersAvailable: 'None of those listings are available any more. Get a new price.',
+  TooFewBought: 'Fewer listings were available than expected. Get a new price.',
+  FeeNotCovered: 'Not enough ETH sent to cover the fee.',
+  NotStray: 'That token is part of the batch.',
 };
 
 export type { Address };

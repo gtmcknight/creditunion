@@ -9,7 +9,7 @@ Independent. Not affiliated with Jack Butcher.
 | | |
 |---|---|
 | **Open** | Anyone with ≥10 Credits opens a batch and sets a creator fee (0–10%, fixed forever). Optional trait filter (Colors / Print / Weight / Eights), checked onchain against Jack's own `CreditArt.describe`. Optional reserve. Deadline 3–90 days. |
-| **Deposit** | Approve the factory once and deposit any number, or `safeTransferFrom` one Credit straight to the batch (no approval). Deposit order is the Statement order. |
+| **Deposit** | Approve the factory once and deposit any number, or `safeTransferFrom` one Credit straight to the batch (no approval; `data` may name a beneficiary). Deposit order is the Statement order. Plain `transferFrom` fires no hook: such strays go to the fee recipient via `rescue()` as lost-and-found. |
 | **Buy in** | The `Sweeper` buys the cheapest fitting OpenSea listings through Seaport 1.6 and deposits them in the buyer's name, in one transaction. The buyer pays the listings plus the sweep fee (1%). Unused ETH is refunded, and listings that sold first are skipped. |
 | **Withdraw** | Any depositor, any time, until the batch holds 80. |
 | **Lock** | The 80th Credit locks it. The deadline extends to at least 7 days out. |
@@ -32,11 +32,11 @@ All of these are fixed once set. Batch cards and pages lead with the creator (EN
 
 - No owner, admin, pause, or upgrade. Every parameter is fixed at deploy.
 - The factory only moves Credits **from its caller** into **its own** batches.
-- The Statement mint goes through an immutable `IAssembler`, run by `delegatecall` so the batch is the Credits owner Jack's contract sees. The batch verifies the result: none of the 80 still exist, and it owns the Statement.
+- The Statement mint goes through an immutable `IAssembler`, **called** (never delegatecalled) with an operator approval that exists only for the duration of the call. The batch verifies the result: the adapter's `statement()` matches, none of the 80 still exist, and it owns the Statement. Adapter storage cannot reach the batch.
 - The auction follows the Nouns/Zora pattern. Refunds are gas-capped and never copy return data. A failed refund becomes `owed` (pull), so a hostile bidder can't block the auction.
 - Payouts are pull-based (`claim`, callable by anyone for anyone).
 
-**Not yet audited.** Get a review before mainnet, focused on the Jack assembler.
+**Internally reviewed, not externally audited.** See [contracts/AUDIT.md](contracts/AUDIT.md): static analysis, three adversarial reviews, invariant fuzzing and mainnet fork tests, with every finding and what changed. Get an independent audit before mainnet, including the Jack assembler.
 
 ## Layout
 

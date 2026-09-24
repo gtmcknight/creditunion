@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {BatchFactory} from "./BatchFactory.sol";
 import {ICredits} from "./interfaces/ICredits.sol";
 import {
     AdvancedOrder,
     CriteriaResolver,
+    Execution,
     FulfillmentComponent,
     ISeaport,
     ItemType,
@@ -18,7 +18,7 @@ import {
 /// @notice One transaction: buy listed Credits on Seaport (OpenSea's exchange), then deposit
 ///         them into a batch in the buyer's name. Pay the listings plus the fee; unused ETH comes back.
 ///         Nothing is held between transactions. No owner, no admin.
-contract Sweeper is IERC721Receiver, ReentrancyGuardTransient {
+contract Sweeper is ReentrancyGuardTransient {
     uint256 public constant MAX_FEE_BPS = 500;
 
     /// @notice Fee on what the listings cost, in basis points. Fixed at deploy.
@@ -82,12 +82,17 @@ contract Sweeper is IERC721Receiver, ReentrancyGuardTransient {
             }
         }
 
-        uint256 floor = address(this).balance - msg.value; // stray ETH is never spent or refunded
-        (bool[] memory available,) = seaport.fulfillAvailableAdvancedOrders{value: msg.value}(
-            orders, new CriteriaResolver[](0), offerF, considF, bytes32(0), address(this), n
-        );
-        uint256 left = address(this).balance - floor; // Seaport refunded what it didn't use
-        uint256 spent = msg.value - left;
+        (bool[] memory available, Execution[] memory executions) = seaport.fulfillAvailableAdvancedOrders{
+            value: msg.value
+        }(orders, new CriteriaResolver[](0), offerF, considF, bytes32(0), address(this), n);
+
+        // What the listings cost, from Seaport's own record of what it paid out. Not a balance delta,
+        // so ETH pushed at this contract by a seller or royalty wallet mid-call cannot distort it.
+        uint256 spent;
+        for (uint256 i; i < executions.length; ++i) {
+            if (executions[i].item.itemType == ItemType.NATIVE) spent += executions[i].item.amount;
+        }
+        uint256 left = msg.value - spent; // Seaport returned the rest to this contract
 
         ids = new uint256[](n);
         uint256 bought;
@@ -114,11 +119,8 @@ contract Sweeper is IERC721Receiver, ReentrancyGuardTransient {
         return listingsTotal + listingsTotal * feeBps / 10_000;
     }
 
-    function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
-        return this.onERC721Received.selector;
-    }
-
-    /// @dev Seaport returns unused ETH here.
+    /// @dev Seaport returns unused ETH here. No ERC721 receiver hook on purpose: Seaport delivers with
+    ///      plain transferFrom, and a safeTransferFrom of a stray NFT here should fail, not strand it.
     receive() external payable {}
 
     function _send(address to, uint256 amount) internal returns (bool ok) {

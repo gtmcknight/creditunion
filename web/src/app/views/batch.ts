@@ -361,6 +361,28 @@ async function drawPicker(
 
 type Quote = { orders: unknown[]; ids: string[]; prices: string[]; total: string; error?: string };
 
+/// The orders are what gets sent to the chain; the ids/prices/total are what gets shown. Make sure they agree,
+/// so a bad quote (or a tampered one) can't show ten Credits and buy one.
+function checkQuote(q: Quote) {
+  type Order = { parameters?: { offer?: { token?: string; identifierOrCriteria?: string; itemType?: number }[]; consideration?: { itemType?: number; startAmount?: string; endAmount?: string }[] } };
+  const orders = q.orders as Order[];
+  if (!Array.isArray(orders) || orders.length !== q.ids.length || q.prices.length !== q.ids.length) throw new Error('Bad quote.');
+  let sum = 0n;
+  orders.forEach((o, i) => {
+    const offer = o.parameters?.offer ?? [];
+    const cons = o.parameters?.consideration ?? [];
+    if (offer.length !== 1 || Number(offer[0].itemType) !== 2 || String(offer[0].identifierOrCriteria) !== q.ids[i]) throw new Error('Bad quote.');
+    if (String(offer[0].token).toLowerCase() !== config.credits.toLowerCase()) throw new Error('Bad quote.');
+    const price = cons.reduce((a, c) => {
+      if (Number(c.itemType) !== 0 || c.startAmount !== c.endAmount) throw new Error('Bad quote.');
+      return a + BigInt(c.endAmount ?? '0');
+    }, 0n);
+    if (price !== BigInt(q.prices[i])) throw new Error('Bad quote.');
+    sum += price;
+  });
+  if (sum !== BigInt(q.total)) throw new Error('Bad quote.');
+}
+
 function bindBuy(
   batch: Address,
   run: (btn: HTMLElement | null, label: string, fn: () => Promise<unknown>, ok: string) => Promise<void>,
@@ -387,6 +409,7 @@ function bindBuy(
         const r = await fetch(`/opensea/quote?batch=${batch}&n=${n}`);
         q = (await r.json()) as Quote;
         if (!r.ok || q.error) throw new Error(q.error ?? 'No quote');
+        checkQuote(q);
         const total = BigInt(q.total);
         value = (await pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'quote', args: [total] })) as bigint;
         out.innerHTML = `<div class="quote-row"><span>${q.ids.length} Credit${q.ids.length === 1 ? '' : 's'}</span><span class="num">${eth(total)}</span></div>

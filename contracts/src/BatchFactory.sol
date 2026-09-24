@@ -34,6 +34,7 @@ contract BatchFactory {
     error NotBatch();
     error NoDepositor();
     error ProtocolFeeTooHigh();
+    error NoFeeRecipient();
 
     constructor(
         ICredits credits_,
@@ -43,6 +44,7 @@ contract BatchFactory {
         uint256 minOpen_
     ) {
         if (protocolFeeBps_ > MAX_PROTOCOL_FEE_BPS) revert ProtocolFeeTooHigh();
+        if (feeRecipient_ == address(0)) revert NoFeeRecipient();
         credits = credits_;
         protocolFeeBps = protocolFeeBps_;
         assembler = assembler_;
@@ -86,7 +88,8 @@ contract BatchFactory {
     ///         (withdraw rights and payout). Used by the Sweeper to deposit Credits it just bought.
     function depositFor(address batch, uint256[] calldata ids, address to) external {
         if (!isBatch[batch]) revert NotBatch();
-        if (to == address(0)) revert NoDepositor();
+        // Contracts that can never withdraw or receive ETH would strand the share.
+        if (to == address(0) || to == batch || to == address(this) || isBatch[to]) revert NoDepositor();
         _move(batch, ids, to);
     }
 

@@ -24,7 +24,9 @@ interface IBatchFactory {
 ///         Settled   The Statement went to the winner. Protocol fee and the creator's fee (fixed when the
 ///                   batch opened), then each deposited Credit claims 1/80 of the rest.
 ///
-///         No owner, no admin, no upgrades. Every rule is in this file.
+///         No owner, no admin, no upgrades. Every rule is in this file. The one external dependency
+///         besides Credits is the assembler fixed in the factory: it is called, never delegatecalled,
+///         with a temporary operator approval, and its work is verified before the batch moves on.
 contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     uint256 public constant SIZE = 80;
     uint256 public constant MAX_CREATOR_FEE_BPS = 1000; // 10%
@@ -96,6 +98,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     address public highBidder;
     uint256 public highBid;
     bool public settled;
+    bool public statementUnclaimed; // settle() could not push the Statement to the winner; they pull it
     uint256 public payoutPerShare;
     mapping(address => bool) public claimed;
     mapping(address => uint256) public owed; // ETH whose push failed; pull with withdrawOwed
@@ -110,6 +113,8 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     event Settled(address indexed winner, uint256 amount, uint256 protocolFee, uint256 creatorFee, uint256 payoutPerShare);
     event Claimed(address indexed depositor, uint256 amount);
     event Owed(address indexed to, uint256 amount);
+    event StatementUnclaimed(address indexed winner);
+    event Rescued(address indexed token, uint256 indexed id, address to);
 
     error AlreadyInitialized();
     error NotFactory();
@@ -128,6 +133,8 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     error AuctionRunning();
     error NothingToClaim();
     error PaymentFailed();
+    error NotStray();
+    error NotWinner();
 
     // ---------------------------------------------------------------- setup
 
@@ -183,14 +190,20 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     }
 
     /// @notice Deposit one Credit with `Credits.safeTransferFrom(you, batch, id)`, no approval needed.
-    ///         Also accepts the Statement while assembling.
-    function onERC721Received(address, address from, uint256 id, bytes calldata)
+    ///         `data` may hold an abi-encoded address to record as the depositor instead of `from`
+    ///         (for escrows and marketplaces delivering on someone's behalf). Also accepts the
+    ///         Statement while assembling. Plain `transferFrom` fires no hook: use `rescue` for those.
+    function onERC721Received(address, address from, uint256 id, bytes calldata data)
         external
         override
         returns (bytes4)
     {
         if (_assembling) return this.onERC721Received.selector;
         if (msg.sender != address(credits)) revert WrongToken();
+        if (data.length == 32) {
+            address to = abi.decode(data, (address));
+            if (to != address(0)) from = to;
+        }
         _add(from, id);
         return this.onERC721Received.selector;
     }
@@ -215,6 +228,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     function withdraw(uint256[] calldata ids) external nonReentrant {
         State s = state();
         if (s != State.Open && s != State.Expired) revert WrongState(s);
+        // Book everything first, then move tokens.
         for (uint256 i; i < ids.length; ++i) {
             uint256 id = ids[i];
             if (depositorOf[id] != msg.sender) revert NotDepositor(id);
@@ -222,8 +236,8 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
             --sharesOf[msg.sender];
             _remove(id);
             emit Withdrawn(msg.sender, id, _ids.length);
-            credits.transferFrom(address(this), msg.sender, id);
         }
+        for (uint256 i; i < ids.length; ++i) credits.transferFrom(address(this), msg.sender, ids[i]);
     }
 
     /// @dev Keeps deposit order for the rest.
@@ -249,29 +263,29 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     // ---------------------------------------------------------------- assemble
 
     /// @notice Burn the 80 into a Statement, in deposit order. Anyone can call once Full; the caller pays gas.
-    /// @dev The assembler is fixed in the factory at deploy and runs as this contract. What it did is checked
-    ///      here: none of the 80 Credits may still be held, and this batch must own the Statement.
+    /// @dev The assembler is fixed in the factory at deploy. It is approved as an operator for this batch's
+    ///      Credits only for the duration of the call, and its work is checked afterwards: none of the 80
+    ///      Credits may still exist, and this batch must own the Statement the adapter says it minted.
+    ///      Its storage is its own; nothing it does can reach this contract's state.
     function assemble() external nonReentrant {
         _require(State.Full);
         uint256[] memory ids = _ids;
+        IAssembler asm = factory.assembler();
+        address st = asm.statement();
+        if (st == address(0) || st == address(credits)) revert StatementNotReceived();
+
         _assembling = true;
-        (bool ok, bytes memory ret) = address(factory.assembler()).delegatecall(
-            abi.encodeCall(IAssembler.assemble, (address(credits), ids))
-        );
+        credits.setApprovalForAll(address(asm), true);
+        uint256 sid = asm.assemble(ids);
+        credits.setApprovalForAll(address(asm), false);
         _assembling = false;
-        if (!ok) {
-            assembly {
-                revert(add(ret, 32), mload(ret))
-            }
-        }
-        (address st, uint256 sid) = abi.decode(ret, (address, uint256));
 
         for (uint256 i; i < SIZE; ++i) {
             try credits.ownerOf(ids[i]) returns (address) {
                 revert CreditsNotBurned();
             } catch {}
         }
-        if (st == address(0) || IERC721(st).ownerOf(sid) != address(this)) revert StatementNotReceived();
+        if (IERC721(st).ownerOf(sid) != address(this)) revert StatementNotReceived();
 
         statement = st;
         statementId = sid;
@@ -325,9 +339,21 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         fee = highBid - creatorFee - per * SIZE; // rounding dust goes with the protocol fee
         emit Settled(highBidder, highBid, fee, creatorFee, per);
 
-        IERC721(statement).transferFrom(address(this), highBidder, statementId);
+        // A Statement contract that refuses the transfer must not trap the sale: the winner pulls instead.
+        try IERC721(statement).transferFrom(address(this), highBidder, statementId) {}
+        catch {
+            statementUnclaimed = true;
+            emit StatementUnclaimed(highBidder);
+        }
         _push(factory.feeRecipient(), fee);
         if (creatorFee > 0) _push(creator, creatorFee);
+    }
+
+    /// @notice Winner's fallback when settle() could not deliver the Statement.
+    function claimStatement(address to) external nonReentrant {
+        if (!statementUnclaimed || msg.sender != highBidder) revert NotWinner();
+        statementUnclaimed = false;
+        IERC721(statement).transferFrom(address(this), to, statementId);
     }
 
     // ---------------------------------------------------------------- payouts
@@ -352,6 +378,17 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         if (amount == 0) revert NothingToClaim();
         owed[msg.sender] = 0;
         if (!_send(msg.sender, amount, gasleft())) revert PaymentFailed();
+    }
+
+    /// @notice Forward a token this batch holds but never recorded (a Credit sent with plain `transferFrom`,
+    ///         or any other NFT) to the fee recipient as lost-and-found. Cannot touch pooled Credits or
+    ///         the Statement. Anyone can call it.
+    function rescue(address token, uint256 id) external nonReentrant {
+        if (token == address(credits) && depositorOf[id] != address(0)) revert NotStray();
+        if (token == statement && id == statementId) revert NotStray();
+        address to = factory.feeRecipient();
+        IERC721(token).transferFrom(address(this), to, id);
+        emit Rescued(token, id, to);
     }
 
     /// @dev Gas-capped so a receiver that reverts or burns gas cannot block bids; failures become `owed`.

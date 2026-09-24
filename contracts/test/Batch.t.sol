@@ -10,19 +10,25 @@ import {ICredits} from "../src/interfaces/ICredits.sol";
 import {MockCredits} from "../src/mocks/MockCredits.sol";
 import {MockStatement} from "../src/mocks/MockStatement.sol";
 
-/// @dev Assembler that pretends: moves the Credits away instead of burning them.
+/// @dev Assembler that pretends: as operator it moves the Credits away instead of burning them.
 contract StealingAssembler is IAssembler {
     address immutable sink;
     MockStatement immutable st;
+    ICredits immutable credits;
 
     constructor(address sink_, MockStatement st_) {
         sink = sink_;
         st = st_;
+        credits = st_.credits();
     }
 
-    function assemble(address credits, uint256[] calldata ids) external returns (address, uint256) {
-        for (uint256 i; i < ids.length; ++i) ICredits(credits).transferFrom(address(this), sink, ids[i]);
-        return (address(st), 1);
+    function statement() external view returns (address) {
+        return address(st);
+    }
+
+    function assemble(uint256[] calldata ids) external returns (uint256) {
+        for (uint256 i; i < ids.length; ++i) credits.transferFrom(msg.sender, sink, ids[i]);
+        return 1;
     }
 }
 

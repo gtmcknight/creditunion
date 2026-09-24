@@ -11,8 +11,8 @@
   // Public config served at /config.json. Secrets: `wrangler secret put RPC_URL` and `wrangler secret put OPENSEA_API_KEY`.
   "vars": {
     "CHAIN_ID": "11155111",
-    "CREDITS": "0xb10ECEF114fE6B46531104A7e39560141732a334",
-    "FACTORY": "0xac92bfE6Cad4b1DD2661A908Aaf51E3d72Dc326E",
+    "CREDITS": "0xc08e21e6D3a7222d6990e817fe692777a698B003",
+    "FACTORY": "0x5FBB901DeEa488f9E887069757800bfe8d4d776C",
     "SWEEPER": "0x0000000000000000000000000000000000000000",
     "OPENSEA_SLUG": "credits",
     "FALLBACK_RPC": "https://ethereum-sepolia-rpc.publicnode.com"
@@ -20,5 +20,13 @@
   // Sepolia: SWEEPER stays zero (OpenSea can't list the mock Credits), which hides buy-in.
   // Mainnet addresses go here after DeployMainnet.
   "routes": [{ "pattern": "eighty.rhps.fun", "custom_domain": true }],
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+  // Per-IP rate limits (Workers Rate Limiting API). Keys are cf-connecting-ip.
+  "unsafe": {
+    "bindings": [
+      { "name": "RL_RPC", "type": "ratelimit", "namespace_id": "8001", "simple": { "limit": 300, "period": 60 } },
+      { "name": "RL_QUOTE", "type": "ratelimit", "namespace_id": "8002", "simple": { "limit": 6, "period": 60 } },
+      { "name": "RL_MISC", "type": "ratelimit", "namespace_id": "8003", "simple": { "limit": 120, "period": 60 } }
+    ]
+  }
 }
