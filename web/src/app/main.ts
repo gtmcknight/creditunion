@@ -1,9 +1,9 @@
 import type { Address } from 'viem';
-import { parseAbi } from 'viem';
-import { chain, config, connect, disconnect, loadConfig, onSession, restore, send, session, wallets } from './chain';
+import { chain, config, connect, disconnect, loadConfig, onSession, restore, session, wallets } from './chain';
 import { batch } from './views/batch';
 import { create } from './views/create';
 import { home, how } from './views/home';
+import { mint } from './views/mint';
 import { esc, errText, short, toast } from './ui';
 
 const app = document.getElementById('app')!;
@@ -14,11 +14,12 @@ async function route() {
   const hash = location.hash.replace(/^#\/?/, '');
   const [page, arg] = hash.split('/');
   document.querySelectorAll<HTMLAnchorElement>('[data-nav]').forEach((a) =>
-    a.toggleAttribute('aria-current', a.dataset.nav === (page === 'b' || page === 'new' ? '' : page)),
+    a.toggleAttribute('aria-current', a.dataset.nav === (page === 'b' || page === 'new' ? '' : page ?? '')),
   );
   app.classList.remove('in');
   try {
     if (page === 'how') how(app);
+    else if (page === 'mint') await mint(app, route);
     else if (page === 'new') await create(app);
     else if (page === 'b' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await batch(app, arg as Address, route);
     else await home(app);
@@ -28,28 +29,13 @@ async function route() {
   if (run === seq) requestAnimationFrame(() => app.classList.add('in'));
 }
 
-/// Test networks only: the mock Credits contract lets anyone mint, so testers can fill batches themselves.
+/// Test networks only: a banner and a nav link to the Mint page.
 function drawTestnet() {
-  const el = document.getElementById('testnet')!;
   if (config.chainId === 1) return;
+  const el = document.getElementById('testnet')!;
   el.hidden = false;
-  el.innerHTML = `<span><strong>${chain.name}</strong> test mode. Credits here are mocks.</span>${
-    session.account ? '<button class="link small" id="faucet">Get 20 test Credits</button>' : ''
-  }`;
-  document.getElementById('faucet')?.addEventListener('click', async (e) => {
-    const b = e.currentTarget as HTMLButtonElement;
-    b.disabled = true;
-    b.textContent = 'Minting…';
-    try {
-      await send({ address: config.credits, abi: parseAbi(['function mint(address,uint256) returns (uint256)']), functionName: 'mint', args: [session.account!, 20n] });
-      toast('20 test Credits minted.', 'ok');
-      route();
-    } catch (x) {
-      toast(errText(x), 'err');
-    }
-    b.disabled = false;
-    b.textContent = 'Get 20 test Credits';
-  });
+  el.innerHTML = `<span><strong>${chain.name}</strong> test mode. Credits here are test mints with the real art.</span><a class="small" href="#/mint">Mint test Credits →</a>`;
+  document.querySelector<HTMLElement>('nav a[data-nav="mint"]')?.removeAttribute('hidden');
 }
 
 function drawAccount() {

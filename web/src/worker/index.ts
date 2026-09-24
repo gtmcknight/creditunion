@@ -120,8 +120,10 @@ export default {
 
     const art = url.pathname.match(/^\/art\/(\d{1,7})\.svg$/);
     if (art) {
+      // Keyed by contract too: art never changes for a given Credits, but the contract can (testnets).
       const cache = caches.default;
-      const hit = await cache.match(req);
+      const key = new Request(`${url.origin}/art/${env.CREDITS.toLowerCase()}/${art[1]}.svg`);
+      const hit = await cache.match(key);
       if (hit) return hit;
       const client = createPublicClient({ transport: http(rpcUrl(env)) });
       const id = BigInt(art[1]);
@@ -139,7 +141,7 @@ export default {
             'cache-control': 'public, max-age=31536000, immutable',
           },
         });
-        ctx.waitUntil(cache.put(req, res.clone()));
+        ctx.waitUntil(cache.put(key, res.clone()));
         return res;
       } catch {
         return new Response('art unavailable', { status: 502 });

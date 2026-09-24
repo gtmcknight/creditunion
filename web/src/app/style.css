@@ -1281,3 +1281,18 @@ dialog form {
   color: var(--fg);
   font-weight: 500;
 }
+
+nav a[hidden] {
+  display: none;
+}
+.picker.static {
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+  margin: 0;
+  mask-image: none;
+  -webkit-mask-image: none;
+}
+.picker.static .pick {
+  cursor: default;
+}
