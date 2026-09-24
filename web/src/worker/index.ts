@@ -29,6 +29,7 @@ interface Env {
   RL_RPC?: RateLimit;
   RL_QUOTE?: RateLimit;
   RL_MISC?: RateLimit;
+  RL_ART?: RateLimit;
 }
 
 /// Exactly what viem's public client needs for readContract, simulateContract and waitForTransactionReceipt.
@@ -45,7 +46,9 @@ const MAX_RPC_BODY = 64_000;
 const MAX_RPC_BATCH = 50;
 
 const rpcUrl = (env: Env) => env.RPC_URL || env.FALLBACK_RPC;
-const client = (env: Env) => createPublicClient({ transport: http(rpcUrl(env), { batch: true, timeout: 8_000 }) });
+// No request batching here: viem's batch scheduler is shared across concurrent requests in one isolate, and a
+// promise resolved in another request's context is cancelled when that request ends (the Worker then "hangs").
+const client = (env: Env) => createPublicClient({ transport: http(rpcUrl(env), { timeout: 8_000 }) });
 const isDev = (url: URL) => url.hostname === 'localhost' || url.hostname === '127.0.0.1';
 
 const CSP = [
@@ -95,7 +98,15 @@ function sameSite(req: Request) {
 export default {
   async fetch(req, env, ctx): Promise<Response> {
     const url = new URL(req.url);
-    const res = await handle(req, env, ctx, url);
+    let res: Response;
+    try {
+      res = await handle(req, env, ctx, url);
+    } catch (e) {
+      // Never let a stack trace or an RPC URL out; the class of error is enough to debug.
+      const msg = String((e as Error)?.message ?? e).replace(/https?:\/\/\S+/g, '<url>').slice(0, 300);
+      console.error('worker error', url.pathname, msg);
+      res = new Response(`worker error: ${msg}`, { status: 500 });
+    }
     return secure(res, url);
   },
 } satisfies ExportedHandler<Env>;
@@ -183,7 +194,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const key = new Request(`${url.origin}/art/${env.CREDITS.toLowerCase()}/${art[1]}.svg`);
     const hit = await cache.match(key);
     if (hit) return hit;
-    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    if (await limited(env.RL_ART, req)) return text('slow down', 429); // a page loads up to 80 at once
     const c = client(env);
     const id = BigInt(art[1]);
     // Even opened directly, the SVG can run nothing and reach nothing.
