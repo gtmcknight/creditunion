@@ -55,7 +55,7 @@ contract BatchTest is Test {
     function setUp() public {
         credits = new MockCredits();
         statement = new MockStatement(ICredits(address(credits)));
-        factory = new BatchFactory(ICredits(address(credits)), new MockAssembler(statement), fee, 10);
+        factory = new BatchFactory(ICredits(address(credits)), new MockAssembler(statement), fee, 100, 10);
         credits.mint(alice, 50); // ids 1..50
         credits.mint(bob, 50); // ids 51..100
         for (uint256 i; i < 3; ++i) {
@@ -73,7 +73,7 @@ contract BatchTest is Test {
 
     function _open(address who, uint256[] memory ids, uint256 reserve) internal returns (Batch) {
         vm.prank(who);
-        return Batch(factory.create("Test", noFilter, reserve, 14 days, ids));
+        return Batch(factory.create("Test", noFilter, reserve, 0, 14 days, ids));
     }
 
     function _full(uint256 reserve) internal returns (Batch b) {
@@ -87,15 +87,15 @@ contract BatchTest is Test {
     function test_OpenRequiresMinimum() public {
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(BatchFactory.TooFewToOpen.selector, 10));
-        factory.create("x", noFilter, 0, 14 days, _range(1, 9));
+        factory.create("x", noFilter, 0, 0, 14 days, _range(1, 9));
     }
 
     function test_OpenRejectsBadDuration() public {
         vm.startPrank(alice);
         vm.expectRevert(BatchFactory.BadDuration.selector);
-        factory.create("x", noFilter, 0, 1 days, _range(1, 10));
+        factory.create("x", noFilter, 0, 0, 1 days, _range(1, 10));
         vm.expectRevert(BatchFactory.BadDuration.selector);
-        factory.create("x", noFilter, 0, 91 days, _range(1, 10));
+        factory.create("x", noFilter, 0, 0, 91 days, _range(1, 10));
     }
 
     function test_CannotDepositSomeoneElsesCredits() public {
@@ -150,10 +150,10 @@ contract BatchTest is Test {
     function test_ImplementationAndClonesCannotBeReinitialized() public {
         Batch b = _open(alice, _range(1, 10), 0);
         vm.expectRevert(Batch.AlreadyInitialized.selector);
-        b.initialize(bob, "x", noFilter, 0, 1);
+        b.initialize(bob, "x", noFilter, 0, 0, 1);
         Batch impl = Batch(factory.implementation());
         vm.expectRevert(Batch.AlreadyInitialized.selector);
-        impl.initialize(bob, "x", noFilter, 0, 1);
+        impl.initialize(bob, "x", noFilter, 0, 0, 1);
     }
 
     function test_Filter() public {
@@ -162,7 +162,7 @@ contract BatchTest is Test {
         uint256[] memory evens = new uint256[](10);
         for (uint256 i; i < 10; ++i) evens[i] = 2 + 2 * i;
         vm.prank(alice);
-        Batch b = Batch(factory.create("Evens", f, 0, 14 days, evens));
+        Batch b = Batch(factory.create("Evens", f, 0, 0, 14 days, evens));
         assertEq(b.count(), 10);
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Batch.Excluded.selector, 1));
@@ -212,7 +212,7 @@ contract BatchTest is Test {
 
     function test_FillExtendsDeadline() public {
         vm.prank(alice);
-        Batch b = Batch(factory.create("x", noFilter, 0, 3 days, _range(1, 40)));
+        Batch b = Batch(factory.create("x", noFilter, 0, 0, 3 days, _range(1, 40)));
         skip(2 days);
         vm.prank(bob);
         factory.deposit(address(b), _range(51, 40));
@@ -251,13 +251,13 @@ contract BatchTest is Test {
 
     function test_AssembleRejectsAssemblerThatDoesNotBurn() public {
         BatchFactory bad =
-            new BatchFactory(ICredits(address(credits)), new StealingAssembler(carol, statement), fee, 10);
+            new BatchFactory(ICredits(address(credits)), new StealingAssembler(carol, statement), fee, 100, 10);
         vm.prank(alice);
         credits.setApprovalForAll(address(bad), true);
         vm.prank(bob);
         credits.setApprovalForAll(address(bad), true);
         vm.prank(alice);
-        Batch b = Batch(bad.create("x", noFilter, 0, 14 days, _range(1, 40)));
+        Batch b = Batch(bad.create("x", noFilter, 0, 0, 14 days, _range(1, 40)));
         vm.prank(bob);
         bad.deposit(address(b), _range(51, 40));
         vm.expectRevert(Batch.CreditsNotBurned.selector);
@@ -355,13 +355,48 @@ contract BatchTest is Test {
         b.settle();
     }
 
+    // ---------------------------------------------------------------- fees
+
+    function test_CreatorFeeCappedAt10Percent() public {
+        vm.prank(alice);
+        vm.expectRevert(Batch.CreatorFeeTooHigh.selector);
+        factory.create("x", noFilter, 0, 1001, 14 days, _range(1, 10));
+    }
+
+    function test_ProtocolFeeCappedAt5Percent() public {
+        MockAssembler asm = new MockAssembler(statement);
+        vm.expectRevert(BatchFactory.ProtocolFeeTooHigh.selector);
+        new BatchFactory(ICredits(address(credits)), asm, fee, 501, 10);
+    }
+
+    function test_CreatorAndProtocolSplit() public {
+        vm.prank(alice);
+        Batch b = Batch(factory.create("Fee", noFilter, 0, 200, 14 days, _range(1, 40))); // 2% creator
+        vm.prank(bob);
+        factory.deposit(address(b), _range(51, 40));
+        b.assemble();
+        vm.prank(carol);
+        b.bid{value: 3 ether}();
+        skip(1 days);
+        uint256 aliceBefore = alice.balance;
+        b.settle();
+        assertEq(fee.balance, 0.03 ether); // 1% protocol
+        assertEq(alice.balance - aliceBefore, 0.06 ether); // 2% creator, paid to the opener
+        assertEq(b.payoutPerShare(), 0.036375 ether); // (3 − 0.09) / 80
+        b.claim(alice);
+        b.claim(bob);
+        assertEq(address(b).balance, 0);
+    }
+
     // ---------------------------------------------------------------- fuzz
 
     /// @dev Any split of any winning bid pays out exactly: 80 shares + fee == bid.
-    function testFuzz_SplitIsExact(uint96 amount, uint8 aliceShare) public {
+    function testFuzz_SplitIsExact(uint96 amount, uint8 aliceShare, uint16 creatorFee) public {
         amount = uint96(bound(amount, 1, 1_000_000 ether));
         uint256 a = bound(aliceShare, 30, 50); // bob holds 50
-        Batch b = _open(alice, _range(1, a), 0);
+        creatorFee = uint16(bound(creatorFee, 0, 1000));
+        vm.prank(alice);
+        Batch b = Batch(factory.create("F", noFilter, 0, creatorFee, 14 days, _range(1, a)));
         vm.prank(bob);
         factory.deposit(address(b), _range(51, 80 - a));
         b.assemble();
@@ -373,6 +408,7 @@ contract BatchTest is Test {
         if (b.claimable(alice) > 0) b.claim(alice);
         if (b.claimable(bob) > 0) b.claim(bob);
         assertEq(address(b).balance, 0);
+        // alice is both a depositor and the creator: everything paid out sums to the winning bid
         assertEq(fee.balance + (alice.balance - 100 ether) + (bob.balance - 100 ether), amount);
         assertLe(fee.balance, uint256(amount) / 100 + 80);
     }
@@ -408,7 +444,7 @@ contract BatchTest is Test {
     function test_GasFor40Deposit() public {
         vm.prank(alice);
         uint256 g = gasleft();
-        factory.create("Gas", noFilter, 0, 14 days, _range(1, 40));
+        factory.create("Gas", noFilter, 0, 0, 14 days, _range(1, 40));
         emit log_named_uint("create with 40", g - gasleft());
     }
 }

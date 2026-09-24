@@ -11,7 +11,7 @@ import {
 } from 'viem';
 import { foundry, mainnet, sepolia } from 'viem/chains';
 
-export type Config = { chainId: number; credits: Address; factory: Address };
+export type Config = { chainId: number; credits: Address; factory: Address; sweeper: Address | null };
 
 const CHAINS: Record<number, Chain> = { 1: mainnet, 11155111: sepolia, 31337: foundry };
 

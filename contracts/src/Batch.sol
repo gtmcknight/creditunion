@@ -11,6 +11,7 @@ interface IBatchFactory {
     function credits() external view returns (ICredits);
     function assembler() external view returns (IAssembler);
     function feeRecipient() external view returns (address);
+    function protocolFeeBps() external view returns (uint256);
 }
 
 /// @title Batch
@@ -20,12 +21,13 @@ interface IBatchFactory {
 ///         Full      The 80th Credit locks the batch. Anyone can assemble the Statement until the deadline.
 ///         Expired   Deadline passed before assembly. Every depositor withdraws their Credits.
 ///         Auction   The batch holds the Statement. The 24-hour clock starts with the first bid.
-///         Settled   The Statement went to the winner. 1% fee, then each deposited Credit claims 1/80 of the rest.
+///         Settled   The Statement went to the winner. Protocol fee and the creator's fee (fixed when the
+///                   batch opened), then each deposited Credit claims 1/80 of the rest.
 ///
 ///         No owner, no admin, no upgrades. Every rule is in this file.
 contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     uint256 public constant SIZE = 80;
-    uint256 public constant FEE_BPS = 100; // 1%
+    uint256 public constant MAX_CREATOR_FEE_BPS = 1000; // 10%
     uint256 public constant FILL_GRACE = 7 days; // a batch that fills always has at least this long to assemble
     uint256 public constant RESERVE_WINDOW = 7 days; // with no bid by then, the reserve no longer applies
     uint256 public constant AUCTION_LENGTH = 24 hours;
@@ -62,6 +64,8 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         uint64 auctionEnd;
         uint256 reserve;
         uint256 minBid;
+        uint256 creatorFeeBps;
+        uint256 protocolFeeBps;
         Filter filter;
         address statement;
         uint256 statementId;
@@ -77,6 +81,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     string public name;
     Filter internal _filter;
     uint256 public reserve;
+    uint256 public creatorFeeBps;
     uint64 public deadline;
     uint64 public filledAt;
     uint64 public assembledAt;
@@ -102,7 +107,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     event Filled(uint64 deadline);
     event Assembled(address indexed caller, address statement, uint256 statementId);
     event Bid(address indexed bidder, uint256 amount, uint64 auctionEnd);
-    event Settled(address indexed winner, uint256 amount, uint256 fee, uint256 payoutPerShare);
+    event Settled(address indexed winner, uint256 amount, uint256 protocolFee, uint256 creatorFee, uint256 payoutPerShare);
     event Claimed(address indexed depositor, uint256 amount);
     event Owed(address indexed to, uint256 amount);
 
@@ -110,6 +115,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     error NotFactory();
     error WrongState(State state);
     error NameTooLong();
+    error CreatorFeeTooHigh();
     error NotDepositor(uint256 id);
     error NotHeld(uint256 id);
     error AlreadyDeposited(uint256 id);
@@ -135,10 +141,12 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         string calldata name_,
         Filter calldata filter_,
         uint256 reserve_,
+        uint256 creatorFeeBps_,
         uint64 deadline_
     ) external {
         if (address(factory) != address(0)) revert AlreadyInitialized();
         if (bytes(name_).length > MAX_NAME) revert NameTooLong();
+        if (creatorFeeBps_ > MAX_CREATOR_FEE_BPS) revert CreatorFeeTooHigh();
         factory = IBatchFactory(msg.sender);
         credits = factory.credits();
         art = credits.art();
@@ -146,6 +154,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         name = name_;
         _filter = filter_;
         reserve = reserve_;
+        creatorFeeBps = creatorFeeBps_;
         deadline = deadline_;
     }
 
@@ -164,7 +173,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
 
     // ---------------------------------------------------------------- deposit / withdraw
 
-    /// @notice Records Credits the factory has just moved here from `from`.
+    /// @notice Records Credits the factory has just moved here, on behalf of `from`.
     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
         if (msg.sender != address(factory)) revert NotFactory();
         for (uint256 i; i < ids.length; ++i) {
@@ -309,14 +318,16 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         if (highBid == 0 || block.timestamp < auctionEnd) revert AuctionRunning();
         settled = true;
 
-        uint256 fee = highBid * FEE_BPS / 10_000;
-        uint256 per = (highBid - fee) / SIZE;
+        uint256 creatorFee = highBid * creatorFeeBps / 10_000;
+        uint256 fee = highBid * factory.protocolFeeBps() / 10_000;
+        uint256 per = (highBid - fee - creatorFee) / SIZE;
         payoutPerShare = per;
-        fee = highBid - per * SIZE; // rounding dust goes with the fee
-        emit Settled(highBidder, highBid, fee, per);
+        fee = highBid - creatorFee - per * SIZE; // rounding dust goes with the protocol fee
+        emit Settled(highBidder, highBid, fee, creatorFee, per);
 
         IERC721(statement).transferFrom(address(this), highBidder, statementId);
         _push(factory.feeRecipient(), fee);
+        if (creatorFee > 0) _push(creator, creatorFee);
     }
 
     // ---------------------------------------------------------------- payouts
@@ -390,6 +401,8 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         s.auctionEnd = auctionEnd;
         s.reserve = reserve;
         s.minBid = statement != address(0) && !settled ? minBid() : 0;
+        s.creatorFeeBps = creatorFeeBps;
+        s.protocolFeeBps = factory.protocolFeeBps();
         s.filter = _filter;
         s.statement = statement;
         s.statementId = statementId;

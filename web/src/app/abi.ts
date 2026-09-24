@@ -34,7 +34,7 @@ export const batchAbi = [
   },
   {
     "type": "function",
-    "name": "FEE_BPS",
+    "name": "FILL_GRACE",
     "inputs": [],
     "outputs": [
       {
@@ -47,7 +47,7 @@ export const batchAbi = [
   },
   {
     "type": "function",
-    "name": "FILL_GRACE",
+    "name": "MAX_CREATOR_FEE_BPS",
     "inputs": [],
     "outputs": [
       {
@@ -268,6 +268,19 @@ export const batchAbi = [
   },
   {
     "type": "function",
+    "name": "creatorFeeBps",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "credits",
     "inputs": [],
     "outputs": [
@@ -472,6 +485,11 @@ export const batchAbi = [
       },
       {
         "name": "reserve_",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "creatorFeeBps_",
         "type": "uint256",
         "internalType": "uint256"
       },
@@ -765,6 +783,16 @@ export const batchAbi = [
             "internalType": "uint256"
           },
           {
+            "name": "creatorFeeBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "protocolFeeBps",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
             "name": "filter",
             "type": "tuple",
             "internalType": "struct Batch.Filter",
@@ -984,7 +1012,13 @@ export const batchAbi = [
         "internalType": "uint256"
       },
       {
-        "name": "fee",
+        "name": "protocolFee",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "creatorFee",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -1059,6 +1093,11 @@ export const batchAbi = [
         "internalType": "uint256"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "CreatorFeeTooHigh",
+    "inputs": []
   },
   {
     "type": "error",
@@ -1166,6 +1205,11 @@ export const factoryAbi = [
         "internalType": "address"
       },
       {
+        "name": "protocolFeeBps_",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
         "name": "minOpen_",
         "type": "uint256",
         "internalType": "uint256"
@@ -1176,6 +1220,19 @@ export const factoryAbi = [
   {
     "type": "function",
     "name": "MAX_DURATION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_PROTOCOL_FEE_BPS",
     "inputs": [],
     "outputs": [
       {
@@ -1291,6 +1348,11 @@ export const factoryAbi = [
         "internalType": "uint256"
       },
       {
+        "name": "creatorFeeBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
         "name": "duration",
         "type": "uint256",
         "internalType": "uint256"
@@ -1336,6 +1398,29 @@ export const factoryAbi = [
         "name": "ids",
         "type": "uint256[]",
         "internalType": "uint256[]"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "depositFor",
+    "inputs": [
+      {
+        "name": "batch",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "ids",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      },
+      {
+        "name": "to",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [],
@@ -1389,6 +1474,19 @@ export const factoryAbi = [
   {
     "type": "function",
     "name": "minOpen",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "protocolFeeBps",
     "inputs": [],
     "outputs": [
       {
@@ -1458,7 +1556,17 @@ export const factoryAbi = [
   },
   {
     "type": "error",
+    "name": "NoDepositor",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "NotBatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ProtocolFeeTooHigh",
     "inputs": []
   },
   {
@@ -1467,6 +1575,427 @@ export const factoryAbi = [
     "inputs": [
       {
         "name": "min",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  }
+] as const;
+
+export const sweeperAbi = [
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "seaport_",
+        "type": "address",
+        "internalType": "contract ISeaport"
+      },
+      {
+        "name": "factory_",
+        "type": "address",
+        "internalType": "contract BatchFactory"
+      },
+      {
+        "name": "feeBps_",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "receive",
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "MAX_FEE_BPS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "credits",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract ICredits"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "factory",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract BatchFactory"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "feeBps",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "feeRecipient",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "onERC721Received",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "quote",
+    "inputs": [
+      {
+        "name": "listingsTotal",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "seaport",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract ISeaport"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "sweep",
+    "inputs": [
+      {
+        "name": "batch",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "orders",
+        "type": "tuple[]",
+        "internalType": "struct AdvancedOrder[]",
+        "components": [
+          {
+            "name": "parameters",
+            "type": "tuple",
+            "internalType": "struct OrderParameters",
+            "components": [
+              {
+                "name": "offerer",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "zone",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "offer",
+                "type": "tuple[]",
+                "internalType": "struct OfferItem[]",
+                "components": [
+                  {
+                    "name": "itemType",
+                    "type": "uint8",
+                    "internalType": "enum ItemType"
+                  },
+                  {
+                    "name": "token",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "identifierOrCriteria",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "startAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "endAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  }
+                ]
+              },
+              {
+                "name": "consideration",
+                "type": "tuple[]",
+                "internalType": "struct ConsiderationItem[]",
+                "components": [
+                  {
+                    "name": "itemType",
+                    "type": "uint8",
+                    "internalType": "enum ItemType"
+                  },
+                  {
+                    "name": "token",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "identifierOrCriteria",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "startAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "endAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "recipient",
+                    "type": "address",
+                    "internalType": "address payable"
+                  }
+                ]
+              },
+              {
+                "name": "orderType",
+                "type": "uint8",
+                "internalType": "enum OrderType"
+              },
+              {
+                "name": "startTime",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "endTime",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "zoneHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "salt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "conduitKey",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "totalOriginalConsiderationItems",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "numerator",
+            "type": "uint120",
+            "internalType": "uint120"
+          },
+          {
+            "name": "denominator",
+            "type": "uint120",
+            "internalType": "uint120"
+          },
+          {
+            "name": "signature",
+            "type": "bytes",
+            "internalType": "bytes"
+          },
+          {
+            "name": "extraData",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      },
+      {
+        "name": "minBought",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "ids",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "event",
+    "name": "Swept",
+    "inputs": [
+      {
+        "name": "buyer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "batch",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "bought",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "spent",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "fee",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "FeeNotCovered",
+    "inputs": [
+      {
+        "name": "fee",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "FeeTooHigh",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotACredit",
+    "inputs": [
+      {
+        "name": "orderIndex",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "NotBatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PaymentFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ReentrancyGuardReentrantCall",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TooFewBought",
+    "inputs": [
+      {
+        "name": "bought",
         "type": "uint256",
         "internalType": "uint256"
       }

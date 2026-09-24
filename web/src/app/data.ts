@@ -17,6 +17,8 @@ export type Summary = {
   auctionEnd: number;
   reserve: bigint;
   minBid: bigint;
+  creatorFeeBps: number;
+  protocolFeeBps: number;
   filter: { colors: `0x${string}`; print: `0x${string}`; weight: `0x${string}`; eights: `0x${string}` };
   statement: Address;
   statementId: bigint;
@@ -35,6 +37,8 @@ function toSummary(address: Address, s: Record<string, unknown>): Summary {
     filledAt: Number(s.filledAt),
     assembledAt: Number(s.assembledAt),
     auctionEnd: Number(s.auctionEnd),
+    creatorFeeBps: Number(s.creatorFeeBps),
+    protocolFeeBps: Number(s.protocolFeeBps),
   };
 }
 
@@ -96,4 +100,8 @@ export async function eligible(batch: Address, ids: readonly bigint[]) {
 
 export async function minOpen() {
   return Number(await pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'minOpen' }));
+}
+
+export async function protocolFeeBps() {
+  return Number(await pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'protocolFeeBps' }));
 }

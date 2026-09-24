@@ -13,10 +13,13 @@ import {IAssembler} from "./interfaces/IAssembler.sol";
 contract BatchFactory {
     uint256 public constant MIN_DURATION = 3 days;
     uint256 public constant MAX_DURATION = 90 days;
+    uint256 public constant MAX_PROTOCOL_FEE_BPS = 500; // hard ceiling for any deploy: 5%
 
     ICredits public immutable credits;
     IAssembler public immutable assembler;
     address public immutable feeRecipient;
+    /// @notice Protocol share of each Statement sale, in basis points. Fixed at deploy.
+    uint256 public immutable protocolFeeBps;
     /// @notice Credits the creator must put in to open a batch.
     uint256 public immutable minOpen;
     address public immutable implementation;
@@ -29,9 +32,19 @@ contract BatchFactory {
     error TooFewToOpen(uint256 min);
     error BadDuration();
     error NotBatch();
+    error NoDepositor();
+    error ProtocolFeeTooHigh();
 
-    constructor(ICredits credits_, IAssembler assembler_, address feeRecipient_, uint256 minOpen_) {
+    constructor(
+        ICredits credits_,
+        IAssembler assembler_,
+        address feeRecipient_,
+        uint256 protocolFeeBps_,
+        uint256 minOpen_
+    ) {
+        if (protocolFeeBps_ > MAX_PROTOCOL_FEE_BPS) revert ProtocolFeeTooHigh();
         credits = credits_;
+        protocolFeeBps = protocolFeeBps_;
         assembler = assembler_;
         feeRecipient = feeRecipient_;
         minOpen = minOpen_;
@@ -41,11 +54,13 @@ contract BatchFactory {
     /// @notice Open a batch with at least `minOpen` of your Credits.
     /// @param filter keccak256 of each required trait value, or 0 for any.
     /// @param reserve Opening bid floor, dropped if no bid within 7 days of assembly. 0 for none.
+    /// @param creatorFeeBps Your cut of the sale, 0–1000 (10%). Fixed forever; depositors see it before joining.
     /// @param duration Seconds until the deadline; a batch that fills always gets 7 more days to assemble.
     function create(
         string calldata name,
         Batch.Filter calldata filter,
         uint256 reserve,
+        uint256 creatorFeeBps,
         uint256 duration,
         uint256[] calldata ids
     ) external returns (address batch) {
@@ -55,23 +70,32 @@ contract BatchFactory {
         batch = Clones.clone(implementation);
         isBatch[batch] = true;
         _batches.push(batch);
-        Batch(batch).initialize(msg.sender, name, filter, reserve, uint64(block.timestamp + duration));
+        Batch(batch).initialize(msg.sender, name, filter, reserve, creatorFeeBps, uint64(block.timestamp + duration));
         emit BatchCreated(batch, msg.sender, name, _batches.length - 1);
 
-        _move(batch, ids);
+        _move(batch, ids, msg.sender);
     }
 
     /// @notice Add your Credits to a batch. Up to ~40 per call fits comfortably in a block.
     function deposit(address batch, uint256[] calldata ids) external {
         if (!isBatch[batch]) revert NotBatch();
-        _move(batch, ids);
+        _move(batch, ids, msg.sender);
     }
 
-    function _move(address batch, uint256[] calldata ids) internal {
+    /// @notice Add your Credits to a batch on someone else's behalf: `to` becomes the depositor
+    ///         (withdraw rights and payout). Used by the Sweeper to deposit Credits it just bought.
+    function depositFor(address batch, uint256[] calldata ids, address to) external {
+        if (!isBatch[batch]) revert NotBatch();
+        if (to == address(0)) revert NoDepositor();
+        _move(batch, ids, to);
+    }
+
+    /// @dev Credits always come from the caller; `to` is only who the batch records.
+    function _move(address batch, uint256[] calldata ids, address to) internal {
         for (uint256 i; i < ids.length; ++i) {
             credits.transferFrom(msg.sender, batch, ids[i]);
         }
-        Batch(batch).depositFrom(msg.sender, ids);
+        Batch(batch).depositFrom(to, ids);
     }
 
     // ---------------------------------------------------------------- views

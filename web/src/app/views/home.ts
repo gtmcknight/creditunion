@@ -1,4 +1,5 @@
 import { listBatches, type Summary } from '../data';
+import { hydrate, pct, who } from '../ens';
 import { describeFilter } from '../traits';
 import { eth, esc, sheet, until } from '../ui';
 
@@ -6,7 +7,7 @@ const STEPS = [
   ['Pool', '10+ Credits opens one. Anyone fills it.'],
   ['Withdraw', 'Take yours back any time before 80.'],
   ['Burn', 'At 80 it locks. Anyone burns it.'],
-  ['Auction', 'Sold onchain. 99% split 80 ways.'],
+  ['Auction', 'Sold onchain. Split 80 ways.'],
 ];
 
 function status(s: Summary) {
@@ -24,6 +25,51 @@ function status(s: Summary) {
   }
 }
 
+const SORTS = [
+  ['fullest', 'Fullest'],
+  ['fee', 'Lowest fee'],
+  ['new', 'Newest'],
+] as const;
+type SortKey = (typeof SORTS)[number][0];
+
+function sortKey(): SortKey {
+  try {
+    const v = localStorage.getItem('eighty-sort');
+    if (SORTS.some(([k]) => k === v)) return v as SortKey;
+  } catch {}
+  return 'fullest';
+}
+
+const STAGE: Record<string, number> = { Open: 0, Full: 1, Auction: 2, Settled: 3, Expired: 4 };
+
+/// Live batches first, always; the chosen sort orders within each stage. `list` arrives newest first.
+function sortList(list: { s: Summary; ids: readonly bigint[] }[], k: SortKey) {
+  const age = new Map(list.map((x, i) => [x.s.address, i]));
+  list.sort(
+    (a, b) =>
+      STAGE[a.s.state] - STAGE[b.s.state] ||
+      (k === 'fee' ? a.s.creatorFeeBps - b.s.creatorFeeBps : 0) ||
+      (k === 'new' ? age.get(a.s.address)! - age.get(b.s.address)! : b.s.count - a.s.count),
+  );
+}
+
+const fee = (s: Summary) =>
+  `<span class="fee${s.creatorFeeBps ? '' : ' none'}">${s.creatorFeeBps ? `${pct(s.creatorFeeBps)} fee` : 'No fee'}</span>`;
+
+function card(s: Summary, ids: readonly bigint[]) {
+  const f = describeFilter(s.filter);
+  return `<a class="card" href="#/b/${s.address}">
+    ${sheet(ids, { size: 'sm' })}
+    <div class="card-body">
+      <div class="row"><strong>${esc(s.name || 'Untitled')}</strong><span class="tag ${s.state.toLowerCase()}">${s.state}</span></div>
+      <div class="row creator">${who(s.creator)}${fee(s)}</div>
+      <div class="bar"><i style="width:${(s.count / 80) * 100}%"></i></div>
+      <div class="row muted small"><span class="num">${s.count}/80</span><span>${status(s)}</span></div>
+      ${f ? `<div class="small filter">${esc(f)}</div>` : ''}
+    </div>
+  </a>`;
+}
+
 export async function home(app: HTMLElement) {
   app.innerHTML = `
   <section class="hero">
@@ -36,7 +82,9 @@ export async function home(app: HTMLElement) {
     <ol class="steps">${STEPS.map(([h, t], i) => `<li style="--i:${i}"><span class="n">0${i + 1}</span><strong>${h}</strong><span>${t}</span></li>`).join('')}</ol>
   </section>
   <section>
-    <div class="section-head"><h2>Batches</h2><span class="muted" id="batch-count"></span></div>
+    <div class="section-head"><h2>Batches</h2><span class="muted" id="batch-count"></span>
+      <div class="seg sm" role="radiogroup" aria-label="Sort">${SORTS.map(([k, l]) => `<label><input type="radio" name="sort" value="${k}" ${k === sortKey() ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+    </div>
     <div class="grid" id="batches"><p class="muted">Loading from chain…</p></div>
   </section>`;
 
@@ -45,31 +93,29 @@ export async function home(app: HTMLElement) {
     const el = document.getElementById('batches');
     if (!el) return; // navigated away
     document.getElementById('batch-count')!.textContent = list.length ? `${list.length}` : '';
-    const order: Record<string, number> = { Open: 0, Full: 1, Auction: 2, Settled: 3, Expired: 4 };
-    list.sort((a, b) => order[a.s.state] - order[b.s.state] || b.s.count - a.s.count);
-    const lead = list.find((x) => x.s.state === 'Open') ?? list[0];
+    const lead = [...list].sort((a, b) => b.s.count - a.s.count).find((x) => x.s.state === 'Open') ?? list[0];
     const hero = document.getElementById('hero-art') as HTMLAnchorElement | null;
     if (hero && lead) {
       hero.href = `#/b/${lead.s.address}`;
       hero.innerHTML = `${sheet(lead.ids)}<span class="legend muted small"><span>${esc(lead.s.name || 'Untitled')}</span><span class="num">${lead.s.count}/80</span></span>`;
       hero.classList.add('in');
     }
-    el.innerHTML = list.length
-      ? list
-          .map(({ s, ids }, i) => {
-            const f = describeFilter(s.filter);
-            return `<a class="card" href="#/b/${s.address}" style="--i:${i}">
-              ${sheet(ids, { size: 'sm' })}
-              <div class="card-body">
-                <div class="row"><strong>${esc(s.name || 'Untitled')}</strong><span class="tag ${s.state.toLowerCase()}">${s.state}</span></div>
-                <div class="bar"><i style="width:${(s.count / 80) * 100}%"></i></div>
-                <div class="row muted small"><span class="num">${s.count}/80</span><span>${status(s)}</span></div>
-                ${f ? `<div class="small filter">${esc(f)}</div>` : ''}
-              </div>
-            </a>`;
-          })
-          .join('')
-      : `<div class="empty-state"><p>No batches yet.</p><a class="btn primary" href="#/new">Open the first one</a></div>`;
+    const draw = () => {
+      sortList(list, sortKey());
+      el.innerHTML = list.length
+        ? list.map(({ s, ids }) => card(s, ids)).join('')
+        : `<div class="empty-state"><p>No batches yet.</p><a class="btn primary" href="#/new">Open the first one</a></div>`;
+      hydrate(el);
+    };
+    draw();
+    document.querySelectorAll<HTMLInputElement>('input[name=sort]').forEach((r) =>
+      r.addEventListener('change', () => {
+        try {
+          localStorage.setItem('eighty-sort', r.value);
+        } catch {}
+        draw();
+      }),
+    );
   } catch (e) {
     const el = document.getElementById('batches');
     if (el) el.innerHTML = `<p class="error">Couldn't read batches from chain. ${esc((e as Error).message)}</p>`;

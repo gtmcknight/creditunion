@@ -6,13 +6,15 @@
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/rpc", "/art/*", "/config.json"]
+    "run_worker_first": ["/rpc", "/art/*", "/config.json", "/opensea/*", "/ens/*"]
   },
-  // Public config served at /config.json. Set RPC_URL as a secret: `wrangler secret put RPC_URL`.
+  // Public config served at /config.json. Secrets: `wrangler secret put RPC_URL` and `wrangler secret put OPENSEA_API_KEY`.
   "vars": {
     "CHAIN_ID": "31337",
     "CREDITS": "0x0000000000000000000000000000000000000000",
     "FACTORY": "0x0000000000000000000000000000000000000000",
+    "SWEEPER": "0x0000000000000000000000000000000000000000",
+    "OPENSEA_SLUG": "credits",
     "FALLBACK_RPC": "http://127.0.0.1:8545"
   },
   "observability": { "enabled": true }

@@ -1,7 +1,8 @@
 import { parseEther, type Address } from 'viem';
-import { batchAbi, creditsAbi, factoryAbi } from '../abi';
-import { config, explorer, send, session } from '../chain';
+import { batchAbi, creditsAbi, factoryAbi, sweeperAbi } from '../abi';
+import { config, explorer, pub, send, session } from '../chain';
 import { eligible, getBatch, me } from '../data';
+import { hydrate, pct, who } from '../ens';
 import { describeFilter } from '../traits';
 import { $$, art, errText, esc, eth, same, sheet, short, toast, until } from '../ui';
 
@@ -49,6 +50,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
       <header>
         <span class="tag ${s.state.toLowerCase()}">${s.state}</span>
         <h1>${esc(s.name || 'Untitled')}</h1>
+        <div class="byline">${who(s.creator, 'lg')}<span class="fee${s.creatorFeeBps ? '' : ' none'}">${s.creatorFeeBps ? `${pct(s.creatorFeeBps)} creator fee` : 'No creator fee'}</span></div>
         ${f ? `<p class="filter">${esc(f)}</p>` : ''}
       </header>
       ${
@@ -61,14 +63,23 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
         ${s.state === 'Full' ? fact('Burn by', `<span class="num">${until(s.deadline)}</span>`) : ''}
         ${fact('Depositors', `<span class="num">${depositors}</span>`)}
         ${s.reserve && (s.state === 'Open' || s.state === 'Full' || (s.state === 'Auction' && s.minBid === s.reserve && !s.highBid)) ? fact('Reserve', eth(s.reserve)) : ''}
-        ${fact('Opened by', link(s.creator))}
+        ${fact('Sale split', split(s))}
         ${fact('Contract', link(s.address))}
       </dl>
       <div id="panel">${panel(b, m, myIds)}</div>
     </div>
   </section>`;
 
+  hydrate(app);
   bind(b, m, myIds, rerender);
+}
+
+/// "1% protocol · 5% creator · 94% to depositors"
+function split(s: Ctx['s']) {
+  const rest = 10_000 - s.protocolFeeBps - s.creatorFeeBps;
+  return [`${pct(s.protocolFeeBps)} protocol`, s.creatorFeeBps ? `${pct(s.creatorFeeBps)} creator` : '', `${pct(rest)} depositors`]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 const fact = (k: string, v: string) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
@@ -85,14 +96,16 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
     myIds.size ? `<button class="btn block${primary ? ' primary' : ''}" id="withdraw">Withdraw ${plural(myIds.size)}</button>` : '';
 
   if (s.state === 'Open') {
-    if (!m) return `<div class="box"><h3>Add Credits</h3><p class="muted">Connect to see which of yours fit.</p>${connect}</div>`;
+    if (!m)
+      return `<div class="box"><h3>Add Credits</h3><p class="muted">Connect to see which of yours fit${config.sweeper ? ', or buy in from OpenSea' : ''}.</p>${connect}</div>`;
     return `<div class="box">
       <div class="box-head"><h3>Add Credits</h3><span class="muted small num" id="pick-count"></span></div>
       <div class="picker" id="picker"><p class="muted small">Checking your Credits…</p></div>
       <div class="stack" id="deposit-actions"></div>
       ${withdraw()}
       <p class="muted small">Withdraw any time before 80.</p>
-    </div>`;
+    </div>
+    ${config.sweeper ? buyPanel(80 - s.count) : ''}`;
   }
 
   if (s.state === 'Full') {
@@ -148,6 +161,21 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
     }
     ${m?.shares ? `<p class="small">Your share <strong class="num">${m.shares}/80</strong>${s.highBid ? ` · <span class="num">≈${eth(net * BigInt(m.shares))}</span> now` : ''}</p>` : ''}
     ${owed}
+  </div>`;
+}
+
+const BUY_STEPS = [1, 5, 10, 20, 40];
+
+function buyPanel(room: number) {
+  const steps = BUY_STEPS.filter((n) => n <= room);
+  if (!steps.includes(Math.min(room, 40))) steps.push(Math.min(room, 40));
+  const def = steps.includes(10) ? 10 : steps[steps.length - 1];
+  return `<div class="box" id="buy">
+    <div class="box-head"><h3>Buy in from OpenSea</h3><span class="muted small">Cheapest that fit</span></div>
+    <div class="seg" role="radiogroup" aria-label="How many">${steps.map((n) => `<label><input type="radio" name="buy-n" value="${n}" ${n === def ? 'checked' : ''}><span>${n}</span></label>`).join('')}</div>
+    <div id="buy-quote" class="quote muted small">Pick how many, then get a price.</div>
+    <button class="btn primary block" id="buy-go">Get price</button>
+    <p class="muted small">One transaction buys them and deposits them in your name. Listings that sell first are skipped and refunded.</p>
   </div>`;
 }
 
@@ -247,6 +275,7 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void) {
   }
 
   if (s.state === 'Open' && m) drawPicker(b, m, rerender, run, txNote);
+  if (s.state === 'Open' && m && config.sweeper) bindBuy(s.address, run, txNote);
 }
 
 async function drawPicker(
@@ -328,4 +357,55 @@ async function drawPicker(
   });
   draw();
   void rerender;
+}
+
+type Quote = { orders: unknown[]; ids: string[]; prices: string[]; total: string; error?: string };
+
+function bindBuy(
+  batch: Address,
+  run: (btn: HTMLElement | null, label: string, fn: () => Promise<unknown>, ok: string) => Promise<void>,
+  txNote: (h: string) => void,
+) {
+  const go = document.getElementById('buy-go') as HTMLButtonElement | null;
+  const out = document.getElementById('buy-quote');
+  if (!go || !out) return;
+  let q: Quote | null = null;
+  let value = 0n;
+  const reset = () => {
+    q = null;
+    go.textContent = 'Get price';
+    out.textContent = 'Pick how many, then get a price.';
+  };
+  document.querySelectorAll('input[name=buy-n]').forEach((r) => r.addEventListener('change', reset));
+
+  go.addEventListener('click', async () => {
+    if (!q) {
+      const n = (document.querySelector('input[name=buy-n]:checked') as HTMLInputElement).value;
+      go.disabled = true;
+      go.textContent = 'Finding listings…';
+      try {
+        const r = await fetch(`/opensea/quote?batch=${batch}&n=${n}`);
+        q = (await r.json()) as Quote;
+        if (!r.ok || q.error) throw new Error(q.error ?? 'No quote');
+        const total = BigInt(q.total);
+        value = (await pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'quote', args: [total] })) as bigint;
+        out.innerHTML = `<div class="quote-row"><span>${q.ids.length} Credit${q.ids.length === 1 ? '' : 's'}</span><span class="num">${eth(total)}</span></div>
+          <div class="quote-row"><span>Eighty fee</span><span class="num">${eth(value - total)}</span></div>
+          <div class="quote-row total"><span>Total</span><span class="num">${eth(value)}</span></div>
+          ${Number(n) > q.ids.length ? `<p>Only ${q.ids.length} listed that fit.</p>` : ''}`;
+        go.textContent = `Buy ${q.ids.length} & deposit`;
+      } catch (e) {
+        q = null;
+        out.textContent = errText(e);
+        go.textContent = 'Try again';
+      }
+      go.disabled = false;
+      return;
+    }
+    const quote = q;
+    await run(go, 'Buying…', () =>
+      send({ address: config.sweeper!, abi: sweeperAbi, functionName: 'sweep', args: [batch, quote.orders, 1n], value }, txNote),
+    'Bought and deposited.');
+    reset();
+  });
 }

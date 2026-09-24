@@ -11,6 +11,7 @@ const artAbi = [
 const entries = {
   batchAbi: abi('Batch.sol', 'Batch'),
   factoryAbi: abi('BatchFactory.sol', 'BatchFactory'),
+  sweeperAbi: abi('Sweeper.sol', 'Sweeper'),
   creditsAbi: abi('ICredits.sol', 'ICredits'),
   creditArtAbi: [...abi('ICredits.sol', 'ICreditArt'), ...artAbi],
 };

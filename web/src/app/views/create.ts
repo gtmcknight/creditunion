@@ -1,11 +1,12 @@
 import { decodeEventLog, parseEther } from 'viem';
 import { creditsAbi, factoryAbi } from '../abi';
 import { config, send, session } from '../chain';
-import { isApproved, minOpen, myCredits } from '../data';
+import { isApproved, minOpen, myCredits, protocolFeeBps } from '../data';
 import { hashTrait, LABEL, TRAITS, type TraitKey } from '../traits';
 import { $$, art, errText, esc, toast } from '../ui';
 
 const CHUNK = 40;
+const fmt = (n: number) => n.toFixed(4).replace(/\.?0+$/, '');
 const DURATIONS = [7, 14, 30, 60, 90];
 
 export async function create(app: HTMLElement) {
@@ -16,7 +17,12 @@ export async function create(app: HTMLElement) {
     return;
   }
 
-  const [owned, approved, min] = await Promise.all([myCredits(session.account), isApproved(session.account), minOpen()]);
+  const [owned, approved, min, protocolBps] = await Promise.all([
+    myCredits(session.account),
+    isApproved(session.account),
+    minOpen(),
+    protocolFeeBps(),
+  ]);
   const picks = new Set<string>();
   const filter: Record<TraitKey, string> = { colors: '', print: '', weight: '', eights: '' };
 
@@ -33,6 +39,8 @@ export async function create(app: HTMLElement) {
           .join('')}</div>
         <p class="hint">Optional. Enforced onchain.</p>
       </div></div>
+
+      <label class="field-row"><span class="label">Your fee</span><div><div class="field"><input id="cfee" inputmode="decimal" placeholder="0" autocomplete="off"><span>%</span></div><p class="hint" id="cfee-hint">Your cut of the sale, 0–10%. Fixed forever and shown to everyone before they join.</p></div></label>
 
       <label class="field-row"><span class="label">Reserve</span><div><div class="field"><input id="reserve" inputmode="decimal" placeholder="0" autocomplete="off"><span>ETH</span></div><p class="hint">Minimum first bid. Lapses 7 days after the burn.</p></div></label>
 
@@ -84,6 +92,25 @@ export async function create(app: HTMLElement) {
     owned.slice(0, 80).forEach((id) => picks.add(id.toString()));
     draw();
   });
+  const cfee = document.getElementById('cfee') as HTMLInputElement;
+  const feeBps = () => {
+    const v = cfee.value.trim();
+    if (!v) return 0;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 && n <= 10 ? Math.round(n * 100) : NaN;
+  };
+  cfee.addEventListener('input', () => {
+    const bps = feeBps();
+    const hint = document.getElementById('cfee-hint')!;
+    if (Number.isNaN(bps)) hint.textContent = 'Between 0 and 10.';
+    else if (!bps) hint.textContent = 'Your cut of the sale, 0–10%. Fixed forever and shown to everyone before they join.';
+    else {
+      const you = (3 * bps) / 10_000;
+      const per = (3 * (1 - (protocolBps + bps) / 10_000)) / 80;
+      hint.textContent = `On a 3 ETH sale: ${fmt(you)} ETH to you, ${fmt(per)} ETH per Credit.`;
+    }
+  });
+
   $$<HTMLSelectElement>('select[data-trait]', app).forEach((s) =>
     s.addEventListener('change', () => (filter[s.dataset.trait as TraitKey] = s.value)),
   );
@@ -113,6 +140,8 @@ export async function create(app: HTMLElement) {
     } catch {
       return toast('Reserve must be an ETH amount.', 'err');
     }
+    const bps = feeBps();
+    if (Number.isNaN(bps)) return toast('Your fee must be between 0 and 10%.', 'err');
     const name = (document.getElementById('name') as HTMLInputElement).value.trim();
     const days = Number((app.querySelector('input[name=dur]:checked') as HTMLInputElement).value);
     const ids = [...picks].map(BigInt);
@@ -129,7 +158,7 @@ export async function create(app: HTMLElement) {
         address: config.factory,
         abi: factoryAbi,
         functionName: 'create',
-        args: [name, f, reserve, BigInt(days * 86400), ids.slice(0, CHUNK)],
+        args: [name, f, reserve, BigInt(bps), BigInt(days * 86400), ids.slice(0, CHUNK)],
       });
       const ev = receipt.logs
         .map((l) => {

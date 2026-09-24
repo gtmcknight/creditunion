@@ -27,7 +27,7 @@ contract SeedDemo is Script {
         vm.startBroadcast(keys[0]);
         MockCredits credits = new MockCredits();
         MockStatement statement = new MockStatement(ICredits(address(credits)));
-        BatchFactory f = new BatchFactory(ICredits(address(credits)), new MockAssembler(statement), who[0], 10);
+        BatchFactory f = new BatchFactory(ICredits(address(credits)), new MockAssembler(statement), who[0], 100, 10);
         for (uint256 i; i < 4; ++i) credits.mint(who[i], 200); // ids 1..800
         vm.stopBroadcast();
 
@@ -56,7 +56,7 @@ contract SeedDemo is Script {
         cyan.colors = keccak256("CMY");
 
         // 2. Auction running with bids
-        address b2 = _open(f, keys[1], "Registered", none, 0, _r(241, 30));
+        address b2 = _open(f, keys[1], "Registered", none, 0, 250, _r(241, 30));
         _dep(f, keys[2], b2, _r(401, 30));
         _dep(f, keys[3], b2, _r(601, 20));
         vm.broadcast(keys[3]);
@@ -73,7 +73,7 @@ contract SeedDemo is Script {
         // 4. Open, mostly filled, filtered (even ids only in the mock art)
         uint256[] memory evens = new uint256[](26);
         for (uint256 i; i < 26; ++i) evens[i] = 42 + 2 * i;
-        address b4 = _open(f, keys[0], "All Cyan", cyan, 0, evens);
+        address b4 = _open(f, keys[0], "All Cyan", cyan, 0, 500, evens);
         uint256[] memory evens2 = new uint256[](38);
         for (uint256 i; i < 38; ++i) evens2[i] = 272 + 2 * i;
         _dep(f, keys[1], b4, evens2);
@@ -86,8 +86,20 @@ contract SeedDemo is Script {
         internal
         returns (address b)
     {
+        b = _open(f, k, n, fl, res, 0, ids);
+    }
+
+    function _open(
+        BatchFactory f,
+        uint256 k,
+        string memory n,
+        Batch.Filter memory fl,
+        uint256 res,
+        uint256 creatorFee,
+        uint256[] memory ids
+    ) internal returns (address b) {
         vm.broadcast(k);
-        b = f.create(n, fl, res, 30 days, ids);
+        b = f.create(n, fl, res, creatorFee, 30 days, ids);
     }
 
     function _dep(BatchFactory f, uint256 k, address b, uint256[] memory ids) internal {
