@@ -1,9 +1,10 @@
 import type { Address } from 'viem';
-import { chain, config, connect, disconnect, loadConfig, onSession, restore, session, wallets } from './chain';
+import { chain, config, connect, loadConfig, onSession, restore, session, wallets } from './chain';
 import { batch } from './views/batch';
 import { create } from './views/create';
 import { home, how } from './views/home';
 import { mint } from './views/mint';
+import { profile } from './views/profile';
 import { esc, errText, short, toast } from './ui';
 
 const app = document.getElementById('app')!;
@@ -16,10 +17,14 @@ async function route() {
   document.querySelectorAll<HTMLAnchorElement>('[data-nav]').forEach((a) =>
     a.toggleAttribute('aria-current', a.dataset.nav === (page === 'b' || page === 'new' ? '' : page ?? '')),
   );
+  document.querySelectorAll<HTMLAnchorElement>('#account [data-nav]').forEach((a) =>
+    a.classList.toggle('current', page === 'me'),
+  );
   app.classList.remove('in');
   try {
     if (page === 'how') how(app);
     else if (page === 'mint') await mint(app, route);
+    else if (page === 'me') await profile(app, route);
     else if (page === 'new') await create(app);
     else if (page === 'b' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await batch(app, arg as Address, route);
     else await home(app);
@@ -41,11 +46,8 @@ function drawTestnet() {
 function drawAccount() {
   const el = document.getElementById('account')!;
   el.innerHTML = session.account
-    ? `<button class="btn sm" id="acct" title="Disconnect"><i class="dot live"></i><span class="mono">${short(session.account)}</span></button>`
+    ? `<a class="btn sm" href="#/me" data-nav="me"><i class="dot live"></i><span class="mono">${short(session.account)}</span></a>`
     : `<button class="btn sm primary" data-connect>Connect</button>`;
-  document.getElementById('acct')?.addEventListener('click', () => {
-    if (confirm('Disconnect wallet?')) disconnect();
-  });
 }
 
 async function openConnect() {

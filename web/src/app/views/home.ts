@@ -1,7 +1,8 @@
-import { listBatches, type Summary } from '../data';
+import { session } from '../chain';
+import { listBatches, type Listed, type Summary } from '../data';
 import { hydrate, pct, who } from '../ens';
 import { describeFilter } from '../traits';
-import { eth, esc, sheet, until } from '../ui';
+import { eth, esc, same, sheet, until } from '../ui';
 
 const STEPS = [
   ['Pool', '10+ Credits opens one. Anyone fills it.'],
@@ -43,7 +44,7 @@ function sortKey(): SortKey {
 const STAGE: Record<string, number> = { Open: 0, Full: 1, Auction: 2, Settled: 3, Expired: 4 };
 
 /// Live batches first, always; the chosen sort orders within each stage. `list` arrives newest first.
-function sortList(list: { s: Summary; ids: readonly bigint[] }[], k: SortKey) {
+function sortList(list: Listed[], k: SortKey) {
   const age = new Map(list.map((x, i) => [x.s.address, i]));
   list.sort(
     (a, b) =>
@@ -56,12 +57,18 @@ function sortList(list: { s: Summary; ids: readonly bigint[] }[], k: SortKey) {
 const fee = (s: Summary) =>
   `<span class="fee${s.creatorFeeBps ? '' : ' none'}">${s.creatorFeeBps ? `${pct(s.creatorFeeBps)} fee` : 'No fee'}</span>`;
 
-function card(s: Summary, ids: readonly bigint[]) {
+/// Ids in this batch deposited by the connected wallet.
+export function mineIn(b: Listed) {
+  return new Set(b.ids.filter((_, i) => same(b.depositors[i], session.account)).map(String));
+}
+
+export function card({ s, ids, depositors }: Listed) {
   const f = describeFilter(s.filter);
+  const mine = mineIn({ s, ids, depositors });
   return `<a class="card" href="#/b/${s.address}">
-    ${sheet(ids, { size: 'sm' })}
+    ${sheet(ids, { size: 'sm', mine })}
     <div class="card-body">
-      <div class="row"><strong>${esc(s.name || 'Untitled')}</strong><span class="tag ${s.state.toLowerCase()}">${s.state}</span></div>
+      <div class="row"><strong>${esc(s.name || 'Untitled')}</strong><span class="tags">${mine.size ? `<span class="tag you">You · ${mine.size}</span>` : ''}<span class="tag ${s.state.toLowerCase()}">${s.state}</span></span></div>
       <div class="row creator">${who(s.creator)}${fee(s)}</div>
       <div class="bar"><i style="width:${(s.count / 80) * 100}%"></i></div>
       <div class="row muted small"><span class="num">${s.count}/80</span><span>${status(s)}</span></div>
@@ -103,7 +110,7 @@ export async function home(app: HTMLElement) {
     const draw = () => {
       sortList(list, sortKey());
       el.innerHTML = list.length
-        ? list.map(({ s, ids }) => card(s, ids)).join('')
+        ? list.map(card).join('')
         : `<div class="empty-state"><p>No batches yet.</p><a class="btn primary" href="#/new">Open the first one</a></div>`;
       hydrate(el);
     };

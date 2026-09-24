@@ -664,7 +664,7 @@ nav .short {
   pointer-events: none;
 }
 .sheet.sm .cell.mine::after {
-  display: none;
+  box-shadow: inset 0 0 0 2px #0a0a0a;
 }
 .cell img {
   transition: opacity 200ms var(--ease);
@@ -1330,4 +1330,109 @@ nav a[hidden] {
 }
 .picker.static .pick {
   cursor: default;
+}
+
+/* ---------------------------------------------------------------- you */
+
+.tags {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
+}
+.tag.you {
+  background: #fff;
+  color: #0a0a0a;
+  box-shadow: inset 0 0 0 2px #0a0a0a;
+}
+#account .btn.current {
+  box-shadow: inset 0 0 0 1px var(--fg);
+}
+.profile {
+  display: grid;
+  gap: 28px;
+  padding: clamp(24px, 5vw, 56px) 0 8px;
+}
+.profile-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.profile-head .who.lg {
+  font-size: clamp(24px, 4vw, 36px);
+  letter-spacing: -0.03em;
+  gap: 14px;
+}
+.profile-head .who.lg img {
+  width: clamp(36px, 5vw, 48px);
+  height: clamp(36px, 5vw, 48px);
+}
+.stats {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--fg);
+}
+.stats > div {
+  display: grid;
+  gap: 6px;
+  padding: 16px 16px 0 0;
+}
+.stats dt {
+  font-size: 13px;
+  color: var(--muted);
+}
+.stats dd {
+  margin: 0;
+  font: 500 clamp(20px, 4vw, 40px) / 1 var(--sans);
+  letter-spacing: -0.035em;
+  white-space: nowrap;
+}
+.dues {
+  display: grid;
+}
+.due {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.due a {
+  font-weight: 500;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile ~ section {
+  margin-top: 56px;
+}
+.wallet-grid {
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+}
+@media (max-width: 560px) {
+  .due {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .due .muted {
+    grid-row: 2;
+  }
+}
+
+/* Cards: name on its own line when tags need the room */
+.card .row:first-child {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.card .row:first-child strong {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+@media (max-width: 560px) {
+  .card .row:first-child strong {
+    flex-basis: 100%;
+  }
 }

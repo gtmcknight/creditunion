@@ -42,7 +42,9 @@ function toSummary(address: Address, s: Record<string, unknown>): Summary {
   };
 }
 
-export async function listBatches(limit = 60): Promise<{ s: Summary; ids: readonly bigint[] }[]> {
+export type Listed = { s: Summary; ids: readonly bigint[]; depositors: readonly Address[] };
+
+export async function listBatches(limit = 60): Promise<Listed[]> {
   const addrs = await pub.readContract({
     address: config.factory,
     abi: factoryAbi,
@@ -51,11 +53,11 @@ export async function listBatches(limit = 60): Promise<{ s: Summary; ids: readon
   });
   return Promise.all(
     addrs.map(async (a) => {
-      const [s, ids] = await Promise.all([
+      const [s, slots] = await Promise.all([
         pub.readContract({ address: a, abi: batchAbi, functionName: 'summary' }),
-        pub.readContract({ address: a, abi: batchAbi, functionName: 'ids' }),
+        pub.readContract({ address: a, abi: batchAbi, functionName: 'slots' }),
       ]);
-      return { s: toSummary(a, s as Record<string, unknown>), ids };
+      return { s: toSummary(a, s as Record<string, unknown>), ids: slots[0], depositors: slots[1] };
     }),
   );
 }
