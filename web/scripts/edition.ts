@@ -54,6 +54,13 @@ ids.forEach((id, i) => {
 writeFileSync(new URL('../public/edition-traits.bin', import.meta.url), Buffer.from(packed.buffer));
 console.log('wrote public/edition-traits.bin', packed.byteLength, 'bytes');
 
+// Scores for the onchain table: uint16 little-endian score×10 per id (index id-1), 80.00 → 800, 800.00 → 8000.
+const scores = new Uint16Array(ids[ids.length - 1]);
+ids.forEach((id) => (scores[id - 1] = Math.round(rate(src[id][0], src[id][1], ed).score * 10)));
+writeFileSync(new URL('../../contracts/data/scores.bin', import.meta.url), Buffer.from(scores.buffer));
+writeFileSync(new URL('../public/scores.bin', import.meta.url), Buffer.from(scores.buffer));
+console.log('wrote scores.bin', scores.byteLength, 'bytes; #1', scores[0], '#11469', scores[11468]);
+
 // Binary layout: u32 json length, json (n, tails, counts), then Float64 rs[], then Uint32 below[].
 const meta = Buffer.from(JSON.stringify({ n: ed.n, tails: ed.tails, counts: ed.counts, version: '3.4.0' }));
 const head = Buffer.alloc(4);

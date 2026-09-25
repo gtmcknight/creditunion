@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {Batch} from "../src/Batch.sol";
+import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {Sweeper} from "../src/Sweeper.sol";
 import {IAssembler} from "../src/interfaces/IAssembler.sol";
@@ -39,7 +39,7 @@ contract SweeperForkTest is Test {
         seller = vm.addr(sellerKey);
 
         // minOpen 1 so a single real holder can open a test batch
-        factory = new BatchFactory(CREDITS, IAssembler(address(0)), address(this), fee, 100, 1);
+        factory = new BatchFactory(CREDITS, IRatings(address(0)), IAssembler(address(0)), address(this), fee, 100, 1);
         sweeper = new Sweeper(SEAPORT, factory, 100);
 
         // Find live Credits: one for the creator, three to move to our seller.
@@ -53,7 +53,7 @@ contract SweeperForkTest is Test {
                         one[0] = id;
                         vm.startPrank(o);
                         CREDITS.setApprovalForAll(address(factory), true);
-                        batch = Batch(factory.create("Fork", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, one));
+                        batch = Batch(factory.create("Fork", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, one));
                         vm.stopPrank();
                     } else {
                         vm.prank(o);

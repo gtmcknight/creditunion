@@ -207,7 +207,7 @@ function buyPanel(room: number) {
   if (!steps.includes(Math.min(room, 40))) steps.push(Math.min(room, 40));
   const def = steps.includes(10) ? 10 : steps[steps.length - 1];
   return `<div class="box" id="buy">
-    <div class="box-head"><h3>Buy in from OpenSea</h3><span class="muted small">Cheapest that fit</span></div>
+    <div class="box-head"><h3>Buy Credits from OpenSea</h3><span class="muted small">Cheapest that fit</span></div>
     <div class="seg" role="radiogroup" aria-label="How many">${steps.map((n) => `<label><input type="radio" name="buy-n" value="${n}" ${n === def ? 'checked' : ''}><span>${n}</span></label>`).join('')}</div>
     <div id="buy-quote" class="quote muted small">Pick how many, then get a price.</div>
     <button class="btn primary block" id="buy-go">Get price</button>
@@ -443,7 +443,7 @@ function bindBuy(
 
   go.addEventListener('click', async () => {
     if (!q) {
-      const n = (document.querySelector('input[name=buy-n]:checked') as HTMLInputElement).value;
+      const n = (document.querySelector('input[name=buy-n]:checked') as HTMLInputElement | null)?.value ?? '10';
       go.disabled = true;
       go.textContent = 'Finding listings…';
       try {

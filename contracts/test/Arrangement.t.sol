@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {Batch} from "../src/Batch.sol";
+import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {MockAssembler} from "../src/MockAssembler.sol";
 import {ICredits} from "../src/interfaces/ICredits.sol";
@@ -39,7 +39,7 @@ contract ArrangementTest is Test {
     function setUp() public {
         credits = new MockCredits();
         statement = new RecordingStatement(ICredits(address(credits)));
-        factory = new BatchFactory(ICredits(address(credits)), new MockAssembler(statement), address(0), fee, 100, 10);
+        factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(statement), address(0), fee, 100, 10);
         credits.mint(alice, 50);
         credits.mint(bob, 50);
         for (uint256 i; i < 2; ++i) {

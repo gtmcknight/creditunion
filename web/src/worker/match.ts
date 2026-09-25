@@ -2,6 +2,23 @@
 /// Reads public/edition-traits.bin (one packed Uint32 per Credit; layout in scripts/edition.ts).
 
 let table: Promise<Uint32Array> | null = null;
+let scores: Promise<Uint16Array> | null = null;
+
+async function loadScores(assets: Fetcher, origin: string) {
+  if (!scores) {
+    scores = assets
+      .fetch(new Request(`${origin}/scores.bin`))
+      .then(async (r) => {
+        if (!r.ok) throw new Error('scores.bin missing');
+        return new Uint16Array(await r.arrayBuffer());
+      })
+      .catch((e) => {
+        scores = null;
+        throw e;
+      });
+  }
+  return scores;
+}
 
 async function load(assets: Fetcher, origin: string) {
   if (!table) {
@@ -29,11 +46,14 @@ export type Rules = {
   minuteTo?: number;
   idFrom?: number;
   idTo?: number;
+  minScore?: number; // score ×10, 0 = any
+  maxScore?: number;
   list?: number[]; // explicit ids, empty = any
 };
 
 export async function match(assets: Fetcher, origin: string, r: Rules, samples = 80) {
   const t = await load(assets, origin);
+  const sc = r.minScore || r.maxScore ? await loadScores(assets, origin) : null;
   const list = r.list?.length ? new Set(r.list) : null;
   const lo = Math.max(1, r.idFrom || 1);
   const hi = Math.min(t.length, r.idTo || t.length);
@@ -45,6 +65,11 @@ export async function match(assets: Fetcher, origin: string, r: Rules, samples =
     if (r.prints && !(r.prints & (1 << ((v >> 4) & 7)))) return false;
     if (r.weights && !(r.weights & (1 << ((v >> 7) & 3)))) return false;
     if (r.eights && !(r.eights & (1 << ((v >> 9) & 31)))) return false;
+    if (sc) {
+      const s = sc[id - 1];
+      if (r.minScore && s < r.minScore) return false;
+      if (r.maxScore && s > r.maxScore) return false;
+    }
     if ((r.minuteFrom ?? -1) >= 0 || (r.minuteTo ?? -1) >= 0) {
       const mi = (v >> 14) & 2047;
       if (mi === 2047) return false;

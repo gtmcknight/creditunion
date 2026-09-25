@@ -7,8 +7,13 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 import {ICredits, ICreditArt} from "./interfaces/ICredits.sol";
 import {IAssembler} from "./interfaces/IAssembler.sol";
 
+interface IRatings {
+    function scoreOf(uint256 id) external view returns (uint16);
+}
+
 interface IBatchFactory {
     function credits() external view returns (ICredits);
+    function ratings() external view returns (IRatings);
     function assembler() external view returns (IAssembler);
     function assemblerActiveAt() external view returns (uint64);
     function exitWindowOpen() external view returns (bool);
@@ -78,6 +83,8 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         uint64 paidTo; // ...and at or before this one
         uint256 idFrom; // Credit numbers from...
         uint256 idTo; // ...to
+        uint16 minScore; // official rating ×10 (80.00 → 800), 0 = any
+        uint16 maxScore; // 0 = any
     }
 
     struct Summary {
@@ -198,6 +205,10 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         if (allowlist_.length > MAX_ALLOWLIST) revert AllowlistTooLong();
         if (filter_.paidTo != 0 && filter_.paidFrom > filter_.paidTo) revert BadFilter();
         if (filter_.idTo != 0 && filter_.idFrom > filter_.idTo) revert BadFilter();
+        if (filter_.maxScore != 0 && filter_.minScore > filter_.maxScore) revert BadFilter();
+        if ((filter_.minScore != 0 || filter_.maxScore != 0) && address(IBatchFactory(msg.sender).ratings()) == address(0)) {
+            revert BadFilter();
+        }
         for (uint256 i; i < allowlist_.length; ++i) {
             if (!allowed[allowlist_[i]]) {
                 allowed[allowlist_[i]] = true;
@@ -322,6 +333,10 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         if (f.paidFrom != 0 || f.paidTo != 0) {
             uint64 t = credits.timestampOf(id);
             if (t < f.paidFrom || (f.paidTo != 0 && t > f.paidTo)) return false;
+        }
+        if (f.minScore != 0 || f.maxScore != 0) {
+            uint16 sc = factory.ratings().scoreOf(id);
+            if (sc < f.minScore || (f.maxScore != 0 && sc > f.maxScore)) return false;
         }
         if (f.palettes == 0 && f.prints == 0 && f.weights == 0 && f.eights == 0) return true;
         ICreditArt.Read memory r = art.describe(credits.seedOf(id), credits.timestampOf(id));

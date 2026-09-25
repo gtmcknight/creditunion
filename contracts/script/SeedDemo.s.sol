@@ -2,12 +2,14 @@
 pragma solidity 0.8.28;
 
 import {Script, console} from "forge-std/Script.sol";
-import {Batch} from "../src/Batch.sol";
+import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {MockAssembler} from "../src/MockAssembler.sol";
 import {ICredits} from "../src/interfaces/ICredits.sol";
 import {MockCredits} from "../src/mocks/MockCredits.sol";
 import {MockStatement} from "../src/mocks/MockStatement.sol";
+import {Ratings} from "../src/Ratings.sol";
+import {RatingsDeploy} from "./DeployRatings.s.sol";
 
 /// @notice Local anvil only: deploys mocks and leaves batches in every state for UI work.
 contract SeedDemo is Script {
@@ -27,7 +29,8 @@ contract SeedDemo is Script {
         vm.startBroadcast(keys[0]);
         MockCredits credits = new MockCredits();
         MockStatement statement = new MockStatement(ICredits(address(credits)));
-        BatchFactory f = new BatchFactory(ICredits(address(credits)), new MockAssembler(statement), address(0), who[0], 100, 1);
+        Ratings ratings = RatingsDeploy.deploy(vm.readFileBinary("data/scores.bin")); // the real score table
+        BatchFactory f = new BatchFactory(ICredits(address(credits)), IRatings(address(ratings)), new MockAssembler(statement), address(0), who[0], 100, 1);
         for (uint256 i; i < 4; ++i) credits.mint(who[i], 200); // ids 1..800
         vm.stopBroadcast();
 
@@ -46,6 +49,7 @@ contract SeedDemo is Script {
         Batch(b1).bid{value: 3.2 ether}();
         console.log("CREDITS", address(credits));
         console.log("FACTORY", address(f));
+        console.log("RATINGS", address(ratings));
         console.log("SETTLE_ME", b1);
     }
 

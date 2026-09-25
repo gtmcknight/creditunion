@@ -48,7 +48,7 @@ export function docs(app: HTMLElement) {
           ['Payment window', 'Only Credits paid for between two moments, e.g. a single minute of the mint.'],
           ['Credit numbers', 'Only Credits in a numeric range.'],
           ['A list', 'Only specific Credits, up to 200 numbers, stored in the batch.'],
-          ['Rating', 'Every batch shows its Credits’ official ratings (§ Ratings), and the arranger can sort by them, but a batch cannot filter by rating: the rating is a rank over the whole edition, which a contract cannot recompute.'],
+          ['Rating', 'A minimum official rating (§ Ratings). The scores of all 122,154 Credits are frozen onchain in a Ratings contract, so the rule is enforced there like every other.'],
         ]),
     },
     {
@@ -94,7 +94,7 @@ export function docs(app: HTMLElement) {
     },
     {
       id: 'buying',
-      title: 'Buying in from OpenSea',
+      title: 'Buying Credits from OpenSea',
       body: `<p>No Credits? On an open batch, pick how many and get a price. The site finds the cheapest OpenSea listings that fit the batch’s rules, checks onchain that each seller still owns and has approved the Credit, and prepares one transaction that buys them through Seaport and deposits them in your name. They are yours in the batch exactly as if you had deposited them: you can withdraw them until it locks.</p>
       <p>You pay the listings plus the buy-in fee; anything unspent comes straight back. A listing that sold moments before is skipped and refunded. Listings already include Jack’s 1 % royalty, as on OpenSea.</p>`,
     },
@@ -128,11 +128,12 @@ export function docs(app: HTMLElement) {
         ${addr(config.factory, 'BatchFactory')}
         ${addr(config.credits, testnet ? 'Test Credits' : 'Credits')}
         ${config.sweeper ? addr(config.sweeper, 'Sweeper') : ''}
+        ${config.ratings ? addr(config.ratings, 'Ratings') : ''}
         <span class="addr"><span>Network</span><span>${esc(chain.name)}</span></span>
       </div>
       <p class="muted small">Batches are minimal clones of one implementation; each batch page links to its own address.</p>
       ${rules([
-        ['Source', `${src('contracts/src/Batch.sol')} · ${src('contracts/src/BatchFactory.sol')} · ${src('contracts/src/Sweeper.sol')} · ${src('contracts/src/interfaces/IAssembler.sol')} · ${link(REPO, 'repository')}`],
+        ['Source', `${src('contracts/src/Batch.sol')} · ${src('contracts/src/BatchFactory.sol')} · ${src('contracts/src/Sweeper.sol')} · ${src('contracts/src/Ratings.sol')} · ${src('contracts/src/interfaces/IAssembler.sol')} · ${link(REPO, 'repository')}`],
         ['Jack’s', `${link(`https://etherscan.io/address/${CREDITS_MAINNET}`, 'Credits on Ethereum')} · ${link('https://jack.art/credits', 'jack.art/credits')} · ${link('https://opensea.io/collection/credits', 'OpenSea')}`],
         ['Seaport 1.6', link(`https://etherscan.io/address/${SEAPORT}`, short(SEAPORT))],
         ['Site', `Cloudflare Worker with no state: a read-only RPC proxy to these contracts, cached Credit art, ENS names, OpenSea quotes and ratings. ${src('web/src/worker/index.ts')}`],

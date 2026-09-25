@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {Batch} from "./Batch.sol";
 import {ICredits} from "./interfaces/ICredits.sol";
+import {IRatings} from "./Batch.sol";
 import {IAssembler} from "./interfaces/IAssembler.sol";
 
 /// @title BatchFactory
@@ -24,6 +25,8 @@ contract BatchFactory {
     uint256 public constant ASSEMBLER_DELAY = 3 days;
 
     ICredits public immutable credits;
+    /// @notice The frozen official score table, or zero if rating rules are unavailable on this deployment.
+    IRatings public immutable ratings;
     address public immutable feeRecipient;
     /// @notice The one address that may propose an assembler. Irrelevant once one is active.
     address public immutable assemblerSetter;
@@ -60,12 +63,14 @@ contract BatchFactory {
     /// @param assembler_ The adapter, or zero to open pooling before it exists (then `setter_` proposes it).
     constructor(
         ICredits credits_,
+        IRatings ratings_,
         IAssembler assembler_,
         address setter_,
         address feeRecipient_,
         uint256 protocolFeeBps_,
         uint256 minOpen_
     ) {
+        ratings = ratings_;
         if (protocolFeeBps_ > MAX_PROTOCOL_FEE_BPS) revert ProtocolFeeTooHigh();
         if (feeRecipient_ == address(0)) revert NoFeeRecipient();
         if (address(assembler_) == address(0) && setter_ == address(0)) revert NoAssembler();

@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {Batch} from "../src/Batch.sol";
+import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {MockAssembler} from "../src/MockAssembler.sol";
 import {IAssembler} from "../src/interfaces/IAssembler.sol";
@@ -61,7 +61,7 @@ contract BatchTest is Test {
     function setUp() public {
         credits = new MockCredits();
         statement = new MockStatement(ICredits(address(credits)));
-        factory = new BatchFactory(ICredits(address(credits)), new MockAssembler(statement), address(0), fee, 100, 10);
+        factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(statement), address(0), fee, 100, 10);
         credits.mint(alice, 50); // ids 1..50
         credits.mint(bob, 50); // ids 51..100
         for (uint256 i; i < 3; ++i) {
@@ -257,7 +257,7 @@ contract BatchTest is Test {
 
     function test_AssembleRejectsAssemblerThatDoesNotBurn() public {
         BatchFactory bad =
-            new BatchFactory(ICredits(address(credits)), new StealingAssembler(carol, statement), address(0), fee, 100, 10);
+            new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new StealingAssembler(carol, statement), address(0), fee, 100, 10);
         vm.prank(alice);
         credits.setApprovalForAll(address(bad), true);
         vm.prank(bob);
@@ -372,7 +372,7 @@ contract BatchTest is Test {
     function test_ProtocolFeeCappedAt5Percent() public {
         MockAssembler asm = new MockAssembler(statement);
         vm.expectRevert(BatchFactory.ProtocolFeeTooHigh.selector);
-        new BatchFactory(ICredits(address(credits)), asm, address(0), fee, 501, 10);
+        new BatchFactory(ICredits(address(credits)), IRatings(address(0)), asm, address(0), fee, 501, 10);
     }
 
     function test_CreatorAndProtocolSplit() public {

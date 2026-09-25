@@ -3,6 +3,9 @@ pragma solidity 0.8.28;
 
 import {Script, console} from "forge-std/Script.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
+import {IRatings} from "../src/Batch.sol";
+import {Ratings} from "../src/Ratings.sol";
+import {RatingsDeploy} from "./DeployRatings.s.sol";
 import {Sweeper} from "../src/Sweeper.sol";
 import {IAssembler} from "../src/interfaces/IAssembler.sol";
 import {ICredits} from "../src/interfaces/ICredits.sol";
@@ -33,11 +36,15 @@ contract DeployMainnet is Script {
         require(CREDITS.isSealed(), "credits not sealed");
 
         vm.startBroadcast();
+        // RATINGS: an already deployed score table (DeployRatings), or deploy it here (~55M gas over 12 txs).
+        address ratingsAddr = vm.envOr("RATINGS", address(0));
+        if (ratingsAddr == address(0)) ratingsAddr = address(RatingsDeploy.deploy(vm.readFileBinary("data/scores.bin")));
         BatchFactory factory = new BatchFactory(
-            CREDITS, assembler, setter, feeTo, vm.envOr("PROTOCOL_FEE_BPS", uint256(100)), 1
+            CREDITS, IRatings(ratingsAddr), assembler, setter, feeTo, vm.envOr("PROTOCOL_FEE_BPS", uint256(100)), 1
         );
         Sweeper sweeper = new Sweeper(SEAPORT, factory, vm.envOr("SWEEP_FEE_BPS", uint256(100)));
         vm.stopBroadcast();
+        console.log("RATINGS", ratingsAddr);
         console.log("FACTORY", address(factory));
         console.log("SWEEPER", address(sweeper));
     }

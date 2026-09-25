@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {Batch} from "../src/Batch.sol";
+import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {MockAssembler} from "../src/MockAssembler.sol";
 import {ICredits} from "../src/interfaces/ICredits.sol";
@@ -143,7 +143,7 @@ contract BatchInvariants is Test {
     function setUp() public {
         credits = new MockCredits();
         statement = new MockStatement(ICredits(address(credits)));
-        factory = new BatchFactory(ICredits(address(credits)), new MockAssembler(statement), address(0), fee, 100, 10);
+        factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(statement), address(0), fee, 100, 10);
 
         actors.push(creator);
         actors.push(makeAddr("alice"));
@@ -156,7 +156,7 @@ contract BatchInvariants is Test {
         for (uint256 i; i < 10; ++i) ids[i] = i + 1;
         vm.startPrank(creator);
         credits.setApprovalForAll(address(factory), true);
-        batch = Batch(factory.create("Inv", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0.5 ether, 300, Batch.Arrangement.Deposit, 30 days, ids));
+        batch = Batch(factory.create("Inv", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0.5 ether, 300, Batch.Arrangement.Deposit, 30 days, ids));
         vm.stopPrank();
 
         handler = new Handler(credits, factory, batch, actors);

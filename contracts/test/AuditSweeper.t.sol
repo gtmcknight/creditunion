@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {Batch} from "../src/Batch.sol";
+import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {Sweeper} from "../src/Sweeper.sol";
 import {MockAssembler} from "../src/MockAssembler.sol";
@@ -26,7 +26,7 @@ contract AuditSweeperTest is Test {
     function setUp() public {
         credits = new MockCredits();
         statement = new MockStatement(ICredits(address(credits)));
-        factory = new BatchFactory(ICredits(address(credits)), new MockAssembler(statement), address(0), fee, 100, 10);
+        factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(statement), address(0), fee, 100, 10);
         sweeper = new Sweeper(ISeaport(makeAddr("seaport")), factory, 100);
         credits.mint(alice, 50); // ids 1..50
         credits.mint(bob, 50); // ids 51..100

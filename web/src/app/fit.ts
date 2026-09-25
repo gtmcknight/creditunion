@@ -52,6 +52,9 @@ export function fitsRules(s: Summary, id: bigint, r: Rated | undefined): boolean
   if (f.prints && !(f.prints & (1 << TRAITS.print.indexOf(r.traits.registration as (typeof TRAITS.print)[number])))) return false;
   if (f.weights && !(f.weights & (1 << TRAITS.weight.indexOf(weightOf(r) as (typeof TRAITS.weight)[number])))) return false;
   if (f.eights && !(f.eights & (1 << r.traits.eights))) return false;
+  const sc = Math.round(r.score * 10);
+  if (f.minScore && sc < f.minScore) return false;
+  if (f.maxScore && sc > f.maxScore) return false;
   return true;
 }
 

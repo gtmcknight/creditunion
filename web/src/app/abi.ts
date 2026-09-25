@@ -527,6 +527,16 @@ export const batchAbi = [
             "name": "idTo",
             "type": "uint256",
             "internalType": "uint256"
+          },
+          {
+            "name": "minScore",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "maxScore",
+            "type": "uint16",
+            "internalType": "uint16"
           }
         ]
       }
@@ -630,6 +640,16 @@ export const batchAbi = [
             "name": "idTo",
             "type": "uint256",
             "internalType": "uint256"
+          },
+          {
+            "name": "minScore",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "maxScore",
+            "type": "uint16",
+            "internalType": "uint16"
           }
         ]
       },
@@ -1047,6 +1067,16 @@ export const batchAbi = [
                 "name": "idTo",
                 "type": "uint256",
                 "internalType": "uint256"
+              },
+              {
+                "name": "minScore",
+                "type": "uint16",
+                "internalType": "uint16"
+              },
+              {
+                "name": "maxScore",
+                "type": "uint16",
+                "internalType": "uint16"
               }
             ]
           },
@@ -1515,6 +1545,11 @@ export const factoryAbi = [
         "internalType": "contract ICredits"
       },
       {
+        "name": "ratings_",
+        "type": "address",
+        "internalType": "contract IRatings"
+      },
+      {
         "name": "assembler_",
         "type": "address",
         "internalType": "contract IAssembler"
@@ -1730,6 +1765,16 @@ export const factoryAbi = [
             "name": "idTo",
             "type": "uint256",
             "internalType": "uint256"
+          },
+          {
+            "name": "minScore",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "maxScore",
+            "type": "uint16",
+            "internalType": "uint16"
           }
         ]
       },
@@ -1946,6 +1991,19 @@ export const factoryAbi = [
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "ratings",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IRatings"
       }
     ],
     "stateMutability": "view"

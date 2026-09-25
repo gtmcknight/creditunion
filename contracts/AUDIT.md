@@ -64,6 +64,10 @@ Trait rules are now sets: `Filter.palettes` (uint16, bit = C|M|Y|K mask of the c
 
 ETH accounting under mixed reverting/gas-burning receivers; reentrancy via refund callbacks, `claim`, the assembler call and ERC721 hooks; Expired as a terminal state; 80th-slot races; clone initialisation races; uint64 casts; factory moving anyone else's Credits or into a non-batch; the Sweeper's factory approval being usable by others; Seaport overspending `msg.value`; malicious order shapes (ERC20/ERC721 consideration, criteria, partial fills, contract orders, offerer == Sweeper, zero amounts, duplicate orders, invalid signatures); XSS via chain/ENS/OpenSea data; secret leakage in errors; open redirects; malicious injected providers.
 
+### Ratings (score table)
+
+`Ratings.sol` freezes Jack's official rating (methodology v3.4.0, ×10 as uint16) for all 122,154 Credits in 11 SSTORE2-style data contracts read with `EXTCODECOPY`. It is pure data: no owner, no setters, no external calls. The constructor rejects a chunk whose code length does not match the expected `1 + 2 × ids`, so a truncated or padded table cannot be deployed. `scoreOf` returns 0 for id 0 or ids past `count`, which a rating rule treats as "does not qualify". `Batch` reads it only inside `passes()` after the cheaper checks, through the factory's immutable `ratings()`; a factory deployed without a table rejects rating rules at `create` (`BadFilter`) rather than silently admitting everything. The generated `data/scores.bin` is checked against jack.art (score and rank) in `Ratings.t.sol` and `web/scripts/edition.ts`.
+
 ## Before mainnet
 
 1. Write `JackAssembler` against the published Statement contract; add fork tests against it.

@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {Batch} from "../src/Batch.sol";
+import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {MockAssembler} from "../src/MockAssembler.sol";
 import {ICredits} from "../src/interfaces/ICredits.sol";
@@ -68,7 +68,7 @@ contract TestCreditsTest is Test {
     /// Full flow on TestCredits: a filtered batch, 80 deposits, burn into a Statement.
     function test_BatchToStatement() public {
         MockStatement st = new MockStatement(ICredits(address(credits)));
-        BatchFactory f = new BatchFactory(ICredits(address(credits)), new MockAssembler(st), address(0), address(0xFEE), 100, 10);
+        BatchFactory f = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(st), address(0), address(0xFEE), 100, 10);
         for (uint256 i; i < 2; ++i) credits.mint(alice, 40);
         vm.startPrank(alice);
         credits.setApprovalForAll(address(f), true);
@@ -78,7 +78,7 @@ contract TestCreditsTest is Test {
             first[i] = i + 1;
             rest[i] = i + 41;
         }
-        Batch b = Batch(f.create("Test", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, first));
+        Batch b = Batch(f.create("Test", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, first));
         f.deposit(address(b), rest);
         vm.stopPrank();
         b.assemble();
@@ -99,7 +99,7 @@ contract TestCreditsTest is Test {
     /// Sets: a filter accepting two palettes admits Credits of either and nothing else.
     function test_FilterAcceptsSets() public {
         MockStatement st = new MockStatement(ICredits(address(credits)));
-        BatchFactory f = new BatchFactory(ICredits(address(credits)), new MockAssembler(st), address(0), address(0xFEE), 100, 1);
+        BatchFactory f = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(st), address(0), address(0xFEE), 100, 1);
         credits.mint(alice, 40);
         credits.mint(alice, 40);
         CreditArt art = credits.art();
@@ -151,7 +151,7 @@ contract TestCreditsTest is Test {
     /// A trait filter accepts exactly the Credits the real art says match.
     function test_FilterUsesRealTraits() public {
         MockStatement st = new MockStatement(ICredits(address(credits)));
-        BatchFactory f = new BatchFactory(ICredits(address(credits)), new MockAssembler(st), address(0), address(0xFEE), 100, 1);
+        BatchFactory f = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(st), address(0), address(0xFEE), 100, 1);
         credits.mint(alice, 40);
         CreditArt art = credits.art();
         string memory want = art.describe(credits.seedOf(1), credits.timestampOf(1)).colors;

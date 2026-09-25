@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {Batch} from "../src/Batch.sol";
+import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {MockAssembler} from "../src/MockAssembler.sol";
 import {IAssembler} from "../src/interfaces/IAssembler.sol";
@@ -27,7 +27,7 @@ contract StagedTest is Test {
         credits = new MockCredits();
         statement = new MockStatement(ICredits(address(credits)));
         asm = new MockAssembler(statement);
-        factory = new BatchFactory(ICredits(address(credits)), IAssembler(address(0)), setter, fee, 100, 10);
+        factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), IAssembler(address(0)), setter, fee, 100, 10);
         credits.mint(alice, 50);
         credits.mint(bob, 50);
         for (uint256 i; i < 2; ++i) {
@@ -52,7 +52,7 @@ contract StagedTest is Test {
 
     function test_NeedsAssemblerOrSetter() public {
         vm.expectRevert(BatchFactory.NoAssembler.selector);
-        new BatchFactory(ICredits(address(credits)), IAssembler(address(0)), address(0), fee, 100, 10);
+        new BatchFactory(ICredits(address(credits)), IRatings(address(0)), IAssembler(address(0)), address(0), fee, 100, 10);
     }
 
     function test_PoolsAndLocksButCannotBurnYet() public {
@@ -174,7 +174,7 @@ contract StagedTest is Test {
     }
 
     function test_ConstructorAssemblerIsActiveImmediately() public {
-        BatchFactory f = new BatchFactory(ICredits(address(credits)), asm, address(0), fee, 100, 10);
+        BatchFactory f = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), asm, address(0), fee, 100, 10);
         assertEq(address(f.assembler()), address(asm));
         assertGt(f.assemblerActiveAt(), 0);
         assertFalse(f.exitWindowOpen());

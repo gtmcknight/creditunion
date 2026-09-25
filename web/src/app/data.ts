@@ -49,6 +49,8 @@ export type Summary = {
     paidTo: number;
     idFrom: bigint;
     idTo: bigint;
+    minScore: number; // official rating ×10, 0 = any
+    maxScore: number;
   };
   allowlistSize: number;
   statement: Address;

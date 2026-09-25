@@ -22,6 +22,7 @@ interface Env {
   CREDITS: Address;
   FACTORY: Address;
   SWEEPER: Address;
+  RATINGS?: Address;
   OPENSEA_SLUG: string;
   OPENSEA_API_KEY?: string;
   RPC_URL?: string;
@@ -122,6 +123,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         credits: env.CREDITS,
         factory: env.FACTORY,
         sweeper: env.OPENSEA_API_KEY && !/^0x0+$/.test(env.SWEEPER ?? '0x0') ? env.SWEEPER : null,
+        ratings: env.RATINGS && !/^0x0+$/.test(env.RATINGS) ? env.RATINGS : null,
       },
       { headers: { 'cache-control': 'public, max-age=60' } },
     );
@@ -153,6 +155,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         minuteTo: int('minuteTo', -1, 4000, -1),
         idFrom: int('idFrom', 0, 1e7, 0),
         idTo: int('idTo', 0, 1e7, 0),
+        minScore: int('minScore', 0, 8000, 0),
+        maxScore: int('maxScore', 0, 8000, 0),
         list: list as number[],
       };
     } catch {

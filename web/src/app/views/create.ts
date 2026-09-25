@@ -31,6 +31,7 @@ type Rules = {
   minuteTo: number;
   idFrom: number;
   idTo: number;
+  minScore: number; // ×10
   list: number[];
 };
 
@@ -88,6 +89,7 @@ const DESIGNS: { name: string; rules: Partial<Rules>; arrangement?: number; patt
   { name: 'With an 8', rules: { eights: 0b111110 } },
   { name: 'One minute', rules: {}, minute80: 0, arrangement: 1 },
   { name: 'First 80', rules: { idFrom: 1, idTo: 80 }, arrangement: 2 },
+  { name: 'Rated 500+', rules: { minScore: 5000 }, arrangement: 3 },
 ];
 
 // ---------------------------------------------------------------- page
@@ -107,7 +109,7 @@ export async function create(app: HTMLElement) {
     protocolFeeBps(),
     fetch('/minutes.json').then((r) => r.json() as Promise<Minutes>).catch(() => [] as Minutes),
   ]);
-  const rules: Rules = { palettes: 0, prints: 0, weights: 0, eights: 0, minuteFrom: -1, minuteTo: -1, idFrom: 0, idTo: 0, list: [] };
+  const rules: Rules = { palettes: 0, prints: 0, weights: 0, eights: 0, minuteFrom: -1, minuteTo: -1, idFrom: 0, idTo: 0, minScore: 0, list: [] };
   const artOf = (id: bigint) => (config.chainId === 1 ? art(id) : `/art/mainnet/${id}.svg`);
   let ghosts: { id: bigint; palette: number }[] = [];
   let pattern: 'none' | 'checkered' = 'none';
@@ -130,7 +132,7 @@ export async function create(app: HTMLElement) {
       <div class="chips presets designs" id="designs">${DESIGNS.map((d, i) => `<button type="button" data-design="${i}">${d.name}</button>`).join('')}</div></header>
       <nav class="tabs" id="tabs" aria-label="Sections">${[
         ['name', 'Name'], ['palette', 'Palette'], ['print', 'Print'], ['weight', 'Weight'], ['eights', 'Eights'], ['time', 'Time'],
-        ['numbers', 'Numbers'], ['list', 'List'], ['order', 'Order'], ['terms', 'Terms'], ['credits', 'Credits'],
+        ['rating', 'Rating'], ['numbers', 'Numbers'], ['list', 'List'], ['order', 'Order'], ['terms', 'Terms'], ['credits', 'Credits'],
       ].map(([k, l], i) => `<button type="button" data-tab-for="${k}" aria-selected="${i === 0}">${l}</button>`).join('')}</nav>
 
       <section class="rule" data-tab="name"><label class="rule-head" for="name">Name</label><input id="name" maxlength="64" placeholder="e.g. Cyan Minute" autocomplete="off"></section>
@@ -149,6 +151,14 @@ export async function create(app: HTMLElement) {
 
       <section class="rule" data-tab="eights"><div class="rule-head">Eights <span class="muted" id="eights-pick">Any</span></div>
         <div class="chips presets" data-rule="eights">${Array.from({ length: EIGHTS_MAX + 1 }, (_, n) => `<button type="button" data-bit="${n}" aria-pressed="false">${eightsChip(n)}</button>`).join('')}</div>
+      </section>
+
+      <section class="rule" data-tab="rating"><div class="rule-head">Rating <span id="score-text">Any</span></div>
+        <div class="window">
+          <input type="range" id="min-score" min="80" max="800" step="1" value="80" aria-label="Minimum official rating">
+          <div class="chips presets" id="score-presets">${[[0, 'Any'], [300, '300+'], [500, '500+'], [700, '700+']].map(([v, l]) => `<button type="button" data-score="${v}" aria-pressed="${v === 0}">${l}</button>`).join('')}</div>
+        </div>
+        <p class="hint">Jack’s official Credit rating, 80–800, frozen onchain. Only Credits scoring at least this join.</p>
       </section>
 
       <section class="rule" data-tab="time"><div class="rule-head">Paid during <span id="win-text">Any time</span></div>
@@ -212,6 +222,7 @@ export async function create(app: HTMLElement) {
     if (rules.list.length && !rules.list.includes(Number(id))) return false;
     if (rules.idFrom && Number(id) < rules.idFrom) return false;
     if (rules.idTo && Number(id) > rules.idTo) return false;
+    if (rules.minScore && (!r || Math.round(r.score * 10) < rules.minScore)) return false;
     if (!r) return !rules.palettes && !rules.prints && !rules.weights && !rules.eights && rules.minuteFrom < 0 && rules.minuteTo < 0;
     if (rules.palettes && !(rules.palettes & (1 << paletteBit(r.traits.palette)))) return false;
     if (rules.prints && !(rules.prints & (1 << PRINTS.indexOf(r.traits.registration as (typeof PRINTS)[number])))) return false;
@@ -236,6 +247,7 @@ export async function create(app: HTMLElement) {
     if (rules.weights) parts.push(`Weight ${WEIGHTS.filter((_, i) => rules.weights & (1 << i)).join(', ')}`);
     if (rules.eights) parts.push(`Eights ${Array.from({ length: EIGHTS_MAX + 1 }, (_, n) => n).filter((n) => rules.eights & (1 << n)).join(', ')}`);
     if (rules.minuteFrom >= 0 || rules.minuteTo >= 0) parts.push(document.getElementById('win-text')!.textContent!.replace(/^/, 'Paid '));
+    if (rules.minScore) parts.push(`Rating ≥ ${rules.minScore / 10}`);
     if (rules.idFrom || rules.idTo) parts.push(rules.idFrom && rules.idTo ? `#${rules.idFrom}–${rules.idTo}` : rules.idFrom ? `#${rules.idFrom}+` : `up to #${rules.idTo}`);
     if (rules.list.length) parts.push(`${rules.list.length} listed`);
     return parts.length ? parts.join(' · ') : 'Any Credit';
@@ -275,6 +287,7 @@ export async function create(app: HTMLElement) {
             minuteTo: rules.minuteTo,
             idFrom: rules.idFrom,
             idTo: rules.idTo,
+            minScore: rules.minScore,
             list: rules.list.slice(0, 200),
           }),
         });
@@ -412,6 +425,26 @@ export async function create(app: HTMLElement) {
   });
   drawWindow();
 
+  // ---------------------------------------------------------------- rating
+  const minScoreEl = document.getElementById('min-score') as HTMLInputElement;
+  const drawScore = () => {
+    const v = Number(minScoreEl.value);
+    rules.minScore = v > 80 ? v * 10 : 0;
+    document.getElementById('score-text')!.textContent = rules.minScore ? `${v} and up` : 'Any';
+    document.querySelectorAll<HTMLButtonElement>('#score-presets [data-score]').forEach((b) => b.setAttribute('aria-pressed', String(Number(b.dataset.score) === (rules.minScore ? v : 0))));
+  };
+  minScoreEl.addEventListener('input', () => {
+    drawScore();
+    refresh();
+  });
+  document.getElementById('score-presets')!.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-score]');
+    if (!b) return;
+    minScoreEl.value = String(Number(b.dataset.score) || 80);
+    drawScore();
+    refresh();
+  });
+
   // ---------------------------------------------------------------- numbers and list
   const idFromEl = document.getElementById('id-from') as HTMLInputElement;
   const idToEl = document.getElementById('id-to') as HTMLInputElement;
@@ -505,6 +538,8 @@ export async function create(app: HTMLElement) {
       paidTo: BigInt(rules.minuteTo >= 0 ? minutes[rules.minuteTo][0] + 59 : 0),
       idFrom: BigInt(rules.idFrom),
       idTo: BigInt(rules.idTo),
+      minScore: rules.minScore,
+      maxScore: 0,
     };
     go.disabled = true;
     go.textContent = 'Opening…';
@@ -543,7 +578,9 @@ export async function create(app: HTMLElement) {
     const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-design]');
     if (!btn) return;
     const d = DESIGNS[Number(btn.dataset.design)];
-    Object.assign(rules, { palettes: 0, prints: 0, weights: 0, eights: 0, minuteFrom: -1, minuteTo: -1, idFrom: 0, idTo: 0, list: [] }, d.rules);
+    Object.assign(rules, { palettes: 0, prints: 0, weights: 0, eights: 0, minuteFrom: -1, minuteTo: -1, idFrom: 0, idTo: 0, minScore: 0, list: [] }, d.rules);
+    minScoreEl.value = String(rules.minScore ? rules.minScore / 10 : 80);
+    drawScore();
     pattern = d.pattern ?? 'none';
     if (d.minute80 !== undefined) {
       const m = eighty[d.minute80];
@@ -583,7 +620,7 @@ export async function create(app: HTMLElement) {
   const markTabs = () => {
     const set: Record<string, boolean> = {
       palettes: !!rules.palettes, prints: !!rules.prints, weights: !!rules.weights, eights: !!rules.eights,
-      time: rules.minuteFrom >= 0 || rules.minuteTo >= 0, numbers: !!(rules.idFrom || rules.idTo), list: rules.list.length > 0,
+      time: rules.minuteFrom >= 0 || rules.minuteTo >= 0, numbers: !!(rules.idFrom || rules.idTo), list: rules.list.length > 0, rating: rules.minScore > 0,
       credits: picks.size > 0, name: !!(document.getElementById('name') as HTMLInputElement).value.trim(),
     };
     tabs.querySelectorAll<HTMLButtonElement>('[data-tab-for]').forEach((b) => b.classList.toggle('set', !!set[b.dataset.tabFor!]));

@@ -3,7 +3,7 @@ pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
-import {Batch} from "../src/Batch.sol";
+import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {MockAssembler} from "../src/MockAssembler.sol";
 import {IAssembler} from "../src/interfaces/IAssembler.sol";
@@ -55,7 +55,7 @@ contract AuditTest is Test {
     function setUp() public {
         credits = new MockCredits();
         statement = new MockStatement(ICredits(address(credits)));
-        factory = new BatchFactory(ICredits(address(credits)), new MockAssembler(statement), address(0), fee, 100, 10);
+        factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(statement), address(0), fee, 100, 10);
         credits.mint(alice, 50); // 1..50
         credits.mint(bob, 50); // 51..100
         for (uint256 i; i < 3; ++i) {
@@ -87,7 +87,7 @@ contract AuditTest is Test {
     ///      in assemble() must not be able to touch Batch storage. Under the old delegatecall design its
     ///      `++assembled` rewrote slot 0 (factory) and settle() reverted forever with the ETH stuck.
     function test_Audit_BuggyAssemblerStorageWriteBricksSettle() public {
-        BatchFactory f2 = new BatchFactory(ICredits(address(credits)), new CounterAssembler(statement), address(0), fee, 100, 10);
+        BatchFactory f2 = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new CounterAssembler(statement), address(0), fee, 100, 10);
         vm.prank(alice);
         credits.setApprovalForAll(address(f2), true);
         vm.prank(bob);

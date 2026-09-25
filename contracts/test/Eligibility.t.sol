@@ -2,12 +2,14 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {Batch} from "../src/Batch.sol";
+import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {MockAssembler} from "../src/MockAssembler.sol";
 import {ICredits} from "../src/interfaces/ICredits.sol";
 import {MockCredits} from "../src/mocks/MockCredits.sol";
 import {MockStatement} from "../src/mocks/MockStatement.sol";
+import {Ratings} from "../src/Ratings.sol";
+import {RatingsDeploy} from "../script/DeployRatings.s.sol";
 
 /// @notice Time windows, number ranges and explicit allowlists. MockCredits stamps timestampOf(id) = id.
 contract EligibilityTest is Test {
@@ -19,7 +21,7 @@ contract EligibilityTest is Test {
     function setUp() public {
         credits = new MockCredits();
         MockStatement st = new MockStatement(ICredits(address(credits)));
-        factory = new BatchFactory(ICredits(address(credits)), new MockAssembler(st), address(0), address(0xFEE), 100, 1);
+        factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(st), address(0), address(0xFEE), 100, 1);
         credits.mint(alice, 200);
         vm.prank(alice);
         credits.setApprovalForAll(address(factory), true);
@@ -33,6 +35,40 @@ contract EligibilityTest is Test {
     function _open(Batch.Filter memory f, uint256[] memory list, uint256 seed) internal returns (Batch b) {
         vm.prank(alice);
         b = Batch(factory.create("E", f, list, 0, 0, Batch.Arrangement.Deposit, 14 days, _one(seed)));
+    }
+
+    /// Rating rules read the frozen score table. Here: ids 1..4 score 1000, 5000, 8000, 5500 (×10).
+    function test_RatingRule() public {
+        bytes memory data = abi.encodePacked(bytes2(0xE803), bytes2(0x8813), bytes2(0x401F), bytes2(0x7C15)); // LE
+        Ratings r = RatingsDeploy.deploy(data);
+        assertEq(r.scoreOf(2), 5000);
+        MockStatement st = new MockStatement(ICredits(address(credits)));
+        BatchFactory f2 = new BatchFactory(ICredits(address(credits)), IRatings(address(r)), new MockAssembler(st), address(0), address(0xFEE), 100, 1);
+        vm.prank(alice);
+        credits.setApprovalForAll(address(f2), true);
+        Batch.Filter memory f;
+        f.minScore = 4000;
+        vm.prank(alice);
+        Batch b = Batch(f2.create("R", f, none, 0, 0, Batch.Arrangement.Deposit, 14 days, _one(2)));
+        assertFalse(b.passes(1)); // 100.0 < 400.0
+        assertTrue(b.passes(2));
+        assertTrue(b.passes(3));
+        assertTrue(b.passes(4));
+        assertFalse(b.passes(5)); // unknown id scores 0
+        f.maxScore = 6000;
+        vm.prank(alice);
+        Batch c = Batch(f2.create("R2", f, none, 0, 0, Batch.Arrangement.Deposit, 14 days, _one(4)));
+        assertTrue(c.passes(2));
+        assertFalse(c.passes(3)); // 800 > 600
+        assertFalse(c.passes(1));
+    }
+
+    function test_RatingRuleNeedsTable() public {
+        Batch.Filter memory f;
+        f.minScore = 100; // this factory has no ratings table
+        vm.prank(alice);
+        vm.expectRevert(Batch.BadFilter.selector);
+        factory.create("R", f, none, 0, 0, Batch.Arrangement.Deposit, 14 days, _one(9));
     }
 
     function test_PaymentWindow() public {

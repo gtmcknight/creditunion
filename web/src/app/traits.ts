@@ -48,6 +48,7 @@ export function describeFilter(f: Summary['filter'], allowlistSize = 0) {
   if (f.weights) parts.push(`Weight ${setLabels(f.weights, TRAITS.weight, (_, i) => i).join(', ')}`);
   if (f.eights) parts.push(`Eights ${Array.from({ length: 32 }, (_, n) => n).filter((n) => f.eights & (1 << n)).join(', ')}`);
   if (f.paidFrom || f.paidTo) parts.push(window(f.paidFrom, f.paidTo));
+  if (f.minScore || f.maxScore) parts.push(f.minScore && f.maxScore ? `Rating ${f.minScore / 10}–${f.maxScore / 10}` : f.minScore ? `Rating ≥ ${f.minScore / 10}` : `Rating ≤ ${f.maxScore / 10}`);
   if (f.idFrom || f.idTo) parts.push(f.idFrom && f.idTo ? `#${f.idFrom}–${f.idTo}` : f.idFrom ? `#${f.idFrom}+` : `up to #${f.idTo}`);
   if (allowlistSize) parts.push(`${allowlistSize} listed`);
   return parts.join(' · ');
