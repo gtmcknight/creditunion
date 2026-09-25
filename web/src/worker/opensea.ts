@@ -20,6 +20,7 @@ export type Quote = {
   ids: string[];
   prices: string[]; // wei, per listing
   total: string; // wei, sum of listings (fee not included)
+  expires: number | null; // unix seconds when the earliest zone signature expires, null if unsigned
 };
 
 async function os(key: string, path: string, init?: RequestInit): Promise<Json> {
@@ -154,12 +155,23 @@ export async function quote(o: { key: string; sweeper: Address; listings: Listin
     if (upstream) throw upstream;
     throw new Error(stale ? 'The listings that fit just went stale on OpenSea. Try again in a moment.' : 'No listings fit this batch right now.');
   }
+  const expiries = got.map((g) => zoneExpiry(String(g.order.extraData ?? '0x'))).filter((e): e is number => e !== null);
   return {
     orders: got.map((g) => g.order),
     ids: got.map((g) => g.l.id),
     prices: got.map((g) => g.l.price),
     total: got.reduce((a, g) => a + BigInt(g.l.price), 0n).toString(),
+    expires: expiries.length ? Math.min(...expiries) : null,
   };
+}
+
+/// SIP-7 signed-zone extraData: 1 byte version, 64-byte signature, then a uint64 expiration (unix seconds).
+/// OpenSea signs fills for about 90 s; past that the zone rejects the order and the sweep would revert.
+function zoneExpiry(extraData: string): number | null {
+  const hex = extraData.replace(/^0x/, '');
+  if (hex.length < (1 + 64 + 8) * 2 || hex.slice(0, 2) !== '00') return null;
+  const exp = parseInt(hex.slice(130, 146), 16);
+  return Number.isFinite(exp) && exp > 1_600_000_000 ? exp : null;
 }
 
 /// Normalise OpenSea's fulfillment response into Seaport's AdvancedOrder.

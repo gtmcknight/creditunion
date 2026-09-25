@@ -140,6 +140,7 @@ export async function create(app: HTMLElement) {
       <section class="rule" data-tab="name"><label class="rule-head" for="name">Name</label><input id="name" maxlength="64" placeholder="e.g. Cyan Minute" autocomplete="off"></section>
 
       <section class="rule" data-tab="palette"><div class="rule-head">Palette <span class="muted" id="palettes-pick">Any</span></div>
+        <div class="chips presets" id="ink-chips">${[1, 2, 3, 4].map((n) => `<button type="button" data-inks="${n}">${n} ink${n > 1 ? 's' : ''}</button>`).join('')}</div>
         <div class="tiles" data-rule="palettes">${TRAITS.colors.map((p) => `<button type="button" class="tile" data-bit="${paletteBit(p)}" aria-pressed="false" title="${p}">${swatch(p)}<span>${p}</span></button>`).join('')}</div>
       </section>
 
@@ -350,6 +351,16 @@ export async function create(app: HTMLElement) {
       document.getElementById(`${key}-pick`)!.textContent = labelsFor(key);
     }
   };
+  // One tap for every palette with n inks (the single-ink "separations", every two-ink pair, …).
+  document.getElementById('ink-chips')!.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-inks]');
+    if (!btn) return;
+    const n = Number(btn.dataset.inks);
+    rules.palettes = TRAITS.colors.filter((p) => p.length === n).reduce((m, p) => m | (1 << paletteBit(p)), 0);
+    pattern = 'none';
+    syncTiles();
+    refresh();
+  });
   for (const key of SET_KEYS) {
     app.querySelector<HTMLElement>(`[data-rule="${key}"]`)!.addEventListener('click', (e) => {
       const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-bit]');

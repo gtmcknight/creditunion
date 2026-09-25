@@ -478,7 +478,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     function minBid() public view returns (uint256) {
         if (highBid == 0) {
             if (block.timestamp < assembledAt + RESERVE_WINDOW && reserve > 0) return reserve;
-            return 1;
+            return MIN_RAISE; // after the reserve lapses, 0.01 ETH: a dust bid must not start the clock
         }
         uint256 raise = highBid * MIN_RAISE_BPS / 10_000;
         return highBid + (raise > MIN_RAISE ? raise : MIN_RAISE);

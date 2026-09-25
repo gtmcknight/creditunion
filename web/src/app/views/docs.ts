@@ -26,6 +26,16 @@ export function docs(app: HTMLElement) {
       <p>There is no account, no database and no admin key. Everything you see on this site is read straight from the chain, and every action is a transaction you sign yourself.</p>`,
     },
     {
+      id: 'trust',
+      title: 'What you are trusting',
+      body: rules([
+        ['Nobody', 'No owner, no admin, no pause, no upgrade. Every rule is in the contracts and every parameter is fixed at deploy, except the one-time adapter activation described above.'],
+        ['The factory', 'The only contract you approve. It can move Credits only from the person calling it, only into a batch it created.'],
+        ['The adapter', 'Holds operator rights over a batch’s Credits for the duration of one burn call, and its result is verified. It is called, never delegatecalled, so nothing it does can reach a batch’s state.'],
+        ['Reviews', `Two static analyzers, seven adversarial review passes, invariant fuzzing (128,000 random calls per run), 138 tests including runs against the real Seaport and Credits contracts on a mainnet fork, and a full deploy and buy-in rehearsal on a fork of mainnet. Every finding and fix is recorded in ${src('contracts/AUDIT.md')}. An independent audit is planned before mainnet.`],
+      ]),
+    },
+    {
       id: 'lifecycle',
       title: 'Life of a batch',
       body: rules([
@@ -68,7 +78,7 @@ export function docs(app: HTMLElement) {
       title: 'Auction',
       body: rules([
         ['Clock', '24 hours, starting at the first bid. There is no clock before that.'],
-        ['Reserve', 'If the creator set one, it is the minimum first bid for 7 days after the burn. After that any amount starts the auction.'],
+        ['Reserve', 'If the creator set one, it is the minimum first bid for 7 days after the burn. After that the minimum is 0.01 ETH, so no dust bid can start the clock.'],
         ['Raises', 'Each bid must beat the last by 5 %, and by at least 0.01 ETH.'],
         ['Anti-snipe', 'A bid in the last 15 minutes moves the end to 15 minutes after it.'],
         ['Refunds', 'When you are outbid, your ETH comes back in the same transaction. If your wallet cannot receive it (a contract that reverts), it is held for you to collect.'],
@@ -123,16 +133,6 @@ export function docs(app: HTMLElement) {
         (testnet
           ? `<p class="muted">This deployment (${esc(chain.name)}) is a test preview: the Credits here are test mints with the real art, and the adapter proposed here targets a mock Statement.</p>`
           : ''),
-    },
-    {
-      id: 'trust',
-      title: 'What you are trusting',
-      body: rules([
-        ['Nobody', 'No owner, no admin, no pause, no upgrade. Every rule is in the contracts and every parameter is fixed at deploy, except the one-time adapter activation described above.'],
-        ['The factory', 'The only contract you approve. It can move Credits only from the person calling it, only into a batch it created.'],
-        ['The adapter', 'Holds operator rights over a batch’s Credits for the duration of one burn call, and its result is verified. It is called, never delegatecalled, so nothing it does can reach a batch’s state.'],
-        ['Reviews', `Static analysis, three independent adversarial reviews, invariant fuzzing (128,000 random calls per run) and tests against the real Seaport and Credits contracts on a mainnet fork. Every finding and fix is recorded in ${src('contracts/AUDIT.md')}. An independent audit is planned before mainnet.`],
-      ]),
     },
     {
       id: 'contracts',

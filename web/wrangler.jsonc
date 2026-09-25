@@ -11,10 +11,10 @@
   // Public config served at /config.json. Secrets: `wrangler secret put RPC_URL` and `wrangler secret put OPENSEA_API_KEY`.
   "vars": {
     "CHAIN_ID": "11155111",
-    "CREDITS": "0x8fCB530dEA061391bfD95bB1d4A9F3344d6a1cc0",
-    "FACTORY": "0x9eceB2a9A7e69d3177dA1C2c3dE9625B29300128",
+    "CREDITS": "0x327a65fE29214049A70ffC257DFC4271f77ed89a",
+    "FACTORY": "0x271D00514D44aebb6Df27b0a14561aDb78C7A061",
     "SWEEPER": "0x0000000000000000000000000000000000000000",
-    "RATINGS": "0xDf31f7aA980022EebC19D7042a7322ae57B529f6",
+    "RATINGS": "0xEA339434A8ABb6B65c70dAC6E1008b37297fB9e2",
     "OPENSEA_SLUG": "credits",
     "FALLBACK_RPC": "https://ethereum-sepolia-rpc.publicnode.com"
   },

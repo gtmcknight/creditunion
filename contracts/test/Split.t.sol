@@ -132,7 +132,7 @@ contract SplitTest is Test {
 
     /// Any bid, any three-way division of positions: the payouts plus the fee equal the bid exactly.
     function testFuzz_EarlySplitIsExact(uint96 amount, uint8 aShare, uint8 bShare) public {
-        amount = uint96(bound(amount, 1, 1_000_000 ether));
+        amount = uint96(bound(amount, 0.01 ether, 1_000_000 ether));
         uint256 a = bound(aShare, 1, 40);
         uint256 bb = bound(bShare, 1, 40);
         uint256 c = 80 - a - bb;

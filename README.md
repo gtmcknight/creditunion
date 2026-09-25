@@ -16,7 +16,7 @@ Independent. Not affiliated with Jack Butcher.
 | **Lock** | The 80th Credit locks it. The deadline extends to at least 7 days out. |
 | **Burn** | Anyone calls `assemble()`. The batch checks that all 80 Credits are gone and that it holds the Statement, or the whole call reverts. |
 | **Expire** | Not burned by the deadline (never filled, or Statements sold out): everyone withdraws. |
-| **Auction** | A 24h clock starts at the first bid. Each bid +5% (min 0.01 ETH). Bids in the last 15 min extend it. Outbid ETH is refunded in the same tx. A reserve lapses after 7 days with no bids. |
+| **Auction** | A 24h clock starts at the first bid. Each bid +5% (min 0.01 ETH). Bids in the last 15 min extend it. Outbid ETH is refunded in the same tx. A reserve lapses after 7 days with no bids (the minimum is then 0.01 ETH). |
 | **Split** | Anyone settles. The Statement goes to the winner. The protocol fee (2%) comes off the top; the rest goes to the 80 positions: 1/80 each (*Equal*), or 1.5 → 0.5 shares by deposit order (*Early bird*, chosen when the batch opens — the curator deposits first, so that is their reward instead of a fee), and each deposited Credit claims 1/80 of the rest. |
 
 ## Ratings

@@ -102,6 +102,10 @@ function drawHero(list: Listed[]) {
     const sold = list.filter((b) => b.s.state === 'Settled').reduce((a, b) => a + b.s.highBid, 0n);
     const vals = [String(list.filter((b) => b.s.state === 'Open').length), String(pooled), String(made), sold ? eth(sold, 2) : '0'];
     stats.querySelectorAll('dd').forEach((dd, i) => (dd.textContent = vals[i]));
+    // "0 Statements · 0 sold" reads as a dead product; those two appear once there is something to count.
+    stats.querySelectorAll<HTMLElement>('div').forEach((d, i) => (d.hidden = i >= 2 && made === 0));
+    const seg = document.getElementById('sort-seg');
+    if (seg) seg.hidden = list.length < 4;
   }
 }
 
@@ -111,7 +115,7 @@ export async function home(app: HTMLElement) {
     <div class="hero-text">
       <h1>Eighty Credits make a Statement.</h1>
       <p class="lede">Pool yours with others. At 80 it burns into a Statement, sold onchain, split 80 ways.</p>
-      <div class="actions"><a class="btn primary" href="#/new">Open a batch</a><a class="btn" href="#/docs">How it works</a></div>
+      <div class="actions"><a class="btn primary" href="#/new">Design a batch</a><a class="btn" href="#/docs">How it works</a></div>
     </div>
     <div class="closest" id="closest" aria-live="polite"></div>
     <dl class="stats hero-stats" id="stats">
@@ -127,7 +131,7 @@ export async function home(app: HTMLElement) {
   </section>
   <section>
     <div class="section-head"><h2>Batches</h2><span class="muted" id="batch-count"></span>
-      <div class="seg sm" role="radiogroup" aria-label="Sort">${SORTS.map(([k, l]) => `<label><input type="radio" name="sort" value="${k}" ${k === sortKey() ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+      <div class="seg sm" role="radiogroup" aria-label="Sort" id="sort-seg" hidden>${SORTS.map(([k, l]) => `<label><input type="radio" name="sort" value="${k}" ${k === sortKey() ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
     </div>
     <div class="notice" id="fit-bar">${
       session.account

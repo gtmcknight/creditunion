@@ -197,7 +197,7 @@ contract Adversarial4Test is Test {
     /// Random churn while Open (deposit / withdraw / re-deposit by three actors), then fill and sell:
     /// unitsOf must equal the slot-order model, sum to 12,640, and conserve every wei.
     function testFuzz_ChurnThenSellExact(uint256 seed, uint96 amount) public {
-        amount = uint96(bound(amount, 1, 10_000 ether));
+        amount = uint96(bound(amount, 0.01 ether, 10_000 ether));
         Batch b = _open(factory, alice, _range(1, 3), Batch.Split.Early, Batch.Arrangement.Deposit);
         address[3] memory who = [alice, bob, carol];
         uint256[3] memory base = [uint256(1), 81, 161];
@@ -247,7 +247,7 @@ contract Adversarial4Test is Test {
     /// Equal path is the old maths: payoutPerShare == net/80, dust ≤ 79 wei, unitsOf == sharesOf,
     /// Settled event carries the same number as payoutPerShare()/summary().
     function testFuzz_EqualUnchanged(uint96 amount) public {
-        amount = uint96(bound(amount, 1, 10_000 ether));
+        amount = uint96(bound(amount, 0.01 ether, 10_000 ether));
         Batch b = _open(factory, alice, _range(1, 40), Batch.Split.Equal, Batch.Arrangement.Deposit);
         vm.prank(bob);
         factory.deposit(address(b), _range(81, 40));
@@ -295,17 +295,22 @@ contract Adversarial4Test is Test {
 
     /// A bid whose net is below one unit per position: everything is dust → protocol fee; nobody can claim;
     /// the batch still ends empty. (Early needs net ≥ 12,640 wei for any depositor payout; Equal ≥ 80 wei.)
-    function test_TinyBidAllDust() public {
+    /// The 0.01 ETH floor after the reserve lapses means a sale can never be all dust: even the minimum bid
+    /// pays every position something.
+    function test_MinimumBidPaysEveryPosition() public {
         Batch b = _open(factory, alice, _range(1, 40), Batch.Split.Early, Batch.Arrangement.Deposit);
         vm.prank(bob);
         factory.deposit(address(b), _range(81, 40));
         b.assemble();
-        _bidAndSettle(b, 12_639); // 2% fee → net 12,387 < 12,640
-        assertEq(b.payoutPerUnit(), 0);
-        assertEq(b.claimable(alice), 0);
-        vm.expectRevert(Batch.NothingToClaim.selector);
+        assertEq(b.minBid(), 0.01 ether);
+        vm.prank(carol);
+        vm.expectRevert(abi.encodeWithSelector(Batch.BidTooLow.selector, 0.01 ether));
+        b.bid{value: 12_639}();
+        _bidAndSettle(b, 0.01 ether);
+        assertGt(b.payoutPerUnit(), 0);
+        assertGt(b.claimable(bob), 0); // even the back of the line
         b.claim(alice);
-        assertEq(fee.balance, 12_639);
+        b.claim(bob);
         assertEq(address(b).balance, 0);
     }
 

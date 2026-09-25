@@ -444,7 +444,7 @@ contract BatchTest is Test {
 
     /// @dev Any split of any winning bid pays out exactly: 80 shares + fee == bid.
     function testFuzz_SplitIsExact(uint96 amount, uint8 aliceShare, uint16 creatorFee) public {
-        amount = uint96(bound(amount, 1, 1_000_000 ether));
+        amount = uint96(bound(amount, 0.01 ether, 1_000_000 ether));
         uint256 a = bound(aliceShare, 30, 50); // bob holds 50
         creatorFee = uint16(bound(creatorFee, 0, 1000));
         vm.prank(fee);

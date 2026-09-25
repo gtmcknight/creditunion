@@ -412,7 +412,7 @@ async function drawPicker(
   void rerender;
 }
 
-type Quote = { orders: unknown[]; ids: string[]; prices: string[]; total: string; error?: string };
+type Quote = { orders: unknown[]; ids: string[]; prices: string[]; total: string; expires?: number | null; error?: string };
 let quotedFeeBps = 0n; // the Sweeper's rate at quote time; the sweep reverts if it has been raised since
 
 /// The orders are what gets sent to the chain; the ids/prices/total are what gets shown. Make sure they agree,
@@ -447,10 +447,34 @@ function bindBuy(
   if (!go || !out) return;
   let q: Quote | null = null;
   let value = 0n;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const stopTimer = () => {
+    if (timer) clearInterval(timer);
+    timer = null;
+  };
   const reset = () => {
+    stopTimer();
     q = null;
     go.textContent = 'Get price';
     out.textContent = 'Pick how many, then get a price.';
+  };
+  // OpenSea signs each fill for ~90 s; past that the sweep would revert, so the price is shown with its clock.
+  const countdown = (expires: number) => {
+    stopTimer();
+    const el = document.getElementById('buy-expiry');
+    const tick = () => {
+      const left = Math.floor(expires - Date.now() / 1000);
+      if (left <= 0) {
+        stopTimer();
+        q = null;
+        go.textContent = 'Get price';
+        out.innerHTML = '<p>That price has expired. Get a fresh one.</p>';
+        return;
+      }
+      if (el) el.textContent = `Price good for ${left}s`;
+    };
+    tick();
+    timer = setInterval(tick, 1000);
   };
   document.querySelectorAll('input[name=buy-n]').forEach((r) => r.addEventListener('change', reset));
 
@@ -472,8 +496,10 @@ function bindBuy(
         out.innerHTML = `<div class="quote-row"><span>${q.ids.length} Credit${q.ids.length === 1 ? '' : 's'}</span><span class="num">${eth(total)}</span></div>
           <div class="quote-row"><span>Eighty fee</span><span class="num">${eth(value - total)}</span></div>
           <div class="quote-row total"><span>Total</span><span class="num">${eth(value)}</span></div>
-          ${Number(n) > q.ids.length ? `<p>Only ${q.ids.length} listed that fit.</p>` : ''}`;
+          ${Number(n) > q.ids.length ? `<p>Only ${q.ids.length} listed that fit.</p>` : ''}
+          ${q.expires ? '<p class="muted small num" id="buy-expiry"></p>' : ''}`;
         go.textContent = `Buy ${q.ids.length} & deposit`;
+        if (q.expires) countdown(q.expires);
       } catch (e) {
         q = null;
         out.textContent = errText(e);
@@ -483,6 +509,7 @@ function bindBuy(
       return;
     }
     const quote = q;
+    stopTimer();
     await run(go, 'Buying…', () =>
       send({ address: config.sweeper!, abi: sweeperAbi, functionName: 'sweep', args: [batch, quote.orders, 1n, quotedFeeBps], value }, txNote),
     'Bought and deposited.');

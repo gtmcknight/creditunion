@@ -416,22 +416,22 @@ contract Adversarial3Test is Test {
         b.claimStatement(alice);
 
         uint256 min = b.minBid();
-        assertEq(min, 1);
+        assertEq(min, 0.01 ether); // no reserve: the MIN_RAISE floor
         vm.prank(carol);
-        vm.expectRevert(abi.encodeWithSelector(Batch.BidTooLow.selector, 1));
-        b.bid{value: 0}();
+        vm.expectRevert(abi.encodeWithSelector(Batch.BidTooLow.selector, 0.01 ether));
+        b.bid{value: 0.01 ether - 1}();
         vm.prank(carol);
-        b.bid{value: 1}();
+        b.bid{value: 0.01 ether}();
         uint64 end = b.auctionEnd();
         assertEq(end, block.timestamp + 24 hours);
-        assertEq(b.minBid(), 1 + 0.01 ether); // MIN_RAISE dominates
+        assertEq(b.minBid(), 0.02 ether); // MIN_RAISE dominates
         vm.prank(carol);
-        vm.expectRevert(abi.encodeWithSelector(Batch.BidTooLow.selector, 1 + 0.01 ether));
-        b.bid{value: 0.01 ether}();
+        vm.expectRevert(abi.encodeWithSelector(Batch.BidTooLow.selector, 0.02 ether));
+        b.bid{value: 0.02 ether - 1}();
         // self-outbid: refund goes back to self, net cost is the delta
         uint256 before = carol.balance;
         vm.prank(carol);
-        b.bid{value: 1 + 0.01 ether}();
+        b.bid{value: 0.02 ether}();
         assertEq(before - carol.balance, 0.01 ether);
         assertEq(b.highBidder(), carol);
         // 5% dominates for large bids
@@ -497,14 +497,15 @@ contract Adversarial3Test is Test {
         vm.warp(b.assembledAt() + 7 days - 1);
         assertEq(b.minBid(), 5 ether);
         vm.warp(b.assembledAt() + 7 days);
-        assertEq(b.minBid(), 1);
+        assertEq(b.minBid(), b.MIN_RAISE()); // 0.01 ETH floor once the reserve lapses, never dust
         vm.prank(carol);
+        vm.expectRevert(abi.encodeWithSelector(Batch.BidTooLow.selector, b.MIN_RAISE()));
         b.bid{value: 1}();
+        vm.prank(carol);
+        b.bid{value: 0.01 ether}();
         skip(1 days);
         b.settle();
-        assertEq(b.payoutPerShare(), 0); // documented: a 1 wei sale pays nothing to depositors
-        vm.expectRevert(Batch.NothingToClaim.selector);
-        b.claim(alice);
+        assertGt(b.payoutPerShare(), 0);
     }
 
     function test_FactoryIsolation() public {
