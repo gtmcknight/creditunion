@@ -222,7 +222,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         });
         ctx.waitUntil(cache.put(scanKey, Response.json(listings, { headers: { 'cache-control': 'public, max-age=30' } })));
       }
-      const result = await quote({ key: env.OPENSEA_API_KEY, sweeper: env.SWEEPER, listings: listings.slice(0, n) });
+      const result = await quote({ key: env.OPENSEA_API_KEY, sweeper: env.SWEEPER, listings, n });
       return Response.json(result, { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
       return Response.json({ error: (e as Error).message.slice(0, 200) }, { status: 502, headers: { 'cache-control': 'no-store' } });

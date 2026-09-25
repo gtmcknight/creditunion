@@ -100,33 +100,47 @@ export async function scan(o: {
   return picked;
 }
 
-/// Signed fill data for each listing (includes the zone signature OpenSea's restricted orders need).
-/// The Sweeper is named as the fulfiller: OpenSea's zone checks it against Seaport's caller.
-export async function quote(o: { key: string; sweeper: Address; listings: Listing[] }): Promise<Quote> {
+/// Signed fill data for the `n` cheapest listings OpenSea will still fill (includes the zone signature its
+/// restricted orders need). A listing can pass the on-chain liveness check yet be dead on OpenSea's side
+/// (gasless cancel, superseded listing): those come back "Order not valid" and are skipped, and the next
+/// cheapest takes their place. The Sweeper is named as the fulfiller: OpenSea's zone checks it against
+/// Seaport's caller.
+export async function quote(o: { key: string; sweeper: Address; listings: Listing[]; n: number }): Promise<Quote> {
   if (!o.listings.length) throw new Error('No listings fit this batch right now.');
-  const orders: Json[] = new Array(o.listings.length);
-  let i = 0;
-  await Promise.all(
-    Array.from({ length: CONCURRENCY }, async () => {
-      while (i < o.listings.length) {
-        const k = i++;
-        const l = o.listings[k];
-        const r = await os(o.key, '/listings/fulfillment_data', {
-          method: 'POST',
-          body: JSON.stringify({
-            listing: { hash: l.hash, chain: 'ethereum', protocol_address: l.protocol },
-            fulfiller: { address: o.sweeper },
-          }),
-        });
-        orders[k] = toAdvanced(r);
-      }
-    }),
-  );
+  const got: { l: Listing; order: Json }[] = [];
+  let next = 0;
+  let lastError: Error | null = null;
+  while (got.length < o.n && next < o.listings.length) {
+    const want = o.listings.slice(next, next + Math.min(CONCURRENCY, o.n - got.length));
+    next += want.length;
+    const results = await Promise.all(
+      want.map(async (l) => {
+        try {
+          const r = await os(o.key, '/listings/fulfillment_data', {
+            method: 'POST',
+            body: JSON.stringify({
+              listing: { hash: l.hash, chain: 'ethereum', protocol_address: l.protocol },
+              fulfiller: { address: o.sweeper },
+            }),
+          });
+          return { l, order: toAdvanced(r) };
+        } catch (e) {
+          const err = e as Error;
+          // OpenSea's own "Order not valid" is a dead listing; anything else (rate limit, outage) is real.
+          if (!/OpenSea 400/.test(err.message)) throw err;
+          lastError = err;
+          return null;
+        }
+      }),
+    );
+    for (const r of results) if (r) got.push(r);
+  }
+  if (!got.length) throw new Error(lastError ? 'The listings that fit just went stale on OpenSea. Try again in a moment.' : 'No listings fit this batch right now.');
   return {
-    orders,
-    ids: o.listings.map((p) => p.id),
-    prices: o.listings.map((p) => p.price),
-    total: o.listings.reduce((a, p) => a + BigInt(p.price), 0n).toString(),
+    orders: got.map((g) => g.order),
+    ids: got.map((g) => g.l.id),
+    prices: got.map((g) => g.l.price),
+    total: got.reduce((a, g) => a + BigInt(g.l.price), 0n).toString(),
   };
 }
 

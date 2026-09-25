@@ -9,7 +9,7 @@ Everything deployed here is immutable except the one-time adapter activation (se
 - [ ] `FEE_RECIPIENT`: a multisig or a wallet you will keep. It receives fees and rescued strays, and it is the only key that can change fees (within the caps). Immutable.
 - [ ] `SETTER`: multisig. Its only power is proposing the Statement adapter once. Immutable.
 - [ ] Confirm fees: protocol 2 %, creator 0 %, buy-in 2 % (all changeable later by `FEE_RECIPIENT`, new batches only).
-- [ ] Fund the deployer `0x75BD…eD5C` with ~0.06 ETH (≈7.5 M gas for factory + sweeper, ≈55 M for the score table; check gas price first).
+- [ ] Fund the deployer `0x75BD…eD5C`. Rehearsed on a mainnet fork: **60.1 M gas over 14 txs** (score table 11 chunks + reader, factory, sweeper). At 0.2 gwei that is 0.012 ETH; at 2 gwei 0.12 ETH. Fund `60M × gas price × 1.5`; check `cast gas-price` right before.
 - [ ] Etherscan API key for source verification.
 - [ ] Decide the launch domain (eighty.rhps.fun stays, or a custom one → add the route in `wrangler.jsonc`).
 
@@ -43,7 +43,7 @@ Everything deployed here is immutable except the one-time adapter activation (se
 | Deployer | `0x75BD31465854c7e9E0066496b4ADaD6a46E4eD5C` | Needs ~0.01 ETH. Key in `web/.env`. |
 | Etherscan API key | | For source verification. |
 
-## 1. Deploy (≈7.5M gas + ≈55M for the score table)
+## 1. Deploy (60.1M gas, 14 txs, rehearsed on a fork)
 
 The score table (Jack's official ratings for all 122,154 Credits, `contracts/data/scores.bin`) is deployed as 11 data
 contracts plus a reader. `DeployMainnet` deploys it unless `RATINGS` names an existing one.
