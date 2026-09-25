@@ -66,8 +66,11 @@ export async function ratings(o: {
   await Promise.all(
     o.ids.map(async (id) => {
       const hit = await cache.match(key(id));
-      if (hit) known.set(id.toString(), (await hit.json()) as [string, number]);
-      else missing.push(id);
+      if (!hit) missing.push(id);
+      else {
+        const v = (await hit.json()) as [string, number] | null;
+        if (v) known.set(id.toString(), v); // null = a cached miss (no such Credit)
+      }
     }),
   );
   if (missing.length) {
@@ -75,6 +78,10 @@ export async function ratings(o: {
     for (const [id, v] of fresh) {
       known.set(id, v);
       await cache.put(key(BigInt(id)), Response.json(v, { headers: { 'cache-control': 'public, max-age=31536000, immutable' } }));
+    }
+    // Ids that do not exist (yet) are remembered briefly too, so a list of bogus ids is not a free RPC amplifier.
+    for (const id of missing) {
+      if (!fresh.has(id.toString())) await cache.put(key(id), Response.json(null, { headers: { 'cache-control': 'public, max-age=60' } }));
     }
   }
   const out: Record<string, Rated> = {};

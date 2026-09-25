@@ -75,6 +75,8 @@ imports Sourcify matches). Rehearsed on Sepolia for all four contracts. For `Rat
 ## 3. Sanity checks on chain
 
 ```sh
+# The score table is byte-for-byte data/scores.bin and covers the sealed edition (read-only script):
+forge script script/CheckRatings.s.sol --sig "run(address,address)" $RATINGS 0x97630aA70AB14ed9883B41dAfccBc11349723043 --rpc-url "$MAINNET_RPC"
 cast call $FACTORY "minOpen()(uint256)"          # 1
 cast call $FACTORY "ratings()(address)"          # RATINGS
 cast call $RATINGS "scoreOf(uint256)(uint16)" 11469   # 8000 (rank 1, 800.00)

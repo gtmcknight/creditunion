@@ -534,7 +534,8 @@ export async function create(app: HTMLElement) {
         address: config.factory,
         abi: factoryAbi,
         functionName: 'create',
-        args: [name, f, rules.list.map(BigInt), reserve, arr, BigInt(days * 86400), ids.slice(0, CHUNK)],
+        // The fees shown on this page go along: the open reverts if they changed underneath you.
+        args: [name, f, rules.list.map(BigInt), reserve, arr, BigInt(days * 86400), ids.slice(0, CHUNK), BigInt(protocolBps), BigInt(creatorBps)],
       });
       const ev = receipt.logs
         .map((l) => {

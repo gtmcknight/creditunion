@@ -19,7 +19,7 @@ interface IBatchFactory {
     function exitWindowOpen() external view returns (bool);
     function pendingUntil() external view returns (uint64);
     function feeRecipient() external view returns (address);
-    function protocolFeeBps() external view returns (uint256);
+    function isBatch(address) external view returns (bool);
 }
 
 /// @title Batch
@@ -173,6 +173,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     error AlreadyDeposited(uint256 id);
     error Excluded(uint256 id);
     error WrongToken();
+    error NoDepositor();
     error CreditsNotBurned();
     error StatementNotReceived();
     error BidTooLow(uint256 min);
@@ -284,6 +285,11 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
             address to = abi.decode(data, (address));
             if (to != address(0)) from = to;
         }
+        // Same rule as the factory's depositFor: a depositor that can never withdraw or take ETH would strand
+        // the share (this batch, the factory, another batch), and a mint hook has no depositor at all.
+        if (from == address(0) || from == address(this) || from == address(factory) || factory.isBatch(from)) {
+            revert NoDepositor();
+        }
         _add(from, id);
         return this.onERC721Received.selector;
     }
@@ -343,7 +349,8 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         }
         if (f.minScore != 0 || f.maxScore != 0) {
             uint16 sc = factory.ratings().scoreOf(id);
-            if (sc < f.minScore || (f.maxScore != 0 && sc > f.maxScore)) return false;
+            // 0 means "not in the table" (real scores start at 80.0): never admitted by a rating rule.
+            if (sc == 0 || sc < f.minScore || (f.maxScore != 0 && sc > f.maxScore)) return false;
         }
         if (f.palettes == 0 && f.prints == 0 && f.weights == 0 && f.eights == 0) return true;
         ICreditArt.Read memory r = art.describe(credits.seedOf(id), credits.timestampOf(id));
@@ -393,8 +400,12 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     ///         caller pays gas. With the Creator arrangement, only after the creator's grace has passed.
     function assemble() external nonReentrant {
         _require(State.Full);
-        if (arrangement == Arrangement.Creator && block.timestamp < filledAt + CREATOR_ORDER_GRACE) {
-            revert CreatorsTurn();
+        if (arrangement == Arrangement.Creator) {
+            // The creator's day starts when assembly first became possible: at fill, or, for a batch that filled
+            // during the staged launch, when the assembler was activated.
+            uint256 active = factory.assemblerActiveAt();
+            uint256 since = active > filledAt ? active : filledAt;
+            if (block.timestamp < since + CREATOR_ORDER_GRACE) revert CreatorsTurn();
         }
         _assemble(_ids, arrangement == Arrangement.Creator ? Arrangement.Deposit : arrangement);
     }

@@ -21,7 +21,7 @@ import {
 contract Sweeper is ReentrancyGuardTransient {
     uint256 public constant MAX_FEE_BPS = 500;
 
-    /// @notice Fee on what the listings cost, in basis points. Fixed at deploy.
+    /// @notice Fee on what the listings cost, in basis points. 
     /// @notice Fee on each buy-in, quoted before anyone signs. The fee recipient may change it within MAX_FEE_BPS.
     uint256 public feeBps;
 
@@ -38,6 +38,7 @@ contract Sweeper is ReentrancyGuardTransient {
     error FeeNotCovered(uint256 fee);
     error PaymentFailed();
     error FeeTooHigh();
+    error FeeChanged(uint256 feeBps);
     error NotFeeRecipient();
 
     event FeeSet(uint256 feeBps);
@@ -63,14 +64,17 @@ contract Sweeper is ReentrancyGuardTransient {
 
     /// @param orders Seaport listings, each selling exactly one Credit for ETH (as returned by OpenSea).
     /// @param minBought Revert unless at least this many listings were still available.
+    /// @param maxFeeBps The fee rate you were quoted; reverts if it has been raised since, so a fee change can
+    ///        never apply to a purchase signed under the old rate (partial fills included).
     /// @return ids The Credits bought and deposited, in order.
-    function sweep(address batch, AdvancedOrder[] calldata orders, uint256 minBought)
+    function sweep(address batch, AdvancedOrder[] calldata orders, uint256 minBought, uint256 maxFeeBps)
         external
         payable
         nonReentrant
         returns (uint256[] memory ids)
     {
         if (!factory.isBatch(batch)) revert NotBatch();
+        if (feeBps > maxFeeBps) revert FeeChanged(feeBps);
         uint256 n = orders.length;
 
         // One offer fulfillment per order; one consideration fulfillment per consideration item.

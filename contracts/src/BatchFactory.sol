@@ -62,6 +62,7 @@ contract BatchFactory {
     error ProtocolFeeTooHigh();
     error CreatorFeeTooHigh();
     error NotFeeRecipient();
+    error FeesChanged(uint256 protocolFeeBps, uint256 creatorFeeBps);
     error NoFeeRecipient();
     error NotSetter();
     error AssemblerFixed();
@@ -144,6 +145,8 @@ contract BatchFactory {
     /// @param filter Trait hashes (0 for any), payment window and number range (0 for unbounded).
     /// @param allowlist Up to 200 specific Credit numbers that alone may join; empty for no list.
     /// @param reserve Opening bid floor, dropped if no bid within 7 days of assembly. 0 for none.
+    /// @param expectProtocolFeeBps The fees shown to you before opening; the call reverts if either has changed
+    ///        since, so a fee change can never be slipped in front of an opening batch.
     /// @dev The batch takes the factory's current protocol and creator fees and keeps them forever.
     /// @param arrangement How the 80 are ordered on the Statement (Batch.Arrangement).
     /// @param duration Seconds until the deadline; a batch that fills always gets 7 more days to assemble.
@@ -154,8 +157,13 @@ contract BatchFactory {
         uint256 reserve,
         Batch.Arrangement arrangement,
         uint256 duration,
-        uint256[] calldata ids
+        uint256[] calldata ids,
+        uint256 expectProtocolFeeBps,
+        uint256 expectCreatorFeeBps
     ) external returns (address batch) {
+        if (protocolFeeBps != expectProtocolFeeBps || creatorFeeBps != expectCreatorFeeBps) {
+            revert FeesChanged(protocolFeeBps, creatorFeeBps);
+        }
         if (ids.length < minOpen) revert TooFewToOpen(minOpen);
         if (duration < MIN_DURATION || duration > MAX_DURATION) revert BadDuration();
 

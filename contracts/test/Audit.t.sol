@@ -78,7 +78,7 @@ contract AuditTest is Test {
 
     function _open(address who, uint256[] memory ids) internal returns (Batch) {
         vm.prank(who);
-        return Batch(factory.create("Audit", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, ids));
+        return Batch(factory.create("Audit", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, ids, 100, 0));
     }
 
     // ---------------------------------------------------------------- F1: delegatecall storage exposure
@@ -93,7 +93,7 @@ contract AuditTest is Test {
         vm.prank(bob);
         credits.setApprovalForAll(address(f2), true);
         vm.prank(alice);
-        Batch b = Batch(f2.create("Bug", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, _range(1, 40)));
+        Batch b = Batch(f2.create("Bug", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, _range(1, 40), 100, 0));
         vm.prank(bob);
         f2.deposit(address(b), _range(51, 40));
 

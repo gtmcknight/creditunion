@@ -31,7 +31,7 @@ audit before mainnet.** The mainnet assembler adapter does not exist yet and mus
 | S3 | Low | `depositFor(to = batch/factory)` created a share that could never withdraw or be paid. | Rejected. (Any other contract without `receive()` remains the caller's own mistake; the factory only moves the caller's Credits.) |
 | S4 | Info | Sweeper accepted `safeTransferFrom` of stray NFTs it could never move. | Receiver hook removed; such transfers now fail instead of stranding. |
 | W1 | High | `/rpc` was an open relay for the paid RPC key: any `eth_call`/`eth_getLogs` target, usable cross-site. | Six methods only; `eth_call` only to Credits, Factory, Sweeper or a factory batch (`isBatch` cached); same-site only; JSON re-serialised; size and batch caps; per-IP rate limit. |
-| W2 | High | `/opensea/quote` fanned out to ~500 uncached `eth_call`s and 40 OpenSea calls per anonymous request, against any address. | Batch must be a factory batch; scan cached 30 s per batch; RPC calls batched; rate limited (6/min/IP). |
+| W2 | High | `/opensea/quote` fanned out to ~500 uncached `eth_call`s and 40 OpenSea calls per anonymous request, against any address. | Batch must be a factory batch; scan cached 30 s per batch and coalesced while in flight; rules checked before any liveness call; rate limited (6/min/IP). (Round 2: the earlier note "RPC calls batched" was wrong — see R2-2.) |
 | W3 | Medium | Frontend displayed `ids`/`total` from the quote but sent `orders`; a bad quote could show 10 and buy 1. | `checkQuote` verifies every order's offer id/token and ETH-only consideration against the shown ids, prices and total before anything is sent. The Sweeper contract independently bounds spend by `msg.value`. |
 | W4 | Medium | No security headers. | CSP (`frame-ancestors 'none'`, `script-src 'self'`, images only self/data/ENS metadata), HSTS, nosniff, referrer and permissions policies on every response. |
 | W5 | Medium | `/ens` fetched name-owner-chosen avatar URLs from the Worker and never cached negatives. | Avatar is now ENS's own metadata service URL; negatives cached 1 h, errors 60 s; 5 s RPC timeout; rate limited. |
@@ -71,6 +71,42 @@ ETH accounting under mixed reverting/gas-burning receivers; reentrancy via refun
 ### Ratings (score table)
 
 `Ratings.sol` freezes Jack's official rating (methodology v3.4.0, ×10 as uint16) for all 122,154 Credits in 11 SSTORE2-style data contracts read with `EXTCODECOPY`. It is pure data: no owner, no setters, no external calls. The constructor rejects a chunk whose code length does not match the expected `1 + 2 × ids`, so a truncated or padded table cannot be deployed. `scoreOf` returns 0 for id 0 or ids past `count`, which a rating rule treats as "does not qualify". `Batch` reads it only inside `passes()` after the cheaper checks, through the factory's immutable `ratings()`; a factory deployed without a table rejects rating rules at `create` (`BadFilter`) rather than silently admitting everything. The generated `data/scores.bin` is checked against jack.art (score and rank) in `Ratings.t.sol` and `web/scripts/edition.ts`.
+
+## Round 2 (Sept 24, after fees became adjustable and the score table went onchain)
+
+| Track | What | Result |
+|---|---|---|
+| Static analysis | Slither 0.11.6 and Aderyn 0.6.8 on the core sources | Slither: 0 High, 3 Medium (the same intentional ones as round 1). Aderyn: 4 "High" flags, all false positives on inspection (packed init code, not a hash; refunds/claims exist; guarded book-then-move; storage array passed by copy). |
+| Adversarial review | Three fresh reviewers: fees + Ratings, Worker + site, full Batch lifecycle | 0 High, 2 Medium (Worker), 5 Low, 6 Info; all fixed below. 42 new tests in `test/Adversarial2.t.sol` and `test/Adversarial3.t.sol`. |
+| Fork rehearsal | `DeployMainnet` on a mainnet fork, then a real OpenSea quote and sweep through the site | 60.1 M gas / 14 txs; found the dead-listing quote failure (fixed) |
+| Verification | Sourcify on all four Sepolia contracts | Works without an Etherscan key |
+| Live Credits | Source fetched from Sourcify: OZ v5, `burn` → `_burn`, `ownerOf` reverts on a burned id | The post-assembly `CreditsNotBurned` check is correct for mainnet |
+
+### Fixed
+
+| # | Sev | Finding | Change |
+|---|---|---|---|
+| R2-1 | Med | Rate-limit keys were the raw IP: one IPv6 /64 gives an attacker 2^64 fresh limits. | Keys are the IPv4 address or the IPv6 /64. |
+| R2-2 | Med | An uncached listing scan cost up to ~2,000 individual RPC calls, and concurrent quotes for one batch each ran their own scan. | Rules (`passes`) are checked before any liveness call; one scan per batch at a time, shared by requests that arrive during it (kept alive with `waitUntil`); fill data cached 20 s per listing. |
+| R2-3 | Low | `Sweeper.setFee` raised between quote and purchase charged the new rate on partial fills (the unspent ETH of sold-out listings covered it). | `sweep(…, maxFeeBps)`: reverts `FeeChanged` if the rate rose above what the buyer was quoted. |
+| R2-4 | Low | The fee recipient could front-run a `create()` with `setFees` at the caps and that batch would keep them. | `create(…, expectProtocolFeeBps, expectCreatorFeeBps)` reverts `FeesChanged` on any mismatch; the site passes what it showed. |
+| R2-5 | Low | The ERC721 hook accepted a `data` beneficiary of the batch itself, the factory or another batch (which `depositFor` already refused), stranding that share's ETH forever. | The hook applies the same sink rule (`NoDepositor`), and refuses a mint hook (`from == 0`). |
+| R2-6 | Low | The creator's 1-day ordering window ran from `filledAt`, so every batch that filled during the staged launch had lost it by activation. | The window runs from `max(filledAt, assemblerActiveAt)`. |
+| R2-7 | Low | `usable()` did not pin the Seaport version or the ERC721 amount; a 1.5 listing or amount ≠ 1 would revert the whole sweep at execution. | Only `protocol_address == Seaport 1.6` and `startAmount == endAmount == 1`. |
+| R2-8 | Low | `/rpc` forwarded params verbatim (state overrides, gas/value, archive block tags, full-transaction blocks on the paid key). | Params are rebuilt per method: `eth_call → [{to, data}, 'latest']`, `eth_getBlockByNumber → [tag, false]`, hashes validated, nothing else. |
+| R2-9 | Low | `/ratings` never cached misses; a list of bogus ids was a free RPC amplifier. | Misses cached 60 s; ids bounded to 1e7. |
+| R2-10 | Low | No body cap on `/edition/match` and `/ratings`; `/rpc` buffered before checking. | All three read through a 16 KB / 64 KB capped stream. |
+| R2-11 | Low | A rate limit or malformed fill mid-quote discarded the good orders already collected. | Malformed fills are skipped like dead listings; an upstream error returns the partial quote if any. |
+| R2-12 | Info | `Ratings` accepted a chunk count that did not cover `count` (in-range `scoreOf` could panic). | Constructor requires exactly `ceil(count / 12000)` chunks. |
+| R2-13 | Info | A max-only rating rule admitted ids missing from the table (score 0). | Score 0 never satisfies a rating rule. |
+| R2-14 | Info | Chunk contents are trusted at deploy time. | `script/CheckRatings.s.sol` hashes the onchain chunks against `data/scores.bin`, checks `count` against Credits and `isSealed`; in the runbook. |
+
+### Accepted / documented (round 2)
+
+- The fee recipient is now an admin key: `setFees` and `Sweeper.setFee` within the caps, plus receiving fees, dust and rescued strays. It cannot touch any batch, pooled Credit or the assembler. Use a multisig.
+- Scan cache (30 s) residual: a seller can revoke or transfer after the scan; the sweep skips or reverts at simulation. Same class as S2.
+- `/ens`, `/art`, `/config.json` are usable cross-site (cached, rate limited); the quote endpoint's same-site check is defence in depth, the key never leaves the Worker and no CORS headers are set.
+- `style-src 'unsafe-inline'` remains for the inline widths on sheets and bars.
 
 ## Before mainnet
 

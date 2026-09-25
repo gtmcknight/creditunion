@@ -82,7 +82,7 @@ contract AuditSweeperForkTest is Test {
                         one[0] = id;
                         vm.startPrank(o);
                         CREDITS.setApprovalForAll(address(factory), true);
-                        batch = Batch(factory.create("Fork", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, one));
+                        batch = Batch(factory.create("Fork", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, one, 100, 0));
                         vm.stopPrank();
                     } else {
                         vm.prank(o);
@@ -215,7 +215,7 @@ contract AuditSweeperForkTest is Test {
 
         uint256 send1 = sweeper.quote(total);
         vm.prank(buyer);
-        uint256[] memory ids = sweeper.sweep{value: send1}(address(batch), orders, 2);
+        uint256[] memory ids = sweeper.sweep{value: send1}(address(batch), orders, 2, 500);
 
         assertEq(ids.length, 2);
         assertEq(CREDITS.ownerOf(forSale[0]), address(batch));
@@ -231,7 +231,7 @@ contract AuditSweeperForkTest is Test {
         orders[0] = _restricted(forSale[0], 0.03 ether, address(0), uint64(block.timestamp + 300));
         uint256 send2 = sweeper.quote(0.03 ether);
         vm.prank(buyer);
-        sweeper.sweep{value: send2}(address(batch), orders, 1);
+        sweeper.sweep{value: send2}(address(batch), orders, 1, 500);
         assertEq(CREDITS.ownerOf(forSale[0]), address(batch));
     }
 
@@ -246,12 +246,12 @@ contract AuditSweeperForkTest is Test {
         uint256 send3 = sweeper.quote(0.05 ether);
         vm.prank(buyer);
         vm.expectRevert(abi.encodeWithSelector(Sweeper.TooFewBought.selector, 1));
-        sweeper.sweep{value: send3}(address(batch), orders, 2);
+        sweeper.sweep{value: send3}(address(batch), orders, 2, 500);
 
         // Skipped, not reverted: the open listing still goes through with minBought 1.
         uint256 send4 = sweeper.quote(0.05 ether);
         vm.prank(buyer);
-        uint256[] memory ids = sweeper.sweep{value: send4}(address(batch), orders, 1);
+        uint256[] memory ids = sweeper.sweep{value: send4}(address(batch), orders, 1, 500);
         assertEq(ids.length, 1);
         assertEq(ids[0], forSale[1]);
         assertEq(CREDITS.ownerOf(forSale[0]), seller);
@@ -268,7 +268,7 @@ contract AuditSweeperForkTest is Test {
         uint256 send5 = sweeper.quote(0.03 ether);
         vm.prank(buyer);
         vm.expectRevert(bytes4(keccak256("NoSpecifiedOrdersAvailable()")));
-        sweeper.sweep{value: send5}(address(batch), orders, 1);
+        sweeper.sweep{value: send5}(address(batch), orders, 1, 500);
     }
 
     // ---------------------------------------------------------------- ETH accounting
@@ -287,7 +287,7 @@ contract AuditSweeperForkTest is Test {
         uint256 feeBefore = fee.balance;
         uint256 buyerBefore = buyer.balance;
         vm.prank(buyer);
-        uint256[] memory ids = sweeper.sweep{value: send6}(address(batch), orders, 2);
+        uint256[] memory ids = sweeper.sweep{value: send6}(address(batch), orders, 2, 500);
         assertEq(ids.length, 2);
         assertEq(fee.balance - feeBefore, 0.05 ether / 100); // fee on the real listings total
         assertEq(buyerBefore - buyer.balance, send6); // buyer paid exactly the quote, nothing more
@@ -308,7 +308,7 @@ contract AuditSweeperForkTest is Test {
         uint256 send7 = sweeper.quote(0.05 ether);
         vm.prank(buyer);
         vm.expectRevert();
-        sweeper.sweep{value: send7}(address(batch), orders, 1);
+        sweeper.sweep{value: send7}(address(batch), orders, 1, 500);
     }
 
     // ---------------------------------------------------------------- stray Credits
@@ -350,14 +350,14 @@ contract AuditSweeperForkTest is Test {
         orders[0].denominator = 1;
         vm.prank(attacker);
         vm.expectRevert();
-        sweeper.sweep{value: 0.01 ether}(address(batch), orders, 1);
+        sweeper.sweep{value: 0.01 ether}(address(batch), orders, 1, 500);
 
         // Zero-amount offer: would be "available" without a transfer, but Seaport rejects it outright.
         orders[0].parameters.offer[0].startAmount = 0;
         orders[0].parameters.offer[0].endAmount = 0;
         vm.prank(attacker);
         vm.expectRevert();
-        sweeper.sweep{value: 0.01 ether}(address(batch), orders, 1);
+        sweeper.sweep{value: 0.01 ether}(address(batch), orders, 1, 500);
 
         assertEq(CREDITS.ownerOf(stray), address(sweeper)); // safe from attackers, and from everyone else
     }

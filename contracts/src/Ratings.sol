@@ -12,9 +12,12 @@ contract Ratings {
     address[] internal _chunks;
 
     error BadChunk(uint256 index);
+    error BadCount();
 
     /// @param chunks_ Data contracts in id order, each `0x00` + PER_CHUNK×2 bytes (the last may be shorter).
     constructor(address[] memory chunks_, uint256 count_) {
+        // Exactly enough chunks for `count_` ids, so every id in range maps to a chunk that exists.
+        if (count_ == 0 || chunks_.length != (count_ + PER_CHUNK - 1) / PER_CHUNK) revert BadCount();
         for (uint256 i; i < chunks_.length; ++i) {
             uint256 need = i + 1 < chunks_.length ? PER_CHUNK * 2 + 1 : (count_ - i * PER_CHUNK) * 2 + 1;
             if (chunks_[i].code.length != need) revert BadChunk(i);

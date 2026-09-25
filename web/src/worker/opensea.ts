@@ -38,6 +38,8 @@ function usable(l: Json, credits: Address) {
   if (!Array.isArray(offer) || offer.length !== 1) return null;
   const o = offer[0];
   if (Number(o.itemType) !== 2 || String(o.token).toLowerCase() !== credits.toLowerCase()) return null;
+  if (String(o.startAmount) !== '1' || String(o.endAmount) !== '1') return null;
+  if (String(l.protocol_address ?? '').toLowerCase() !== SEAPORT) return null; // the Sweeper speaks 1.6 only
   if (!Array.isArray(p.consideration) || p.consideration.some((c: Json) => Number(c.itemType) !== 0)) return null;
   if (p.consideration.some((c: Json) => c.startAmount !== c.endAmount)) return null; // no dutch auctions
   const total = p.consideration.reduce((a: bigint, c: Json) => a + BigInt(c.endAmount), 0n);
@@ -82,12 +84,13 @@ export async function scan(o: {
       .filter((c): c is NonNullable<typeof c> => !!c && !!c.operator && !seen.has(c.id) && !!seen.add(c.id));
     const ok = await Promise.all(
       fresh.map(async (c) => {
-        const [fits, live, contracts] = await Promise.all([
-          o.passes(BigInt(c.id)).catch(() => false),
+        // Cheapest first: most listings fail the batch's rules, so the liveness calls run only for those that fit.
+        if (!(await o.passes(BigInt(c.id)).catch(() => false))) return false;
+        const [live, contracts] = await Promise.all([
           o.live(BigInt(c.id), c.seller, c.operator!).catch(() => false),
           Promise.all(c.recipients.map(isContract)),
         ]);
-        return fits && live && !contracts.some(Boolean);
+        return live && !contracts.some(Boolean);
       }),
     );
     for (let i = 0; i < fresh.length && picked.length < o.max; i++) {
@@ -105,37 +108,52 @@ export async function scan(o: {
 /// (gasless cancel, superseded listing): those come back "Order not valid" and are skipped, and the next
 /// cheapest takes their place. The Sweeper is named as the fulfiller: OpenSea's zone checks it against
 /// Seaport's caller.
-export async function quote(o: { key: string; sweeper: Address; listings: Listing[]; n: number }): Promise<Quote> {
+export async function quote(o: { key: string; sweeper: Address; listings: Listing[]; n: number; origin: string }): Promise<Quote> {
   if (!o.listings.length) throw new Error('No listings fit this batch right now.');
   const got: { l: Listing; order: Json }[] = [];
   let next = 0;
-  let lastError: Error | null = null;
-  while (got.length < o.n && next < o.listings.length) {
+  let stale = false;
+  let upstream: Error | null = null;
+  const cache = caches.default;
+  // Fill data is per listing and changes only when the listing does; a short cache means a burst of quotes
+  // for the same batch costs OpenSea one call per listing, not one per quote.
+  const fill = async (l: Listing): Promise<Json> => {
+    const key = new Request(`${o.origin}/opensea/fill/${l.hash}/${o.sweeper.toLowerCase()}`);
+    const hit = await cache.match(key);
+    if (hit) return hit.json();
+    const r = await os(o.key, '/listings/fulfillment_data', {
+      method: 'POST',
+      body: JSON.stringify({
+        listing: { hash: l.hash, chain: 'ethereum', protocol_address: l.protocol },
+        fulfiller: { address: o.sweeper },
+      }),
+    });
+    await cache.put(key, Response.json(r, { headers: { 'cache-control': 'public, max-age=20' } }));
+    return r;
+  };
+  while (got.length < o.n && next < o.listings.length && !upstream) {
     const want = o.listings.slice(next, next + Math.min(CONCURRENCY, o.n - got.length));
     next += want.length;
     const results = await Promise.all(
       want.map(async (l) => {
         try {
-          const r = await os(o.key, '/listings/fulfillment_data', {
-            method: 'POST',
-            body: JSON.stringify({
-              listing: { hash: l.hash, chain: 'ethereum', protocol_address: l.protocol },
-              fulfiller: { address: o.sweeper },
-            }),
-          });
-          return { l, order: toAdvanced(r) };
+          return { l, order: toAdvanced(await fill(l)) };
         } catch (e) {
           const err = e as Error;
-          // OpenSea's own "Order not valid" is a dead listing; anything else (rate limit, outage) is real.
-          if (!/OpenSea 400/.test(err.message)) throw err;
-          lastError = err;
+          // "Order not valid" (400) is a dead listing, and a malformed fill is skipped the same way; a rate
+          // limit or outage stops the walk, and what was already collected is still a valid quote.
+          if (/OpenSea 400/.test(err.message) || /no order parameters/.test(err.message)) stale = true;
+          else upstream = err;
           return null;
         }
       }),
     );
     for (const r of results) if (r) got.push(r);
   }
-  if (!got.length) throw new Error(lastError ? 'The listings that fit just went stale on OpenSea. Try again in a moment.' : 'No listings fit this batch right now.');
+  if (!got.length) {
+    if (upstream) throw upstream;
+    throw new Error(stale ? 'The listings that fit just went stale on OpenSea. Try again in a moment.' : 'No listings fit this batch right now.');
+  }
   return {
     orders: got.map((g) => g.order),
     ids: got.map((g) => g.l.id),

@@ -50,6 +50,8 @@ const MAINNET_CREDITS: Address = '0x97630aA70AB14ed9883B41dAfccBc11349723043';
 const MAX_RPC_BATCH = 50;
 
 const rpcUrl = (env: Env) => env.RPC_URL || env.FALLBACK_RPC;
+/// Listing scans in progress, per batch, so a burst of quotes costs one scan.
+const inflight = new Map<string, Promise<Awaited<ReturnType<typeof scan>>>>();
 // No request batching here: viem's batch scheduler is shared across concurrent requests in one isolate, and a
 // promise resolved in another request's context is cancelled when that request ends (the Worker then "hangs").
 const client = (env: Env) => createPublicClient({ transport: http(rpcUrl(env), { timeout: 8_000 }) });
@@ -83,9 +85,46 @@ function secure(res: Response, url: URL) {
 
 const text = (s: string, status: number) => new Response(s, { status });
 
+/// Rate-limit key: the IPv4 address, or the /64 for IPv6 (one home gets a whole /64, so keying on the full
+/// address would hand an attacker 2^64 fresh limits).
+function ipKey(ip: string) {
+  if (!ip.includes(':')) return ip;
+  const [a, b = ''] = ip.split('::');
+  const head = a ? a.split(':') : [];
+  const tail = b ? b.split(':') : [];
+  const groups = [...head, ...Array<string>(Math.max(0, 8 - head.length - tail.length)).fill('0'), ...tail];
+  return `${groups.slice(0, 4).map((g) => g.padStart(4, '0')).join(':')}::/64`;
+}
+
+/// Read a body of at most `max` bytes, whatever the headers claim; null if it is larger.
+async function readBody(req: Request, max: number): Promise<string | null> {
+  if (Number(req.headers.get('content-length') ?? 0) > max) return null;
+  const reader = req.body?.getReader();
+  if (!reader) return '';
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel();
+      return null;
+    }
+    parts.push(value);
+  }
+  const all = new Uint8Array(size);
+  let off = 0;
+  for (const p of parts) {
+    all.set(p, off);
+    off += p.byteLength;
+  }
+  return new TextDecoder().decode(all);
+}
+
 async function limited(rl: RateLimit | undefined, req: Request) {
   if (!rl) return false;
-  const key = req.headers.get('cf-connecting-ip') ?? 'anon';
+  const key = ipKey(req.headers.get('cf-connecting-ip') ?? 'anon');
   try {
     return !(await rl.limit({ key })).success;
   } catch {
@@ -137,7 +176,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
     let rules: Rules;
     try {
-      const b = (await req.json()) as Record<string, unknown>;
+      const raw = await readBody(req, 16_000);
+      if (raw === null) return text('too large', 413);
+      const b = JSON.parse(raw) as Record<string, unknown>;
       const int = (k: string, min: number, max: number, dflt: number) => {
         const v = b[k];
         if (v === undefined || v === null) return dflt;
@@ -175,10 +216,12 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
     let ids: bigint[];
     try {
-      const body = (await req.json()) as { ids?: unknown };
+      const raw = await readBody(req, 16_000);
+      if (raw === null) return text('too large', 413);
+      const body = JSON.parse(raw) as { ids?: unknown };
       if (!Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > 200) throw 0;
       ids = body.ids.map((x) => {
-        if (!/^\d{1,9}$/.test(String(x))) throw 0;
+        if (!/^\d{1,7}$/.test(String(x)) || Number(x) < 1 || Number(x) > 1e7) throw 0;
         return BigInt(String(x));
       });
     } catch {
@@ -205,9 +248,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       const cache = caches.default;
       const scanKey = new Request(`${url.origin}/opensea/scan/${batch}`);
       let listings = await cache.match(scanKey).then((r) => r?.json<Awaited<ReturnType<typeof scan>>>());
+      if (!listings && inflight.has(batch)) listings = await inflight.get(batch)!;
       if (!listings) {
         const c = client(env);
-        listings = await scan({
+        const p = scan({
           key: env.OPENSEA_API_KEY,
           slug: env.OPENSEA_SLUG,
           credits: env.CREDITS,
@@ -220,9 +264,14 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
             ]).then(([o, ok]) => o.toLowerCase() === seller.toLowerCase() && ok),
           hasCode: (a) => c.getCode({ address: a }).then((code) => !!code && code !== '0x'),
         });
+        // One scan per batch at a time: requests arriving mid-scan share it. waitUntil keeps this request's
+        // context (and so the scan's I/O) alive even if this client goes away before it finishes.
+        inflight.set(batch, p);
+        ctx.waitUntil(p.finally(() => inflight.delete(batch)).catch(() => {}));
+        listings = await p;
         ctx.waitUntil(cache.put(scanKey, Response.json(listings, { headers: { 'cache-control': 'public, max-age=30' } })));
       }
-      const result = await quote({ key: env.OPENSEA_API_KEY, sweeper: env.SWEEPER, listings, n });
+      const result = await quote({ key: env.OPENSEA_API_KEY, sweeper: env.SWEEPER, listings, n, origin: url.origin });
       return Response.json(result, { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
       return Response.json({ error: (e as Error).message.slice(0, 200) }, { status: 502, headers: { 'cache-control': 'no-store' } });
@@ -305,8 +354,8 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
   if (Number(req.headers.get('content-length') ?? 0) > MAX_RPC_BODY) return text('too large', 413);
   if (await limited(env.RL_RPC, req)) return text('slow down', 429);
 
-  const body = await req.text();
-  if (body.length > MAX_RPC_BODY) return text('too large', 413);
+  const body = await readBody(req, MAX_RPC_BODY);
+  if (body === null) return text('too large', 413);
   let parsed: unknown;
   try {
     parsed = JSON.parse(body);
@@ -322,13 +371,27 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
     if (!c || typeof c !== 'object') return text('bad call', 400);
     const { id, method, params } = c as { id?: unknown; method?: unknown; params?: unknown };
     if (typeof method !== 'string' || !RPC_METHODS.has(method)) return text('method not allowed', 403);
+    // Params are rebuilt, not forwarded: no state overrides, gas/value fields, archive block tags or full
+    // transaction bodies ride along on the paid key.
     const p = Array.isArray(params) ? params : [];
+    let out: unknown[];
     if (method === 'eth_call') {
-      const to = String((p[0] as { to?: string })?.to ?? '').toLowerCase();
-      if (!/^0x[0-9a-f]{40}$/.test(to)) return text('bad target', 400);
+      const call = (p[0] ?? {}) as { to?: string; data?: string };
+      const to = String(call.to ?? '').toLowerCase();
+      const data = String(call.data ?? '0x');
+      if (!/^0x[0-9a-f]{40}$/.test(to) || !/^0x([0-9a-fA-F]{2}){0,8192}$/.test(data)) return text('bad call', 400);
       if (!allowed.has(to) && !(await isBatch(env, url, to as Address))) return text('target not allowed', 403);
+      out = [{ to, data }, 'latest'];
+    } else if (method === 'eth_getBlockByNumber') {
+      const tag = p[0] === 'latest' || p[0] === 'pending' || p[0] === 'safe' || p[0] === 'finalized' ? p[0] : 'latest';
+      out = [tag, false];
+    } else if (method === 'eth_getTransactionReceipt' || method === 'eth_getTransactionByHash') {
+      if (!/^0x[0-9a-fA-F]{64}$/.test(String(p[0] ?? ''))) return text('bad hash', 400);
+      out = [String(p[0]).toLowerCase()];
+    } else {
+      out = [];
     }
-    clean.push({ jsonrpc: '2.0', id: id ?? null, method, params: p });
+    clean.push({ jsonrpc: '2.0', id: id ?? null, method, params: out });
   }
   const upstream = await fetch(rpcUrl(env), {
     method: 'POST',

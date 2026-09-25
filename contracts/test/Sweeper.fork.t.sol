@@ -53,7 +53,7 @@ contract SweeperForkTest is Test {
                         one[0] = id;
                         vm.startPrank(o);
                         CREDITS.setApprovalForAll(address(factory), true);
-                        batch = Batch(factory.create("Fork", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, one));
+                        batch = Batch(factory.create("Fork", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, one, 100, 0));
                         vm.stopPrank();
                     } else {
                         vm.prank(o);
@@ -116,7 +116,7 @@ contract SweeperForkTest is Test {
         uint256 dust = address(sweeper).balance; // mainnet addresses can hold pre-existing dust
 
         vm.prank(buyer);
-        uint256[] memory ids = sweeper.sweep{value: send}(address(batch), orders, 3);
+        uint256[] memory ids = sweeper.sweep{value: send}(address(batch), orders, 3, 500);
 
         assertEq(ids.length, 3);
         for (uint256 i; i < 3; ++i) {
@@ -145,14 +145,14 @@ contract SweeperForkTest is Test {
         AdvancedOrder[] memory first = new AdvancedOrder[](1);
         first[0] = orders[0];
         vm.prank(other);
-        sweeper.sweep{value: 0.0303 ether}(address(batch), first, 1);
+        sweeper.sweep{value: 0.0303 ether}(address(batch), first, 1, 500);
 
         vm.prank(buyer);
         vm.expectRevert();
-        sweeper.sweep{value: 0.07 ether}(address(batch), orders, 2);
+        sweeper.sweep{value: 0.07 ether}(address(batch), orders, 2, 500);
 
         vm.prank(buyer);
-        uint256[] memory ids = sweeper.sweep{value: 0.07 ether}(address(batch), orders, 1);
+        uint256[] memory ids = sweeper.sweep{value: 0.07 ether}(address(batch), orders, 1, 500);
         assertEq(ids.length, 1);
         assertEq(ids[0], forSale[1]);
         assertEq(buyer.balance, 10 ether - 0.03 ether - 0.0003 ether);
@@ -163,7 +163,7 @@ contract SweeperForkTest is Test {
         orders[0] = _listing(forSale[0], 0.03 ether);
         vm.prank(buyer);
         vm.expectRevert(abi.encodeWithSelector(Sweeper.FeeNotCovered.selector, 0.0003 ether));
-        sweeper.sweep{value: 0.03 ether}(address(batch), orders, 1);
+        sweeper.sweep{value: 0.03 ether}(address(batch), orders, 1, 500);
     }
 
     function test_RejectsNonBatchAndNonCredit() public {
@@ -171,11 +171,11 @@ contract SweeperForkTest is Test {
         orders[0] = _listing(forSale[0], 0.03 ether);
         vm.prank(buyer);
         vm.expectRevert(Sweeper.NotBatch.selector);
-        sweeper.sweep{value: 1 ether}(address(0xdead), orders, 1);
+        sweeper.sweep{value: 1 ether}(address(0xdead), orders, 1, 500);
 
         orders[0].parameters.offer[0].token = address(0x1234);
         vm.prank(buyer);
         vm.expectRevert(abi.encodeWithSelector(Sweeper.NotACredit.selector, 0));
-        sweeper.sweep{value: 1 ether}(address(batch), orders, 1);
+        sweeper.sweep{value: 1 ether}(address(batch), orders, 1, 500);
     }
 }

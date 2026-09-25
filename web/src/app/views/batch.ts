@@ -401,6 +401,7 @@ async function drawPicker(
 }
 
 type Quote = { orders: unknown[]; ids: string[]; prices: string[]; total: string; error?: string };
+let quotedFeeBps = 0n; // the Sweeper's rate at quote time; the sweep reverts if it has been raised since
 
 /// The orders are what gets sent to the chain; the ids/prices/total are what gets shown. Make sure they agree,
 /// so a bad quote (or a tampered one) can't show ten Credits and buy one.
@@ -452,7 +453,10 @@ function bindBuy(
         if (!r.ok || q.error) throw new Error(q.error ?? 'No quote');
         checkQuote(q);
         const total = BigInt(q.total);
-        value = (await pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'quote', args: [total] })) as bigint;
+        [value, quotedFeeBps] = (await Promise.all([
+          pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'quote', args: [total] }),
+          pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'feeBps' }),
+        ])) as [bigint, bigint];
         out.innerHTML = `<div class="quote-row"><span>${q.ids.length} Credit${q.ids.length === 1 ? '' : 's'}</span><span class="num">${eth(total)}</span></div>
           <div class="quote-row"><span>Eighty fee</span><span class="num">${eth(value - total)}</span></div>
           <div class="quote-row total"><span>Total</span><span class="num">${eth(value)}</span></div>
@@ -468,7 +472,7 @@ function bindBuy(
     }
     const quote = q;
     await run(go, 'Buying…', () =>
-      send({ address: config.sweeper!, abi: sweeperAbi, functionName: 'sweep', args: [batch, quote.orders, 1n], value }, txNote),
+      send({ address: config.sweeper!, abi: sweeperAbi, functionName: 'sweep', args: [batch, quote.orders, 1n, quotedFeeBps], value }, txNote),
     'Bought and deposited.');
     reset();
   });

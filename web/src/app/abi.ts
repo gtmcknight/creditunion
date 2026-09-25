@@ -1488,6 +1488,11 @@ export const batchAbi = [
   },
   {
     "type": "error",
+    "name": "NoDepositor",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "NotCreator",
     "inputs": []
   },
@@ -1856,6 +1861,16 @@ export const factoryAbi = [
         "name": "ids",
         "type": "uint256[]",
         "internalType": "uint256[]"
+      },
+      {
+        "name": "expectProtocolFeeBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "expectCreatorFeeBps",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [
@@ -2189,6 +2204,22 @@ export const factoryAbi = [
     "type": "error",
     "name": "FailedDeployment",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "FeesChanged",
+    "inputs": [
+      {
+        "name": "protocolFeeBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "creatorFeeBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",
@@ -2561,6 +2592,11 @@ export const sweeperAbi = [
         "name": "minBought",
         "type": "uint256",
         "internalType": "uint256"
+      },
+      {
+        "name": "maxFeeBps",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [
@@ -2621,6 +2657,17 @@ export const sweeperAbi = [
       }
     ],
     "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "FeeChanged",
+    "inputs": [
+      {
+        "name": "feeBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",
