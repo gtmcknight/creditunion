@@ -2,7 +2,7 @@ import Sortable from 'sortablejs';
 import { parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi } from '../abi';
 import { config, explorer, pub, send, session } from '../chain';
-import { ARRANGEMENTS, earlyWeight, eligible, getBatch, hasLayout, layoutSlot, me, ratings, type Rated } from '../data';
+import { ARRANGEMENTS, earlyWeight, eligible, getBatch, hasLayout, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
 import { maskLabel, paletteBit } from '../traits';
 import { hydrate, pct, who } from '../ens';
 import { describeFilter } from '../traits';
@@ -42,10 +42,22 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
     sessionStorage.setItem(seenKey, String(s.count));
   } catch {}
 
+  // On a layout batch the sheet shows every Credit in the slot it will burn into, not in deposit order.
+  const slots = hasLayout(s.filter) ? Array.from({ length: 80 }, (_, i) => layoutSlot(s.filter, i)) : null;
+  let placed: (bigint | null)[] | undefined;
+  if (slots && !burned && b.ids.length) {
+    try {
+      const pal = (await Promise.all(
+        b.ids.map((id) => pub.readContract({ address: s.address, abi: batchAbi, functionName: 'paletteOf', args: [id] })),
+      )) as number[];
+      const byId = new Map(b.ids.map((id, i) => [id.toString(), Number(pal[i])]));
+      placed = placeOnLayout(slots, b.ids, (id) => byId.get(id.toString()) ?? 0);
+    } catch {}
+  }
   const artHtml = burned
     ? `<figure class="statement">${sheet(b.ids, { closed: true })}<figcaption class="legend muted small"><span>Statement #${s.statementId}</span><span>80 Credits, burned in deposit order</span></figcaption></figure>`
-    : `${sheet(b.ids, { mine: myIds, fresh: seen < s.count ? seen : undefined, closing: s.state === 'Full', layout: hasLayout(s.filter) ? Array.from({ length: 80 }, (_, i) => layoutSlot(s.filter, i)) : undefined })}
-       <div class="legend muted small">${myIds.size ? `<button type="button" class="spot" aria-pressed="false"><i class="dot mine"></i><span>Highlight yours</span><span class="num muted">${myIds.size}</span></button>` : ''}<span id="legend-order">${s.arrangement === 0 ? 'In deposit order' : s.arrangement === 4 ? 'Shown in deposit order · burned as laid out' : `Shown in deposit order · burned by ${ARRANGEMENTS[s.arrangement].toLowerCase()}`}</span></div>`;
+    : `${sheet(b.ids, { mine: myIds, fresh: placed ? undefined : seen < s.count ? seen : undefined, closing: s.state === 'Full', layout: slots ?? undefined, placed })}
+       <div class="legend muted small">${myIds.size ? `<button type="button" class="spot" aria-pressed="false"><i class="dot mine"></i><span>Highlight yours</span><span class="num muted">${myIds.size}</span></button>` : ''}<span id="legend-order">${s.arrangement === 0 ? 'In deposit order' : s.arrangement === 4 ? (placed ? 'Shown as laid out' : 'Burned as laid out') : `Shown in deposit order · burned by ${ARRANGEMENTS[s.arrangement].toLowerCase()}`}</span></div>`;
 
   app.innerHTML = `
   <a class="back" href="#/">← Batches</a>

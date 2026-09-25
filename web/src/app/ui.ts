@@ -53,10 +53,12 @@ export function sheet(
     ghosts?: { id: bigint; src: string }[];
     /// Palette mask wanted at each slot (0 = any): empty cells show the colour they are waiting for.
     layout?: number[];
+    /// Explicit slot → id placement (layout batches before the burn); overrides `ids` order.
+    placed?: (bigint | null)[];
   } = {},
 ) {
   const cells = Array.from({ length: 80 }, (_, i) => {
-    const id = ids[i];
+    const id = opts.placed ? (opts.placed[i] ?? undefined) : ids[i];
     if (id === undefined) {
       const g = opts.ghosts?.[i - ids.length];
       if (g) return `<i class="cell ghost" title="Credit #${g.id}"><img src="${g.src}" alt="" loading="lazy" decoding="async"></i>`;

@@ -10,6 +10,30 @@ export const ARRANGEMENTS = ['Deposit order', 'Mint time', 'Credit number', 'Cre
 export const layoutSlot = (f: { layout0: bigint; layout1: bigint }, i: number) =>
   Number(i < 64 ? (f.layout0 >> BigInt(4 * i)) & 15n : (f.layout1 >> BigInt(4 * (i - 64))) & 15n);
 export const hasLayout = (f: { layout0: bigint; layout1: bigint }) => f.layout0 !== 0n || f.layout1 !== 0n;
+
+/// Where each deposited Credit sits on a layout sheet before the burn, mirroring Batch.layoutOrder: painted
+/// slots take the earliest deposit of their palette, open slots the rest, in deposit order. Nulls are empty.
+export function placeOnLayout(slots: number[], ids: readonly bigint[], paletteOf: (id: bigint) => number): (bigint | null)[] {
+  const placed: (bigint | null)[] = new Array(80).fill(null);
+  const used = new Set<number>();
+  for (let i = 0; i < 80; i++) {
+    if (!slots[i]) continue;
+    const j = ids.findIndex((id, k) => !used.has(k) && paletteOf(id) === slots[i]);
+    if (j >= 0) {
+      used.add(j);
+      placed[i] = ids[j];
+    }
+  }
+  let k = 0;
+  for (let i = 0; i < 80; i++) {
+    if (slots[i]) continue;
+    while (k < ids.length && used.has(k)) k++;
+    if (k >= ids.length) break;
+    used.add(k);
+    placed[i] = ids[k];
+  }
+  return placed;
+}
 export const SPLITS = ['Equal', 'Early bird'] as const;
 /// Early-bird weight of a 0-based position, in shares (1.5 at the first slot, 0.5 at the last).
 export const earlyWeight = (i: number) => (237 - 2 * i) / 158;
