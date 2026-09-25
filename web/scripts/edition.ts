@@ -28,6 +28,32 @@ for (const id of check) {
   }
 }
 
+// Per-minute payment counts over the mint, for the time-window picker: [[minuteStart, count], ...].
+const perMinute = new Map<number, number>();
+for (const id of ids) {
+  const m = Math.floor(src[id][1] / 60) * 60;
+  perMinute.set(m, (perMinute.get(m) ?? 0) + 1);
+}
+const minutes = [...perMinute.entries()].sort((a, b) => a[0] - b[0]);
+writeFileSync(new URL('../public/minutes.json', import.meta.url), JSON.stringify(minutes));
+console.log('wrote public/minutes.json', minutes.length, 'minutes;', minutes.filter(([, c]) => c === 80).length, 'with exactly 80');
+
+// Per-Credit packed traits for the design-time matcher: Uint32 per id (index id-1):
+//   bits 0-3 palette mask (C=1,M=2,Y=4,K=8) · 4-6 print · 7-8 weight · 9-13 eights · 14-24 minute index (2047 = none)
+const PRINTS = ['Registered', 'Nudge', 'Slip', 'Skew', 'Drift', 'Loose'];
+const minuteIndex = new Map(minutes.map(([m], i) => [m, i]));
+const packed = new Uint32Array(ids[ids.length - 1]);
+ids.forEach((id, i) => {
+  const t = rows[i];
+  const mask = [...'CMYK'].reduce((m, ch, b) => (t.palette.includes(ch) ? m | (1 << b) : m), 0);
+  const marks = t.activeBits, cap = t.palette.length * 64;
+  const weight = marks * 256 >= 120 * cap && marks * 256 <= 136 * cap ? 0 : marks * 256 >= 112 * cap && marks * 256 <= 144 * cap ? 1 : marks * 256 >= 96 * cap && marks * 256 <= 160 * cap ? 2 : 3;
+  const mi = minuteIndex.get(Math.floor(src[id][1] / 60) * 60) ?? 2047;
+  packed[id - 1] = mask | (PRINTS.indexOf(t.registration) << 4) | (weight << 7) | (Math.min(t.eights, 31) << 9) | (mi << 14);
+});
+writeFileSync(new URL('../public/edition-traits.bin', import.meta.url), Buffer.from(packed.buffer));
+console.log('wrote public/edition-traits.bin', packed.byteLength, 'bytes');
+
 // Binary layout: u32 json length, json (n, tails, counts), then Float64 rs[], then Uint32 below[].
 const meta = Buffer.from(JSON.stringify({ n: ed.n, tails: ed.tails, counts: ed.counts, version: '3.4.0' }));
 const head = Buffer.alloc(4);

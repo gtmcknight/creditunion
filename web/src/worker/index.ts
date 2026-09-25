@@ -10,6 +10,7 @@ import { mainnet } from 'viem/chains';
 import { batchAbi, creditsAbi, creditArtAbi, factoryAbi } from '../app/abi';
 import { quote, scan } from './opensea';
 import { ratings } from './ratings';
+import { match, type Rules } from './match';
 
 interface RateLimit {
   limit(o: { key: string }): Promise<{ success: boolean }>;
@@ -126,6 +127,42 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   }
 
   if (url.pathname === '/rpc') return rpc(req, env, url);
+
+  // Design-time counts: how many Credits in the edition satisfy a rule set.
+  if (url.pathname === '/edition/match') {
+    if (req.method !== 'POST' || !sameSite(req)) return text('forbidden', 403);
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    let rules: Rules;
+    try {
+      const b = (await req.json()) as Record<string, unknown>;
+      const int = (k: string, min: number, max: number, dflt: number) => {
+        const v = b[k];
+        if (v === undefined || v === null) return dflt;
+        if (typeof v !== 'number' || !Number.isInteger(v) || v < min || v > max) throw 0;
+        return v;
+      };
+      const list = Array.isArray(b.list) ? b.list : [];
+      if (list.length > 200 || list.some((x) => typeof x !== 'number' || !Number.isInteger(x) || x < 1 || x > 1e7)) throw 0;
+      rules = {
+        palette: int('palette', 0, 15, 0),
+        print: int('print', -1, 5, -1),
+        weight: int('weight', -1, 3, -1),
+        eights: int('eights', -1, 31, -1),
+        minuteFrom: int('minuteFrom', -1, 4000, -1),
+        minuteTo: int('minuteTo', -1, 4000, -1),
+        idFrom: int('idFrom', 0, 1e7, 0),
+        idTo: int('idTo', 0, 1e7, 0),
+        list: list as number[],
+      };
+    } catch {
+      return text('bad request', 400);
+    }
+    try {
+      return Response.json(await match(env.ASSETS, url.origin, rules), { headers: { 'cache-control': 'no-store' } });
+    } catch (e) {
+      return Response.json({ error: String((e as Error).message).slice(0, 200) }, { status: 502 });
+    }
+  }
 
   // Official ratings for up to 200 Credits, computed from the frozen edition (see shared/credits.ts).
   if (url.pathname === '/ratings') {
