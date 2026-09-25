@@ -84,7 +84,7 @@ const eightsChip = (n: number) => (n === 0 ? 'no 8s' : '8'.repeat(n));
 export async function create(app: HTMLElement) {
   if (!session.account) {
     app.innerHTML = `<a class="back" href="#/">← Batches</a>
-    <section class="narrow"><h1>Design a batch</h1><p class="lede">Decide who can join, how the sheet is ordered, and what you charge. Start with 10 or more of your Credits; anyone can leave until 80.</p>
+    <section class="narrow"><h1>Design a batch</h1><p class="lede">Decide who can join, how the sheet is ordered, and what you charge. Start with any of your Credits; anyone can leave until 80.</p>
     <button class="btn primary" data-connect>Connect wallet</button></section>`;
     return;
   }

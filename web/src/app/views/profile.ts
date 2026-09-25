@@ -71,7 +71,7 @@ export async function profile(app: HTMLElement, rerender: () => void) {
     <div class="section-head"><h2>Your batches</h2><span class="muted">${mine.length || ''}</span></div>
     <div class="grid">${
       mine.length
-        ? mine.map(card).join('')
+        ? mine.map((b) => card(b)).join('')
         : `<div class="empty-state"><p>You're not in any batch yet.</p><div class="actions"><a class="btn primary" href="#/">Browse batches</a><a class="btn" href="#/new">Open one</a></div></div>`
     }</div>
   </section>

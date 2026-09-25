@@ -105,7 +105,8 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
       return `<div class="box"><h3>Add Credits</h3><p class="muted">Connect to see which of yours fit${config.sweeper ? ', or buy in from OpenSea' : ''}.</p>${connect}</div>`;
     return `<div class="box">
       <div class="box-head"><h3>Add Credits</h3><span class="muted small num" id="pick-count"></span></div>
-      <div class="picker" id="picker"><p class="muted small">Checking your Credits…</p></div>
+      <p class="small" id="fit-line">Checking which of yours fit…</p>
+      <div class="picker" id="picker"></div>
       <div class="stack" id="deposit-actions"></div>
       ${withdraw()}
       <p class="muted small">Withdraw any time before 80.${s.canAssemble ? '' : ' Burning opens once Jack’s Statement contract ships.'}</p>
@@ -328,14 +329,18 @@ async function drawPicker(
   if (!el.isConnected) return;
   picks = new Set([...picks].filter((p) => fits.some((f) => f.toString() === p)));
 
+  const line = document.getElementById('fit-line');
   if (!m.owned.length) {
-    el.outerHTML = `<p class="muted">You don’t hold any Credits. <a href="https://opensea.io/collection/credits" target="_blank" rel="noopener">Find some ↗</a></p>`;
+    if (line) line.innerHTML = `You don’t hold any Credits. <a href="https://opensea.io/collection/credits" target="_blank" rel="noopener">Find some ↗</a>`;
+    el.remove();
     return;
   }
   if (!fits.length) {
-    el.outerHTML = `<p class="muted">None of your ${m.owned.length} Credits match this batch’s filter.</p>`;
+    if (line) line.textContent = `None of your ${m.owned.length} Credits fit this batch’s rules.`;
+    el.remove();
     return;
   }
+  if (line) line.innerHTML = `<strong class="num">${fits.length}</strong> of your ${m.owned.length} Credits fit this batch.`;
 
   el.innerHTML = fits
     .map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="${picks.has(id.toString())}" title="Credit #${id}"><img src="${art(id)}" alt="Credit #${id}" loading="lazy"></button>`)

@@ -4,6 +4,7 @@ import { batch } from './views/batch';
 import { create } from './views/create';
 import { home } from './views/home';
 import { docs } from './views/docs';
+import { invalidateFit } from './fit';
 import { hydrate, who } from './ens';
 import { mint } from './views/mint';
 import { profile } from './views/profile';
@@ -134,6 +135,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawTheme)
 drawTheme();
 
 onSession(() => {
+  invalidateFit();
   drawAccount();
   drawTestnet();
   route();

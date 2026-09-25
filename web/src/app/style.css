@@ -2053,3 +2053,29 @@ input[type='datetime-local'] {
     padding: 0 10px;
   }
 }
+
+/* ---------------------------------------------------------------- can you join */
+
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 16px;
+  margin-bottom: 24px;
+  padding: 12px 16px;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  font-size: 14px;
+}
+.notice strong {
+  font-weight: 600;
+}
+.tag.join {
+  background: var(--fg);
+  color: var(--bg);
+  box-shadow: none;
+}
+.card.can-join .sheet {
+  box-shadow: 0 0 0 2px var(--fg);
+}

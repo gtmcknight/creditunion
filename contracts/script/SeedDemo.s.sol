@@ -27,7 +27,7 @@ contract SeedDemo is Script {
         vm.startBroadcast(keys[0]);
         MockCredits credits = new MockCredits();
         MockStatement statement = new MockStatement(ICredits(address(credits)));
-        BatchFactory f = new BatchFactory(ICredits(address(credits)), new MockAssembler(statement), address(0), who[0], 100, 10);
+        BatchFactory f = new BatchFactory(ICredits(address(credits)), new MockAssembler(statement), address(0), who[0], 100, 1);
         for (uint256 i; i < 4; ++i) credits.mint(who[i], 200); // ids 1..800
         vm.stopBroadcast();
 

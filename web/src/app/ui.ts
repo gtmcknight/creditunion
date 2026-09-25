@@ -79,7 +79,7 @@ export function errText(e: unknown): string {
 }
 
 const ERRORS: Record<string, string> = {
-  TooFewToOpen: 'You need at least 10 Credits to open a batch.',
+  TooFewToOpen: 'Not enough Credits to open a batch.',
   WrongState: 'The batch is not in the right state for that.',
   NotDepositor: 'Only the depositor can withdraw that Credit.',
   Excluded: "That Credit doesn't match this batch's filter.",

@@ -29,7 +29,7 @@ export function docs(app: HTMLElement) {
       id: 'lifecycle',
       title: 'Life of a batch',
       body: rules([
-        ['Open', 'Anyone holding at least 10 Credits opens a batch with them and names it. At open they fix, forever: who may join (§ Eligibility), the order on the Statement (§ Order), their own fee (0–10 %), an optional reserve, and a deadline of 3–90 days.'],
+        ['Open', 'Anyone holding a Credit opens a batch with it and names it. At open they fix, forever: who may join (§ Eligibility), the order on the Statement (§ Order), their own fee (0–10 %), an optional reserve, and a deadline of 3–90 days.'],
         ['Deposit', 'Approve the Eighty factory once, then add any number of Credits (up to 40 per transaction). Or send a single Credit straight to the batch with <code>safeTransferFrom</code>; no approval needed. Deposits record who put in what.'],
         ['Withdraw', 'Until the batch holds 80, every depositor can take their Credits back at any time. No fee, no penalty, no permission.'],
         ['Lock', 'The 80th deposit locks the batch. Nobody can add or withdraw. The deadline moves to at least 7 days out so there is time to burn.'],

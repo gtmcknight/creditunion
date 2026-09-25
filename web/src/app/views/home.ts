@@ -1,6 +1,8 @@
 import { session } from '../chain';
 import { ARRANGEMENTS, listBatches, type Listed, type Summary } from '../data';
 import { hydrate, pct, who } from '../ens';
+import { fitByBatch } from '../fit';
+import type { Address } from 'viem';
 import { describeFilter } from '../traits';
 import { eth, esc, same, sheet, until } from '../ui';
 
@@ -55,13 +57,15 @@ export function mineIn(b: Listed) {
   return new Set(b.ids.filter((_, i) => same(b.depositors[i], session.account)).map(String));
 }
 
-export function card({ s, ids, depositors }: Listed) {
+export function card({ s, ids, depositors }: Listed, fit?: bigint[]) {
   const f = describeFilter(s.filter, s.allowlistSize);
   const mine = mineIn({ s, ids, depositors });
-  return `<a class="card" href="#/b/${s.address}">
+  const room = 80 - s.count;
+  const canJoin = fit?.length ? Math.min(fit.length, room) : 0;
+  return `<a class="card${canJoin ? ' can-join' : ''}" href="#/b/${s.address}">
     ${sheet(ids, { size: 'sm', mine })}
     <div class="card-body">
-      <div class="row"><strong>${esc(s.name || 'Untitled')}</strong><span class="tags">${mine.size ? `<span class="tag you">You · ${mine.size}</span>` : ''}<span class="tag ${s.state.toLowerCase()}">${s.state}</span></span></div>
+      <div class="row"><strong>${esc(s.name || 'Untitled')}</strong><span class="tags">${canJoin ? `<span class="tag join">Join · ${canJoin} fit</span>` : ''}${mine.size ? `<span class="tag you">You · ${mine.size}</span>` : ''}<span class="tag ${s.state.toLowerCase()}">${s.state}</span></span></div>
       <div class="row creator">${who(s.creator)}${fee(s)}</div>
       <div class="bar"><i style="width:${(s.count / 80) * 100}%"></i></div>
       <div class="row muted small"><span class="num">${s.count}/80</span><span>${status(s)}</span></div>
@@ -127,6 +131,11 @@ export async function home(app: HTMLElement) {
     <div class="section-head"><h2>Batches</h2><span class="muted" id="batch-count"></span>
       <div class="seg sm" role="radiogroup" aria-label="Sort">${SORTS.map(([k, l]) => `<label><input type="radio" name="sort" value="${k}" ${k === sortKey() ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
     </div>
+    <div class="notice" id="fit-bar">${
+      session.account
+        ? `<span>Checking which batches take your Credits…</span>`
+        : `<span>Connect to see which batches you can join, based on what you hold.</span><button class="btn sm primary" data-connect>Connect</button>`
+    }</div>
     <div class="grid" id="batches"><p class="muted">Loading from chain…</p></div>
   </section>`;
 
@@ -136,14 +145,38 @@ export async function home(app: HTMLElement) {
     if (!el) return; // navigated away
     document.getElementById('batch-count')!.textContent = list.length ? `${list.length}` : '';
     drawHero(list);
+    let fit = new Map<Address, bigint[]>();
+    let onlyMine = false;
     const draw = () => {
       sortList(list, sortKey());
-      el.innerHTML = list.length
-        ? list.map(card).join('')
-        : `<div class="empty-state"><p>No batches yet.</p><a class="btn primary" href="#/new">Open the first one</a></div>`;
+      const shown = onlyMine ? list.filter((b) => fit.has(b.s.address)) : list;
+      el.innerHTML = shown.length
+        ? shown.map((b) => card(b, fit.get(b.s.address))).join('')
+        : list.length
+          ? `<div class="empty-state"><p>None of the open batches take your Credits right now.</p><a class="btn primary" href="#/new">Design one that does</a></div>`
+          : `<div class="empty-state"><p>No batches yet.</p><a class="btn primary" href="#/new">Open the first one</a></div>`;
       hydrate(el);
     };
     draw();
+    if (session.account) {
+      fitByBatch(list).then((m) => {
+        fit = m;
+        const bar = document.getElementById('fit-bar');
+        if (!bar) return;
+        const open = list.filter((b) => b.s.state === 'Open').length;
+        bar.innerHTML = fit.size
+          ? `<span><strong>${fit.size}</strong> of ${open} open batch${open === 1 ? '' : 'es'} take your Credits.</span><button type="button" class="btn sm" id="only-mine" aria-pressed="false">Only those</button>`
+          : `<span>${open ? 'None of the open batches take your Credits right now.' : 'No open batches yet.'}</span><a class="btn sm" href="#/new">Design one</a>`;
+        document.getElementById('only-mine')?.addEventListener('click', (e) => {
+          const b = e.currentTarget as HTMLButtonElement;
+          onlyMine = !onlyMine;
+          b.setAttribute('aria-pressed', String(onlyMine));
+          b.classList.toggle('primary', onlyMine);
+          draw();
+        });
+        draw();
+      });
+    }
     document.querySelectorAll<HTMLInputElement>('input[name=sort]').forEach((r) =>
       r.addEventListener('change', () => {
         try {

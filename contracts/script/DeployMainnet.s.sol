@@ -34,7 +34,7 @@ contract DeployMainnet is Script {
 
         vm.startBroadcast();
         BatchFactory factory = new BatchFactory(
-            CREDITS, assembler, setter, feeTo, vm.envOr("PROTOCOL_FEE_BPS", uint256(100)), 10
+            CREDITS, assembler, setter, feeTo, vm.envOr("PROTOCOL_FEE_BPS", uint256(100)), 1
         );
         Sweeper sweeper = new Sweeper(SEAPORT, factory, vm.envOr("SWEEP_FEE_BPS", uint256(100)));
         vm.stopBroadcast();

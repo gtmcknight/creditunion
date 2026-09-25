@@ -20,6 +20,8 @@ export const hashTrait = (v: string): Hex => (v ? keccak256(toBytes(v)) : ZERO);
 
 const reverse = new Map<string, string>();
 for (const vals of Object.values(TRAITS)) for (const v of vals) reverse.set(keccak256(toBytes(v)), v);
+/// The label a filter hash stands for, if it is one of the known trait values.
+export const traitLabel = (hash: string) => reverse.get(hash as Hex);
 
 const dayTime = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 const timeOnly = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
