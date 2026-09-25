@@ -43,6 +43,9 @@ function match(f: Filter, palettes: number) {
   return p;
 }
 
+/// Up to 80 edition Credits that pass a party's rules, spread across the edition.
+export const examples = (f: Filter) => match(f, f.palettes).then((m) => m.sample);
+
 type Slot = { i: number; want: number; f: Filter; fit: Match };
 const slotOf = new WeakMap<Element, Slot>();
 
@@ -116,7 +119,7 @@ function card({ i, want, f, fit }: Slot) {
   return `<p class="eyebrow">Slot ${i + 1} · open</p>
     <p class="takes">${takes}</p>
     ${rules ? `<p class="muted small">${esc(rules)}</p>` : ''}
-    <p class="muted small"><span class="num">${fit.count.toLocaleString()}</span> Credits in the edition fit</p>
+    <p class="muted small"><span class="num">${fit.count.toLocaleString()}</span> in the edition</p>
     ${examples.length ? `<div class="examples">${examples.map((id) => `<figure><span class="art"><img src="${editionArt(id)}" alt=""></span><figcaption class="num">#${id}</figcaption></figure>`).join('')}</div>` : ''}`;
 }
 

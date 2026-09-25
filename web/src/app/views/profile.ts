@@ -13,7 +13,7 @@ type Due = { b: Listed; claim: bigint; owed: bigint };
 export async function profile(app: HTMLElement, rerender: () => void) {
   const account = session.account;
   if (!account) {
-    app.innerHTML = `<section class="narrow"><h1>Your Eighty</h1><p class="lede">Connect to see your Credits and batches.</p><button class="btn primary" data-connect>Connect wallet</button></section>`;
+    app.innerHTML = `<section class="narrow"><h1>Your Eighty</h1><p class="lede">Connect to see your Credits and parties.</p><button class="btn primary" data-connect>Connect wallet</button></section>`;
     return;
   }
 
@@ -46,7 +46,7 @@ export async function profile(app: HTMLElement, rerender: () => void) {
     </header>
     <dl class="stats">
       <div><dt>In your wallet</dt><dd class="num">${owned.length}</dd></div>
-      <div><dt>In batches</dt><dd class="num">${deposited}</dd></div>
+      <div><dt>In parties</dt><dd class="num">${deposited}</dd></div>
       <div><dt>To collect</dt><dd class="num">${total ? eth(total) : '0'}</dd></div>
     </dl>
   </section>
@@ -69,11 +69,11 @@ export async function profile(app: HTMLElement, rerender: () => void) {
   }
 
   <section>
-    <div class="section-head"><h2>Your batches</h2><span class="muted">${mine.length || ''}</span></div>
+    <div class="section-head"><h2>Your parties</h2><span class="muted">${mine.length || ''}</span></div>
     <div class="grid">${
       mine.length
         ? mine.map((b) => card(b)).join('')
-        : `<div class="empty-state"><p>You're not in any batch yet.</p><div class="actions"><a class="btn primary" href="#/">Browse batches</a><a class="btn" href="#/new">Open one</a></div></div>`
+        : `<div class="empty-state"><p>You're not in any party yet.</p><div class="actions"><a class="btn primary" href="#/">Browse parties</a><a class="btn" href="#/new">Open one</a></div></div>`
     }</div>
   </section>
 

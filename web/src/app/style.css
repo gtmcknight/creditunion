@@ -19,7 +19,7 @@
 
   --r: 6px;
   --r-lg: 12px; /* = --r + 6px padding */
-  --gutter: 16px;
+  --gutter: clamp(16px, 4vw, 48px);
   --max: 1120px;
   --ease: cubic-bezier(0.2, 0, 0, 1);
 
@@ -2329,7 +2329,11 @@ input[type='datetime-local'] {
   display: flex;
   gap: 4px;
 }
+.subtabs a,
 .subtabs button {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
   height: 32px;
   padding: 0 12px;
   border: 0;
@@ -2340,16 +2344,15 @@ input[type='datetime-local'] {
   color: var(--muted);
   cursor: pointer;
 }
+.subtabs a:hover,
 .subtabs button:hover {
   color: var(--fg);
 }
+.subtabs a[aria-selected='true'],
 .subtabs button[aria-selected='true'] {
   background: var(--line);
   color: var(--fg);
   font-weight: 500;
-}
-.subtabs button[hidden] {
-  display: none;
 }
 .subtabs .num {
   margin-left: 4px;
@@ -2450,9 +2453,6 @@ input[type='datetime-local'] {
 .more .facts {
   border-top: 0;
 }
-.box.off {
-  opacity: 0.5;
-}
 .batch-art .cell img {
   transition: opacity 160ms var(--ease);
 }
@@ -2461,4 +2461,128 @@ input[type='datetime-local'] {
 }
 .batch-art.lighting .cell.ghost.lit img {
   opacity: 0.6;
+}
+
+.group-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 16px;
+  font-size: 15px;
+  font-weight: 500;
+}
+.group-title .num {
+  color: var(--muted);
+}
+.grid + .group-title {
+  margin-top: 48px;
+}
+
+/* ---------------------------------------------------------------- batch page: Add Credits tabs, OpenSea listings */
+
+.box.add .subtabs {
+  margin: 0 0 4px;
+}
+.subtabs button {
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+[data-pane] {
+  display: grid;
+  gap: 12px;
+}
+[data-pane][hidden] {
+  display: none;
+}
+.listings {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 8px;
+  max-height: 340px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 3px;
+  margin: -3px;
+}
+.listings:empty {
+  display: none;
+}
+.listing {
+  display: grid;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.listing .art {
+  /* Crop the art's white margin: show 60–240 of its 320 viewBox. */
+  display: block;
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: #fff;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px var(--line);
+  transition: box-shadow 120ms var(--ease);
+}
+.listing img {
+  display: block;
+  width: 177.8%;
+  max-width: none;
+  margin: -33.3% 0 0 -33.3%;
+}
+.listing .price {
+  font-size: 12px;
+  color: var(--muted);
+}
+.listing:hover .art {
+  box-shadow: 0 0 0 1px var(--fg);
+}
+.listing[aria-pressed='true'] .art {
+  box-shadow: 0 0 0 2px var(--fg);
+}
+.listing[aria-pressed='true'] .price {
+  color: var(--fg);
+}
+.listings:has([aria-pressed='true']) .listing[aria-pressed='false'] {
+  opacity: 0.55;
+}
+.listings.preview .listing {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* Tap a listing to skip it: a quiet × on hover says so. */
+.listing:not([disabled]) .art {
+  position: relative;
+}
+.listing:not([disabled]):hover .art::after {
+  content: '×';
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: 14px;
+  line-height: 1;
+  color: #0a0a0a;
+}
+
+.buy-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.buy-head .num {
+  font-size: 15px;
+}
+.listing:focus {
+  outline: none;
+}
+.listing:focus-visible .art {
+  box-shadow: 0 0 0 2px var(--fg);
 }

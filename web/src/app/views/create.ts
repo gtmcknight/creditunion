@@ -9,11 +9,11 @@ import { $$, art, errText, esc, sheet, toast } from '../ui';
 
 const CHUNK = 40;
 const ARR_HINTS = [
-  'The 80 appear on the Statement in the order they were deposited.',
-  'Sorted by when each Credit was paid for, earliest first.',
-  'Sorted by Credit number, lowest first.',
-  'You arrange the sheet once it’s full: by rating, mint time, number, or by hand. If you haven’t burned within a day of filling, anyone can burn in deposit order.',
-  'The sheet follows your painted layout: each slot takes a Credit of its palette. You get a day to swap within a palette; then anyone can burn it as laid out.',
+  'In the order Credits are deposited.',
+  'Earliest mint first.',
+  'Lowest number first.',
+  'You arrange the sheet once it fills. You have one day.',
+  'Follows your painted layout.',
 ];
 /// Layout presets: which slots take brush A, brush B, or stay open (any palette).
 const LAYOUTS: Record<string, (i: number) => 'A' | 'B' | 0> = {
@@ -109,8 +109,8 @@ const DESIGNS: { name: string; rules: Partial<Rules>; arrangement?: number; patt
 
 export async function create(app: HTMLElement) {
   if (!session.account) {
-    app.innerHTML = `<a class="back" href="#/">← Batches</a>
-    <section class="narrow"><h1>Design a batch</h1><p class="lede">Decide who can join, how the sheet is ordered, and what you charge. Start with any of your Credits; anyone can leave until 80.</p>
+    app.innerHTML = `<a class="back" href="#/">← Parties</a>
+    <section class="narrow"><h1>Make Statement Party</h1><p class="lede">Set the rules, the order and the payout.</p>
     <button class="btn primary" data-connect>Connect wallet</button></section>`;
     return;
   }
@@ -132,7 +132,7 @@ export async function create(app: HTMLElement) {
   const picks = new Set<string>();
   const last = Math.max(0, minutes.length - 1);
 
-  app.innerHTML = `<a class="back" href="#/">← Batches</a>
+  app.innerHTML = `<a class="back" href="#/">← Parties</a>
   <section class="design">
     <div class="design-preview">
       <div id="preview">${sheet([])}</div>
@@ -144,7 +144,7 @@ export async function create(app: HTMLElement) {
     </div>
 
     <form id="create" class="design-form" novalidate>
-      <header><h1>Design a batch</h1><p class="lede">Tap rules to see who fits; the sheet fills with real Credits that do. Everything here is fixed once the batch opens, and shown to everyone before they join.</p>
+      <header><h1>Make Statement Party</h1><p class="lede">Rules are fixed once the party starts.</p>
       <div class="chips presets designs" id="designs">${DESIGNS.map((d, i) => `<button type="button" data-design="${i}">${d.name}</button>`).join('')}</div></header>
       <nav class="tabs" id="tabs" aria-label="Sections">${[
         ['name', 'Name'], ['palette', 'Palette'], ['print', 'Print'], ['weight', 'Weight'], ['eights', 'Eights'], ['time', 'Time'],
@@ -175,7 +175,7 @@ export async function create(app: HTMLElement) {
           <input type="range" id="min-score" min="80" max="800" step="1" value="80" aria-label="Minimum official rating">
           <div class="chips presets" id="score-presets">${[[0, 'Any'], [300, '300+'], [500, '500+'], [700, '700+']].map(([v, l]) => `<button type="button" data-score="${v}" aria-pressed="${v === 0}">${l}</button>`).join('')}</div>
         </div>
-        <p class="hint">Jack’s official Credit rating, 80–800, frozen onchain. Only Credits scoring at least this join.</p>
+        <p class="hint">Jack’s official rating, 80–800.</p>
       </section>
 
       <section class="rule" data-tab="time"><div class="rule-head">Paid during <span id="win-text">Any time</span></div>
@@ -184,7 +184,7 @@ export async function create(app: HTMLElement) {
           <div class="dual"><input type="range" id="win-from" min="0" max="${last}" value="0" aria-label="Window start"><input type="range" id="win-to" min="0" max="${last}" value="${last}" aria-label="Window end"></div>
         </div>
         <div class="chips presets" id="win-presets"></div>
-        <p class="hint" id="win-count">Drag the handles over the mint. Each bar is a minute.</p>
+        <p class="hint" id="win-count">Drag to set the window.</p>
       </section>
 
       <section class="rule" data-tab="numbers"><div class="rule-head">Credit numbers <span class="muted" id="id-hint">Any</span></div>
@@ -196,11 +196,11 @@ export async function create(app: HTMLElement) {
       </section>
 
       <section class="rule" data-tab="layout"><div class="rule-head">Layout <span class="muted" id="layout-pick">None</span></div>
-        <p class="hint">Paint the sheet. Each painted slot will only take a Credit of that palette, and the Statement is burned in this arrangement. Open slots take anything.</p>
+        <p class="hint">Painted slots only take that palette.</p>
         <div class="chips presets" id="layout-presets">${Object.keys(LAYOUTS).map((k) => `<button type="button" data-layout="${k}">${k}</button>`).join('')}</div>
         <div class="brushes" id="brushes">${[0, ...TRAITS.colors.map(paletteBit)].map((m) => `<button type="button" class="brush" data-brush="${m}" title="${maskLabel(m)}" aria-pressed="${m === 1}">${m ? maskInks(m).map((c) => `<i style="background:${c}"></i>`).join('') : '<span>any</span>'}</button>`).join('')}</div>
         <div class="lgrid" id="lgrid">${Array.from({ length: 80 }, (_, i) => `<button type="button" class="lcell" data-i="${i}" aria-label="Slot ${i + 1}"></button>`).join('')}</div>
-        <p class="hint" id="layout-hint">Tap or drag across slots to paint with the chosen palette. Presets use your last two palettes.</p>
+        <p class="hint" id="layout-hint">Tap or drag to paint.</p>
       </section>
 
       <section class="rule" data-tab="order"><div class="rule-head">Order on the Statement</div>
@@ -210,13 +210,13 @@ export async function create(app: HTMLElement) {
 
       <section class="rule" data-tab="terms"><div class="rule-head">Payout</div>
         <div class="seg">${SPLITS.map((l, i) => `<label><input type="radio" name="split" value="${i}" ${i === 0 ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
-        <p class="hint" id="split-hint">Every Credit earns 1/80 of the sale.</p>
+        <p class="hint" id="split-hint">Every Credit earns 1/80.</p>
       </section>
 
       <section class="rule split3" data-tab="terms">
-        <div><div class="rule-head">Sale split</div><p class="split-note">${protocolBps ? `${pct(protocolBps)} protocol` : ''}${creatorBps ? ` · ${pct(creatorBps)} creator` : ''} · ${pct(10_000 - protocolBps - creatorBps)} to depositors</p><p class="hint">Every batch opened now gets this split, for good.</p></div>
-        <div><div class="rule-head">Reserve</div><div class="field"><input id="reserve" inputmode="decimal" placeholder="0" autocomplete="off"><span>ETH</span></div><p class="hint">Minimum first bid, for 7 days.</p></div>
-        <div><div class="rule-head">Deadline</div><div class="seg">${DURATIONS.map((d) => `<label><input type="radio" name="dur" value="${d}" ${d === 30 ? 'checked' : ''}><span>${d}d</span></label>`).join('')}</div><p class="hint">Then everyone withdraws.</p></div>
+        <div><div class="rule-head">Sale split</div><p class="split-note">${protocolBps ? `${pct(protocolBps)} protocol` : ''}${creatorBps ? ` · ${pct(creatorBps)} creator` : ''} · ${pct(10_000 - protocolBps - creatorBps)} to depositors</p></div>
+        <div><div class="rule-head">Reserve</div><div class="field"><input id="reserve" inputmode="decimal" placeholder="0" autocomplete="off"><span>ETH</span></div><p class="hint">Minimum first bid.</p></div>
+        <div><div class="rule-head">Deadline</div><div class="seg">${DURATIONS.map((d) => `<label><input type="radio" name="dur" value="${d}" ${d === 30 ? 'checked' : ''}><span>${d}d</span></label>`).join('')}</div></div>
       </section>
 
       <section class="rule" data-tab="credits"><div class="rule-head">Your Credits <span class="muted num" id="n">Min ${min}</span><button type="button" class="link small" id="all">Select all that fit</button></div>
@@ -229,7 +229,7 @@ export async function create(app: HTMLElement) {
 
       <div class="submit">
         ${approved ? '' : `<button type="button" class="btn primary" id="approve">Approve Eighty · once</button>`}
-        <button class="btn primary" id="go" disabled ${approved ? '' : 'hidden'}>Open batch</button>
+        <button class="btn primary" id="go" disabled ${approved ? '' : 'hidden'}>Start party</button>
         <p class="hint" id="why"></p>
       </div>
     </form>
@@ -297,7 +297,7 @@ export async function create(app: HTMLElement) {
     document.getElementById('n')!.textContent = picks.size ? `${picks.size} selected` : `Min ${min}`;
     const n = picks.size;
     const reason = !isOk ? 'Approve first.' : n < min ? `Select at least ${min} of your qualifying Credits.` : n > 80 ? 'At most 80.' : '';
-    why.textContent = reason || (n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions: open with ${CHUNK}, then deposit the rest.` : '');
+    why.textContent = reason || (n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions` : '');
     go.disabled = !!reason;
 
     clearTimeout(editionTimer);
@@ -518,13 +518,13 @@ export async function create(app: HTMLElement) {
     rules.minuteTo = any ? -1 : b;
     if (any) {
       winText.textContent = 'Any time';
-      winCount.textContent = minutes.length ? `The whole mint: ${minutes.reduce((s, [, c]) => s + c, 0).toLocaleString()} Credits over ${minutes.length.toLocaleString()} minutes.` : '';
+      winCount.textContent = minutes.length ? `${minutes.reduce((s, [, c]) => s + c, 0).toLocaleString()} Credits` : '';
     } else {
       const start = new Date(minutes[a][0] * 1000), end = new Date((minutes[b][0] + 60) * 1000);
       winText.textContent = `${fmtDT.format(start)} – ${start.toDateString() === end.toDateString() ? fmtT.format(end) : fmtDT.format(end)} ${tz}`;
       let n = 0;
       for (let i = a; i <= b; i++) n += minutes[i][1];
-      winCount.textContent = `${n.toLocaleString()} Credit${n === 1 ? '' : 's'} were paid for in this window${a === b ? ' (one minute)' : ''}.`;
+      winCount.textContent = `${n.toLocaleString()} Credit${n === 1 ? '' : 's'}`;
     }
     document.querySelectorAll<HTMLButtonElement>('#win-presets [data-i]').forEach((btn) =>
       btn.setAttribute('aria-pressed', String(btn.dataset.i === 'any' ? any : Number(btn.dataset.i) === a && a === b)),
@@ -612,8 +612,8 @@ export async function create(app: HTMLElement) {
   });
   app.querySelectorAll<HTMLInputElement>('input[name=split]').forEach((r) =>
     r.addEventListener('change', () => (document.getElementById('split-hint')!.textContent = r.value === '1'
-      ? 'Position 1 earns 1.5 shares, position 80 earns 0.5, straight line between. You deposit first, so you take the top slots. Leaving forfeits your slots.'
-      : 'Every Credit earns 1/80 of the sale.')),
+      ? 'Earlier deposits earn more: 1.5× down to 0.5×.'
+      : 'Every Credit earns 1/80.')),
   );
   app.querySelectorAll<HTMLInputElement>('input[name=arr]').forEach((r) =>
     r.addEventListener('change', () => (document.getElementById('arr-hint')!.textContent = ARR_HINTS[Number(r.value)])),
@@ -690,11 +690,11 @@ export async function create(app: HTMLElement) {
         go.textContent = `Depositing ${i}–${Math.min(i + CHUNK, ids.length)}…`;
         await send({ address: config.factory, abi: factoryAbi, functionName: 'deposit', args: [batch, ids.slice(i, i + CHUNK)] });
       }
-      toast('Batch opened.', 'ok');
+      toast('Party opened.', 'ok');
       location.hash = `#/b/${batch}`;
     } catch (x) {
       toast(errText(x), 'err', 8000);
-      go.textContent = 'Open batch';
+      go.textContent = 'Start party';
       refresh();
     }
   });

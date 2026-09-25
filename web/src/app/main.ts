@@ -18,7 +18,7 @@ async function route() {
   const hash = location.hash.replace(/^#\/?/, '');
   const [page, arg] = hash.split('/');
   document.querySelectorAll<HTMLAnchorElement>('[data-nav]').forEach((a) =>
-    a.toggleAttribute('aria-current', a.dataset.nav === (page === 'b' || page === 'new' ? '' : page ?? '')),
+    a.toggleAttribute('aria-current', a.dataset.nav === (page === 'b' || page === 'new' || page === 'auctions' ? '' : page ?? '')),
   );
   document.querySelectorAll<HTMLAnchorElement>('#account [data-nav]').forEach((a) =>
     a.classList.toggle('current', page === 'me'),
@@ -30,7 +30,7 @@ async function route() {
     else if (page === 'me') await profile(app, route);
     else if (page === 'new') await create(app);
     else if (page === 'b' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await batch(app, arg as Address, route);
-    else await home(app);
+    else await home(app, page === 'auctions' ? 'auctions' : 'parties');
   } catch (e) {
     if (run === seq) app.innerHTML = `<section class="prose"><h1>Something went wrong</h1><p class="error">${esc(errText(e))}</p></section>`;
   }
@@ -42,7 +42,7 @@ function drawTestnet() {
   if (config.chainId === 1) return;
   const el = document.getElementById('testnet')!;
   el.hidden = false;
-  el.innerHTML = `<span><strong>Testnet preview</strong> · ${esc(chain.name)}, test Credits only. Mainnet launches with Jack’s Statement contract.</span><a href="#/mint">Mint test Credits →</a>`;
+  el.innerHTML = `<span><strong>Testnet</strong> · ${esc(chain.name)}</span><a href="#/mint">Mint test Credits →</a>`;
 }
 
 /// Phone browsers have no wallet inside them: open this page in a wallet's own browser instead.

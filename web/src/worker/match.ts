@@ -51,13 +51,15 @@ export type Rules = {
   list?: number[]; // explicit ids, empty = any
 };
 
-export async function match(assets: Fetcher, origin: string, r: Rules, samples = 80) {
+/// A test for one Credit against the rules, from the frozen edition (no chain reads).
+export async function predicate(assets: Fetcher, origin: string, r: Rules) {
   const t = await load(assets, origin);
   const sc = r.minScore || r.maxScore ? await loadScores(assets, origin) : null;
   const list = r.list?.length ? new Set(r.list) : null;
   const lo = Math.max(1, r.idFrom || 1);
   const hi = Math.min(t.length, r.idTo || t.length);
-  const ok = (id: number) => {
+  return (id: number) => {
+    if (id < lo || id > hi) return false;
     if (list && !list.has(id)) return false;
     const v = t[id - 1];
     if (!v) return false;
@@ -78,6 +80,13 @@ export async function match(assets: Fetcher, origin: string, r: Rules, samples =
     }
     return true;
   };
+}
+
+export async function match(assets: Fetcher, origin: string, r: Rules, samples = 80) {
+  const t = await load(assets, origin);
+  const ok = await predicate(assets, origin, r);
+  const lo = Math.max(1, r.idFrom || 1);
+  const hi = Math.min(t.length, r.idTo || t.length);
   // Two passes: count, then take matches evenly spaced across the edition (all of them when few).
   let count = 0;
   for (let id = lo; id <= hi; id++) if (ok(id)) count++;

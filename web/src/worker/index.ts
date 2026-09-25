@@ -10,7 +10,7 @@ import { mainnet } from 'viem/chains';
 import { batchAbi, creditsAbi, creditArtAbi, factoryAbi } from '../app/abi';
 import { quote, scan } from './opensea';
 import { ratings } from './ratings';
-import { match, type Rules } from './match';
+import { match, predicate, type Rules } from './match';
 
 interface RateLimit {
   limit(o: { key: string }): Promise<{ success: boolean }>;
@@ -235,54 +235,42 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
   }
 
+  // Live OpenSea listings that fit a party, cheapest first: what the Buy tab shows before anyone asks for a price.
+  if (url.pathname === '/opensea/listings') {
+    if (!env.OPENSEA_API_KEY) return text('OpenSea is not configured', 501);
+    if (!sameSite(req)) return text('forbidden', 403);
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    const batch = (url.searchParams.get('batch') ?? '').toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(batch)) return text('bad request', 400);
+    if (!(await isBatch(env, url, batch as Address))) return text('not a batch', 404);
+    try {
+      // Without a Sweeper (testnets) the party can't take mainnet Credits, so this is a live preview: real
+      // mainnet listings and prices, checked against the party's rules via the frozen edition.
+      const live = hasSweeper(env);
+      const listings = live ? await fitting(env, url, ctx, batch as Address) : await previewFitting(env, url, ctx, batch as Address);
+      return Response.json({ listings: listings.map((l) => ({ id: l.id, price: l.price })), preview: !live }, { headers: { 'cache-control': 'no-store' } });
+    } catch (e) {
+      return Response.json({ error: (e as Error).message.slice(0, 200) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
+  }
+
   if (url.pathname === '/opensea/quote') {
-    if (!env.OPENSEA_API_KEY || !env.SWEEPER) return text('OpenSea is not configured', 501);
+    if (!env.OPENSEA_API_KEY || !hasSweeper(env)) return text('OpenSea is not configured', 501);
     if (!sameSite(req)) return text('forbidden', 403);
     if (await limited(env.RL_QUOTE, req)) return text('slow down', 429);
     const batch = (url.searchParams.get('batch') ?? '').toLowerCase();
-    const n = Number(url.searchParams.get('n'));
+    // Either the `n` cheapest, or exactly the listings the buyer picked (`ids`, comma separated).
+    const idsParam = url.searchParams.get('ids');
+    const ids = idsParam ? idsParam.split(',') : null;
+    const n = ids ? ids.length : Number(url.searchParams.get('n'));
     if (!/^0x[0-9a-f]{40}$/.test(batch) || !Number.isInteger(n) || n < 1 || n > 40) return text('bad request', 400);
+    if (ids && ids.some((x) => !/^\d{1,7}$/.test(x))) return text('bad request', 400);
     if (!(await isBatch(env, url, batch as Address))) return text('not a batch', 404);
     try {
-      // The scan (list pages, trait and liveness checks) is the expensive part and the same for everyone.
-      const cache = caches.default;
-      const scanKey = new Request(`${url.origin}/opensea/scan/${batch}`);
-      let listings = await cache.match(scanKey).then((r) => r?.json<Awaited<ReturnType<typeof scan>>>());
-      if (!listings && inflight.has(batch)) listings = await inflight.get(batch)!;
-      if (!listings) {
-        const c = client(env);
-        const p = scan({
-          key: env.OPENSEA_API_KEY,
-          slug: env.OPENSEA_SLUG,
-          credits: env.CREDITS,
-          max: 40,
-          passes: (id) => c.readContract({ address: batch as Address, abi: batchAbi, functionName: 'passes', args: [id] }),
-          live: (id, seller, operator) =>
-            Promise.all([
-              c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'ownerOf', args: [id] }),
-              c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'isApprovedForAll', args: [seller, operator] }),
-            ]).then(([o, ok]) => o.toLowerCase() === seller.toLowerCase() && ok),
-          hasCode: (a) => c.getCode({ address: a }).then((code) => !!code && code !== '0x'),
-        });
-        // One scan per batch at a time: requests arriving mid-scan share it. waitUntil keeps this request's
-        // context (and so the scan's I/O) alive even if this client goes away before it finishes.
-        inflight.set(batch, p);
-        ctx.waitUntil(p.finally(() => inflight.delete(batch)).catch(() => {}));
-        listings = await p;
-        ctx.waitUntil(cache.put(scanKey, Response.json(listings, { headers: { 'cache-control': 'public, max-age=30' } })));
-      }
-      // Slots: on a layout batch two listings of one palette can fight over one slot, so the batch replays its
-      // deposit rule over the whole bundle, in price order, and only the ones that would land are quoted.
-      if (listings.length) {
-        try {
-          const ok = (await client(env).readContract({
-            address: batch as Address,
-            abi: batchAbi,
-            functionName: 'canTake',
-            args: [listings.map((l) => BigInt(l.id))],
-          })) as readonly boolean[];
-          listings = listings.filter((_, i) => ok[i]);
-        } catch {}
+      let listings = await fitting(env, url, ctx, batch as Address);
+      if (ids) {
+        const want = new Set(ids);
+        listings = listings.filter((l) => want.has(l.id));
       }
       const result = await quote({ key: env.OPENSEA_API_KEY, sweeper: env.SWEEPER, listings, n, origin: url.origin });
       return Response.json(result, { headers: { 'cache-control': 'no-store' } });
@@ -415,6 +403,95 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
     status: upstream.status,
     headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
   });
+}
+
+/// Listings that fit a party and would land in it, cheapest first. The scan (list pages, trait and liveness
+/// checks) is the expensive part and the same for everyone, so it is cached briefly and shared while in flight.
+const hasSweeper = (env: Env) => !!env.SWEEPER && !/^0x0+$/.test(env.SWEEPER);
+
+/// Testnet preview of `fitting`: mainnet listings that pass the party's rules as the edition knows them.
+/// Layouts: a Credit fits if its palette has a painted slot, or any slot is open.
+async function previewFitting(env: Env, url: URL, ctx: ExecutionContext, batch: Address) {
+  const cache = caches.default;
+  const key = new Request(`${url.origin}/opensea/preview/${batch}`);
+  const hit = await cache.match(key);
+  if (hit) return hit.json<Awaited<ReturnType<typeof scan>>>();
+  const s = (await client(env).readContract({ address: batch, abi: batchAbi, functionName: 'summary' })) as { filter: Record<string, bigint | number> };
+  const f = s.filter;
+  const layout = [BigInt(f.layout0), BigInt(f.layout1)];
+  let palettes = Number(f.palettes);
+  if (layout[0] || layout[1]) {
+    const slots = Array.from({ length: 80 }, (_, i) => Number((layout[i < 64 ? 0 : 1] >> BigInt(4 * (i < 64 ? i : i - 64))) & 15n));
+    if (!slots.includes(0)) palettes = slots.reduce((m, v) => m | (1 << v), 0);
+  }
+  const ok = await predicate(env.ASSETS, url.origin, {
+    palettes,
+    prints: Number(f.prints),
+    weights: Number(f.weights),
+    eights: Number(f.eights),
+    idFrom: Number(f.idFrom),
+    idTo: Number(f.idTo),
+    minScore: Number(f.minScore),
+    maxScore: Number(f.maxScore),
+  });
+  const main = createPublicClient({ transport: http(env.ENS_RPC || 'https://eth.drpc.org', { timeout: 8_000 }) });
+  const listings = await scan({
+    key: env.OPENSEA_API_KEY!,
+    slug: env.OPENSEA_SLUG,
+    credits: MAINNET_CREDITS,
+    max: 40,
+    passes: (id) => Promise.resolve(ok(Number(id))),
+    live: (id, seller, operator) =>
+      Promise.all([
+        main.readContract({ address: MAINNET_CREDITS, abi: creditsAbi, functionName: 'ownerOf', args: [id] }),
+        main.readContract({ address: MAINNET_CREDITS, abi: creditsAbi, functionName: 'isApprovedForAll', args: [seller, operator] }),
+      ]).then(([o, a]) => o.toLowerCase() === seller.toLowerCase() && a),
+    hasCode: (a) => main.getCode({ address: a }).then((code) => !!code && code !== '0x'),
+  });
+  ctx.waitUntil(cache.put(key, Response.json(listings, { headers: { 'cache-control': 'public, max-age=60' } })));
+  return listings;
+}
+
+async function fitting(env: Env, url: URL, ctx: ExecutionContext, batch: Address) {
+  const cache = caches.default;
+  const scanKey = new Request(`${url.origin}/opensea/scan/${batch}`);
+  let listings = await cache.match(scanKey).then((r) => r?.json<Awaited<ReturnType<typeof scan>>>());
+  if (!listings && inflight.has(batch)) listings = await inflight.get(batch)!;
+  if (!listings) {
+    const c = client(env);
+    const p = scan({
+      key: env.OPENSEA_API_KEY!,
+      slug: env.OPENSEA_SLUG,
+      credits: env.CREDITS,
+      max: 40,
+      passes: (id) => c.readContract({ address: batch, abi: batchAbi, functionName: 'passes', args: [id] }),
+      live: (id, seller, operator) =>
+        Promise.all([
+          c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'ownerOf', args: [id] }),
+          c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'isApprovedForAll', args: [seller, operator] }),
+        ]).then(([o, ok]) => o.toLowerCase() === seller.toLowerCase() && ok),
+      hasCode: (a) => c.getCode({ address: a }).then((code) => !!code && code !== '0x'),
+    });
+    // waitUntil keeps this request's context (and so the scan's I/O) alive even if the client goes away.
+    inflight.set(batch, p);
+    ctx.waitUntil(p.finally(() => inflight.delete(batch)).catch(() => {}));
+    listings = await p;
+    ctx.waitUntil(cache.put(scanKey, Response.json(listings, { headers: { 'cache-control': 'public, max-age=30' } })));
+  }
+  // Slots: on a layout party two listings of one palette can fight over one slot, so the party replays its
+  // deposit rule over the whole bundle, in price order, and only the ones that would land are kept.
+  if (listings.length) {
+    try {
+      const ok = (await client(env).readContract({
+        address: batch,
+        abi: batchAbi,
+        functionName: 'canTake',
+        args: [listings.map((l) => BigInt(l.id))],
+      })) as readonly boolean[];
+      listings = listings.filter((_, i) => ok[i]);
+    } catch {}
+  }
+  return listings;
 }
 
 /// Whether an address is one of our factory's batches. Positives are cached forever (a batch is one for good).

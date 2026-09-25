@@ -14,10 +14,10 @@ export async function mint(app: HTMLElement, rerender: () => void) {
   }
   const owned = session.account ? await myCredits(session.account) : [];
 
-  app.innerHTML = `<a class="back" href="#/">← Batches</a>
+  app.innerHTML = `<a class="back" href="#/">← Parties</a>
   <section class="narrow">
     <h1>Mint test Credits</h1>
-    <p class="lede">Free on ${chain.name}. Same art and traits as real Credits, so you can try every flow: open a batch, fill it, burn it, bid.</p>
+    <p class="lede">Free on ${chain.name}. Same art and traits as real Credits.</p>
     <div class="box">
       <div class="box-head"><h3>How many</h3><span class="muted small">Up to 40 per transaction</span></div>
       <div class="seg" role="radiogroup" aria-label="How many">${COUNTS.map((n) => `<label><input type="radio" name="mint-n" value="${n}" ${n === 20 ? 'checked' : ''}><span>${n}</span></label>`).join('')}</div>
@@ -33,7 +33,7 @@ export async function mint(app: HTMLElement, rerender: () => void) {
               .reverse()
               .map((id) => `<span class="pick" title="Credit #${id}"><img src="${art(id)}" alt="Credit #${id}" loading="lazy"></span>`)
               .join('')}</div>
-             <div class="actions"><a class="btn primary" href="#/">Join a batch</a><a class="btn" href="#/new">Open a batch</a></div>`
+             <div class="actions"><a class="btn primary" href="#/">Join a party</a><a class="btn" href="#/new">Make Statement Party</a></div>`
           : '<p class="muted">None yet.</p>'
       }
     </div>`

@@ -97,10 +97,10 @@ export function errText(e: unknown): string {
 }
 
 const ERRORS: Record<string, string> = {
-  TooFewToOpen: 'Not enough Credits to open a batch.',
-  WrongState: 'The batch is not in the right state for that.',
+  TooFewToOpen: 'Not enough Credits to open a party.',
+  WrongState: 'The party is not in the right state for that.',
   NotDepositor: 'Only the depositor can withdraw that Credit.',
-  Excluded: "That Credit doesn't match this batch's filter.",
+  Excluded: "That Credit doesn't match this party's filter.",
   BidTooLow: 'Bid is below the minimum.',
   AuctionOver: 'The auction has ended.',
   AuctionRunning: 'The auction is still running.',
@@ -110,7 +110,7 @@ const ERRORS: Record<string, string> = {
   NoSpecifiedOrdersAvailable: 'None of those listings are available any more. Get a new price.',
   TooFewBought: 'Fewer listings were available than expected. Get a new price.',
   FeeNotCovered: 'Not enough ETH sent to cover the fee.',
-  NotStray: 'That token is part of the batch.',
+  NotStray: 'That token is part of the party.',
   AssemblerNotReady: 'Burning opens once Jack’s Statement contract ships and the adapter is activated.',
 };
 

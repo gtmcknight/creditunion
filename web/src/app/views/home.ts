@@ -69,63 +69,67 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[]) {
       <div class="row creator">${who(s.creator)}${fee(s)}</div>
       <div class="bar"><i style="width:${(s.count / 80) * 100}%"></i></div>
       <div class="row muted small"><span class="num">${s.count}/80</span><span>${status(s)}</span></div>
-      ${f || s.arrangement ? `<div class="small filter">${[f, s.arrangement ? `Order · ${ARRANGEMENTS[s.arrangement]}` : ''].filter(Boolean).map(esc).join(' · ')}</div>` : ''}
+      ${f || s.arrangement ? `<div class="small filter">${[f, s.arrangement ? ARRANGEMENTS[s.arrangement] : ''].filter(Boolean).map(esc).join(' · ')}</div>` : ''}
     </div>
   </a>`;
 }
 
-export async function home(app: HTMLElement) {
-  // App-style bar: filter tabs on the left, sort and the one primary action on the right.
+const PARTY_STATES = new Set(['Open', 'Full', 'Expired']);
+export type HomeTab = 'parties' | 'auctions';
+
+/// Two tabs over one list: parties still pooling, and Statements at or past auction. Each leads with
+/// "For you" (what you're in, can join, or are bidding on), then everything else.
+export async function home(app: HTMLElement, tab: HomeTab = 'parties') {
   app.innerHTML = `
   <section>
     <div class="subnav">
       <div class="subtabs" role="tablist">
-        <button type="button" role="tab" data-view="all" aria-selected="true">All <span class="num" id="batch-count"></span></button>
-        <button type="button" role="tab" data-view="fit" aria-selected="false" id="fit-tab" hidden>Fits yours <span class="num" id="fit-count"></span></button>
+        <a role="tab" href="#/" aria-selected="${tab === 'parties'}">Parties <span class="num" id="n-parties"></span></a>
+        <a role="tab" href="#/auctions" aria-selected="${tab === 'auctions'}">Auctions <span class="num" id="n-auctions"></span></a>
       </div>
       <div class="subnav-end">
         <div class="seg sm" role="radiogroup" aria-label="Sort" id="sort-seg" hidden>${SORTS.map(([k, l]) => `<label><input type="radio" name="sort" value="${k}" ${k === sortKey() ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
-        <a class="btn primary sm" href="#/new">New batch</a>
+        <a class="btn primary sm" href="#/new">Make Statement Party</a>
       </div>
     </div>
-    <div class="grid" id="batches"><p class="muted">Loading from chain…</p></div>
+    <div id="batches"><p class="muted">Loading from chain…</p></div>
   </section>`;
 
   try {
-    const list = await listBatches();
+    const all = await listBatches();
     const el = document.getElementById('batches');
     if (!el) return; // navigated away
-    document.getElementById('batch-count')!.textContent = list.length ? `${list.length}` : '';
-    document.getElementById('sort-seg')!.hidden = list.length < 4;
+    const parties = all.filter((b) => PARTY_STATES.has(b.s.state));
+    const auctions = all.filter((b) => !PARTY_STATES.has(b.s.state));
+    document.getElementById('n-parties')!.textContent = parties.length ? String(parties.length) : '';
+    document.getElementById('n-auctions')!.textContent = auctions.length ? String(auctions.length) : '';
+    const list = tab === 'parties' ? parties : auctions;
+    document.getElementById('sort-seg')!.hidden = tab !== 'parties' || list.length < 4;
     let fit = new Map<Address, bigint[]>();
-    let onlyMine = false;
+    const forYou = (b: Listed) =>
+      !!session.account &&
+      (mineIn(b).size > 0 || same(b.s.creator, session.account) || fit.has(b.s.address) || (tab === 'auctions' && same(b.s.highBidder, session.account)));
+    const grid = (items: Listed[]) => `<div class="grid">${items.map((b) => card(b, fit.get(b.s.address))).join('')}</div>`;
     const draw = () => {
-      sortList(list, sortKey());
-      const shown = onlyMine ? list.filter((b) => fit.has(b.s.address)) : list;
-      el.innerHTML = shown.length
-        ? shown.map((b) => card(b, fit.get(b.s.address))).join('')
-        : `<div class="empty-state"><p>No batches yet.</p><a class="btn primary" href="#/new">Open the first one</a></div>`;
+      sortList(list, tab === 'parties' ? sortKey() : 'new');
+      const mine = list.filter(forYou);
+      const rest = list.filter((b) => !forYou(b));
+      el.innerHTML = !list.length
+        ? tab === 'parties'
+          ? `<div class="empty-state"><p>No parties yet.</p><a class="btn primary" href="#/new">Make Statement Party</a></div>`
+          : `<div class="empty-state"><p>No auctions yet. When a party burns its 80, the Statement is auctioned here.</p><a class="btn" href="#/">See parties</a></div>`
+        : (mine.length ? `<h2 class="group-title">For you <span class="num">${mine.length}</span></h2>${grid(mine)}` : '') +
+          (rest.length ? `${mine.length ? `<h2 class="group-title">All ${tab} <span class="num">${rest.length}</span></h2>` : ''}${grid(rest)}` : '');
       hydrate(el);
       fillGhosts(el);
     };
     draw();
-    if (session.account) {
-      fitByBatch(list).then((m) => {
+    if (session.account && tab === 'parties') {
+      fitByBatch(parties).then((m) => {
         fit = m;
-        const tab = document.getElementById('fit-tab');
-        if (!tab || !fit.size) return;
-        document.getElementById('fit-count')!.textContent = String(fit.size);
-        tab.hidden = false;
-        draw();
+        if (document.getElementById('batches') === el) draw();
       });
     }
-    document.querySelectorAll<HTMLButtonElement>('.subtabs [data-view]').forEach((t) =>
-      t.addEventListener('click', () => {
-        onlyMine = t.dataset.view === 'fit';
-        document.querySelectorAll('.subtabs [data-view]').forEach((x) => x.setAttribute('aria-selected', String(x === t)));
-        draw();
-      }),
-    );
     document.querySelectorAll<HTMLInputElement>('input[name=sort]').forEach((r) =>
       r.addEventListener('change', () => {
         try {
@@ -136,6 +140,6 @@ export async function home(app: HTMLElement) {
     );
   } catch (e) {
     const el = document.getElementById('batches');
-    if (el) el.innerHTML = `<p class="error">Couldn't read batches from chain. ${esc((e as Error).message)}</p>`;
+    if (el) el.innerHTML = `<p class="error">Couldn't read parties from chain. ${esc((e as Error).message)}</p>`;
   }
 }
