@@ -94,7 +94,7 @@ In `web/wrangler.jsonc` set `CHAIN_ID` `"1"`, `CREDITS` `0x97630aA70AB14ed9883B4
 ```sh
 cd web
 wrangler secret put RPC_URL          # the Alchemy mainnet URL (paid reads, key stays private)
-wrangler secret put OPENSEA_API_KEY  # already set; re-put if rotated
+wrangler secret put OPENSEA_API_KEY  # set Sept 25 from web/.env; re-put if rotated. Without it /opensea/quote is 501 and buy-in is hidden.
 wrangler secret put ENS_RPC          # same as RPC_URL on mainnet
 pnpm build && wrangler deploy
 ```
