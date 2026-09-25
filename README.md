@@ -9,6 +9,7 @@ Independent. Not affiliated with Jack Butcher.
 | | |
 |---|---|
 | **Open** | Anyone with ≥10 Credits opens a batch and sets a creator fee (0–10%, fixed forever). Optional trait filter (Colors / Print / Weight / Eights), checked onchain against Jack's own `CreditArt.describe`. Optional reserve. Deadline 3–90 days. |
+| **Order** | Chosen by the opener and shown before anyone deposits: *Deposit order*, *Mint time*, *Credit number*, or *Creator's order*. With the last, the creator arranges the full sheet by hand (or by rating, mint time, number) and burns with that order; if they haven't within a day of filling, anyone can burn in deposit order. The adapter receives the arrangement too, so whatever Jack's contract wants can be handled there. |
 | **Deposit** | Approve the factory once and deposit any number, or `safeTransferFrom` one Credit straight to the batch (no approval; `data` may name a beneficiary). Deposit order is the Statement order. Plain `transferFrom` fires no hook: such strays go to the fee recipient via `rescue()` as lost-and-found. |
 | **Buy in** | The `Sweeper` buys the cheapest fitting OpenSea listings through Seaport 1.6 and deposits them in the buyer's name, in one transaction. The buyer pays the listings plus the sweep fee (1%). Unused ETH is refunded, and listings that sold first are skipped. |
 | **Withdraw** | Any depositor, any time, until the batch holds 80. |
@@ -17,6 +18,10 @@ Independent. Not affiliated with Jack Butcher.
 | **Expire** | Not burned by the deadline (never filled, or Statements sold out): everyone withdraws. |
 | **Auction** | A 24h clock starts at the first bid. Each bid +5% (min 0.01 ETH). Bids in the last 15 min extend it. Outbid ETH is refunded in the same tx. A reserve lapses after 7 days with no bids. |
 | **Split** | Anyone settles. The Statement goes to the winner. The protocol fee (1%) and the creator's fee come off the top, and each deposited Credit claims 1/80 of the rest. |
+
+## Ratings
+
+Batch pages show each Credit's **official rating**: Jack Butcher's published formula (methodology v3.4.0, [jack.art/credits/rating](https://jack.art/credits/rating)), reproduced in `web/src/shared/credits.ts` from his MIT-licensed art contracts and verified to match his API exactly (score and rank) on sampled Credits. The frozen edition (122,154 Credits: seeds and payment times from the `Distributed` events) is compiled into `web/public/edition.bin` by `node scripts/edition.ts credits.json`; the Worker's `/ratings` endpoint rates any ids against it, including testnet Credits.
 
 ## Fees
 
@@ -28,9 +33,13 @@ Independent. Not affiliated with Jack Butcher.
 
 All of these are fixed once set. Batch cards and pages lead with the creator (ENS name and avatar, resolved on mainnet) and their fee, and the list can sort by lowest fee.
 
+## Launching before the Statement contract exists
+
+The factory can deploy with **no assembler**. Batches open, fill and lock as normal, but cannot burn: pooling only. When Jack's Statement contract ships and the adapter is written and reviewed, one address (the *setter*, ideally a multisig) **proposes** it. That opens a **3-day exit window** in which anyone can withdraw from any batch, full ones included. After 3 days anyone can **activate** it, permanently; the setter then has no powers at all. Full batches get a fresh 7 days from activation to burn, so none expires while waiting. The setter can replace a pending proposal (which restarts the window) but can do nothing else, ever.
+
 ## Trust model
 
-- No owner, admin, pause, or upgrade. Every parameter is fixed at deploy.
+- No owner, admin, pause, or upgrade. Every parameter is fixed at deploy, except the assembler when launched in pooling mode: one setter key, one proposal at a time, always behind a 3-day exit window, gone once active.
 - The factory only moves Credits **from its caller** into **its own** batches.
 - The Statement mint goes through an immutable `IAssembler`, **called** (never delegatecalled) with an operator approval that exists only for the duration of the call. The batch verifies the result: the adapter's `statement()` matches, none of the 80 still exist, and it owns the Statement. Adapter storage cannot reach the batch.
 - The auction follows the Nouns/Zora pattern. Refunds are gas-capped and never copy return data. A failed refund becomes `owed` (pull), so a hostile bidder can't block the auction.
@@ -75,9 +84,11 @@ Secrets: `wrangler secret put RPC_URL` and `wrangler secret put OPENSEA_API_KEY`
 
 **Sepolia (now):** `forge script script/DeployTestnet.s.sol --rpc-url $SEPOLIA --broadcast --private-key $PK` deploys mock Credits, a mock Statement, and the factory. Put the addresses in `web/wrangler.jsonc` `vars`, then run `wrangler secret put RPC_URL` and `pnpm deploy`.
 
-**Mainnet (after Jack publishes the Statement contract, ~Oct 1 2026):**
-1. Read the Statement contract. Write `JackAssembler` implementing `IAssembler`: stateless, approve → mint → revoke, return `(statement, id)`. Test it on a mainnet fork against the real Credits.
-2. Get it and `Batch.sol` reviewed.
+**Mainnet, stage 1 (pooling, can happen now):** `FEE_RECIPIENT=… SETTER=… forge script script/DeployMainnet.s.sol --broadcast` deploys the factory with no assembler and the Sweeper. Set `CHAIN_ID=1`, `CREDITS`, `FACTORY`, `SWEEPER` in `wrangler.jsonc` and deploy the site. Batches fill and lock; burning waits.
+
+**Mainnet, stage 2 (after Jack publishes the Statement contract, ~Oct 1 2026):**
+1. Read the Statement contract. Write `JackAssembler` implementing `IAssembler` (called by the batch with a scoped operator approval; must finish with the batch owning the Statement). Test it on a mainnet fork against the real Credits.
+2. Get it and the core contracts reviewed. Then from the setter: `proposeAssembler(adapter)`; 3 days later anyone calls `activateAssembler()`.
 3. `ASSEMBLER=… FEE_RECIPIENT=… [PROTOCOL_FEE_BPS=100 SWEEP_FEE_BPS=100] forge script script/DeployMainnet.s.sol --broadcast` deploys the factory and the Sweeper.
 4. Set `CHAIN_ID=1`, `CREDITS=0x97630aA70AB14ed9883B41dAfccBc11349723043`, `FACTORY=…` and `SWEEPER=…` in `wrangler.jsonc`, then deploy.
 

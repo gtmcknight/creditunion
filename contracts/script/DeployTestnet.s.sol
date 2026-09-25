@@ -5,6 +5,7 @@ import {Script, console} from "forge-std/Script.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {MockAssembler} from "../src/MockAssembler.sol";
 import {Sweeper} from "../src/Sweeper.sol";
+import {IAssembler} from "../src/interfaces/IAssembler.sol";
 import {ICredits} from "../src/interfaces/ICredits.sol";
 import {ISeaport} from "../src/interfaces/ISeaport.sol";
 import {MockStatement} from "../src/mocks/MockStatement.sol";
@@ -19,8 +20,12 @@ contract DeployTestnet is Script {
         vm.startBroadcast();
         TestCredits credits = new TestCredits();
         MockStatement statement = new MockStatement(ICredits(address(credits)));
-        BatchFactory factory =
-            new BatchFactory(ICredits(address(credits)), new MockAssembler(statement), feeTo, 100, 10);
+        // STAGED=1 mirrors the mainnet launch: no assembler at deploy, the deployer proposes it later.
+        MockAssembler asm = new MockAssembler(statement);
+        bool staged = vm.envOr("STAGED", false);
+        BatchFactory factory = new BatchFactory(
+            ICredits(address(credits)), staged ? IAssembler(address(0)) : asm, staged ? msg.sender : address(0), feeTo, 100, 10
+        );
         // Seaport 1.6 has the same address on Sepolia; buy-in only matters where OpenSea lists these.
         Sweeper sweeper = new Sweeper(ISeaport(0x0000000000000068F116a894984e2DB1123eB395), factory, 100);
         vm.stopBroadcast();
@@ -29,5 +34,6 @@ contract DeployTestnet is Script {
         console.log("STATEMENT", address(statement));
         console.log("FACTORY", address(factory));
         console.log("SWEEPER", address(sweeper));
+        console.log("ASSEMBLER", address(asm));
     }
 }

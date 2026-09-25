@@ -1,11 +1,17 @@
 import { decodeEventLog, parseEther } from 'viem';
 import { creditsAbi, factoryAbi } from '../abi';
 import { config, send, session } from '../chain';
-import { isApproved, minOpen, myCredits, protocolFeeBps } from '../data';
+import { ARRANGEMENTS, isApproved, minOpen, myCredits, protocolFeeBps } from '../data';
 import { hashTrait, LABEL, TRAITS, type TraitKey } from '../traits';
 import { $$, art, errText, esc, toast } from '../ui';
 
 const CHUNK = 40;
+const ARR_HINTS = [
+  'The 80 appear on the Statement in the order they were deposited.',
+  'Sorted by when each Credit was paid for, earliest first.',
+  'Sorted by Credit number, lowest first.',
+  'You arrange the sheet once it’s full: by rating, mint time, number, or by hand. If you haven’t burned within a day of filling, anyone can burn in deposit order.',
+];
 const fmt = (n: number) => n.toFixed(4).replace(/\.?0+$/, '');
 const DURATIONS = [7, 14, 30, 60, 90];
 
@@ -39,6 +45,11 @@ export async function create(app: HTMLElement) {
           .join('')}</div>
         <p class="hint">Optional. Enforced onchain.</p>
       </div></div>
+
+      <div class="field-row" role="radiogroup" aria-label="Order on the Statement"><span class="label">Order</span>
+        <div><div class="seg wrap">${ARRANGEMENTS.map((l, i) => `<label><input type="radio" name="arr" value="${i}" ${i === 0 ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+        <p class="hint" id="arr-hint">${ARR_HINTS[0]}</p></div>
+      </div>
 
       <label class="field-row"><span class="label">Your fee</span><div><div class="field"><input id="cfee" inputmode="decimal" placeholder="0" autocomplete="off"><span>%</span></div><p class="hint" id="cfee-hint">Your cut of the sale, 0–10%. Fixed forever and shown to everyone before they join.</p></div></label>
 
@@ -92,6 +103,9 @@ export async function create(app: HTMLElement) {
     owned.slice(0, 80).forEach((id) => picks.add(id.toString()));
     draw();
   });
+  app.querySelectorAll<HTMLInputElement>('input[name=arr]').forEach((r) =>
+    r.addEventListener('change', () => (document.getElementById('arr-hint')!.textContent = ARR_HINTS[Number(r.value)])),
+  );
   const cfee = document.getElementById('cfee') as HTMLInputElement;
   const feeBps = () => {
     const v = cfee.value.trim();
@@ -144,6 +158,7 @@ export async function create(app: HTMLElement) {
     if (Number.isNaN(bps)) return toast('Your fee must be between 0 and 10%.', 'err');
     const name = (document.getElementById('name') as HTMLInputElement).value.trim();
     const days = Number((app.querySelector('input[name=dur]:checked') as HTMLInputElement).value);
+    const arr = Number((app.querySelector('input[name=arr]:checked') as HTMLInputElement).value);
     const ids = [...picks].map(BigInt);
     const f = {
       colors: hashTrait(filter.colors),
@@ -158,7 +173,7 @@ export async function create(app: HTMLElement) {
         address: config.factory,
         abi: factoryAbi,
         functionName: 'create',
-        args: [name, f, reserve, BigInt(bps), BigInt(days * 86400), ids.slice(0, CHUNK)],
+        args: [name, f, reserve, BigInt(bps), arr, BigInt(days * 86400), ids.slice(0, CHUNK)],
       });
       const ev = receipt.logs
         .map((l) => {

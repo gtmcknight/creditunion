@@ -9,6 +9,7 @@ import { createPublicClient, http, type Address } from 'viem';
 import { mainnet } from 'viem/chains';
 import { batchAbi, creditsAbi, creditArtAbi, factoryAbi } from '../app/abi';
 import { quote, scan } from './opensea';
+import { ratings } from './ratings';
 
 interface RateLimit {
   limit(o: { key: string }): Promise<{ success: boolean }>;
@@ -125,6 +126,29 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   }
 
   if (url.pathname === '/rpc') return rpc(req, env, url);
+
+  // Official ratings for up to 200 Credits, computed from the frozen edition (see shared/credits.ts).
+  if (url.pathname === '/ratings') {
+    if (req.method !== 'POST' || !sameSite(req)) return text('forbidden', 403);
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    let ids: bigint[];
+    try {
+      const body = (await req.json()) as { ids?: unknown };
+      if (!Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > 200) throw 0;
+      ids = body.ids.map((x) => {
+        if (!/^\d{1,9}$/.test(String(x))) throw 0;
+        return BigInt(String(x));
+      });
+    } catch {
+      return text('bad request', 400);
+    }
+    try {
+      const r = await ratings({ assets: env.ASSETS, origin: url.origin, rpc: rpcUrl(env), credits: env.CREDITS, ids });
+      return Response.json(r, { headers: { 'cache-control': 'no-store' } });
+    } catch (e) {
+      return Response.json({ error: String((e as Error).message).replace(/https?:\/\/\S+/g, '<url>').slice(0, 200) }, { status: 502 });
+    }
+  }
 
   if (url.pathname === '/opensea/quote') {
     if (!env.OPENSEA_API_KEY || !env.SWEEPER) return text('OpenSea is not configured', 501);

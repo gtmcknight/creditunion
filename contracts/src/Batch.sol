@@ -10,6 +10,9 @@ import {IAssembler} from "./interfaces/IAssembler.sol";
 interface IBatchFactory {
     function credits() external view returns (ICredits);
     function assembler() external view returns (IAssembler);
+    function assemblerActiveAt() external view returns (uint64);
+    function exitWindowOpen() external view returns (bool);
+    function pendingUntil() external view returns (uint64);
     function feeRecipient() external view returns (address);
     function protocolFeeBps() external view returns (uint256);
 }
@@ -18,7 +21,9 @@ interface IBatchFactory {
 /// @notice Eighty Credits pooled into one Statement.
 ///
 ///         Open      Anyone deposits Credits that pass the batch's filter. Depositors withdraw theirs at any time.
-///         Full      The 80th Credit locks the batch. Anyone can assemble the Statement until the deadline.
+///         Full      The 80th Credit locks the batch. Anyone can assemble the Statement until the deadline,
+///                   once the factory has an active assembler. While one is only proposed, every batch
+///                   (full ones too) can be withdrawn from: the exit window.
 ///         Expired   Deadline passed before assembly. Every depositor withdraws their Credits.
 ///         Auction   The batch holds the Statement. The 24-hour clock starts with the first bid.
 ///         Settled   The Statement went to the winner. Protocol fee and the creator's fee (fixed when the
@@ -38,6 +43,17 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     uint256 public constant MIN_RAISE = 0.01 ether;
     uint256 public constant REFUND_GAS = 50_000;
     uint256 public constant MAX_NAME = 64;
+    uint256 public constant CREATOR_ORDER_GRACE = 1 days; // then anyone burns in deposit order
+
+    /// @notice How the 80 are ordered on the Statement. Fixed when the batch opens; shown before depositing.
+    ///         Deposit: as deposited. MintTime / Number: sorted by the adapter. Creator: the creator supplies
+    ///         the order at burn time, within CREATOR_ORDER_GRACE of filling; after that, deposit order.
+    enum Arrangement {
+        Deposit,
+        MintTime,
+        Number,
+        Creator
+    }
 
     enum State {
         Open,
@@ -57,6 +73,10 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
 
     struct Summary {
         State state;
+        Arrangement arrangement;
+        bool canAssemble; // an assembler is active
+        bool exitWindow; // a proposed assembler is pending: withdrawals open even when Full
+        uint64 exitWindowUntil;
         string name;
         address creator;
         uint256 count;
@@ -84,6 +104,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     Filter internal _filter;
     uint256 public reserve;
     uint256 public creatorFeeBps;
+    Arrangement public arrangement;
     uint64 public deadline;
     uint64 public filledAt;
     uint64 public assembledAt;
@@ -108,7 +129,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     event Deposited(address indexed from, uint256 indexed id, uint256 count);
     event Withdrawn(address indexed to, uint256 indexed id, uint256 count);
     event Filled(uint64 deadline);
-    event Assembled(address indexed caller, address statement, uint256 statementId);
+    event Assembled(address indexed caller, address statement, uint256 statementId, uint256[] order);
     event Bid(address indexed bidder, uint256 amount, uint64 auctionEnd);
     event Settled(address indexed winner, uint256 amount, uint256 protocolFee, uint256 creatorFee, uint256 payoutPerShare);
     event Claimed(address indexed depositor, uint256 amount);
@@ -135,6 +156,10 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     error PaymentFailed();
     error NotStray();
     error NotWinner();
+    error AssemblerNotReady();
+    error NotCreator();
+    error CreatorsTurn();
+    error BadOrder();
 
     // ---------------------------------------------------------------- setup
 
@@ -149,6 +174,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         Filter calldata filter_,
         uint256 reserve_,
         uint256 creatorFeeBps_,
+        Arrangement arrangement_,
         uint64 deadline_
     ) external {
         if (address(factory) != address(0)) revert AlreadyInitialized();
@@ -162,6 +188,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         _filter = filter_;
         reserve = reserve_;
         creatorFeeBps = creatorFeeBps_;
+        arrangement = arrangement_;
         deadline = deadline_;
     }
 
@@ -169,8 +196,18 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
 
     function state() public view returns (State) {
         if (statement != address(0)) return settled ? State.Settled : State.Auction;
-        if (block.timestamp >= deadline) return State.Expired;
+        if (block.timestamp >= effectiveDeadline()) return State.Expired;
         return _ids.length == SIZE ? State.Full : State.Open;
+    }
+
+    /// @notice The deadline, extended so a batch that filled before the assembler was active always has
+    ///         FILL_GRACE from activation to burn.
+    function effectiveDeadline() public view returns (uint256 dl) {
+        dl = deadline;
+        if (_ids.length == SIZE) {
+            uint256 active = factory.assemblerActiveAt();
+            if (active != 0 && dl < active + FILL_GRACE) dl = active + FILL_GRACE;
+        }
     }
 
     function _require(State s) internal view {
@@ -224,10 +261,12 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         }
     }
 
-    /// @notice Take your Credits back. Allowed while Open (under 80) and after the deadline if never assembled.
+    /// @notice Take your Credits back. Allowed while Open (under 80), after the deadline if never assembled,
+    ///         and from any unassembled batch while the factory's exit window is open.
     function withdraw(uint256[] calldata ids) external nonReentrant {
         State s = state();
-        if (s != State.Open && s != State.Expired) revert WrongState(s);
+        bool exit = s == State.Full && factory.exitWindowOpen();
+        if (s != State.Open && s != State.Expired && !exit) revert WrongState(s);
         // Book everything first, then move tokens.
         for (uint256 i; i < ids.length; ++i) {
             uint256 id = ids[i];
@@ -262,21 +301,44 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
 
     // ---------------------------------------------------------------- assemble
 
-    /// @notice Burn the 80 into a Statement, in deposit order. Anyone can call once Full; the caller pays gas.
-    /// @dev The assembler is fixed in the factory at deploy. It is approved as an operator for this batch's
+    /// @notice Burn the 80 into a Statement with the batch's arrangement. Anyone can call once Full; the
+    ///         caller pays gas. With the Creator arrangement, only after the creator's grace has passed.
+    function assemble() external nonReentrant {
+        _require(State.Full);
+        if (arrangement == Arrangement.Creator && block.timestamp < filledAt + CREATOR_ORDER_GRACE) {
+            revert CreatorsTurn();
+        }
+        _assemble(_ids, arrangement == Arrangement.Creator ? Arrangement.Deposit : arrangement);
+    }
+
+    /// @notice Creator arrangement only: the creator burns with a hand-made order (a permutation of the 80).
+    function assembleOrdered(uint256[] calldata order) external nonReentrant {
+        _require(State.Full);
+        if (arrangement != Arrangement.Creator) revert BadOrder();
+        if (msg.sender != creator) revert NotCreator();
+        if (order.length != SIZE) revert BadOrder();
+        for (uint256 i; i < SIZE; ++i) {
+            if (depositorOf[order[i]] == address(0)) revert BadOrder();
+            for (uint256 j; j < i; ++j) {
+                if (order[j] == order[i]) revert BadOrder();
+            }
+        }
+        _assemble(order, Arrangement.Creator);
+    }
+
+    /// @dev The assembler is fixed in the factory. It is approved as an operator for this batch's
     ///      Credits only for the duration of the call, and its work is checked afterwards: none of the 80
     ///      Credits may still exist, and this batch must own the Statement the adapter says it minted.
     ///      Its storage is its own; nothing it does can reach this contract's state.
-    function assemble() external nonReentrant {
-        _require(State.Full);
-        uint256[] memory ids = _ids;
+    function _assemble(uint256[] memory ids, Arrangement how) internal {
         IAssembler asm = factory.assembler();
+        if (address(asm) == address(0)) revert AssemblerNotReady();
         address st = asm.statement();
         if (st == address(0) || st == address(credits)) revert StatementNotReceived();
 
         _assembling = true;
         credits.setApprovalForAll(address(asm), true);
-        uint256 sid = asm.assemble(ids);
+        uint256 sid = asm.assemble(ids, uint8(how));
         credits.setApprovalForAll(address(asm), false);
         _assembling = false;
 
@@ -290,7 +352,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         statement = st;
         statementId = sid;
         assembledAt = uint64(block.timestamp);
-        emit Assembled(msg.sender, st, sid);
+        emit Assembled(msg.sender, st, sid, ids);
     }
 
     // ---------------------------------------------------------------- auction
@@ -429,10 +491,14 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
 
     function summary() external view returns (Summary memory s) {
         s.state = state();
+        s.arrangement = arrangement;
+        s.canAssemble = address(factory.assembler()) != address(0);
+        s.exitWindow = factory.exitWindowOpen();
+        s.exitWindowUntil = factory.pendingUntil();
         s.name = name;
         s.creator = creator;
         s.count = _ids.length;
-        s.deadline = deadline;
+        s.deadline = uint64(effectiveDeadline());
         s.filledAt = filledAt;
         s.assembledAt = assembledAt;
         s.auctionEnd = auctionEnd;

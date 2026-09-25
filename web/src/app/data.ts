@@ -5,9 +5,30 @@ import { config, pub } from './chain';
 export const STATES = ['Open', 'Full', 'Expired', 'Auction', 'Settled'] as const;
 export type StateName = (typeof STATES)[number];
 
+export const ARRANGEMENTS = ['Deposit order', 'Mint time', 'Credit number', 'Creator’s order'] as const;
+
+export type Rated = {
+  id: string;
+  paidAt: number;
+  score: number;
+  rank: number;
+  traits: { palette: string; activeBits: number; occupied: number; eights: number; registration: string };
+  tails: number[];
+};
+
+export async function ratings(ids: readonly bigint[]): Promise<{ n: number; version: string; ratings: Record<string, Rated> }> {
+  const r = await fetch('/ratings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: ids.map(String) }) });
+  if (!r.ok) throw new Error('Ratings unavailable.');
+  return r.json();
+}
+
 export type Summary = {
   address: Address;
   state: StateName;
+  arrangement: number;
+  canAssemble: boolean;
+  exitWindow: boolean;
+  exitWindowUntil: number;
   name: string;
   creator: Address;
   count: number;
@@ -37,6 +58,8 @@ function toSummary(address: Address, s: Record<string, unknown>): Summary {
     filledAt: Number(s.filledAt),
     assembledAt: Number(s.assembledAt),
     auctionEnd: Number(s.auctionEnd),
+    exitWindowUntil: Number(s.exitWindowUntil),
+    arrangement: Number(s.arrangement),
     creatorFeeBps: Number(s.creatorFeeBps),
     protocolFeeBps: Number(s.protocolFeeBps),
   };

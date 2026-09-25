@@ -37,6 +37,14 @@ audit before mainnet.** The mainnet assembler adapter does not exist yet and mus
 | W5 | Medium | `/ens` fetched name-owner-chosen avatar URLs from the Worker and never cached negatives. | Avatar is now ENS's own metadata service URL; negatives cached 1 h, errors 60 s; 5 s RPC timeout; rate limited. |
 | W6 | Low | `/art` SVG served without a CSP; 404s uncached. | `sandbox` CSP on SVG responses; 404 cached 5 min. |
 
+### Added after the review: staged launch
+
+To take deposits before the Statement contract exists, the factory can deploy without an assembler. A single setter key may propose one; a proposal opens a 3-day exit window during which every batch (full ones included) is withdrawable; after the delay anyone activates it permanently and the setter loses all power. Full batches get `FILL_GRACE` from activation. This is the one privileged action in the system and it is covered by `test/Staged.t.sol` (10 tests). **The external audit should cover this path**, and the setter should be a multisig.
+
+### Added after the review: arrangements
+
+Batches carry an `Arrangement` (Deposit / MintTime / Number / Creator). `assembleOrdered(order)` lets the creator of a Creator-arranged batch burn with a hand-made permutation; the contract checks it is exactly the 80 pooled ids with no duplicates (O(80²), bounded). Within `CREATOR_ORDER_GRACE` (1 day of filling) only the creator can burn; afterwards anyone can, in deposit order, so a creator cannot stall. The adapter receives the arrangement value; MintTime/Number sorting happens in the adapter (insertion sort over 80). Covered by `test/Arrangement.t.sol` (8 tests). **Should be included in the external audit.**
+
 ### Accepted / documented
 
 - **The assembler is the trust boundary.** It is immutable and set at factory deploy. It is now isolated from Batch storage and its result is verified, but it holds operator rights over the batch's Credits for the duration of `assemble()`. The mainnet adapter must be reviewed before deploy.

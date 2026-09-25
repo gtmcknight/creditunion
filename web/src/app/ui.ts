@@ -46,7 +46,7 @@ export function sheet(
     if (id === undefined) return `<i class="cell empty"></i>`;
     const mine = opts.mine?.has(id.toString()) ? ' mine' : '';
     const fresh = opts.fresh !== undefined && i >= opts.fresh ? ` new" style="--k:${i - opts.fresh}` : '';
-    return `<i class="cell${mine}${fresh}" title="Credit #${id}"><img src="${art(id)}" alt="" loading="lazy" decoding="async"></i>`;
+    return `<i class="cell${mine}${fresh}" data-id="${id}" title="Credit #${id}"><img src="${art(id)}" alt="" loading="lazy" decoding="async"></i>`;
   });
   const cls = ['sheet', opts.size ?? 'lg', opts.closed && 'closed', opts.closing && 'closing'].filter(Boolean).join(' ');
   return `<div class="${cls}">${cells.join('')}</div>`;
@@ -93,6 +93,7 @@ const ERRORS: Record<string, string> = {
   TooFewBought: 'Fewer listings were available than expected. Get a new price.',
   FeeNotCovered: 'Not enough ETH sent to cover the fee.',
   NotStray: 'That token is part of the batch.',
+  AssemblerNotReady: 'Burning opens once Jack’s Statement contract ships and the adapter is activated.',
 };
 
 export type { Address };

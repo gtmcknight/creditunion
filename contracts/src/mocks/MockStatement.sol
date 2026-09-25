@@ -14,7 +14,7 @@ contract MockStatement is ERC721 {
         credits = credits_;
     }
 
-    function make(uint256[] calldata ids) external returns (uint256 id) {
+    function make(uint256[] calldata ids) external virtual returns (uint256 id) {
         require(ids.length == 80, "need 80");
         require(totalSupply < CAP, "cap");
         credits.burn(msg.sender, ids);

@@ -1,12 +1,15 @@
 import { parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi } from '../abi';
 import { config, explorer, pub, send, session } from '../chain';
-import { eligible, getBatch, me } from '../data';
+import { ARRANGEMENTS, eligible, getBatch, me, ratings, type Rated } from '../data';
 import { hydrate, pct, who } from '../ens';
 import { describeFilter } from '../traits';
 import { $$, art, errText, esc, eth, same, sheet, short, toast, until } from '../ui';
 
 const CHUNK = 40; // Credits per transaction; keeps each one well under the block gas limit
+const CREATOR_GRACE = 86400; // matches Batch.CREATOR_ORDER_GRACE
+const RATING_URL = 'https://jack.art/credits/rating';
+const fmtScore = (s: number) => (Math.floor(s * 100) / 100).toFixed(2);
 
 type Ctx = Awaited<ReturnType<typeof getBatch>>;
 type Mine = Awaited<ReturnType<typeof me>> | null;
@@ -40,7 +43,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
   const artHtml = burned
     ? `<figure class="statement">${sheet(b.ids, { closed: true })}<figcaption class="legend muted small"><span>Statement #${s.statementId}</span><span>80 Credits, burned in deposit order</span></figcaption></figure>`
     : `${sheet(b.ids, { mine: myIds, fresh: seen < s.count ? seen : undefined, closing: s.state === 'Full' })}
-       <div class="legend muted small">${myIds.size ? `<button type="button" class="spot" aria-pressed="false"><i class="dot mine"></i><span>Highlight yours</span><span class="num muted">${myIds.size}</span></button>` : ''}<span>In deposit order</span></div>`;
+       <div class="legend muted small">${myIds.size ? `<button type="button" class="spot" aria-pressed="false"><i class="dot mine"></i><span>Highlight yours</span><span class="num muted">${myIds.size}</span></button>` : ''}<span id="legend-order">${s.arrangement === 0 ? 'In deposit order' : `Shown in deposit order · burned by ${ARRANGEMENTS[s.arrangement].toLowerCase()}`}</span></div>`;
 
   app.innerHTML = `
   <a class="back" href="#/">← Batches</a>
@@ -62,6 +65,8 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
         ${s.state === 'Open' ? fact('Deadline', `<span class="num">${until(s.deadline)}</span>`) : ''}
         ${s.state === 'Full' ? fact('Burn by', `<span class="num">${until(s.deadline)}</span>`) : ''}
         ${fact('Depositors', `<span class="num">${depositors}</span>`)}
+        ${fact('Order', ARRANGEMENTS[s.arrangement])}
+        ${s.count ? fact('Rating', `<span id="rating" class="muted">…</span>`) : ''}
         ${s.reserve && (s.state === 'Open' || s.state === 'Full' || (s.state === 'Auction' && s.minBid === s.reserve && !s.highBid)) ? fact('Reserve', eth(s.reserve)) : ''}
         ${fact('Sale split', split(s))}
         ${fact('Contract', link(s.address))}
@@ -103,16 +108,45 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
       <div class="picker" id="picker"><p class="muted small">Checking your Credits…</p></div>
       <div class="stack" id="deposit-actions"></div>
       ${withdraw()}
-      <p class="muted small">Withdraw any time before 80.</p>
+      <p class="muted small">Withdraw any time before 80.${s.canAssemble ? '' : ' Burning opens once Jack’s Statement contract ships.'}</p>
     </div>
     ${config.sweeper ? buyPanel(80 - s.count) : ''}`;
   }
 
   if (s.state === 'Full') {
     const by = new Date(s.deadline * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    if (s.exitWindow) {
+      const until = new Date(s.exitWindowUntil * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric' });
+      return `<div class="box">
+        <h3>Exit window</h3>
+        <p class="muted">A Statement adapter has been proposed. Until ${until}, anyone can take their Credits out of any batch, this one included. After that the adapter is fixed forever and burning opens.</p>
+        ${m ? withdraw(true) || '<p class="small muted">You have no Credits here.</p>' : connect}
+      </div>`;
+    }
+    if (!s.canAssemble) {
+      return `<div class="box">
+        <h3>Locked · waiting for Jack</h3>
+        <p class="muted">All 80 are in. Burning opens once Jack’s Statement contract ships and the adapter is activated; this batch then has at least 7 days to burn. If an adapter is ever proposed, a 3-day exit window opens first.</p>
+      </div>`;
+    }
+    if (s.arrangement === 3 && Date.now() / 1000 < s.filledAt + CREATOR_GRACE) {
+      const until = new Date((s.filledAt + CREATOR_GRACE) * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric' });
+      if (same(s.creator, session.account)) {
+        return `<div class="box" id="arrange">
+          <div class="box-head"><h3>Arrange the sheet</h3><span class="muted small">Tap two Credits to swap</span></div>
+          <div class="chips presets">${[['rating', 'Rarest first'], ['mint', 'Mint time'], ['number', 'Credit number'], ['deposit', 'Deposit order']].map(([k, l]) => `<button type="button" data-preset="${k}">${l}</button>`).join('')}</div>
+          <button class="btn primary block" id="burn-ordered">Burn with this order</button>
+          <p class="muted small">Until ${until} only you can burn, with your order. After that anyone can, in deposit order.</p>
+        </div>`;
+      }
+      return `<div class="box">
+        <h3>Locked · creator arranging</h3>
+        <p class="muted">${who(s.creator)} chose to arrange the sheet by hand and has until ${until}. After that anyone can burn in deposit order.</p>
+      </div>`;
+    }
     return `<div class="box">
       <h3>Locked</h3>
-      <p class="muted">Anyone can burn. Caller pays ~4–5M gas. Unburned by ${by}, everyone withdraws.</p>
+      <p class="muted">Anyone can burn${s.arrangement ? `, ordered by ${ARRANGEMENTS[s.arrangement === 3 ? 0 : s.arrangement].toLowerCase()}` : ''}. Caller pays ~4–7M gas. Unburned by ${by}, everyone withdraws.</p>
       ${m ? `<button class="btn primary block" id="assemble">Burn 80 → Statement</button>` : connect}
     </div>`;
   }
@@ -275,6 +309,7 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void) {
   }
 
   if (s.state === 'Open' && m) drawPicker(b, m, rerender, run, txNote);
+  if (b.ids.length) loadRatings(b, run, txNote);
   if (s.state === 'Open' && m && config.sweeper) bindBuy(s.address, run, txNote);
 }
 
@@ -431,4 +466,81 @@ function bindBuy(
     'Bought and deposited.');
     reset();
   });
+}
+
+
+/// Official ratings for the sheet: the facts row, cell tooltips, and the creator's arranger presets.
+async function loadRatings(
+  b: Ctx,
+  run: (btn: HTMLElement | null, label: string, fn: () => Promise<unknown>, ok: string) => Promise<void>,
+  txNote: (h: string) => void,
+) {
+  let rated: Record<string, Rated>;
+  let n = 0;
+  try {
+    const r = await ratings(b.ids);
+    rated = r.ratings;
+    n = r.n;
+  } catch {
+    document.getElementById('rating')?.replaceChildren('unavailable');
+    return;
+  }
+  const el = document.getElementById('rating');
+  if (!el) return;
+  const scores = b.ids.map((id) => rated[id.toString()]?.score).filter((x): x is number => typeof x === 'number');
+  if (scores.length) {
+    const avg = scores.reduce((a, x) => a + x, 0) / scores.length;
+    const top = Math.max(...scores);
+    el.classList.remove('muted');
+    el.innerHTML = `<span class="num">avg ${fmtScore(avg)}</span> · <span class="num">top ${fmtScore(top)}</span> <a href="${RATING_URL}" target="_blank" rel="noopener" class="muted small" title="Jack Butcher’s official rating, v3.4.0, over all ${n.toLocaleString()} Credits">official ↗</a>`;
+  }
+  document.querySelectorAll<HTMLElement>('.batch-art .cell[data-id]').forEach((c) => {
+    const r = rated[c.dataset.id!];
+    if (r) c.title = `Credit #${c.dataset.id} · ${fmtScore(r.score)} · rank ${r.rank.toLocaleString()} · ${r.traits.palette} · ${r.traits.eights} eights · ${r.traits.registration}`;
+  });
+
+  const arrange = document.getElementById('arrange');
+  if (!arrange) return;
+  let order = [...b.ids];
+  let picked: number | null = null;
+  const holder = document.querySelector<HTMLElement>('.batch-art .sheet')!;
+  const draw = () => {
+    holder.outerHTML = sheet(order, { closing: true });
+    const cells = document.querySelectorAll<HTMLElement>('.batch-art .sheet .cell[data-id]');
+    cells.forEach((c, i) => {
+      c.classList.add('swap');
+      c.classList.toggle('sel', i === picked);
+      const r = rated[c.dataset.id!];
+      if (r) c.title = `Credit #${c.dataset.id} · ${fmtScore(r.score)}`;
+      c.addEventListener('click', () => {
+        if (picked === null) picked = i;
+        else {
+          [order[picked], order[i]] = [order[i], order[picked]];
+          picked = null;
+        }
+        draw();
+      });
+    });
+  };
+  const key = {
+    rating: (id: bigint) => -(rated[id.toString()]?.score ?? 0),
+    mint: (id: bigint) => rated[id.toString()]?.paidAt ?? 0,
+    number: (id: bigint) => Number(id),
+  } as const;
+  arrange.querySelectorAll<HTMLButtonElement>('[data-preset]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const p = btn.dataset.preset as keyof typeof key | 'deposit';
+      order = p === 'deposit' ? [...b.ids] : [...b.ids].sort((x, y) => key[p](x) - key[p](y) || Number(x - y));
+      picked = null;
+      arrange.querySelectorAll('[data-preset]').forEach((x) => x.setAttribute('aria-pressed', String(x === btn)));
+      draw();
+    }),
+  );
+  document.getElementById('burn-ordered')?.addEventListener('click', (e) =>
+    run(e.currentTarget as HTMLElement, 'Burning…', () =>
+      send({ address: b.s.address, abi: batchAbi, functionName: 'assembleOrdered', args: [order], gas: 12_000_000n }, txNote),
+    'The Statement exists, in your order. Auction is open.'),
+  );
+  draw();
+  document.querySelector<HTMLElement>('.batch-art .sheet')?.classList.remove('closing');
 }

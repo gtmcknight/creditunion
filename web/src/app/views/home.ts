@@ -1,5 +1,5 @@
 import { session } from '../chain';
-import { listBatches, type Listed, type Summary } from '../data';
+import { ARRANGEMENTS, listBatches, type Listed, type Summary } from '../data';
 import { hydrate, pct, who } from '../ens';
 import { describeFilter } from '../traits';
 import { eth, esc, same, sheet, until } from '../ui';
@@ -9,7 +9,7 @@ function status(s: Summary) {
     case 'Open':
       return `${80 - s.count} to go · ${until(s.deadline)} left`;
     case 'Full':
-      return 'Full · ready to burn';
+      return s.exitWindow ? 'Full · exit window open' : s.canAssemble ? 'Full · ready to burn' : 'Full · waiting for Jack';
     case 'Expired':
       return 'Expired · Credits returnable';
     case 'Auction':
@@ -65,7 +65,7 @@ export function card({ s, ids, depositors }: Listed) {
       <div class="row creator">${who(s.creator)}${fee(s)}</div>
       <div class="bar"><i style="width:${(s.count / 80) * 100}%"></i></div>
       <div class="row muted small"><span class="num">${s.count}/80</span><span>${status(s)}</span></div>
-      ${f ? `<div class="small filter">${esc(f)}</div>` : ''}
+      ${f || s.arrangement ? `<div class="small filter">${[f, s.arrangement ? `Order · ${ARRANGEMENTS[s.arrangement]}` : ''].filter(Boolean).map(esc).join(' · ')}</div>` : ''}
     </div>
   </a>`;
 }

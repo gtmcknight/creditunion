@@ -27,7 +27,7 @@ contract SeedDemo is Script {
         vm.startBroadcast(keys[0]);
         MockCredits credits = new MockCredits();
         MockStatement statement = new MockStatement(ICredits(address(credits)));
-        BatchFactory f = new BatchFactory(ICredits(address(credits)), new MockAssembler(statement), who[0], 100, 10);
+        BatchFactory f = new BatchFactory(ICredits(address(credits)), new MockAssembler(statement), address(0), who[0], 100, 10);
         for (uint256 i; i < 4; ++i) credits.mint(who[i], 200); // ids 1..800
         vm.stopBroadcast();
 
@@ -80,6 +80,12 @@ contract SeedDemo is Script {
 
         // 5. Open, just started
         _open(f, keys[3], "Slow Burn", none, 0, _r(661, 12));
+
+        // 6. Full, Creator's order, unburned: the creator (key 0) sees the arranger
+        vm.broadcast(keys[0]);
+        address b6 = f.create("Hand Arranged", none, 0, 0, Batch.Arrangement.Creator, 30 days, _r(101, 40));
+        _dep(f, keys[2], b6, _r(481, 40));
+        console.log("ARRANGE_ME", b6);
     }
 
     function _open(BatchFactory f, uint256 k, string memory n, Batch.Filter memory fl, uint256 res, uint256[] memory ids)
@@ -99,7 +105,7 @@ contract SeedDemo is Script {
         uint256[] memory ids
     ) internal returns (address b) {
         vm.broadcast(k);
-        b = f.create(n, fl, res, creatorFee, 30 days, ids);
+        b = f.create(n, fl, res, creatorFee, Batch.Arrangement.Deposit, 30 days, ids);
     }
 
     function _dep(BatchFactory f, uint256 k, address b, uint256[] memory ids) internal {

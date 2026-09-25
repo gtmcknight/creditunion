@@ -109,6 +109,29 @@ document.addEventListener('click', (e) => {
   if ((e.target as HTMLElement).closest('[data-connect]')) openConnect();
 });
 
+// Theme: the button flips whatever is currently in effect; the choice is remembered per browser.
+function currentTheme(): 'light' | 'dark' {
+  const set = document.documentElement.getAttribute('data-theme');
+  if (set === 'light' || set === 'dark') return set;
+  return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+function drawTheme() {
+  const t = currentTheme();
+  document.documentElement.dataset.mode = t;
+  document.getElementById('theme')?.setAttribute('aria-label', `Switch to ${t === 'dark' ? 'light' : 'dark'} theme`);
+  document.querySelector<HTMLMetaElement>('meta[name=theme-color]:not([media])')?.setAttribute('content', t === 'dark' ? '#0a0a0a' : '#ffffff');
+}
+document.getElementById('theme')?.addEventListener('click', () => {
+  const next = currentTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try {
+    localStorage.setItem('eighty-theme', next);
+  } catch {}
+  drawTheme();
+});
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawTheme);
+drawTheme();
+
 onSession(() => {
   drawAccount();
   drawTestnet();

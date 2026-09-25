@@ -21,6 +21,19 @@ export const batchAbi = [
   },
   {
     "type": "function",
+    "name": "CREATOR_ORDER_GRACE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "EXTENSION",
     "inputs": [],
     "outputs": [
@@ -138,6 +151,19 @@ export const batchAbi = [
   },
   {
     "type": "function",
+    "name": "arrangement",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint8",
+        "internalType": "enum Batch.Arrangement"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "art",
     "inputs": [],
     "outputs": [
@@ -153,6 +179,19 @@ export const batchAbi = [
     "type": "function",
     "name": "assemble",
     "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "assembleOrdered",
+    "inputs": [
+      {
+        "name": "order",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -357,6 +396,19 @@ export const batchAbi = [
   },
   {
     "type": "function",
+    "name": "effectiveDeadline",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "dl",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "factory",
     "inputs": [],
     "outputs": [
@@ -505,6 +557,11 @@ export const batchAbi = [
         "name": "creatorFeeBps_",
         "type": "uint256",
         "internalType": "uint256"
+      },
+      {
+        "name": "arrangement_",
+        "type": "uint8",
+        "internalType": "enum Batch.Arrangement"
       },
       {
         "name": "deadline_",
@@ -782,6 +839,26 @@ export const batchAbi = [
             "internalType": "enum Batch.State"
           },
           {
+            "name": "arrangement",
+            "type": "uint8",
+            "internalType": "enum Batch.Arrangement"
+          },
+          {
+            "name": "canAssemble",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "exitWindow",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "exitWindowUntil",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
             "name": "name",
             "type": "string",
             "internalType": "string"
@@ -934,6 +1011,12 @@ export const batchAbi = [
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
+      },
+      {
+        "name": "order",
+        "type": "uint256[]",
+        "indexed": false,
+        "internalType": "uint256[]"
       }
     ],
     "anonymous": false
@@ -1157,12 +1240,22 @@ export const batchAbi = [
   },
   {
     "type": "error",
+    "name": "AssemblerNotReady",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "AuctionOver",
     "inputs": []
   },
   {
     "type": "error",
     "name": "AuctionRunning",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "BadOrder",
     "inputs": []
   },
   {
@@ -1179,6 +1272,11 @@ export const batchAbi = [
   {
     "type": "error",
     "name": "CreatorFeeTooHigh",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CreatorsTurn",
     "inputs": []
   },
   {
@@ -1200,6 +1298,11 @@ export const batchAbi = [
   {
     "type": "error",
     "name": "NameTooLong",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotCreator",
     "inputs": []
   },
   {
@@ -1292,6 +1395,11 @@ export const factoryAbi = [
         "internalType": "contract IAssembler"
       },
       {
+        "name": "setter_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
         "name": "feeRecipient_",
         "type": "address",
         "internalType": "address"
@@ -1308,6 +1416,19 @@ export const factoryAbi = [
       }
     ],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "ASSEMBLER_DELAY",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -1350,6 +1471,13 @@ export const factoryAbi = [
   },
   {
     "type": "function",
+    "name": "activateAssembler",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "assembler",
     "inputs": [],
     "outputs": [
@@ -1357,6 +1485,32 @@ export const factoryAbi = [
         "name": "",
         "type": "address",
         "internalType": "contract IAssembler"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "assemblerActiveAt",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "assemblerSetter",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -1445,6 +1599,11 @@ export const factoryAbi = [
         "internalType": "uint256"
       },
       {
+        "name": "arrangement",
+        "type": "uint8",
+        "internalType": "enum Batch.Arrangement"
+      },
+      {
         "name": "duration",
         "type": "uint256",
         "internalType": "uint256"
@@ -1520,6 +1679,19 @@ export const factoryAbi = [
   },
   {
     "type": "function",
+    "name": "exitWindowOpen",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "feeRecipient",
     "inputs": [],
     "outputs": [
@@ -1578,6 +1750,45 @@ export const factoryAbi = [
   },
   {
     "type": "function",
+    "name": "pendingAssembler",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IAssembler"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "pendingUntil",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "proposeAssembler",
+    "inputs": [
+      {
+        "name": "a",
+        "type": "address",
+        "internalType": "contract IAssembler"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "protocolFeeBps",
     "inputs": [],
     "outputs": [
@@ -1588,6 +1799,38 @@ export const factoryAbi = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "AssemblerActivated",
+    "inputs": [
+      {
+        "name": "assembler",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "AssemblerProposed",
+    "inputs": [
+      {
+        "name": "assembler",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "activatableAt",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
   },
   {
     "type": "event",
@@ -1622,6 +1865,11 @@ export const factoryAbi = [
   },
   {
     "type": "error",
+    "name": "AssemblerFixed",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "BadDuration",
     "inputs": []
   },
@@ -1648,6 +1896,11 @@ export const factoryAbi = [
   },
   {
     "type": "error",
+    "name": "NoAssembler",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "NoDepositor",
     "inputs": []
   },
@@ -1663,7 +1916,22 @@ export const factoryAbi = [
   },
   {
     "type": "error",
+    "name": "NotSetter",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NothingPending",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ProtocolFeeTooHigh",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TooEarly",
     "inputs": []
   },
   {
