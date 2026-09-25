@@ -220,24 +220,63 @@ contract BatchTest is Test {
         factory.deposit(address(b), _range(51, 41));
     }
 
-    function test_FillExtendsDeadline() public {
+    /// An open batch never expires, whatever duration it was created with.
+    function test_OpenBatchNeverExpires() public {
         vm.prank(alice);
         Batch b = Batch(factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 3 days, _range(1, 40), 100, 0));
-        skip(2 days);
+        skip(365 days);
+        assertEq(uint256(b.state()), uint256(Batch.State.Open));
+        assertEq(b.unlocksAt(), 0);
         vm.prank(bob);
         factory.deposit(address(b), _range(51, 40));
-        assertEq(b.deadline(), block.timestamp + 7 days);
+        assertEq(uint256(b.state()), uint256(Batch.State.Full));
     }
 
-    function test_ExpiredLetsEveryoneWithdraw() public {
+    /// Filling locks the batch for UNLOCK_AFTER: no withdrawals until then.
+    function test_FillStartsLock() public {
         Batch b = _full(0);
-        vm.warp(b.deadline());
-        assertEq(uint256(b.state()), uint256(Batch.State.Expired));
+        assertEq(b.unlocksAt(), block.timestamp + b.UNLOCK_AFTER());
+        skip(b.UNLOCK_AFTER() - 1);
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Full));
+        b.withdraw(_range(51, 1));
+    }
+
+    /// After the lock lifts, depositors may leave; the batch drops back to Open and can't be assembled.
+    function test_UnlockLetsDepositorsLeave() public {
+        Batch b = _full(0);
+        vm.warp(b.unlocksAt());
+        assertEq(uint256(b.state()), uint256(Batch.State.Full));
         vm.prank(bob);
         b.withdraw(_range(51, 40));
         assertEq(credits.balanceOf(bob), 50);
-        vm.expectRevert();
+        assertEq(uint256(b.state()), uint256(Batch.State.Open));
+        vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Open));
         b.assemble();
+    }
+
+    /// Nobody has to leave: an unlocked batch that still holds all 80 can be assembled.
+    function test_UnlockedFullBatchCanStillAssemble() public {
+        Batch b = _full(0);
+        skip(30 days);
+        b.assemble();
+        assertEq(uint256(b.state()), uint256(Batch.State.Auction));
+    }
+
+    /// The lock runs once: leaving and rejoining an unlocked batch can't lock everyone else again.
+    function test_RefillDoesNotRelock() public {
+        Batch b = _full(0);
+        uint256 at = b.unlocksAt();
+        vm.warp(at);
+        vm.prank(bob);
+        b.withdraw(_range(51, 1));
+        vm.prank(bob);
+        factory.deposit(address(b), _range(51, 1)); // same block: leave and rejoin
+        assertEq(uint256(b.state()), uint256(Batch.State.Full));
+        assertEq(b.unlocksAt(), at);
+        vm.prank(alice);
+        b.withdraw(_range(1, 1)); // still free to leave
+        assertEq(uint256(b.state()), uint256(Batch.State.Open));
     }
 
     // ---------------------------------------------------------------- assemble

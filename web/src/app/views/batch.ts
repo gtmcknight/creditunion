@@ -1,4 +1,3 @@
-import Sortable from 'sortablejs';
 import { parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi } from '../abi';
 import { config, explorer, pub, send, session } from '../chain';
@@ -9,7 +8,6 @@ import { editionArt, examples, fillGhosts, registerFilter } from '../ghosts';
 import { $$, art, errText, esc, eth, same, sheet, short, toast, until } from '../ui';
 
 const CHUNK = 40; // Credits per transaction; keeps each one well under the block gas limit
-const CREATOR_GRACE = 86400; // matches Batch.CREATOR_ORDER_GRACE
 const RATING_URL = 'https://jack.art/credits/rating';
 const fmtScore = (s: number) => (Math.floor(s * 100) / 100).toFixed(2);
 
@@ -23,7 +21,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
   try {
     b = await getBatch(address);
   } catch {
-    app.innerHTML = `<section class="prose"><h1>Party not found</h1><p><a href="#/">← Parties</a></p></section>`;
+    app.innerHTML = `<section class="prose"><h1>Party not found</h1><p><a href="/">← Parties</a></p></section>`;
     return;
   }
   const account = session.account;
@@ -61,7 +59,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
        <div class="legend muted small">${myIds.size ? `<button type="button" class="spot" aria-pressed="false"><i class="dot mine"></i><span>Highlight yours</span><span class="num muted">${myIds.size}</span></button>` : ''}</div>`;
 
   app.innerHTML = `
-  <a class="back" href="#/">← Parties</a>
+  <a class="back" href="/">← Parties</a>
   <section class="batch">
     <div class="batch-art">${artHtml}</div>
     <div class="batch-side">
@@ -73,7 +71,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
       ${
         s.state === 'Open' || s.state === 'Full' || s.state === 'Expired'
           ? `<div class="progress">
-          <div class="row"><span class="num"><strong>${s.count}</strong>/80</span><span class="muted small num">${s.state === 'Open' ? `${80 - s.count} to go · ${until(s.deadline)} left` : s.state === 'Full' ? `Burn within ${until(s.deadline)}` : 'Expired'}</span></div>
+          <div class="row"><span class="num"><strong>${s.count}</strong>/80</span><span class="muted small num">${s.state === 'Open' ? `${80 - s.count} to go` : s.state === 'Full' ? (Date.now() / 1000 >= s.deadline ? 'Unlocked' : `Unlocks in ${until(s.deadline)}`) : 'Expired'}</span></div>
           <div class="bar"><i style="width:${(s.count / 80) * 100}%"></i></div>
         </div>`
           : ''
@@ -170,7 +168,13 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
   }
 
   if (s.state === 'Full') {
-    const by = new Date(s.deadline * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    // A full party is locked for 7 days after filling (summary.deadline = when it unlocks). Unburned by then,
+    // anyone may take their Credits back; whoever stays keeps it burnable.
+    const unlocked = Date.now() / 1000 >= s.deadline;
+    const on = new Date(s.deadline * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric' });
+    const lock = unlocked
+      ? `<p class="muted small">Unlocked: take your Credits back, or stay for the burn.</p>${withdraw()}`
+      : `<p class="muted small">Locked until ${on}. If it isn’t burned by then, anyone can take their Credits back.</p>`;
     if (s.exitWindow) {
       const until = new Date(s.exitWindowUntil * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric' });
       return `<div class="box">
@@ -183,27 +187,14 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
       return `<div class="box">
         <h3>Full</h3>
         <p class="muted">Burning opens when Jack’s Statement contract ships.</p>
-      </div>`;
-    }
-    if ((s.arrangement === 3 || s.arrangement === 4) && Date.now() / 1000 < s.filledAt + CREATOR_GRACE) {
-      const until = new Date((s.filledAt + CREATOR_GRACE) * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric' });
-      if (same(s.creator, session.account)) {
-        return `<div class="box" id="arrange">
-          <div class="box-head"><h3>Arrange the sheet</h3><span class="muted small">Drag to reorder</span></div>
-          <div class="chips presets">${(s.arrangement === 4 ? [['layout', 'As laid out']] : [['rating', 'Rarest first'], ['mint', 'Mint time'], ['number', 'Credit number'], ['deposit', 'Deposit order']]).map(([k, l]) => `<button type="button" data-preset="${k}">${l}</button>`).join('')}</div>
-          <button class="btn primary block" id="burn-ordered">Burn with this order</button>
-          <p class="muted small">Only you can burn until ${until}.</p>
-        </div>`;
-      }
-      return `<div class="box">
-        <h3>Locked · creator arranging</h3>
-        <p class="muted">${who(s.creator)} is arranging the sheet until ${until}.</p>
+        ${lock}
       </div>`;
     }
     return `<div class="box">
-      <h3>Locked</h3>
-      <p class="muted">Anyone can burn it before ${by}.</p>
+      <h3>${unlocked ? 'Full' : 'Locked'}</h3>
+      <p class="muted">Anyone can burn it.</p>
       ${m ? `<button class="btn primary block" id="assemble">Burn 80 → Statement</button>` : connect}
+      ${lock}
     </div>`;
   }
 
@@ -657,97 +648,5 @@ async function loadRatings(
     if (r) c.title = `Credit #${c.dataset.id} · ${fmtScore(r.score)} · rank ${r.rank.toLocaleString()} · ${r.traits.palette} · ${r.traits.eights} eights · ${r.traits.registration}`;
   });
 
-  const arrange = document.getElementById('arrange');
-  if (!arrange) return;
-  const slots = hasLayout(b.s.filter) ? Array.from({ length: 80 }, (_, i) => layoutSlot(b.s.filter, i)) : null;
-  let order = [...b.ids];
-  if (slots) {
-    try {
-      order = [...((await pub.readContract({ address: b.s.address, abi: batchAbi, functionName: 'layoutOrder' })) as readonly bigint[])];
-    } catch {}
-  }
-  const maskOf = (id: bigint) => paletteBit(rated[id.toString()]?.traits.palette ?? '');
-  /// Under a layout every painted slot must keep its palette; say which one is wrong before spending gas.
-  const layoutProblem = () => {
-    if (!slots) return null;
-    for (let i = 0; i < 80; i++) if (slots[i] && maskOf(order[i]) !== slots[i]) return `Slot ${i + 1} needs ${maskLabel(slots[i])}.`;
-    return null;
-  };
-  let picked: HTMLElement | null = null;
-  let sortable: Sortable | null = null;
-  const fromDom = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('.cell[data-id]')].map((c) => BigInt(c.dataset.id!));
-  /// Render once per preset; drags and taps then move cells in place, so Sortable can animate them.
-  const draw = () => {
-    sortable?.destroy();
-    const holder = document.querySelector<HTMLElement>('.batch-art .sheet')!;
-    holder.outerHTML = sheet(order, { closing: true });
-    const sheetEl = document.querySelector<HTMLElement>('.batch-art .sheet')!;
-    picked = null;
-    sheetEl.querySelectorAll<HTMLElement>('.cell[data-id]').forEach((c) => {
-      c.classList.add('swap');
-      const r = rated[c.dataset.id!];
-      if (r) c.title = `Credit #${c.dataset.id} · ${fmtScore(r.score)}`;
-      // Tap one Credit, then another: they swap places.
-      c.addEventListener('click', () => {
-        if (!picked) {
-          picked = c;
-          c.classList.add('sel');
-          return;
-        }
-        if (picked !== c) {
-          const a = picked, bEl = c;
-          const aNext = a.nextSibling;
-          if (aNext === bEl) sheetEl.insertBefore(bEl, a);
-          else {
-            sheetEl.insertBefore(a, bEl);
-            sheetEl.insertBefore(bEl, aNext);
-          }
-          order = fromDom(sheetEl);
-        }
-        picked.classList.remove('sel');
-        picked = null;
-      });
-    });
-    // Drag a Credit to any slot: the others shift along, animated. Fallback mode so mouse and touch match.
-    sortable = Sortable.create(sheetEl, {
-      animation: 150,
-      forceFallback: true,
-      fallbackTolerance: 6,
-      draggable: '.cell[data-id]',
-      ghostClass: 'drop-slot',
-      dragClass: 'lifted',
-      onStart: () => {
-        picked?.classList.remove('sel');
-        picked = null;
-      },
-      onEnd: () => {
-        order = fromDom(sheetEl);
-      },
-    });
-  };
-  const key = {
-    layout: (id: bigint) => order.indexOf(id),
-    rating: (id: bigint) => -(rated[id.toString()]?.score ?? 0),
-    mint: (id: bigint) => rated[id.toString()]?.paidAt ?? 0,
-    number: (id: bigint) => Number(id),
-  } as const;
-  arrange.querySelectorAll<HTMLButtonElement>('[data-preset]').forEach((btn) =>
-    btn.addEventListener('click', () => {
-      const p = btn.dataset.preset as keyof typeof key | 'deposit';
-      if (p === 'layout') pub.readContract({ address: b.s.address, abi: batchAbi, functionName: 'layoutOrder' }).then((o) => { order = [...(o as readonly bigint[])]; draw(); }).catch(() => {});
-      else order = p === 'deposit' ? [...b.ids] : [...b.ids].sort((x, y) => key[p](x) - key[p](y) || Number(x - y));
-      picked = null;
-      arrange.querySelectorAll('[data-preset]').forEach((x) => x.setAttribute('aria-pressed', String(x === btn)));
-      draw();
-    }),
-  );
-  document.getElementById('burn-ordered')?.addEventListener('click', (e) => {
-    const problem = layoutProblem();
-    if (problem) return toast(problem, 'err');
-    return run(e.currentTarget as HTMLElement, 'Burning…', () =>
-      send({ address: b.s.address, abi: batchAbi, functionName: 'assembleOrdered', args: [order], gas: 12_000_000n }, txNote),
-    'The Statement exists, in your order. Auction is open.');
-  });
-  draw();
   document.querySelector<HTMLElement>('.batch-art .sheet')?.classList.remove('closing');
 }

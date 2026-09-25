@@ -1,3 +1,4 @@
+import { go as navigate } from '../main';
 import type { Address } from 'viem';
 import { batchAbi } from '../abi';
 import { config, disconnect, explorer, pub, send, session } from '../chain';
@@ -58,7 +59,7 @@ export async function profile(app: HTMLElement, rerender: () => void) {
     <div class="dues">${dues
       .map(
         (d) => `<div class="due">
-        <a href="#/b/${d.b.s.address}">${esc(d.b.s.name || 'Untitled')}</a>
+        <a href="/party/${d.b.s.address}">${esc(d.b.s.name || 'Untitled')}</a>
         <span class="num muted">${d.claim ? `${eth(d.claim)} share` : ''}${d.claim && d.owed ? ' · ' : ''}${d.owed ? `${eth(d.owed)} refund` : ''}</span>
         <button class="btn sm primary" data-collect="${d.b.s.address}" data-claim="${d.claim > 0n}" data-owed="${d.owed > 0n}">Collect</button>
       </div>`,
@@ -73,7 +74,7 @@ export async function profile(app: HTMLElement, rerender: () => void) {
     <div class="grid">${
       mine.length
         ? mine.map((b) => card(b)).join('')
-        : `<div class="empty-state"><p>You're not in any party yet.</p><div class="actions"><a class="btn primary" href="#/">Browse parties</a><a class="btn" href="#/new">Open one</a></div></div>`
+        : `<div class="empty-state"><p>You're not in any party yet.</p><div class="actions"><a class="btn primary" href="/">Browse parties</a><a class="btn" href="/create">Open one</a></div></div>`
     }</div>
   </section>
 
@@ -85,7 +86,7 @@ export async function profile(app: HTMLElement, rerender: () => void) {
             .reverse()
             .map((id) => `<span class="pick" title="Credit #${id}"><img src="${art(id)}" alt="Credit #${id}" loading="lazy"></span>`)
             .join('')}</div>`
-        : `<p class="muted">No Credits here.${config.chainId !== 1 ? ' <a href="#/mint">Mint test Credits →</a>' : ''}</p>`
+        : `<p class="muted">No Credits here.${config.chainId !== 1 ? ' <a href="/mint">Mint test Credits →</a>' : ''}</p>`
     }
   </section>`;
 
@@ -93,7 +94,7 @@ export async function profile(app: HTMLElement, rerender: () => void) {
   fillGhosts(app);
   document.getElementById('disconnect')?.addEventListener('click', () => {
     disconnect();
-    location.hash = '#/';
+    navigate('/');
   });
   app.querySelectorAll<HTMLButtonElement>('[data-collect]').forEach((btn) =>
     btn.addEventListener('click', async () => {

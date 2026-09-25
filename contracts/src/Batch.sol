@@ -26,10 +26,14 @@ interface IBatchFactory {
 /// @notice Eighty Credits pooled into one Statement.
 ///
 ///         Open      Anyone deposits Credits that pass the batch's filter. Depositors withdraw theirs at any time.
-///         Full      The 80th Credit locks the batch. Anyone can assemble the Statement until the deadline,
-///                   once the factory has an active assembler. While one is only proposed, every batch
-///                   (full ones too) can be withdrawn from: the exit window.
-///         Expired   Deadline passed before assembly. Every depositor withdraws their Credits.
+///                   An open batch never expires: it stays open until it holds 80.
+///         Full      The 80th Credit locks the batch for UNLOCK_AFTER. Anyone can assemble the Statement once
+///                   the factory has an active assembler, locked or not. After UNLOCK_AFTER without assembly
+///                   the lock lifts: depositors may withdraw (dropping it back to Open) or stay, and it can
+///                   still be assembled while all 80 remain. The lock runs once, from the first fill; a
+///                   refill never re-locks. While an assembler is only proposed, every
+///                   batch (full ones too) can be withdrawn from: the exit window.
+///         Expired   No longer entered. Kept so the enum's values (and every client decoding them) don't shift.
 ///         Auction   The batch holds the Statement. The 24-hour clock starts with the first bid.
 ///         Settled   The Statement went to the winner. Protocol fee and the creator's fee (fixed when the
 ///                   batch opened), then each deposited Credit claims 1/80 of the rest.
@@ -41,7 +45,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     uint256 public constant SIZE = 80;
     uint256 public constant MAX_CREATOR_FEE_BPS = 1000; // 10%
     uint256 public constant MAX_PROTOCOL_FEE_BPS = 500; // 5%
-    uint256 public constant FILL_GRACE = 7 days; // a batch that fills always has at least this long to assemble
+    uint256 public constant UNLOCK_AFTER = 7 days; // a full batch locks this long, then depositors may leave
     uint256 public constant RESERVE_WINDOW = 7 days; // with no bid by then, the reserve no longer applies
     uint256 public constant AUCTION_LENGTH = 24 hours;
     uint256 public constant EXTENSION = 15 minutes;
@@ -50,11 +54,12 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     uint256 public constant REFUND_GAS = 50_000;
     uint256 public constant MAX_NAME = 64;
     uint256 public constant MAX_ALLOWLIST = 200;
-    uint256 public constant CREATOR_ORDER_GRACE = 1 days; // then anyone burns in deposit order
 
     /// @notice How the 80 are ordered on the Statement. Fixed when the batch opens; shown before depositing.
-    ///         Deposit: as deposited. MintTime / Number: sorted by the adapter. Creator: the creator supplies
-    ///         the order at burn time, within CREATOR_ORDER_GRACE of filling; after that, deposit order.
+    ///         Deposit: as deposited. MintTime / Number: sorted by the adapter. Layout: as painted, each slot
+    ///         holding a Credit of its palette. Everything is decided up front, so anyone can burn at once.
+    ///         Creator (hand-arranged after filling) is retired: its value stays so the others don't shift,
+    ///         and new batches can't choose it.
     enum Arrangement {
         Deposit,
         MintTime,
@@ -104,6 +109,9 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         // 64–79 in layout1), 0 = any palette, 1–15 = the CMYK mask that slot must show. Both zero = no layout.
         uint256 layout0;
         uint64 layout1;
+        // Jack's "Bits" trait: marks set across the Credit's active plates (0–256). 0 = unbounded on that side.
+        uint16 bitsFrom;
+        uint16 bitsTo;
     }
 
     struct Summary {
@@ -157,7 +165,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     uint256 public protocolFeeBps;
     Arrangement public arrangement;
     Split public split;
-    uint64 public deadline;
+    uint64 public deadline; // set at creation; no longer enforced (open batches don't expire)
     uint64 public filledAt;
     uint64 public assembledAt;
     uint64 public auctionEnd;
@@ -181,7 +189,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
 
     event Deposited(address indexed from, uint256 indexed id, uint256 count);
     event Withdrawn(address indexed to, uint256 indexed id, uint256 count);
-    event Filled(uint64 deadline);
+    event Filled(uint64 unlocksAt);
     event Assembled(address indexed caller, address statement, uint256 statementId, uint256[] order);
     event Bid(address indexed bidder, uint256 amount, uint64 auctionEnd);
     event Settled(address indexed winner, uint256 amount, uint256 protocolFee, uint256 creatorFee, uint256 payoutPerShare);
@@ -214,8 +222,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     error NotStray();
     error NotWinner();
     error AssemblerNotReady();
-    error NotCreator();
-    error CreatorsTurn();
+    error ArrangementRetired();
     error BadOrder();
     error NoSlot(uint256 id);
     error LayoutMismatch(uint256 slot);
@@ -245,9 +252,11 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         if (filter_.paidTo != 0 && filter_.paidFrom > filter_.paidTo) revert BadFilter();
         if (filter_.idTo != 0 && filter_.idFrom > filter_.idTo) revert BadFilter();
         if (filter_.maxScore != 0 && filter_.minScore > filter_.maxScore) revert BadFilter();
+        if (filter_.bitsTo != 0 && filter_.bitsFrom > filter_.bitsTo) revert BadFilter();
         if ((filter_.minScore != 0 || filter_.maxScore != 0) && address(IBatchFactory(msg.sender).ratings()) == address(0)) {
             revert BadFilter();
         }
+        if (arrangement_ == Arrangement.Creator) revert ArrangementRetired();
         bool hasLayout = filter_.layout0 != 0 || filter_.layout1 != 0;
         if (hasLayout != (arrangement_ == Arrangement.Layout)) revert BadFilter();
         if (hasLayout) {
@@ -284,18 +293,17 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
 
     function state() public view returns (State) {
         if (statement != address(0)) return settled ? State.Settled : State.Auction;
-        if (block.timestamp >= effectiveDeadline()) return State.Expired;
         return _ids.length == SIZE ? State.Full : State.Open;
     }
 
-    /// @notice The deadline, extended so a batch that filled before the assembler was active always has
-    ///         FILL_GRACE from activation to burn.
-    function effectiveDeadline() public view returns (uint256 dl) {
-        dl = deadline;
-        if (_ids.length == SIZE) {
-            uint256 active = factory.assemblerActiveAt();
-            if (active != 0 && dl < active + FILL_GRACE) dl = active + FILL_GRACE;
-        }
+    /// @notice When a full batch's lock lifts (first fill + UNLOCK_AFTER); 0 while it is not full.
+    function unlocksAt() public view returns (uint256) {
+        return _ids.length == SIZE ? uint256(filledAt) + UNLOCK_AFTER : 0;
+    }
+
+    /// @notice Kept for clients of the old interface: the same as unlocksAt().
+    function effectiveDeadline() external view returns (uint256) {
+        return unlocksAt();
     }
 
     function _require(State s) internal view {
@@ -356,19 +364,20 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         ++sharesOf[from];
         emit Deposited(from, id, _ids.length);
         if (_ids.length == SIZE) {
-            filledAt = uint64(block.timestamp);
-            uint64 floor = uint64(block.timestamp + FILL_GRACE);
-            if (deadline < floor) deadline = floor;
-            emit Filled(deadline);
+            // The lock runs once, from the first fill. A refill after someone left does not re-lock: otherwise one
+            // depositor could leave and rejoin in a single transaction to lock everyone else again, forever.
+            if (filledAt == 0) filledAt = uint64(block.timestamp);
+            emit Filled(uint64(unlocksAt()));
         }
     }
 
-    /// @notice Take your Credits back. Allowed while Open (under 80), after the deadline if never assembled,
-    ///         and from any unassembled batch while the factory's exit window is open.
+    /// @notice Take your Credits back. Allowed while Open (under 80), from a full batch once its lock has lifted
+    ///         (UNLOCK_AFTER since filling, not assembled), and from any unassembled batch while the factory's
+    ///         exit window is open.
     function withdraw(uint256[] calldata ids) external nonReentrant {
         State s = state();
-        bool exit = s == State.Full && factory.exitWindowOpen();
-        if (s != State.Open && s != State.Expired && !exit) revert WrongState(s);
+        bool unlocked = s == State.Full && (block.timestamp >= unlocksAt() || factory.exitWindowOpen());
+        if (s != State.Open && !unlocked) revert WrongState(s);
         // Book everything first, then move tokens.
         for (uint256 i; i < ids.length; ++i) {
             uint256 id = ids[i];
@@ -411,12 +420,13 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
             // 0 means "not in the table" (real scores start at 80.0): never admitted by a rating rule.
             if (sc == 0 || sc < f.minScore || (f.maxScore != 0 && sc > f.maxScore)) return false;
         }
-        if (f.palettes == 0 && f.prints == 0 && f.weights == 0 && f.eights == 0) return true;
+        if (f.palettes == 0 && f.prints == 0 && f.weights == 0 && f.eights == 0 && f.bitsFrom == 0 && f.bitsTo == 0) return true;
         ICreditArt.Read memory r = art.describe(credits.seedOf(id), credits.timestampOf(id));
         if (f.palettes != 0 && f.palettes & (1 << _paletteMask(r.colors)) == 0) return false;
         if (f.prints != 0 && f.prints & (1 << _index(r.register, PRINTS)) == 0) return false;
         if (f.weights != 0 && f.weights & (1 << _index(r.weight, WEIGHTS)) == 0) return false;
         if (f.eights != 0 && (r.eights > 31 || f.eights & (1 << r.eights) == 0)) return false;
+        if (r.marks < f.bitsFrom || (f.bitsTo != 0 && r.marks > f.bitsTo)) return false;
         return true;
     }
 
@@ -522,39 +532,11 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     // ---------------------------------------------------------------- assemble
 
     /// @notice Burn the 80 into a Statement with the batch's arrangement. Anyone can call once Full; the
-    ///         caller pays gas. With the Creator arrangement, only after the creator's grace has passed.
+    ///         caller pays gas.
     function assemble() external nonReentrant {
         _require(State.Full);
-        if (arrangement == Arrangement.Creator || arrangement == Arrangement.Layout) {
-            // The creator's day starts when assembly first became possible: at fill, or, for a batch that filled
-            // during the staged launch, when the assembler was activated.
-            uint256 active = factory.assemblerActiveAt();
-            uint256 since = active > filledAt ? active : filledAt;
-            if (block.timestamp < since + CREATOR_ORDER_GRACE) revert CreatorsTurn();
-        }
         if (arrangement == Arrangement.Layout) return _assemble(layoutOrder(), Arrangement.Deposit);
-        _assemble(_ids, arrangement == Arrangement.Creator ? Arrangement.Deposit : arrangement);
-    }
-
-    /// @notice Creator arrangement only: the creator burns with a hand-made order (a permutation of the 80).
-    function assembleOrdered(uint256[] calldata order) external nonReentrant {
-        _require(State.Full);
-        if (arrangement != Arrangement.Creator && arrangement != Arrangement.Layout) revert BadOrder();
-        if (msg.sender != creator) revert NotCreator();
-        if (order.length != SIZE) revert BadOrder();
-        Filter memory f = _filter;
-        for (uint256 i; i < SIZE; ++i) {
-            if (depositorOf[order[i]] == address(0)) revert BadOrder();
-            for (uint256 j; j < i; ++j) {
-                if (order[j] == order[i]) revert BadOrder();
-            }
-            // Under a layout the creator may only reshuffle within a palette: every painted slot keeps its colour.
-            if (arrangement == Arrangement.Layout) {
-                uint256 want = _slot(f, i);
-                if (want != 0 && paletteOf[order[i]] != want) revert LayoutMismatch(i);
-            }
-        }
-        _assemble(order, Arrangement.Deposit);
+        _assemble(_ids, arrangement);
     }
 
     /// @dev The assembler is fixed in the factory. It is approved as an operator for this batch's
@@ -753,7 +735,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         s.name = name;
         s.creator = creator;
         s.count = _ids.length;
-        s.deadline = uint64(effectiveDeadline());
+        s.deadline = uint64(unlocksAt()); // when a full batch unlocks; 0 while open
         s.filledAt = filledAt;
         s.assembledAt = assembledAt;
         s.auctionEnd = auctionEnd;

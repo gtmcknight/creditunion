@@ -1,3 +1,4 @@
+import { go as navigate } from '../main';
 import { parseAbi } from 'viem';
 import { chain, config, send, session } from '../chain';
 import { myCredits } from '../data';
@@ -9,12 +10,12 @@ const COUNTS = [1, 5, 10, 20, 40];
 /// Test networks only: mint Credits from the testnet contract, which uses Jack's real art renderer.
 export async function mint(app: HTMLElement, rerender: () => void) {
   if (config.chainId === 1) {
-    location.hash = '#/';
+    navigate('/');
     return;
   }
   const owned = session.account ? await myCredits(session.account) : [];
 
-  app.innerHTML = `<a class="back" href="#/">← Parties</a>
+  app.innerHTML = `<a class="back" href="/">← Parties</a>
   <section class="narrow">
     <h1>Mint test Credits</h1>
     <p class="lede">Free on ${chain.name}. Same art and traits as real Credits.</p>
@@ -33,7 +34,7 @@ export async function mint(app: HTMLElement, rerender: () => void) {
               .reverse()
               .map((id) => `<span class="pick" title="Credit #${id}"><img src="${art(id)}" alt="Credit #${id}" loading="lazy"></span>`)
               .join('')}</div>
-             <div class="actions"><a class="btn primary" href="#/">Join a party</a><a class="btn" href="#/new">Make Statement Party</a></div>`
+             <div class="actions"><a class="btn primary" href="/">Join a party</a><a class="btn" href="/create">Make Statement Party</a></div>`
           : '<p class="muted">None yet.</p>'
       }
     </div>`

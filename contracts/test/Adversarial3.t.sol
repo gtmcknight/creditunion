@@ -228,35 +228,6 @@ contract Adversarial3Test is Test {
         assertEq(b.depositorOf(51), carol);
     }
 
-    /// Fixed: the creator's day runs from activation for batches that filled before an assembler existed.
-    function test_CreatorGraceRunsFromActivation() public {
-        BatchFactory f = new BatchFactory(
-            ICredits(address(credits)), IRatings(address(0)), IAssembler(address(0)), setter, fee, 100, 0, 10
-        );
-        _approveAll(f);
-        Batch b = _full(f, Batch.Arrangement.Creator); // alice is the creator
-        assertEq(b.creator(), alice);
-
-        skip(2 days);
-        MockAssembler pending = new MockAssembler(statement);
-        vm.prank(setter);
-        f.proposeAssembler(pending);
-        skip(f.ASSEMBLER_DELAY());
-        f.activateAssembler();
-
-        vm.prank(bob);
-        vm.expectRevert(Batch.CreatorsTurn.selector);
-        b.assemble();
-        skip(b.CREATOR_ORDER_GRACE() - 1);
-        vm.prank(bob);
-        vm.expectRevert(Batch.CreatorsTurn.selector);
-        b.assemble();
-        skip(1);
-        vm.prank(bob);
-        b.assemble(); // the creator had a full day after activation
-        assertEq(statement.ownerOf(1), address(b));
-    }
-
     /// Fixed: a mint hook (from == 0, no beneficiary) is refused, so _ids can never list a Credit nobody
     /// deposited.
     function test_MintIntoBatchRefused() public {
@@ -329,7 +300,7 @@ contract Adversarial3Test is Test {
         assertEq(b3.depositorOf(101), carol);
     }
 
-    function test_ExitWindowWithdrawThenRefillResetsFill() public {
+    function test_ExitWindowWithdrawThenRefillKeepsFirstFill() public {
         BatchFactory f = new BatchFactory(
             ICredits(address(credits)), IRatings(address(0)), IAssembler(address(0)), setter, fee, 100, 0, 10
         );
@@ -351,8 +322,8 @@ contract Adversarial3Test is Test {
         vm.prank(carol);
         f.deposit(address(b), _one(101));
         assertEq(uint256(b.state()), uint256(Batch.State.Full));
-        assertGt(b.filledAt(), filled);
-        assertGe(b.deadline(), block.timestamp + b.FILL_GRACE()); // 14-day deadline still dominates
+        assertEq(b.filledAt(), filled); // the lock runs from the first fill, never re-armed
+        assertEq(b.unlocksAt(), filled + b.UNLOCK_AFTER());
         assertEq(b.ids().length, 80);
         assertEq(b.ids()[79], 101);
     }
@@ -536,34 +507,24 @@ contract Adversarial3Test is Test {
         factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 90 days, _range(101, 10), 100, 0);
     }
 
-    /// Full batch, assembler active, past `deadline` but inside activation + FILL_GRACE: Full, no withdraw,
-    /// assembly allowed; one second past the effective deadline: Expired, withdraw allowed, assembly refused.
-    function test_EffectiveDeadlineEdges() public {
+    /// The lock's edge, on a staged factory (no assembler): one second before unlocksAt no withdrawal;
+    /// at unlocksAt withdrawal works and the batch reopens. Activation later doesn't re-lock it.
+    function test_UnlockEdges() public {
         BatchFactory f = new BatchFactory(
             ICredits(address(credits)), IRatings(address(0)), IAssembler(address(0)), setter, fee, 100, 0, 10
         );
         _approveAll(f);
         Batch b = _full(f, Batch.Arrangement.Deposit);
-        skip(30 days);
-        MockAssembler pending = new MockAssembler(statement);
-        vm.prank(setter);
-        f.proposeAssembler(pending);
-        skip(3 days);
-        f.activateAssembler();
-        uint256 eff = b.effectiveDeadline();
-        assertEq(eff, block.timestamp + 7 days);
-        vm.warp(eff - 1);
-        assertEq(uint256(b.state()), uint256(Batch.State.Full));
+        uint256 at = b.unlocksAt();
+        vm.warp(at - 1);
         vm.prank(bob);
         vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Full));
         b.withdraw(_one(51));
-        vm.warp(eff);
-        assertEq(uint256(b.state()), uint256(Batch.State.Expired));
-        vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Expired));
-        b.assemble();
+        vm.warp(at);
         vm.prank(bob);
         b.withdraw(_one(51));
         assertEq(b.count(), 79);
-        assertEq(b.effectiveDeadline(), b.deadline()); // no longer full: no activation grace
+        assertEq(uint256(b.state()), uint256(Batch.State.Open));
+        assertEq(b.unlocksAt(), 0);
     }
 }

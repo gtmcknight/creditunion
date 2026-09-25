@@ -13,9 +13,9 @@ Independent. Not affiliated with Jack Butcher.
 | **Deposit** | Approve the factory once and deposit any number, or `safeTransferFrom` one Credit straight to the batch (no approval; `data` may name a beneficiary). Deposit order is the Statement order. Plain `transferFrom` fires no hook: such strays go to the fee recipient via `rescue()` as lost-and-found. |
 | **Buy in** | The `Sweeper` buys the cheapest fitting OpenSea listings through Seaport 1.6 and deposits them in the buyer's name, in one transaction. The buyer pays the listings plus the sweep fee (2%). Unused ETH is refunded, and listings that sold first are skipped. |
 | **Withdraw** | Any depositor, any time, until the batch holds 80. |
-| **Lock** | The 80th Credit locks it. The deadline extends to at least 7 days out. |
+| **Lock** | The 80th Credit locks it for 7 days (`UNLOCK_AFTER`). Open batches have no deadline. |
 | **Burn** | Anyone calls `assemble()`. The batch checks that all 80 Credits are gone and that it holds the Statement, or the whole call reverts. |
-| **Expire** | Not burned by the deadline (never filled, or Statements sold out): everyone withdraws. |
+| **Unlock** | Not burned within 7 days of filling (no assembler yet, Statements sold out, anything): depositors may withdraw, which reopens the batch, or stay, and it can still be burned while all 80 remain. A refill starts a fresh 7 days. |
 | **Auction** | A 24h clock starts at the first bid. Each bid +5% (min 0.01 ETH). Bids in the last 15 min extend it. Outbid ETH is refunded in the same tx. A reserve lapses after 7 days with no bids (the minimum is then 0.01 ETH). |
 | **Split** | Anyone settles. The Statement goes to the winner. The protocol fee (2%) comes off the top; the rest goes to the 80 positions: 1/80 each (*Equal*), or 1.5 → 0.5 shares by deposit order (*Early bird*, chosen when the batch opens — the curator deposits first, so that is their reward instead of a fee), and each deposited Credit claims 1/80 of the rest. |
 
@@ -48,7 +48,7 @@ The fee recipient can change any of these within the ceilings. A batch copies th
 
 ## Launching before the Statement contract exists
 
-The factory can deploy with **no assembler**. Batches open, fill and lock as normal, but cannot burn: pooling only. When Jack's Statement contract ships and the adapter is written and reviewed, one address (the *setter*, ideally a multisig) **proposes** it. That opens a **3-day exit window** in which anyone can withdraw from any batch, full ones included. After 3 days anyone can **activate** it, permanently; the setter then has no powers at all. Full batches get a fresh 7 days from activation to burn, so none expires while waiting. The setter can replace a pending proposal (which restarts the window) but can do nothing else, ever.
+The factory can deploy with **no assembler**. Batches open, fill and lock as normal, but cannot burn: pooling only. When Jack's Statement contract ships and the adapter is written and reviewed, one address (the *setter*, ideally a multisig) **proposes** it. That opens a **3-day exit window** in which anyone can withdraw from any batch, full ones included. After 3 days anyone can **activate** it, permanently; the setter then has no powers at all. Full batches never expire while waiting: after their 7-day lock, depositors may leave or stay for the burn. The setter can replace a pending proposal (which restarts the window) but can do nothing else, ever.
 
 ## Trust model
 

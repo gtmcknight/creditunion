@@ -78,7 +78,7 @@ contract TestCreditsTest is Test {
             first[i] = i + 1;
             rest[i] = i + 41;
         }
-        Batch b = Batch(f.create("Test", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, first, 100, 0));
+        Batch b = Batch(f.create("Test", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, first, 100, 0));
         f.deposit(address(b), rest);
         vm.stopPrank();
         b.assemble();
@@ -168,5 +168,43 @@ contract TestCreditsTest is Test {
                 == keccak256(bytes(want));
             assertEq(b.passes(id), same);
         }
+    }
+
+    /// Bits: a range on Jack's "Bits" (marks across active plates) admits exactly the Credits inside it,
+    /// and a backwards range is rejected.
+    function test_FilterOnBits() public {
+        MockStatement st = new MockStatement(ICredits(address(credits)));
+        BatchFactory f = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(st), address(0), address(0xFEE), 100, 0, 1);
+        credits.mint(alice, 40);
+        CreditArt art = credits.art();
+        uint256 m1 = art.describe(credits.seedOf(1), credits.timestampOf(1)).marks;
+        Batch.Filter memory fl;
+        fl.bitsFrom = uint16(m1 > 10 ? m1 - 10 : 0);
+        fl.bitsTo = uint16(m1 + 10);
+        uint256[] memory one = new uint256[](1);
+        one[0] = 1;
+        vm.startPrank(alice);
+        credits.setApprovalForAll(address(f), true);
+        Batch b = Batch(f.create("Bits", fl, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, one, 100, 0));
+        uint256 inside;
+        uint256 outside;
+        for (uint256 id = 2; id <= 40; ++id) {
+            uint256 m = art.describe(credits.seedOf(id), credits.timestampOf(id)).marks;
+            bool want = m >= fl.bitsFrom && m <= fl.bitsTo;
+            assertEq(b.passes(id), want);
+            want ? ++inside : ++outside;
+        }
+        assertGt(inside + outside, 0);
+        Batch.Filter memory bad;
+        bad.bitsFrom = 100;
+        bad.bitsTo = 50;
+        vm.expectRevert(Batch.BadFilter.selector);
+        f.create("Backwards", bad, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _next(art), 100, 0);
+        vm.stopPrank();
+    }
+
+    function _next(CreditArt) internal pure returns (uint256[] memory one) {
+        one = new uint256[](1);
+        one[0] = 2;
     }
 }

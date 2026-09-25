@@ -255,8 +255,8 @@ contract Adversarial5Test is Test {
         assertEq(statement.ownerOf(1), address(b));
     }
 
-    /// Expired: withdrawals undo the bookkeeping and the batch drains normally.
-    function test_ExpiredLayoutBatchDrains() public {
+    /// A long-open layout batch: withdrawals undo the bookkeeping and the batch drains normally.
+    function test_OldLayoutBatchDrains() public {
         uint8[80] memory s;
         for (uint256 i; i < 80; ++i) s[i] = K; // 80 K slots, no any
         credits.mintAt(alice, 20, K_AT); // 1..20: only 20 K exist
@@ -264,7 +264,7 @@ contract Adversarial5Test is Test {
         Batch b = _open(factory, alice, _layout(s), _range(1, 20));
         _noSlot(factory, alice, b, 21);
         skip(14 days);
-        assertEq(uint256(b.state()), uint256(Batch.State.Expired));
+        assertEq(uint256(b.state()), uint256(Batch.State.Open)); // open batches don't expire
         vm.prank(alice);
         b.withdraw(_range(1, 20));
         assertEq(b.count(), 0);
@@ -381,24 +381,10 @@ contract Adversarial5Test is Test {
         assertLt(g, 10_000_000);
     }
 
-    function test_Gas_AssembleOrderedLayout() public {
-        credits.mintAt(alice, 40, CMY_AT);
-        credits.mintAt(bob, 40, K_AT);
-        Batch b = _open(factory, alice, _layout(_checkered()), _range(1, 40));
-        _deposit(factory, bob, b, _range(41, 40));
-        uint256[] memory order = b.layoutOrder();
-        vm.prank(alice);
-        uint256 g = gasleft();
-        b.assembleOrdered(order);
-        g -= gasleft();
-        emit log_named_uint("assembleOrdered() gas, layout", g);
-        assertLt(g, 10_000_000);
-    }
-
     // ---------------------------------------------------------------- 4. odd palettes
 
     /// A Credit whose colors map to no plate (mask 0; impossible on mainnet) can only ever take an any slot,
-    /// never a painted one, and the creator cannot put it in a painted slot either.
+    /// never a painted one.
     function test_BlankPaletteOnlyTakesAnySlots() public {
         uint8[80] memory s;
         for (uint256 i; i < 79; ++i) s[i] = K;
@@ -413,12 +399,6 @@ contract Adversarial5Test is Test {
         uint256[] memory order = b.layoutOrder();
         assertEq(order[79], 1, "blank goes to the any slot");
         _assertOrderValid(b, s);
-        // creator tries to paint slot 0 with the blank
-        uint256[] memory bad = order;
-        (bad[0], bad[79]) = (bad[79], bad[0]);
-        vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(Batch.LayoutMismatch.selector, 0));
-        b.assembleOrdered(bad);
         skip(1 days);
         b.assemble();
         assertEq(statement.ownerOf(1), address(b));
@@ -501,7 +481,7 @@ contract Adversarial5Test is Test {
         f.layout1 = 1 << 60;
         vm.prank(alice);
         vm.expectRevert(Batch.BadFilter.selector);
-        factory.create("L", f, new uint256[](0), 0, Batch.Arrangement.Creator, Batch.Split.Equal, 14 days, _one(1), 200, 0);
+        factory.create("L", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(1), 200, 0);
     }
 
     // ---------------------------------------------------------------- 6. sweeps

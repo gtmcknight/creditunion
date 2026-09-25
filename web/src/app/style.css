@@ -312,8 +312,39 @@ nav a[aria-current] {
 nav .short {
   display: none;
 }
-@media (max-width: 560px) {
-  nav a[data-nav=''] {
+nav a .num {
+  margin-left: 4px;
+  color: var(--muted);
+}
+/* Brand left, the three destinations centred, About · theme · wallet right. */
+.top {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+}
+.side-nav {
+  justify-self: end;
+}
+@media (max-width: 720px) {
+  .side-nav .about-link {
+    display: none;
+  }
+}
+@media (max-width: 480px) {
+  .top {
+    gap: 4px;
+  }
+  .logo {
+    font-size: 0;
+    gap: 0;
+  }
+  nav a {
+    padding: 0 6px;
+  }
+  .theme {
+    display: none;
+  }
+  /* Wallet as its avatar only; the full name is on the profile page. */
+  .btn.acct .who-name {
     display: none;
   }
 }
@@ -1049,15 +1080,20 @@ input::placeholder {
   display: inline-grid;
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
+  gap: 2px;
+  padding: 2px;
   box-shadow: inset 0 0 0 1px var(--line-strong);
   border-radius: var(--r);
-  overflow: hidden;
+  /* clip, not hidden: focusing a radio must not scroll the control and shift the options */
+  overflow: clip;
 }
 .seg label {
   position: relative;
 }
 .seg input {
   position: absolute;
+  inset: 0 auto auto 0;
+  margin: 0;
   width: 1px;
   height: 1px;
   opacity: 0;
@@ -1067,8 +1103,9 @@ input::placeholder {
   display: grid;
   place-items: center;
   min-width: 52px;
-  height: 44px;
+  height: 40px;
   padding: 0 10px;
+  border-radius: calc(var(--r) - 2px);
   font-size: 14px;
   color: var(--muted);
   cursor: pointer;
@@ -1217,7 +1254,7 @@ dialog form {
   margin-left: auto;
 }
 .seg.sm span {
-  height: 32px;
+  height: 28px;
   min-width: 0;
   padding: 0 12px;
   font-size: 13px;
@@ -1806,7 +1843,7 @@ input[type='datetime-local'] {
 .design-stats {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  border-top: 1px solid var(--fg);
+  border-top: 1px solid var(--line-strong);
 }
 .design-stats > div {
   display: grid;
@@ -1829,16 +1866,16 @@ input[type='datetime-local'] {
 }
 .design-form header {
   display: grid;
-  gap: 12px;
+  gap: 6px;
   margin-bottom: 16px;
 }
 .design-form h1 {
-  font-size: clamp(32px, 4.5vw, 44px);
+  font-size: 26px;
 }
 .rule {
   display: grid;
   gap: 12px;
-  padding: 20px 0;
+  padding: 16px 0;
   border-top: 1px solid var(--line);
 }
 .rule[hidden] {
@@ -1849,7 +1886,7 @@ input[type='datetime-local'] {
   align-items: baseline;
   gap: 10px;
   font-weight: 500;
-  font-size: 15px;
+  font-size: 14px;
 }
 .rule-head > span {
   font-weight: 400;
@@ -1906,21 +1943,30 @@ input[type='datetime-local'] {
   display: block;
 }
 .tile svg {
-  padding: 3px;
+  width: 40px;
+  height: 40px;
+  padding: 2px;
   box-sizing: border-box;
+  /* Print and weight glyphs sit straight on the tile; the white card only returns in dark mode,
+     where their fixed black ink would otherwise vanish. */
+  background: none;
+  box-shadow: none;
+}
+:root[data-mode='dark'] .tile svg {
+  background: #fff;
 }
 .timeline {
   position: relative;
 }
-.timeline #hist {
+.timeline svg {
   display: block;
   width: 100%;
   height: 40px;
 }
-.timeline #hist rect {
+.timeline svg rect {
   fill: var(--line-strong);
 }
-.timeline #hist rect.on {
+.timeline svg rect.on {
   fill: var(--fg);
 }
 .timeline .dual {
@@ -1988,9 +2034,6 @@ input[type='datetime-local'] {
 
 /* ---------------------------------------------------------------- design: tabs on phones */
 
-.tabs {
-  display: none;
-}
 @media (max-width: 820px) {
   .design {
     gap: 12px;
@@ -2037,51 +2080,6 @@ input[type='datetime-local'] {
   }
   .design-form header {
     margin-bottom: 4px;
-  }
-  .tabs {
-    position: sticky;
-    top: 176px;
-    z-index: 4;
-    display: flex;
-    gap: 6px;
-    margin: 0 calc(-1 * var(--gutter));
-    padding: 8px var(--gutter);
-    overflow-x: auto;
-    scrollbar-width: none;
-    background: var(--bg);
-    box-shadow: 0 1px 0 var(--line);
-  }
-  .tabs::-webkit-scrollbar {
-    display: none;
-  }
-  .tabs button {
-    position: relative;
-    flex: none;
-    height: 34px;
-    padding: 0 12px;
-    border: 0;
-    border-radius: 999px;
-    background: none;
-    color: var(--muted);
-    font: 500 13px var(--sans);
-    box-shadow: inset 0 0 0 1px var(--line-strong);
-    white-space: nowrap;
-    cursor: pointer;
-  }
-  .tabs button[aria-selected='true'] {
-    background: var(--fg);
-    color: var(--bg);
-    box-shadow: none;
-  }
-  .tabs button.set::after {
-    content: '';
-    position: absolute;
-    top: 4px;
-    right: 4px;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: currentColor;
   }
   .rule {
     border-top: 0;
@@ -2310,21 +2308,6 @@ input[type='datetime-local'] {
   }
 }
 
-/* ---------------------------------------------------------------- home: app bar over the grid */
-
-.subnav {
-  position: sticky;
-  top: 64px; /* under .top */
-  z-index: 6;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 8px 0 24px;
-  padding: 12px 0;
-  background: var(--bg);
-  border-bottom: 1px solid var(--line);
-}
 .subtabs {
   display: flex;
   gap: 4px;
@@ -2358,14 +2341,7 @@ input[type='datetime-local'] {
   margin-left: 4px;
   color: var(--muted);
 }
-.subnav-end {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.subnav-end .seg[hidden] {
-  display: none;
-}
+
 
 /* ---------------------------------------------------------------- batch page: progress, takes, details */
 
@@ -2585,4 +2561,784 @@ input[type='datetime-local'] {
 }
 .listing:focus-visible .art {
   box-shadow: 0 0 0 2px var(--fg);
+}
+
+/* Home: the sort sits over the grid, only when there are enough parties to sort. */
+.list-tools {
+  display: flex;
+  justify-content: flex-end;
+  margin: 8px 0 16px;
+}
+.list-tools[hidden] {
+  display: none;
+}
+
+.home {
+  padding-top: 32px;
+}
+.home .list-tools {
+  margin-top: -8px;
+}
+
+/* Empty Auctions: a black-and-white, faded Statement as the placeholder card. */
+.card.placeholder .cell img,
+.card.placeholder .cell.ghost img {
+  filter: grayscale(1);
+  opacity: 0.18;
+}
+.card.placeholder .card-body {
+  gap: 4px;
+}
+.card.placeholder strong {
+  font-weight: 500;
+}
+
+/* ---------------------------------------------------------------- create: three panes, add-a-rule */
+
+.who-bar {
+  gap: 10px;
+}
+.who-bar .rule-head {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 500;
+}
+#add-rule:empty {
+  display: none;
+}
+.rule-x {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted);
+  cursor: pointer;
+}
+.rule-x:hover {
+  color: var(--fg);
+}
+
+/* Palette tiles: one row per ink count, on a shared 6-column grid so tiles line up across rows. */
+.tiles.palettes {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+.tile-row {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+
+.rule-desc {
+  margin: -6px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Eights as tiles, like Print: the 8s are the glyph, sized to fit, with the count below. */
+.tiles.eights {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+.pips {
+  display: grid;
+  grid-template: repeat(3, 1fr) / repeat(3, 1fr);
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  font: 700 12px/1 var(--mono);
+  color: #111;
+}
+:root[data-mode='dark'] .pips {
+  color: var(--fg);
+}
+@media (max-width: 560px) {
+  .tiles.eights {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Scale under a range: tick values, placed by percent along the track. */
+.axis {
+  position: relative;
+  height: 14px;
+  margin: -4px 11px 0;
+  font: 11px/1 var(--mono);
+  color: var(--muted);
+}
+.axis button {
+  position: absolute;
+  translate: -50% 0;
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.axis button:hover {
+  color: var(--fg);
+}
+
+/* Layout order: the preview sheet is the canvas. Painted slots show their palette behind the art. */
+#preview.paintable .sheet {
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#preview.paintable .cell:hover {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.cell .paint {
+  position: absolute;
+  left: 21.875%;
+  top: 21.875%;
+  width: 50%;
+  height: 50%;
+  display: flex;
+  opacity: 0.35;
+}
+.cell .paint i {
+  flex: 1;
+}
+.cell .paint + img,
+.cell .paint ~ img {
+  position: absolute;
+}
+
+.lgrid[hidden] {
+  display: none;
+}
+/* Paint by dragging across the sheet: the art mustn't start a native image drag. */
+#preview.paintable img {
+  pointer-events: none;
+  -webkit-user-drag: none;
+}
+.form-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-strong);
+  font-size: 15px;
+  font-weight: 600;
+}
+.form-title .muted {
+  font-size: 13px;
+  font-weight: 400;
+}
+.form-title + .rule {
+  border-top: 0;
+  padding-top: 10px;
+}
+
+.design-form header + .form-title {
+  margin-top: 0;
+}
+
+/* Create form: no rules. Sections are set apart by space and their headings; rules within a section by a smaller gap. */
+.design-form .rule {
+  border-top: 0;
+  padding: 8px 0;
+}
+.design-form .form-title {
+  border-top: 0;
+  margin-top: 18px;
+  padding-top: 0;
+}
+.design-form header + .form-title {
+  margin-top: 8px;
+}
+.design-form .form-title + .rule {
+  padding-top: 8px;
+}
+.design-form .rule + .rule:not(.who-bar) {
+  margin-top: 8px;
+}
+
+.design-form header .lede {
+  font-size: 14px;
+}
+
+/* Terms: one row per setting, label left, control right. */
+.terms {
+  gap: 0;
+}
+.term {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 48px;
+}
+.term-label {
+  font-size: 14px;
+  font-weight: 500;
+}
+.term-value {
+  font-size: 14px;
+  color: var(--muted);
+}
+.term .field.sm {
+  width: 160px;
+}
+.term .field.sm input {
+  height: 32px;
+}
+.form-title .link {
+  margin-left: auto;
+  font-weight: 400;
+  font-size: 13px;
+}
+.term-desc {
+  margin: -4px 0 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Numbered steps: a small outlined circle with the step number. */
+.step {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  font: 600 11px/1 var(--mono);
+  color: var(--muted);
+  translate: 0 -1px;
+}
+.summary {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.hint.next {
+  margin-top: 4px;
+}
+/* The preview's title card: the party as it will be listed. */
+.preview-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.preview-title strong {
+  font-size: 17px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.design-form .form-title {
+  align-items: center;
+}
+.design-form .form-title .step {
+  translate: none;
+  flex: none;
+}
+
+.step {
+  position: relative;
+}
+
+.terms .seg {
+  justify-self: start;
+}
+.terms .term-desc {
+  margin: 2px 0 12px;
+}
+.link[hidden] {
+  display: none;
+}
+
+/* Create form rhythm: every section heading sits the same distance below whatever ended the section before. */
+.design-form .form-title {
+  margin: 0;
+  padding-top: 32px;
+}
+.design-form header + .form-title {
+  padding-top: 8px;
+}
+.design-form .rule {
+  padding: 12px 0 0;
+  margin: 0;
+}
+.design-form .rule > :last-child,
+.design-form .terms > :last-child {
+  margin-bottom: 0;
+}
+.design-form .rule + .rule:not(.who-bar) {
+  margin-top: 12px;
+}
+.design-form .picker:not(:has(.pick)) {
+  padding-bottom: 0;
+  mask-image: none;
+  -webkit-mask-image: none;
+}
+.design-form .submit {
+  padding-top: 32px;
+}
+
+/* Create form: one control size and one description style throughout.
+   Pills, toggles and the name field are all 36px high, 14px text, the same corner radius; every
+   description is 13px muted text sitting 8px under its control. */
+.design-form .rule,
+.design-form .terms {
+  gap: 8px;
+}
+.design-form .presets button,
+.design-form input:not([type='range']) {
+  height: 36px;
+  font: 400 14px var(--sans);
+}
+.design-form .seg.sm span {
+  height: 32px;
+  font: 400 14px var(--sans);
+}
+.design-form .presets button,
+.design-form .seg,
+.design-form input:not([type='range']) {
+  border-radius: var(--r);
+}
+.design-form .presets button,
+.design-form .seg.sm span {
+  padding: 0 14px;
+}
+.design-form .hint,
+.design-form .term-desc,
+.design-form .rule-desc,
+.design-form .picker > p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.design-form .terms .seg + .term-desc {
+  margin: 0;
+}
+.design-form .picker:not(:has(.pick)) {
+  margin: 0;
+  padding: 0;
+}
+
+/* Create page: title over the sheet, count under it, and the form starting level with the sheet's top edge. */
+.design-preview {
+  position: static;
+  gap: 16px;
+}
+.preview-title {
+  height: 40px;
+  margin: 0;
+  align-items: center;
+}
+.preview-title h1 {
+  font-size: 26px;
+  line-height: 40px;
+  margin: 0;
+}
+.preview-count {
+  margin: -4px 0 0;
+}
+.design-form {
+  padding-top: 56px; /* the title row (40) + the preview's gap (16) */
+}
+.design-form > .form-title:first-child,
+.design-form .form-title:first-of-type {
+  padding-top: 0;
+}
+.design {
+  margin-top: 32px;
+}
+
+/* A rule's editor eases in when its chip turns on. */
+.design-form .rule[data-pane='who']:not(.who-bar):not([hidden]) {
+  animation: rule-in 220ms var(--ease) both;
+}
+@keyframes rule-in {
+  from {
+    opacity: 0;
+    translate: 0 -6px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .design-form .rule[data-pane='who']:not(.who-bar):not([hidden]) {
+    animation: none;
+  }
+}
+/* Headings sit close to what they label: just the form's own 8px row gap. */
+.design-form .form-title + .rule {
+  padding-top: 0;
+}
+
+/* About: the whole edition as a band across the top. Order switch top left, Expand top right; Expand
+   grows the band to the full window (clip-path from the band's rect to the whole window). */
+.wall-band {
+  margin: 24px 0 40px;
+  display: grid;
+  gap: 10px;
+}
+.wall-frame {
+  position: relative;
+  height: clamp(380px, 46vw, 600px);
+}
+/* The About hero: the headline sits on a paper label over the living wall. */
+.wall-label {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+  width: min(560px, calc(100% - 48px));
+  padding: 32px 36px;
+  background: #fff;
+  color: #111;
+  text-align: center;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 24px 60px -24px rgba(0, 0, 0, 0.35);
+  transition: opacity 200ms var(--ease);
+}
+.wall-label h1 {
+  margin: 0 0 10px;
+  font-size: clamp(28px, 4vw, 44px);
+  line-height: 1.05;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+.wall-label p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.45;
+  color: #444;
+}
+.wall-label a {
+  color: inherit;
+}
+.wall-frame[data-mode='one'] .wall-label,
+.wall-frame.expanded .wall-label {
+  opacity: 0;
+  pointer-events: none;
+}
+.wall-frame canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+/* Controls sit on the art, on a white chip, so they read over any ink. */
+.wall-tools {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 6px;
+}
+.wall-tools button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  color: #0a0a0a;
+  cursor: pointer;
+  position: relative;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 4px 12px -6px rgba(0, 0, 0, 0.25);
+}
+.wall-tools svg {
+  width: 16px;
+  height: 16px;
+}
+.wall-tools button:active {
+  scale: 0.94;
+}
+.wall-pause {
+  display: none !important;
+}
+.wall-frame.expanded .wall-pause {
+  display: grid !important;
+}
+.wall-frame[data-mode='one'] .wall-zoom {
+  display: none;
+}
+.wall-modes {
+  position: absolute;
+  top: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 4px 12px -6px rgba(0, 0, 0, 0.25);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+.wall-modes {
+  left: 10px;
+  display: flex;
+  padding: 3px;
+  gap: 2px;
+}
+.wall-modes button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: 500 12px/1 var(--sans);
+  color: #6b6b6b;
+  cursor: pointer;
+}
+.wall-modes button:hover {
+  color: #0a0a0a;
+}
+.wall-modes button[aria-checked='true'] {
+  background: #0a0a0a;
+  color: #fff;
+}
+.wall-frame.expanded {
+  position: fixed;
+  inset: 0;
+  height: auto;
+  z-index: 100;
+  background: #fff;
+}
+.wall-frame.expanded canvas {
+  box-shadow: none;
+}
+.wall-frame.expanded .wall-modes {
+  top: 16px;
+  left: 16px;
+}
+.wall-frame.expanded .wall-tools {
+  top: 16px;
+  right: 16px;
+}
+
+.wall-modes svg {
+  width: 16px;
+  height: 16px;
+  shape-rendering: crispEdges;
+}
+
+/* Wall controls: an instant label under each icon on hover (no native title delay), and no focus ring
+   left behind by a mouse click. */
+.wall-modes button {
+  position: relative; /* anchors its tooltip */
+}
+.wall-modes button:focus:not(:focus-visible),
+.wall-tools button:focus:not(:focus-visible) {
+  outline: none;
+}
+.wall-modes button[data-tip]::after,
+.wall-tools button[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  translate: -50% -2px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: #0a0a0a;
+  color: #fff;
+  font: 500 11px/1 var(--sans);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms var(--ease), translate 120ms var(--ease);
+  z-index: 2;
+}
+.wall-tools button[data-tip]::after {
+  left: auto;
+  right: 0;
+  translate: 0 -2px;
+}
+.wall-modes button[data-tip]:hover::after,
+.wall-tools button[data-tip]:hover::after {
+  opacity: 1;
+  translate: -50% 0;
+}
+.wall-tools button[data-tip]:hover::after {
+  translate: 0 0;
+}
+
+/* About: a short page. Headline, four steps, a few answers, then every rule folded away. */
+.about {
+  display: grid;
+  gap: 20px;
+  max-width: 880px;
+}
+.about-head {
+  display: grid;
+  gap: 10px;
+}
+.about-head h1 {
+  font-size: clamp(28px, 4vw, 40px);
+  line-height: 1.1;
+}
+.about-head .lede {
+  margin: 0;
+  max-width: 56ch;
+}
+.about-steps {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.about-steps li {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 16px;
+  border-radius: var(--r);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.about-steps .num {
+  font: 500 12px/1 var(--mono);
+  color: var(--muted);
+}
+.about-steps strong {
+  font-size: 16px;
+  font-weight: 600;
+}
+.about-steps p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.about-h {
+  margin: 24px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.about-faq {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 32px;
+}
+.about-faq dt {
+  font-size: 14px;
+  font-weight: 600;
+}
+.about-faq dd {
+  margin: 4px 0 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+/* About: an Apple-style bento. Each section is one panel: headline and a line on top, the picture below. */
+.doc {
+  max-width: none;
+  gap: 0;
+}
+#wall .wall-band {
+  margin-bottom: 8px;
+}
+.chapter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.chapter-grid .chapter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 44px 32px 36px;
+  background: #f5f5f3;
+  color: #111;
+  text-align: center;
+  scroll-margin-top: 72px;
+}
+.chapter-grid h2 {
+  margin: 0 0 8px;
+  font-size: clamp(24px, 2.6vw, 32px);
+  line-height: 1.1;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+.chapter-grid p {
+  margin: 0 auto 6px;
+  max-width: 42ch;
+  font-size: 16px;
+  line-height: 1.45;
+  color: #444;
+}
+.chapter-grid p a {
+  color: inherit;
+}
+.chapter-grid .fig {
+  width: 100%;
+  max-width: 280px;
+  margin: auto 0 0;
+  padding-top: 20px;
+}
+.chapter-grid .fig .viz {
+  padding: 0;
+  background: none;
+}
+.chapter-grid .fig figcaption {
+  font-size: 12px;
+  color: #777;
+  text-align: center;
+}
+.contracts-foot {
+  margin-top: 40px;
+}
+.contracts-foot h2 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+@media (max-width: 700px) {
+  .chapter-grid {
+    grid-template-columns: 1fr;
+  }
+  .chapter-grid .chapter {
+    padding: 32px 20px 20px;
+  }
+}
+.fig svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  font-family: var(--sans);
+}
+.credit-sheet {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 3px;
+  max-width: 360px;
+  margin: 0 auto;
+}
+.credit-sheet img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  background: #fff;
+}
+.about-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.about-foot a {
+  color: inherit;
 }

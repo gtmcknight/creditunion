@@ -404,21 +404,22 @@ contract Adversarial4Test is Test {
         b.rescue(address(credits), 1);
     }
 
-    /// Expired Full batch (never assembled): withdrawals shift positions but nothing can be added back,
-    /// and settle is unreachable, so unitsOf can never be summed against a payout.
-    function test_ExpiredCannotRefill() public {
+    /// Unlocked full batch (never assembled): withdrawals shift positions and reopen it, and a newcomer
+    /// joins at the back; units always match the position model.
+    function test_UnlockedWithdrawReopensAndRefills() public {
         Batch b = _open(staged, alice, _range(1, 40), Batch.Split.Early, Batch.Arrangement.Deposit);
         vm.prank(bob);
         staged.deposit(address(b), _range(81, 40));
-        skip(15 days); // deadline 14d; no assembler activation → no FILL_GRACE extension
-        assertEq(uint256(b.state()), uint256(Batch.State.Expired));
+        skip(15 days); // past the 7-day lock; no assembler yet
         vm.prank(alice);
         b.withdraw(_range(1, 40));
+        assertEq(uint256(b.state()), uint256(Batch.State.Open));
         assertEq(b.unitsOf(bob), _modelUnits(b, bob));
         assertEq(b.unitsOf(bob), 7920); // positions 0..39 now
         vm.prank(carol);
-        vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Expired));
         staged.deposit(address(b), _one(161));
+        assertEq(b.count(), 41);
+        assertEq(b.unitsOf(bob), _modelUnits(b, bob));
     }
 
     /// Duplicate ids in one deposit or withdraw call cannot double-count.
@@ -462,41 +463,6 @@ contract Adversarial4Test is Test {
     }
 
     // ---------------------------------------------------------------- 3. position gaming
-
-    /// Creator arrangement: assembleOrdered changes the Statement order only. Payout positions stay in
-    /// deposit order, so the creator cannot promote their own Credits.
-    function test_AssembleOrderedDoesNotMovePayoutPositions() public {
-        // bob seeds 1 as creator (position 0), alice adds 39, carol 40: creator's remaining Credits come last
-        Batch b = _open(factory, bob, _range(81, 1), Batch.Split.Early, Batch.Arrangement.Creator);
-        vm.prank(alice);
-        factory.deposit(address(b), _range(1, 39));
-        vm.prank(carol);
-        factory.deposit(address(b), _range(161, 20));
-        vm.prank(bob);
-        factory.deposit(address(b), _range(82, 20)); // positions 60..79
-        uint256 bobBefore = b.unitsOf(bob);
-        uint256 aliceBefore = b.unitsOf(alice);
-        uint256 carolBefore = b.unitsOf(carol);
-        // creator burns with his own Credits first
-        uint256[] memory order = new uint256[](80);
-        uint256 k;
-        for (uint256 i; i < 21; ++i) order[k++] = 81 + i;
-        for (uint256 i; i < 39; ++i) order[k++] = 1 + i;
-        for (uint256 i; i < 20; ++i) order[k++] = 161 + i;
-        vm.prank(bob);
-        b.assembleOrdered(order);
-        assertEq(b.unitsOf(bob), bobBefore);
-        assertEq(b.unitsOf(alice), aliceBefore);
-        assertEq(b.unitsOf(carol), carolBefore);
-        (uint256[] memory ids_,) = b.slots();
-        assertEq(ids_[0], 81);
-        assertEq(ids_[1], 1); // deposit order intact
-        _bidAndSettle(b, 4 ether);
-        assertEq(b.claimable(bob), bobBefore * b.payoutPerUnit());
-        address[] memory ds = new address[](3);
-        (ds[0], ds[1], ds[2]) = (alice, bob, carol);
-        _assertConserved(b, ds, 4 ether);
-    }
 
     /// Within one multi-id call, positions follow the array order; a later call can never precede an
     /// earlier one; withdraw + re-deposit in one tx still lands at the back.

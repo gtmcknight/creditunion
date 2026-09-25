@@ -59,7 +59,7 @@ export function sheet(
     const id = opts.placed ? (opts.placed[i] ?? undefined) : ids[i];
     if (id === undefined) {
       const g = opts.ghosts?.[i - ids.length];
-      if (g) return `<i class="cell ghost" title="Credit #${g.id}"><img src="${g.src}" alt="" loading="lazy" decoding="async"></i>`;
+      if (g?.src) return `<i class="cell ghost" title="Credit #${g.id}"><img src="${g.src}" alt="" loading="lazy" decoding="async"></i>`;
       return `<i class="cell empty"></i>`;
     }
     const mine = opts.mine?.has(id.toString()) ? ' mine' : '';

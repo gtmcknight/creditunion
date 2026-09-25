@@ -121,3 +121,20 @@ Per-batch `Split { Equal, Early }` fixed at `initialize`. Early: position i (0-b
 1. Write `JackAssembler` against the published Statement contract; add fork tests against it.
 2. Independent audit of `Batch.sol`, `BatchFactory.sol`, `Sweeper.sol` and the adapter.
 3. Deploy with `PROTOCOL_FEE_BPS`/`SWEEP_FEE_BPS` decided; verify sources on Etherscan/Sourcify.
+
+
+## Change: unlock after fill (branch `unlock-after-fill`, not yet reviewed)
+
+Replaces the deadline/Expired model. Open batches no longer expire (`duration` is still validated and stored but
+not enforced, so the factory interface is unchanged). The 80th deposit sets `filledAt`; `unlocksAt() = filledAt +
+UNLOCK_AFTER` (7 days). `withdraw` is allowed while Open, from Full once `block.timestamp >= unlocksAt()`, and in
+the exit window as before. An unlocked Full batch can still be assembled while all 80 remain; a withdrawal drops it
+to Open. The lock runs once, from the first fill: a refill never re-locks (otherwise a depositor could leave and
+rejoin in one transaction to keep everyone else locked indefinitely). `State.Expired` is never returned (kept so enum values don't shift).
+`effectiveDeadline()` now returns `unlocksAt()`, and `summary().deadline` carries it. `FILL_GRACE` and the
+activation extension are gone: a batch that filled before activation simply waits (unlocked) and is burnable the
+moment the assembler is active. Tests updated: Batch, Adversarial3/4/5, Staged, Audit; five new unit tests
+(open never expires, fill starts lock, unlock lets depositors leave, unlocked batch still assembles, refill
+does not relock). To review: the creator's-order grace (1 day from max(fill, activation)) can now overlap an unlocked
+batch, where a depositor may leave before the creator burns. The creator's grace
+also keys off the first fill.

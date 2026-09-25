@@ -147,26 +147,13 @@ contract LayoutTest is Test {
         assertEq(statement.ownerOf(1), address(b));
     }
 
-    /// The creator may reshuffle within a palette during the grace, never across.
-    function test_CreatorReorderKeepsColours() public {
+    /// A full layout batch burns as painted, by anyone, at once: there is no creator's turn.
+    function test_LayoutBurnsAtOnceByAnyone() public {
         Batch b = _open(_layout(_checkered()), _parity(2, 40, true));
         vm.prank(bob);
         factory.deposit(address(b), _parity(201, 40, false));
-        uint256[] memory order = b.layoutOrder();
         vm.prank(carol);
-        vm.expectRevert(Batch.CreatorsTurn.selector);
         b.assemble();
-        // swap two CMY Credits: fine
-        (order[0], order[2]) = (order[2], order[0]);
-        // swap a CMY and a K: slot 1 wants K
-        uint256[] memory bad = new uint256[](80);
-        for (uint256 i; i < 80; ++i) bad[i] = order[i];
-        (bad[0], bad[1]) = (bad[1], bad[0]);
-        vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(Batch.LayoutMismatch.selector, 0));
-        b.assembleOrdered(bad);
-        vm.prank(alice);
-        b.assembleOrdered(order);
         assertEq(statement.ownerOf(1), address(b));
     }
 

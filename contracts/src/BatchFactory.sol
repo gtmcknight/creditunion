@@ -150,7 +150,8 @@ contract BatchFactory {
     /// @dev The batch takes the factory's current protocol and creator fees and keeps them forever.
     /// @param arrangement How the 80 are ordered on the Statement (Batch.Arrangement).
     /// @param split How the sale is divided among the 80 positions (Batch.Split): equal, or early money earns more.
-    /// @param duration Seconds until the deadline; a batch that fills always gets 7 more days to assemble.
+    /// @param duration Still validated and stored, no longer enforced: open batches don't expire, and a full one
+    ///        unlocks Batch.UNLOCK_AFTER after filling. Kept so the interface doesn't change.
     function create(
         string calldata name,
         Batch.Filter calldata filter,

@@ -90,11 +90,11 @@ contract SeedDemo is Script {
         for (uint256 i; i < 10; ++i) mix[i] = 581 + i; // who[2]'s: 5 odd (K) + 5 even (CMY)
         _openLayout(f, keys[2], "Checkerboard", mix);
 
-        // 6. Full, Creator's order, unburned: the creator (key 0) sees the arranger
+        // 6. Full, by Credit number, unburned: anyone can burn it
         vm.broadcast(keys[0]);
-        address b6 = f.create("Hand Arranged", none, new uint256[](0), 0, Batch.Arrangement.Creator, Batch.Split.Equal, 30 days, _r(101, 40), 200, 0);
+        address b6 = f.create("By Number", none, new uint256[](0), 0, Batch.Arrangement.Number, Batch.Split.Equal, 30 days, _r(101, 40), 200, 0);
         _dep(f, keys[2], b6, _r(481, 40));
-        console.log("ARRANGE_ME", b6);
+        console.log("BURN_ME", b6);
 
         // 7. Open, time window + number range: the eligibility line on cards
         Batch.Filter memory win;

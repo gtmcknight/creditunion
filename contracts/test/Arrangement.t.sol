@@ -86,58 +86,11 @@ contract ArrangementTest is Test {
         assertEq(statement.lastOrder()[79], 90);
     }
 
-    function test_CreatorOrders() public {
-        Batch b = _full(Batch.Arrangement.Creator);
-        // Within the grace, nobody else can burn...
-        vm.prank(alice);
-        vm.expectRevert(Batch.CreatorsTurn.selector);
-        b.assemble();
-        // ...and only the creator may hand in an order.
-        uint256[] memory rev = new uint256[](80);
-        uint256[] memory ids = b.ids();
-        for (uint256 i; i < 80; ++i) rev[i] = ids[79 - i];
-        vm.prank(alice);
-        vm.expectRevert(Batch.NotCreator.selector);
-        b.assembleOrdered(rev);
+    /// Creator's order is retired: new batches can't choose it.
+    function test_CreatorArrangementRetired() public {
         vm.prank(bob);
-        b.assembleOrdered(rev);
-        assertEq(statement.lastOrder()[0], 40);
-        assertEq(statement.lastOrder()[79], 51);
-    }
-
-    function test_CreatorOrderMustBePermutation() public {
-        Batch b = _full(Batch.Arrangement.Creator);
-        uint256[] memory ids = b.ids();
-        uint256[] memory bad = ids;
-        bad[3] = bad[4]; // duplicate
-        vm.prank(bob);
-        vm.expectRevert(Batch.BadOrder.selector);
-        b.assembleOrdered(bad);
-        uint256[] memory bad2 = b.ids();
-        bad2[0] = 99; // not in the batch
-        vm.prank(bob);
-        vm.expectRevert(Batch.BadOrder.selector);
-        b.assembleOrdered(bad2);
-        uint256[] memory short_ = new uint256[](79);
-        vm.prank(bob);
-        vm.expectRevert(Batch.BadOrder.selector);
-        b.assembleOrdered(short_);
-    }
-
-    function test_CreatorGraceThenAnyoneInDepositOrder() public {
-        Batch b = _full(Batch.Arrangement.Creator);
-        skip(b.CREATOR_ORDER_GRACE());
-        vm.prank(alice);
-        b.assemble();
-        assertEq(statement.lastOrder()[0], 51); // deposit order
-    }
-
-    function test_OrderedOnlyForCreatorArrangement() public {
-        Batch b = _full(Batch.Arrangement.Deposit);
-        uint256[] memory ids = b.ids();
-        vm.prank(bob);
-        vm.expectRevert(Batch.BadOrder.selector);
-        b.assembleOrdered(ids);
+        vm.expectRevert(Batch.ArrangementRetired.selector);
+        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Creator, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0);
     }
 
     function test_ArrangementInSummary() public {

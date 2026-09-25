@@ -2,7 +2,7 @@ import { session } from '../chain';
 import { ARRANGEMENTS, listBatches, type Listed, type Summary, hasLayout, layoutSlot } from '../data';
 import { hydrate, pct, who } from '../ens';
 import { fitByBatch } from '../fit';
-import { fillGhosts, registerFilter } from '../ghosts';
+import { editionArt, examples, fillGhosts, registerFilter } from '../ghosts';
 import type { Address } from 'viem';
 import { describeFilter } from '../traits';
 import { eth, esc, same, sheet, until } from '../ui';
@@ -10,9 +10,11 @@ import { eth, esc, same, sheet, until } from '../ui';
 function status(s: Summary) {
   switch (s.state) {
     case 'Open':
-      return `${80 - s.count} to go · ${until(s.deadline)} left`;
+      return `${80 - s.count} to go`;
     case 'Full':
-      return s.exitWindow ? 'Full · exit window open' : s.canAssemble ? 'Full · ready to burn' : 'Full · waiting for Jack';
+      if (s.exitWindow) return 'Full · exit window open';
+      if (Date.now() / 1000 >= s.deadline) return 'Full · unlocked';
+      return s.canAssemble ? 'Full · ready to burn' : 'Full · waiting for Jack';
     case 'Expired':
       return 'Expired · Credits returnable';
     case 'Auction':
@@ -62,7 +64,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[]) {
   const room = 80 - s.count;
   const canJoin = fit?.length ? Math.min(fit.length, room) : 0;
   registerFilter(s.address, s.filter);
-  return `<a class="card${canJoin ? ' can-join' : ''}" href="#/b/${s.address}">
+  return `<a class="card${canJoin ? ' can-join' : ''}" href="/party/${s.address}">
     ${sheet(ids, { size: 'sm', mine, batch: s.state === 'Open' ? s.address : undefined })}
     <div class="card-body">
       <div class="row"><strong>${esc(s.name || 'Untitled')}</strong><span class="tags">${s.split === 1 ? '<span class="tag early">Early bird</span>' : ''}${canJoin ? `<span class="tag join">Join · ${canJoin} fit</span>` : ''}${mine.size ? `<span class="tag you">You · ${mine.size}</span>` : ''}<span class="tag ${s.state.toLowerCase()}">${s.state}</span></span></div>
@@ -77,20 +79,23 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[]) {
 const PARTY_STATES = new Set(['Open', 'Full', 'Expired']);
 export type HomeTab = 'parties' | 'auctions';
 
+/// Header counts: parties still pooling, and Statements at or past auction.
+export function drawCounts(all: Listed[]) {
+  const n = (id: string, v: number) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = v ? String(v) : '';
+  };
+  n('n-parties', all.filter((b) => PARTY_STATES.has(b.s.state)).length);
+  n('n-auctions', all.filter((b) => !PARTY_STATES.has(b.s.state)).length);
+}
+
 /// Two tabs over one list: parties still pooling, and Statements at or past auction. Each leads with
 /// "For you" (what you're in, can join, or are bidding on), then everything else.
 export async function home(app: HTMLElement, tab: HomeTab = 'parties') {
   app.innerHTML = `
-  <section>
-    <div class="subnav">
-      <div class="subtabs" role="tablist">
-        <a role="tab" href="#/" aria-selected="${tab === 'parties'}">Parties <span class="num" id="n-parties"></span></a>
-        <a role="tab" href="#/auctions" aria-selected="${tab === 'auctions'}">Auctions <span class="num" id="n-auctions"></span></a>
-      </div>
-      <div class="subnav-end">
-        <div class="seg sm" role="radiogroup" aria-label="Sort" id="sort-seg" hidden>${SORTS.map(([k, l]) => `<label><input type="radio" name="sort" value="${k}" ${k === sortKey() ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
-        <a class="btn primary sm" href="#/new">Make Statement Party</a>
-      </div>
+  <section class="home">
+    <div class="list-tools" id="sort-row" hidden>
+      <div class="seg sm" role="radiogroup" aria-label="Sort">${SORTS.map(([k, l]) => `<label><input type="radio" name="sort" value="${k}" ${k === sortKey() ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
     </div>
     <div id="batches"><p class="muted">Loading from chain…</p></div>
   </section>`;
@@ -101,10 +106,9 @@ export async function home(app: HTMLElement, tab: HomeTab = 'parties') {
     if (!el) return; // navigated away
     const parties = all.filter((b) => PARTY_STATES.has(b.s.state));
     const auctions = all.filter((b) => !PARTY_STATES.has(b.s.state));
-    document.getElementById('n-parties')!.textContent = parties.length ? String(parties.length) : '';
-    document.getElementById('n-auctions')!.textContent = auctions.length ? String(auctions.length) : '';
+    drawCounts(all);
     const list = tab === 'parties' ? parties : auctions;
-    document.getElementById('sort-seg')!.hidden = tab !== 'parties' || list.length < 4;
+    document.getElementById('sort-row')!.hidden = tab !== 'parties' || list.length < 4;
     let fit = new Map<Address, bigint[]>();
     const forYou = (b: Listed) =>
       !!session.account &&
@@ -116,12 +120,18 @@ export async function home(app: HTMLElement, tab: HomeTab = 'parties') {
       const rest = list.filter((b) => !forYou(b));
       el.innerHTML = !list.length
         ? tab === 'parties'
-          ? `<div class="empty-state"><p>No parties yet.</p><a class="btn primary" href="#/new">Make Statement Party</a></div>`
-          : `<div class="empty-state"><p>No auctions yet. When a party burns its 80, the Statement is auctioned here.</p><a class="btn" href="#/">See parties</a></div>`
+          ? `<div class="empty-state"><p>No parties yet.</p><a class="btn primary" href="/create">Make Statement Party</a></div>`
+          : `<div class="grid"><div class="card placeholder" id="auction-placeholder">${sheet([], { size: 'sm' })}<div class="card-body"><strong>No auctions yet</strong><span class="muted small">When a party burns its 80, its Statement is auctioned here.</span></div></div></div>`
         : (mine.length ? `<h2 class="group-title">For you <span class="num">${mine.length}</span></h2>${grid(mine)}` : '') +
           (rest.length ? `${mine.length ? `<h2 class="group-title">All ${tab} <span class="num">${rest.length}</span></h2>` : ''}${grid(rest)}` : '');
       hydrate(el);
       fillGhosts(el);
+      // Empty Auctions: a greyed Statement of real edition Credits stands in for the first one.
+      const ph = document.getElementById('auction-placeholder');
+      if (ph)
+        examples({ palettes: 0, prints: 0, weights: 0, eights: 0, idFrom: 0n, idTo: 0n, minScore: 0, maxScore: 0 } as Summary['filter']).then((ids) => {
+          ph.querySelector('.sheet')!.outerHTML = sheet([], { size: 'sm', ghosts: ids.slice(0, 80).map((id) => ({ id: BigInt(id), src: editionArt(id) })) });
+        });
     };
     draw();
     if (session.account && tab === 'parties') {

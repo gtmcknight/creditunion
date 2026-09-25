@@ -1,0 +1,432 @@
+/// The whole edition as one picture: every Credit's 8×8 print. Five views:
+///   Time     payment order. Credits paid in the same second share inks (the second picks the plates,
+///            cycling every 15 seconds), so the wall comes out striped.
+///   Color    grouped by their inks (Jack's Colors trait), then by payment.
+///   Density  from fewest marks to most (Jack's Bits trait).
+///   Stream   the mint replayed: each second of payments a column, stacked as they landed.
+///   One by one  one Credit at a time, large, with its number, second, inks and bits.
+/// A living band on the About page; Expand grows whatever view is on to the full window.
+/// Data: public/wall.bin (scripts/wall.ts: 32 bytes per Credit, a 4-bit CMYK mask per cell), plus
+/// edition-traits.bin (palette), bits.bin and times.bin (scripts/wall.ts) for the orders and captions.
+
+/// Subtractive mixes as the contract's SVG draws them, indexed by the 4-bit CMYK mask (0 = paper).
+const PALETTE = ['#ffffff', '#00b5e2', '#e4007c', '#00006e', '#ffd100', '#009400', '#e40000', '#000000', '#111111', '#000c0f', '#0f0008', '#000007', '#110e00', '#000a00', '#0f0000', '#000000'];
+// RGBA packed little-endian for a Uint32 view of ImageData.
+const PAL32 = PALETTE.map((h) => (255 << 24) | (parseInt(h.slice(5, 7), 16) << 16) | (parseInt(h.slice(3, 5), 16) << 8) | parseInt(h.slice(1, 3), 16));
+const LETTERS = 'CMYK';
+const inks = (m: number) => [...LETTERS].filter((_, b) => m & (1 << b)).join('');
+
+const PAUSE = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3v10M11 3v10" stroke="currentColor" stroke-width="2" stroke-linecap="square"/></svg>';
+const PLAY = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 3v10l8-5z" fill="currentColor"/></svg>';
+
+export type Mode = 'time' | 'color' | 'density' | 'stream' | 'one';
+const MODES: [Mode, string][] = [['time', 'Time'], ['color', 'Color'], ['density', 'Density'], ['stream', 'Stream'], ['one', 'One by one']];
+/// Icons on a 16-unit grid, built from squares like the Credits themselves. Color keeps its four inks.
+const sq = (x: number, y: number, s = 3, fill = 'currentColor') => `<rect x="${x}" y="${y}" width="${s}" height="${s}" fill="${fill}"/>`;
+const ICONS: Record<Mode, string> = {
+  // payment order: the diagonal stripes the 15-second ink cycle draws
+  time: sq(2, 2) + sq(6, 2) + sq(10, 6) + sq(2, 10) + sq(6, 6) + sq(10, 10) + sq(6, 10, 3, 'none') + sq(2, 6, 3, 'none'),
+  // the four plates
+  color: sq(2, 2, 5, '#00b5e2') + sq(9, 2, 5, '#e4007c') + sq(2, 9, 5, '#ffd100') + sq(9, 9, 5, '#111'),
+  // fewest marks to most
+  density: sq(2, 11) + sq(6.5, 11) + sq(6.5, 6.5) + sq(11, 11) + sq(11, 6.5) + sq(11, 2),
+  // each second a column, stacked as they landed
+  stream: sq(1.5, 10.5) + sq(5, 7) + sq(5, 10.5) + sq(8.5, 3.5) + sq(8.5, 7) + sq(8.5, 10.5) + sq(12, 10.5),
+  // one Credit, large
+  one: `<rect x="3" y="3" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5"/>` + sq(5.5, 5.5, 2.5) + sq(8, 8, 2.5),
+};
+
+type Edition = { cells: Uint8Array; palette: Uint8Array; bits: Uint16Array; times: Uint32Array; n: number };
+let edition: Promise<Edition> | null = null;
+const load = () =>
+  (edition ??= Promise.all([
+    fetch('/wall.bin').then((r) => r.arrayBuffer()),
+    fetch('/edition-traits.bin').then((r) => r.arrayBuffer()),
+    fetch('/bits.bin').then((r) => r.arrayBuffer()),
+    fetch('/times.bin').then((r) => r.arrayBuffer()),
+  ]).then(([w, t, b, ts]) => {
+    const cells = new Uint8Array(w);
+    const n = cells.length / 32;
+    const traits = new Uint32Array(t);
+    const palette = new Uint8Array(n);
+    for (let i = 0; i < n; i++) palette[i] = traits[i] & 15; // same packing as worker/match.ts
+    return { cells, palette, bits: new Uint16Array(b), times: new Uint32Array(ts), n };
+  }));
+
+/// Slot → Credit index for each mode. Ties fall back to payment order, so every order is stable.
+const orders = new Map<Mode, Uint32Array>();
+function orderFor(e: Edition, mode: Mode) {
+  let o = orders.get(mode);
+  if (o) return o;
+  const ids = Array.from({ length: e.n }, (_, i) => i);
+  if (mode === 'color') ids.sort((a, b) => e.palette[a] - e.palette[b] || a - b);
+  if (mode === 'density') ids.sort((a, b) => e.bits[a] - e.bits[b] || a - b);
+  o = Uint32Array.from(ids);
+  orders.set(mode, o);
+  return o;
+}
+
+/// Draw one Credit at (x, y) in a Uint32 pixel buffer `w` wide, `k` pixels per cell.
+function tile(px: Uint32Array, w: number, h: number, cells: Uint8Array, id: number, x: number, y: number, k: number) {
+  for (let cell = 0; cell < 64; cell++) {
+    const byte = cells[id * 32 + (cell >> 1)];
+    const m = cell & 1 ? byte >> 4 : byte & 15;
+    if (!m) continue;
+    const color = PAL32[m];
+    const cx = x + (cell & 7) * k, cy = y + (cell >> 3) * k;
+    for (let dy = 0; dy < k; dy++) {
+      const yy = cy + dy;
+      if (yy < 0 || yy >= h) continue;
+      const row = yy * w;
+      for (let dx = 0; dx < k; dx++) {
+        const xx = cx + dx;
+        if (xx >= 0 && xx < w) px[row + xx] = color;
+      }
+    }
+  }
+}
+
+/// The About page band. Grid modes drift left to right, Credits running down each column, drawn crisp at
+/// two device pixels per cell (Color gives each ink group its own horizontal stripe, so all fifteen read at
+/// once). Stream replays the mint second by second; One by one holds each Credit large, then slides on.
+/// The caption names what is passing. Hover pauses it; reduced motion keeps it still; off screen it rests.
+/// Options: `label` overlays a headline (the About hero); `mode` starts on a view.
+export async function mountWall(host: HTMLElement, { label = '', mode: start = 'time' as Mode } = {}) {
+  host.innerHTML = `<figure class="wall-band">
+    <div class="wall-frame" data-mode="${start}">
+      <canvas aria-label="Every Credit"></canvas>
+      ${label ? `<div class="wall-label">${label}</div>` : ''}
+      <div class="wall-modes" role="radiogroup" aria-label="View">${MODES.map(([m, l], i) => `<button type="button" role="radio" data-mode="${m}" aria-checked="${m === start}" aria-label="${l}" data-tip="${l}"><svg viewBox="0 0 16 16" aria-hidden="true">${ICONS[m]}</svg></button>`).join('')}</div>
+      <div class="wall-tools">
+        <button type="button" class="wall-zoom" data-zoom="-1" aria-label="Zoom out" data-tip="Zoom out"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg></button>
+        <button type="button" class="wall-zoom" data-zoom="1" aria-label="Zoom in" data-tip="Zoom in"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9M8 3.5v9" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg></button>
+        <button type="button" class="wall-pause" aria-label="Pause" data-tip="Pause">${PAUSE}</button>
+        <button type="button" class="wall-expand" aria-label="Expand to full screen" data-tip="Expand"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div>
+    </div>
+    <figcaption class="small"><span class="num wall-now">–</span> <span class="muted wall-about"></span></figcaption>
+  </figure>`;
+  const cv = host.querySelector('canvas')!;
+  const e = await load().catch(() => null);
+  if (!e || !cv.isConnected) return;
+
+  const day = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const sec = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' });
+  const when = (id: number, withSeconds = false) => (withSeconds ? sec : day).format(new Date(e.times[id] * 1000));
+  const nowEl = host.querySelector<HTMLElement>('.wall-now')!;
+  const aboutEl = host.querySelector<HTMLElement>('.wall-about')!;
+  const total = e.n.toLocaleString();
+  const ABOUT: Record<Mode, string> = {
+    time: `· ${total} Credits in payment order. Each second of the mint picked the inks.`,
+    color: `· ${total} Credits, one stripe per ink combination.`,
+    density: `· ${total} Credits from fewest marks to most.`,
+    stream: '· the mint replayed: every second of payments is a column, stacked as they landed.',
+    one: '· one Credit at a time.',
+  };
+
+  // Color: Credits of each palette, in payment order, one list per palette (1–15).
+  const byPalette: number[][] = Array.from({ length: 16 }, () => []);
+  for (let i = 0; i < e.n; i++) byPalette[e.palette[i]].push(i);
+  const pals = byPalette.map((l, p) => [p, l] as const).filter(([, l]) => l.length).map(([p]) => p);
+  // Stream: first Credit paid at or after a unix second (ids are in payment order).
+  const atOrAfter = (t: number) => {
+    let lo = 0, hi = e.n;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (e.times[mid] < t) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+  const MINT_START = e.times[Math.min(2, e.n - 1)]; // skip Jack's two early Credits, weeks before the mint
+  const MINT_END = e.times[e.n - 1];
+  const SPAN = Math.max(1, MINT_END - MINT_START);
+  // Payments per minute across the mint, for the scrubber strip under Stream and One by one.
+  const perMin = new Uint16Array(Math.ceil(SPAN / 60) + 1);
+  for (let i = 2; i < e.n; i++) perMin[Math.floor((e.times[i] - MINT_START) / 60)]++;
+  const peak = Math.max(1, ...perMin);
+  /// The mint moment at the same local time of day as right now (the mint ran about a day).
+  const nowInMint = () => {
+    const d = new Date();
+    const tod = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+    const mid = new Date(MINT_START * 1000);
+    mid.setHours(0, 0, 0, 0);
+    let t = mid.getTime() / 1000 + tod;
+    if (t < MINT_START) t += 86400;
+    return Math.min(t, MINT_END);
+  };
+
+  let mode: Mode = 'time';
+  let order = orderFor(e, 'time');
+  let img: ImageData | null = null;
+  let px: Uint32Array | null = null;
+  let W = 1, H = 1;
+  // Size from the frame, whose height CSS fixes, never from the canvas: a canvas without a CSS height takes
+  // its height from its own pixel size, and resizing it to itself would feed back and grow without end.
+  const box = host.querySelector<HTMLElement>('.wall-frame')!;
+  let DPR = devicePixelRatio;
+  const size = () => {
+    // Cap the backing store near 2.5M pixels so a big hero or full screen still draws in a few ms.
+    DPR = Math.min(devicePixelRatio, Math.sqrt(2.5e6 / Math.max(1, box.clientWidth * box.clientHeight)));
+    const w = Math.min(8192, Math.max(1, Math.round(box.clientWidth * DPR)));
+    const h = Math.min(4096, Math.max(1, Math.round(box.clientHeight * DPR)));
+    if (img && w === W && h === H) return;
+    W = cv.width = w;
+    H = cv.height = h;
+    img = new ImageData(W, H);
+    px = new Uint32Array(img.data.buffer);
+  };
+  const flush = () => cv.getContext('2d')!.putImageData(img!, 0, 0);
+
+  // ---- scrubber strip: the mint as a bar chart of payments per minute, with a playhead; drag to jump
+  const stripH = () => Math.round(26 * DPR);
+  const INK = 0xff000000 | (0x0a << 16) | (0x0a << 8) | 0x0a;
+  const BAR = 0xff000000 | (0xb4 << 16) | (0xb0 << 8) | 0xae;
+  const strip = (at: number) => {
+    const h = stripH(), y0 = H - h;
+    for (let x = 0; x < W; x++) {
+      const m = Math.floor((x / W) * perMin.length);
+      const bh = Math.round((perMin[m] / peak) * (h - 4));
+      for (let y = H - bh; y < H; y++) px![y * W + x] = BAR;
+    }
+    const hx = Math.round(((at - MINT_START) / SPAN) * (W - 1));
+    const lw = Math.max(1, Math.round(DPR));
+    for (let y = y0; y < H; y++) for (let d = 0; d < lw * 2; d++) {
+      const xx = hx - lw + d;
+      if (xx >= 0 && xx < W) px![y * W + xx] = INK;
+    }
+  };
+  const scrubbable = () => mode === 'stream' || mode === 'one';
+  let scrubbing = false;
+  const scrubTo = (clientX: number) => {
+    const r = cv.getBoundingClientRect();
+    const t = MINT_START + Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * SPAN;
+    clock = t;
+    pos = atOrAfter(t);
+    frame();
+  };
+  cv.addEventListener('pointerdown', (ev) => {
+    if (!scrubbable()) return;
+    const r = cv.getBoundingClientRect();
+    if (ev.clientY < r.bottom - stripH() / DPR - 6) return;
+    scrubbing = true;
+    cv.setPointerCapture(ev.pointerId);
+    scrubTo(ev.clientX);
+  });
+  cv.addEventListener('pointermove', (ev) => {
+    if (scrubbing) scrubTo(ev.clientX);
+    else if (scrubbable()) {
+      const r = cv.getBoundingClientRect();
+      cv.style.cursor = ev.clientY >= r.bottom - stripH() / DPR - 6 ? 'ew-resize' : '';
+    }
+  });
+  const endScrub = () => (scrubbing = false);
+  cv.addEventListener('pointerup', endScrub);
+  cv.addEventListener('pointercancel', endScrub);
+
+  // ---- grid modes: columns drift left; `off` counts columns scrolled
+  // Zoom: device pixels per cell of a Credit in the grid views (Stream draws one step larger).
+  let K = 2, T = 8 * K;
+  let off = 0;
+  const grid = () => {
+    const rows = Math.max(1, Math.floor(H / T));
+    const top = Math.floor((H - rows * T) / 2);
+    const first = Math.floor(off), shift = Math.round((off - first) * T);
+    const vis = Math.ceil(W / T) + 1;
+    let edge = 0;
+    if (mode === 'color') {
+      // Share every row out among the palettes, so the stripes always fill the band; each stripe scrolls
+      // its own list, wrapping.
+      const startOf = (k: number) => Math.round((k * rows) / pals.length);
+      pals.forEach((p, k) => {
+        const list = byPalette[p];
+        const from = startOf(k), per = Math.max(0, startOf(k + 1) - from);
+        for (let c = 0; c < vis; c++) for (let r = 0; r < per; r++) {
+          const id = list[((first + c) * per + r) % list.length];
+          tile(px!, W, H, e.cells, id, c * T - shift, top + (from + r) * T, K);
+        }
+      });
+      const per = Math.max(1, startOf(1));
+      edge = byPalette[pals[0]][(first * per) % byPalette[pals[0]].length];
+      nowEl.textContent = `${pals.length} ink combinations`;
+    } else {
+      const cols = Math.ceil(e.n / rows);
+      for (let c = 0; c < vis; c++) {
+        const col = (first + c) % cols;
+        for (let r = 0; r < rows; r++) {
+          const s = col * rows + r;
+          if (s >= e.n) break;
+          tile(px!, W, H, e.cells, order[s], c * T - shift, top + r * T, K);
+        }
+      }
+      edge = order[Math.min(e.n - 1, (first % cols) * rows)];
+      nowEl.textContent = mode === 'time' ? `${when(edge)} · #${(edge + 1).toLocaleString()}` : `${e.bits[edge]} bits`;
+    }
+  };
+
+  // ---- stream: x is time; a second's payments stack up from the baseline
+  let S = 3; // device pixels per cell, so a Credit is 24 device pixels
+  let ST = 8 * S;
+  let clock = 0; // unix seconds, fractional; set below
+  const stream = () => {
+    const perSec = ST + Math.round(2 * DPR); // one column per second, with a hairline gap
+    const anchor = Math.round(W * 0.7);
+    const from = clock - anchor / perSec, to = clock + (W - anchor) / perSec;
+    const base = H - stripH() - Math.round(8 * DPR);
+    let col = -1, stack = 0;
+    for (let i = atOrAfter(Math.floor(from)); i < e.n && e.times[i] <= to; i++) {
+      const t = e.times[i];
+      if (t !== col) {
+        col = t;
+        stack = 0;
+      }
+      const y = base - (stack + 1) * (ST + 2);
+      stack++;
+      if (y < -ST) continue;
+      tile(px!, W, H, e.cells, i, Math.round(anchor + (t - clock) * perSec), y, S);
+    }
+    const i = Math.max(0, atOrAfter(Math.floor(clock)) - 1);
+    strip(clock);
+    nowEl.textContent = `${sec.format(new Date(Math.floor(clock) * 1000))} · ${(i + 1).toLocaleString()} paid`;
+  };
+
+  // ---- one by one: hold each Credit, then slide the next one in
+  let pos = 2; // Credits advanced, fractional (from #3: the first two are Jack's own)
+  const HOLD = 0.66; // share of each beat spent still
+  const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+  const one = () => {
+    // Big in the band; in the full window, large but with room around it.
+    const room = H - stripH();
+    const k = Math.max(2, Math.floor(Math.min(room - Math.round(24 * DPR), Math.max(room * 0.6, 200 * DPR)) / 8));
+    const size = 8 * k;
+    const gap = Math.round(size * 0.35);
+    const i = Math.floor(pos), frac = pos - i;
+    const t = frac < HOLD ? 0 : ease((frac - HOLD) / (1 - HOLD));
+    const cx = Math.round(W / 2 - size / 2 - t * (size + gap));
+    const y = Math.round((room - size) / 2);
+    for (let d = -3; d <= 3; d++) {
+      const id = (i + d + e.n) % e.n;
+      tile(px!, W, H, e.cells, id, cx + d * (size + gap), y, k);
+    }
+    const cur = t < 0.5 ? i % e.n : (i + 1) % e.n;
+    strip(e.times[cur]);
+    nowEl.textContent = `#${(cur + 1).toLocaleString()} · ${when(cur, true)} · ${inks(e.palette[cur])} · ${e.bits[cur]} bits`;
+  };
+
+  const frame = () => {
+    if (!px) return;
+    px.fill(PAL32[0]);
+    if (mode === 'stream') stream();
+    else if (mode === 'one') one();
+    else grid();
+    aboutEl.textContent = ABOUT[mode];
+    flush();
+  };
+
+  const setMode = (m: Mode) => {
+    mode = m;
+    box.dataset.mode = m;
+    if (m === 'time' || m === 'density') order = orderFor(e, m);
+    off = 0;
+    clock = nowInMint();
+    pos = atOrAfter(clock);
+  };
+  host.querySelector('.wall-modes')!.addEventListener('click', (ev) => {
+    const b = (ev.target as HTMLElement).closest<HTMLButtonElement>('[data-mode]');
+    if (!b) return;
+    setMode(b.dataset.mode as Mode);
+    host.querySelectorAll('[data-mode]').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+    frame();
+  });
+  // Expand grows the live band itself to the window, so whatever view is on keeps running, just bigger.
+  const frameEl = host.querySelector<HTMLElement>('.wall-frame')!;
+  const figure = host.querySelector<HTMLElement>('.wall-band')!;
+  const btn = host.querySelector<HTMLButtonElement>('.wall-expand')!;
+  const EXPAND = btn.innerHTML;
+  const COLLAPSE = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 6.5h-4v-4M2.5 9.5h4v4M9.5 6.5 14 2M6.5 9.5 2 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const clip = (r: DOMRect) => `inset(${r.top}px ${innerWidth - r.right}px ${innerHeight - r.bottom}px ${r.left}px round 0px)`;
+  const reduce = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let open = false;
+  const onKey = (ev: KeyboardEvent) => ev.key === 'Escape' && toggle();
+  const toggle = () => {
+    if (!open) {
+      const r = frameEl.getBoundingClientRect();
+      figure.style.minHeight = `${figure.offsetHeight}px`; // hold the band's place while it's lifted out
+      frameEl.classList.add('expanded');
+      document.body.style.overflow = 'hidden';
+      if (!reduce()) frameEl.animate([{ clipPath: clip(r) }, { clipPath: 'inset(0px 0px 0px 0px round 0px)' }], { duration: 420, easing: 'cubic-bezier(0.32, 0.72, 0, 1)' });
+      btn.innerHTML = COLLAPSE;
+      btn.setAttribute('aria-label', 'Back to the page');
+      btn.dataset.tip = 'Close';
+      addEventListener('keydown', onKey);
+    } else {
+      const done = () => {
+        frameEl.classList.remove('expanded');
+        figure.style.minHeight = '';
+        document.body.style.overflow = '';
+      };
+      removeEventListener('keydown', onKey);
+      btn.innerHTML = EXPAND;
+      btn.setAttribute('aria-label', 'Expand to full screen');
+      btn.dataset.tip = 'Expand';
+      if (reduce()) done();
+      else {
+        // Shrink back onto where the band sits in the page: measure it in place, then animate there.
+        frameEl.classList.remove('expanded');
+        const to = frameEl.getBoundingClientRect();
+        frameEl.classList.add('expanded');
+        frameEl.animate([{ clipPath: 'inset(0px 0px 0px 0px round 0px)' }, { clipPath: clip(to) }], { duration: 320, easing: 'cubic-bezier(0.32, 0.72, 0, 1)' }).onfinish = done;
+      }
+    }
+    open = !open;
+  };
+  btn.addEventListener('click', toggle);
+
+  setMode(start);
+  size();
+  frame();
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let playing = !still, visible = true, last = 0;
+  const tick = (now: number) => {
+    if (!cv.isConnected) return;
+    if (playing && visible && !scrubbing && last) {
+      const dt = Math.min(0.1, (now - last) / 1000);
+      if (mode === 'stream') {
+        clock += dt * 4; // four seconds of the mint per second
+        if (clock > e.times[e.n - 1]) clock = MINT_START;
+      } else if (mode === 'one') pos = (pos + dt * 0.8) % e.n;
+      else off += dt * 6; // columns per second
+      frame();
+    }
+    last = now;
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+  const pauseBtn = host.querySelector<HTMLButtonElement>('.wall-pause')!;
+  const setPlaying = (on: boolean) => {
+    playing = on;
+    pauseBtn.innerHTML = on ? PAUSE : PLAY;
+    pauseBtn.dataset.tip = on ? 'Pause' : 'Play';
+    pauseBtn.setAttribute('aria-label', pauseBtn.dataset.tip);
+  };
+  pauseBtn.addEventListener('click', () => setPlaying(!playing));
+  // Pause only exists full screen; closing it lets the wall run again.
+  new MutationObserver(() => !box.classList.contains('expanded') && !still && !playing && setPlaying(true)).observe(box, { attributes: true, attributeFilter: ['class'] });
+  host.querySelectorAll<HTMLButtonElement>('.wall-zoom').forEach((b) =>
+    b.addEventListener('click', () => {
+      const k = Math.min(12, Math.max(1, K + Number(b.dataset.zoom)));
+      if (k === K) return;
+      off = (off * T) / (8 * k); // keep the same Credits at the left edge
+      K = k;
+      T = 8 * K;
+      S = K + 1;
+      ST = 8 * S;
+      frame();
+    }),
+  );
+  new IntersectionObserver(([x]) => (visible = x.isIntersecting)).observe(cv);
+  new ResizeObserver(() => {
+    size();
+    frame();
+  }).observe(box);
+}

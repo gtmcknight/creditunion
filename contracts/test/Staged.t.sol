@@ -144,23 +144,22 @@ contract StagedTest is Test {
         assertEq(address(factory.assembler()), address(asm));
     }
 
-    /// A batch that filled long before activation is not expired on arrival: it gets 7 days from activation.
-    function test_FullBatchGetsGraceFromActivation() public {
-        Batch b = _full(); // deadline = now + 14 days
-        skip(20 days); // deadline passed
-        assertEq(uint256(b.state()), uint256(Batch.State.Expired));
+    /// A batch that filled long before activation is still full on arrival (unlocked, nobody left):
+    /// it can be assembled as soon as the assembler is active.
+    function test_FullBatchWaitsForActivation() public {
+        Batch b = _full();
+        skip(20 days); // well past the lock
+        assertEq(uint256(b.state()), uint256(Batch.State.Full));
         vm.prank(setter);
         factory.proposeAssembler(asm);
         skip(3 days);
         factory.activateAssembler();
-        assertEq(uint256(b.state()), uint256(Batch.State.Full));
-        assertEq(b.effectiveDeadline(), block.timestamp + b.FILL_GRACE());
         b.assemble();
         assertEq(statement.ownerOf(1), address(b));
     }
 
-    /// If someone withdrew while it was expired, it stays open (under 80) rather than reviving as full.
-    function test_ExpiredWithdrawalIsRespected() public {
+    /// If someone left while it was unlocked, it stays open (under 80) rather than reviving as full.
+    function test_UnlockedWithdrawalIsRespected() public {
         Batch b = _full();
         skip(20 days);
         vm.prank(bob);
@@ -169,7 +168,7 @@ contract StagedTest is Test {
         factory.proposeAssembler(asm);
         skip(3 days);
         factory.activateAssembler();
-        assertEq(uint256(b.state()), uint256(Batch.State.Expired));
+        assertEq(uint256(b.state()), uint256(Batch.State.Open));
         assertEq(b.count(), 79);
     }
 

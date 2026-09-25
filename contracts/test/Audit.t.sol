@@ -138,7 +138,7 @@ contract AuditTest is Test {
         vm.expectRevert(Batch.NotFactory.selector);
         b.depositFrom(bob, _one(60));
 
-        vm.warp(b.deadline()); // Expired: everyone withdraws... except strays
+        skip(365 days); // however long it waits, a stray is never withdrawable
         vm.prank(bob);
         vm.expectRevert(abi.encodeWithSelector(Batch.NotDepositor.selector, 60));
         b.withdraw(_one(60));
