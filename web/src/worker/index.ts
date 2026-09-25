@@ -271,6 +271,19 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         listings = await p;
         ctx.waitUntil(cache.put(scanKey, Response.json(listings, { headers: { 'cache-control': 'public, max-age=30' } })));
       }
+      // Slots: on a layout batch two listings of one palette can fight over one slot, so the batch replays its
+      // deposit rule over the whole bundle, in price order, and only the ones that would land are quoted.
+      if (listings.length) {
+        try {
+          const ok = (await client(env).readContract({
+            address: batch as Address,
+            abi: batchAbi,
+            functionName: 'canTake',
+            args: [listings.map((l) => BigInt(l.id))],
+          })) as readonly boolean[];
+          listings = listings.filter((_, i) => ok[i]);
+        } catch {}
+      }
       const result = await quote({ key: env.OPENSEA_API_KEY, sweeper: env.SWEEPER, listings, n, origin: url.origin });
       return Response.json(result, { headers: { 'cache-control': 'no-store' } });
     } catch (e) {

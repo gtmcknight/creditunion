@@ -1,3 +1,4 @@
+import { maskInks, maskLabel } from './traits';
 import { formatEther, type Address } from 'viem';
 import { config } from './chain';
 
@@ -37,6 +38,9 @@ export const art = (id: bigint | number) => `/art/${config.credits.toLowerCase()
 /// 8×10 sheet on a hairline grid. Filled cells show the Credit; the rest are empty slots.
 /// `closed`: no gaps, the 80 read as one image (a Statement). `closing`: animates to closed.
 /// `fresh`: cells from this index on drop in, in order.
+/// Small ink dots for a palette mask, used for layout slots.
+export const inkDots = (m: number) => `<b class="inks">${maskInks(m).map((c) => `<i style="background:${c}"></i>`).join('')}</b>`;
+
 export function sheet(
   ids: readonly bigint[],
   opts: {
@@ -47,6 +51,8 @@ export function sheet(
     fresh?: number;
     /// Credits shown faded after `ids`: previews of what could fill the rest, with their own art URLs.
     ghosts?: { id: bigint; src: string }[];
+    /// Palette mask wanted at each slot (0 = any): empty cells show the colour they are waiting for.
+    layout?: number[];
   } = {},
 ) {
   const cells = Array.from({ length: 80 }, (_, i) => {
@@ -54,7 +60,8 @@ export function sheet(
     if (id === undefined) {
       const g = opts.ghosts?.[i - ids.length];
       if (g) return `<i class="cell ghost" title="Credit #${g.id}"><img src="${g.src}" alt="" loading="lazy" decoding="async"></i>`;
-      return `<i class="cell empty"></i>`;
+      const want = opts.layout?.[i] ?? 0;
+      return want ? `<i class="cell empty slot" title="${maskLabel(want)}">${inkDots(want)}</i>` : `<i class="cell empty"></i>`;
     }
     const mine = opts.mine?.has(id.toString()) ? ' mine' : '';
     const fresh = opts.fresh !== undefined && i >= opts.fresh ? ` new" style="--k:${i - opts.fresh}` : '';

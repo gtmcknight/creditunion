@@ -2,7 +2,8 @@ import Sortable from 'sortablejs';
 import { parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi } from '../abi';
 import { config, explorer, pub, send, session } from '../chain';
-import { ARRANGEMENTS, earlyWeight, eligible, getBatch, me, ratings, type Rated } from '../data';
+import { ARRANGEMENTS, earlyWeight, eligible, getBatch, hasLayout, layoutSlot, me, ratings, type Rated } from '../data';
+import { maskLabel, paletteBit } from '../traits';
 import { hydrate, pct, who } from '../ens';
 import { describeFilter } from '../traits';
 import { $$, art, errText, esc, eth, same, sheet, short, toast, until } from '../ui';
@@ -43,8 +44,8 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
 
   const artHtml = burned
     ? `<figure class="statement">${sheet(b.ids, { closed: true })}<figcaption class="legend muted small"><span>Statement #${s.statementId}</span><span>80 Credits, burned in deposit order</span></figcaption></figure>`
-    : `${sheet(b.ids, { mine: myIds, fresh: seen < s.count ? seen : undefined, closing: s.state === 'Full' })}
-       <div class="legend muted small">${myIds.size ? `<button type="button" class="spot" aria-pressed="false"><i class="dot mine"></i><span>Highlight yours</span><span class="num muted">${myIds.size}</span></button>` : ''}<span id="legend-order">${s.arrangement === 0 ? 'In deposit order' : `Shown in deposit order · burned by ${ARRANGEMENTS[s.arrangement].toLowerCase()}`}</span></div>`;
+    : `${sheet(b.ids, { mine: myIds, fresh: seen < s.count ? seen : undefined, closing: s.state === 'Full', layout: hasLayout(s.filter) ? Array.from({ length: 80 }, (_, i) => layoutSlot(s.filter, i)) : undefined })}
+       <div class="legend muted small">${myIds.size ? `<button type="button" class="spot" aria-pressed="false"><i class="dot mine"></i><span>Highlight yours</span><span class="num muted">${myIds.size}</span></button>` : ''}<span id="legend-order">${s.arrangement === 0 ? 'In deposit order' : s.arrangement === 4 ? 'Shown in deposit order · burned as laid out' : `Shown in deposit order · burned by ${ARRANGEMENTS[s.arrangement].toLowerCase()}`}</span></div>`;
 
   app.innerHTML = `
   <a class="back" href="#/">← Batches</a>
@@ -143,12 +144,12 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
         <p class="muted">All 80 are in. Burning opens once Jack’s Statement contract ships and the adapter is activated; this batch then has at least 7 days to burn. If an adapter is ever proposed, a 3-day exit window opens first.</p>
       </div>`;
     }
-    if (s.arrangement === 3 && Date.now() / 1000 < s.filledAt + CREATOR_GRACE) {
+    if ((s.arrangement === 3 || s.arrangement === 4) && Date.now() / 1000 < s.filledAt + CREATOR_GRACE) {
       const until = new Date((s.filledAt + CREATOR_GRACE) * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric' });
       if (same(s.creator, session.account)) {
         return `<div class="box" id="arrange">
           <div class="box-head"><h3>Arrange the sheet</h3><span class="muted small">Drag to reorder, or tap two to swap</span></div>
-          <div class="chips presets">${[['rating', 'Rarest first'], ['mint', 'Mint time'], ['number', 'Credit number'], ['deposit', 'Deposit order']].map(([k, l]) => `<button type="button" data-preset="${k}">${l}</button>`).join('')}</div>
+          <div class="chips presets">${(s.arrangement === 4 ? [['layout', 'As laid out']] : [['rating', 'Rarest first'], ['mint', 'Mint time'], ['number', 'Credit number'], ['deposit', 'Deposit order']]).map(([k, l]) => `<button type="button" data-preset="${k}">${l}</button>`).join('')}</div>
           <button class="btn primary block" id="burn-ordered">Burn with this order</button>
           <p class="muted small">Until ${until} only you can burn, with your order. After that anyone can, in deposit order.</p>
         </div>`;
@@ -160,7 +161,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
     }
     return `<div class="box">
       <h3>Locked</h3>
-      <p class="muted">Anyone can burn${s.arrangement ? `, ordered by ${ARRANGEMENTS[s.arrangement === 3 ? 0 : s.arrangement].toLowerCase()}` : ''}. Caller pays ~4–7M gas. Unburned by ${by}, everyone withdraws.</p>
+      <p class="muted">Anyone can burn${s.arrangement === 4 ? ', as laid out' : s.arrangement ? `, ordered by ${ARRANGEMENTS[s.arrangement === 3 ? 0 : s.arrangement].toLowerCase()}` : ''}. Caller pays ~4–7M gas. Unburned by ${by}, everyone withdraws.</p>
       ${m ? `<button class="btn primary block" id="assemble">Burn 80 → Statement</button>` : connect}
     </div>`;
   }
@@ -550,7 +551,20 @@ async function loadRatings(
 
   const arrange = document.getElementById('arrange');
   if (!arrange) return;
+  const slots = hasLayout(b.s.filter) ? Array.from({ length: 80 }, (_, i) => layoutSlot(b.s.filter, i)) : null;
   let order = [...b.ids];
+  if (slots) {
+    try {
+      order = [...((await pub.readContract({ address: b.s.address, abi: batchAbi, functionName: 'layoutOrder' })) as readonly bigint[])];
+    } catch {}
+  }
+  const maskOf = (id: bigint) => paletteBit(rated[id.toString()]?.traits.palette ?? '');
+  /// Under a layout every painted slot must keep its palette; say which one is wrong before spending gas.
+  const layoutProblem = () => {
+    if (!slots) return null;
+    for (let i = 0; i < 80; i++) if (slots[i] && maskOf(order[i]) !== slots[i]) return `Slot ${i + 1} needs ${maskLabel(slots[i])}.`;
+    return null;
+  };
   let picked: HTMLElement | null = null;
   let sortable: Sortable | null = null;
   const fromDom = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('.cell[data-id]')].map((c) => BigInt(c.dataset.id!));
@@ -558,7 +572,7 @@ async function loadRatings(
   const draw = () => {
     sortable?.destroy();
     const holder = document.querySelector<HTMLElement>('.batch-art .sheet')!;
-    holder.outerHTML = sheet(order, { closing: true });
+    holder.outerHTML = sheet(order, { closing: true, layout: slots ?? undefined });
     const sheetEl = document.querySelector<HTMLElement>('.batch-art .sheet')!;
     picked = null;
     sheetEl.querySelectorAll<HTMLElement>('.cell[data-id]').forEach((c) => {
@@ -604,6 +618,7 @@ async function loadRatings(
     });
   };
   const key = {
+    layout: (id: bigint) => order.indexOf(id),
     rating: (id: bigint) => -(rated[id.toString()]?.score ?? 0),
     mint: (id: bigint) => rated[id.toString()]?.paidAt ?? 0,
     number: (id: bigint) => Number(id),
@@ -611,17 +626,20 @@ async function loadRatings(
   arrange.querySelectorAll<HTMLButtonElement>('[data-preset]').forEach((btn) =>
     btn.addEventListener('click', () => {
       const p = btn.dataset.preset as keyof typeof key | 'deposit';
-      order = p === 'deposit' ? [...b.ids] : [...b.ids].sort((x, y) => key[p](x) - key[p](y) || Number(x - y));
+      if (p === 'layout') pub.readContract({ address: b.s.address, abi: batchAbi, functionName: 'layoutOrder' }).then((o) => { order = [...(o as readonly bigint[])]; draw(); }).catch(() => {});
+      else order = p === 'deposit' ? [...b.ids] : [...b.ids].sort((x, y) => key[p](x) - key[p](y) || Number(x - y));
       picked = null;
       arrange.querySelectorAll('[data-preset]').forEach((x) => x.setAttribute('aria-pressed', String(x === btn)));
       draw();
     }),
   );
-  document.getElementById('burn-ordered')?.addEventListener('click', (e) =>
-    run(e.currentTarget as HTMLElement, 'Burning…', () =>
+  document.getElementById('burn-ordered')?.addEventListener('click', (e) => {
+    const problem = layoutProblem();
+    if (problem) return toast(problem, 'err');
+    return run(e.currentTarget as HTMLElement, 'Burning…', () =>
       send({ address: b.s.address, abi: batchAbi, functionName: 'assembleOrdered', args: [order], gas: 12_000_000n }, txNote),
-    'The Statement exists, in your order. Auction is open.'),
-  );
+    'The Statement exists, in your order. Auction is open.');
+  });
   draw();
   document.querySelector<HTMLElement>('.batch-art .sheet')?.classList.remove('closing');
 }

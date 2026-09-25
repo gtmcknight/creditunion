@@ -5,7 +5,11 @@ import { config, pub } from './chain';
 export const STATES = ['Open', 'Full', 'Expired', 'Auction', 'Settled'] as const;
 export type StateName = (typeof STATES)[number];
 
-export const ARRANGEMENTS = ['Deposit order', 'Mint time', 'Credit number', 'Creator’s order'] as const;
+export const ARRANGEMENTS = ['Deposit order', 'Mint time', 'Credit number', 'Creator’s order', 'Layout'] as const;
+/// Palette wanted at layout slot i (0 = any), from the packed Filter fields.
+export const layoutSlot = (f: { layout0: bigint; layout1: bigint }, i: number) =>
+  Number(i < 64 ? (f.layout0 >> BigInt(4 * i)) & 15n : (f.layout1 >> BigInt(4 * (i - 64))) & 15n);
+export const hasLayout = (f: { layout0: bigint; layout1: bigint }) => f.layout0 !== 0n || f.layout1 !== 0n;
 export const SPLITS = ['Equal', 'Early bird'] as const;
 /// Early-bird weight of a 0-based position, in shares (1.5 at the first slot, 0.5 at the last).
 export const earlyWeight = (i: number) => (237 - 2 * i) / 158;
@@ -55,6 +59,8 @@ export type Summary = {
     idTo: bigint;
     minScore: number; // official rating ×10, 0 = any
     maxScore: number;
+    layout0: bigint; // 4 bits per sheet slot, 0 = any palette, 1–15 = CMYK mask (see Batch.Filter)
+    layout1: bigint;
   };
   allowlistSize: number;
   statement: Address;

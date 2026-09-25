@@ -2,6 +2,7 @@ import { decodeEventLog, parseEther } from 'viem';
 import { creditsAbi, factoryAbi } from '../abi';
 import { config, send, session } from '../chain';
 import { pct } from '../ens';
+import { INK, maskInks, maskLabel } from '../traits';
 import { ARRANGEMENTS, SPLITS, creatorFeeBps, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Rated } from '../data';
 import { paletteBit, TRAITS } from '../traits';
 import { $$, art, errText, esc, sheet, toast } from '../ui';
@@ -12,7 +13,18 @@ const ARR_HINTS = [
   'Sorted by when each Credit was paid for, earliest first.',
   'Sorted by Credit number, lowest first.',
   'You arrange the sheet once it’s full: by rating, mint time, number, or by hand. If you haven’t burned within a day of filling, anyone can burn in deposit order.',
+  'The sheet follows your painted layout: each slot takes a Credit of its palette. You get a day to swap within a palette; then anyone can burn it as laid out.',
 ];
+/// Layout presets: which slots take brush A, brush B, or stay open (any palette).
+const LAYOUTS: Record<string, (i: number) => 'A' | 'B' | 0> = {
+  Checkered: (i) => ((Math.floor(i / 8) + (i % 8)) % 2 === 0 ? 'A' : 'B'),
+  Stripes: (i) => (Math.floor(i / 8) % 2 === 0 ? 'A' : 'B'),
+  Columns: (i) => (i % 2 === 0 ? 'A' : 'B'),
+  Border: (i) => (Math.floor(i / 8) === 0 || Math.floor(i / 8) === 9 || i % 8 === 0 || i % 8 === 7 ? 'A' : 'B'),
+  Diagonal: (i) => (Math.abs(Math.floor(i / 8) - (i % 8) - 1) <= 1 ? 'A' : 'B'),
+  Solid: () => 'A',
+  Clear: () => 0,
+};
 const fmt = (n: number) => n.toFixed(4).replace(/\.?0+$/, '');
 const DURATIONS = [7, 14, 30, 60, 90];
 const INKS: Record<string, string> = { C: '#00B5E2', M: '#E4007C', Y: '#FFD100', K: '#111111' };
@@ -115,6 +127,8 @@ export async function create(app: HTMLElement) {
   const artOf = (id: bigint) => (config.chainId === 1 ? art(id) : `/art/mainnet/${id}.svg`);
   let ghosts: { id: bigint; palette: number }[] = [];
   let pattern: 'none' | 'checkered' = 'none';
+  const layout: number[] = new Array(80).fill(0); // palette mask per slot, 0 = any
+  let brushA = 1, brushB = 8; // cyan and black to start
   const picks = new Set<string>();
   const last = Math.max(0, minutes.length - 1);
 
@@ -134,7 +148,7 @@ export async function create(app: HTMLElement) {
       <div class="chips presets designs" id="designs">${DESIGNS.map((d, i) => `<button type="button" data-design="${i}">${d.name}</button>`).join('')}</div></header>
       <nav class="tabs" id="tabs" aria-label="Sections">${[
         ['name', 'Name'], ['palette', 'Palette'], ['print', 'Print'], ['weight', 'Weight'], ['eights', 'Eights'], ['time', 'Time'],
-        ['rating', 'Rating'], ['numbers', 'Numbers'], ['list', 'List'], ['order', 'Order'], ['terms', 'Terms'], ['credits', 'Credits'],
+        ['rating', 'Rating'], ['numbers', 'Numbers'], ['list', 'List'], ['layout', 'Layout'], ['order', 'Order'], ['terms', 'Terms'], ['credits', 'Credits'],
       ].map(([k, l], i) => `<button type="button" data-tab-for="${k}" aria-selected="${i === 0}">${l}</button>`).join('')}</nav>
 
       <section class="rule" data-tab="name"><label class="rule-head" for="name">Name</label><input id="name" maxlength="64" placeholder="e.g. Cyan Minute" autocomplete="off"></section>
@@ -181,8 +195,16 @@ export async function create(app: HTMLElement) {
         <textarea id="allow" rows="2" placeholder="Credit numbers, separated by spaces or commas · up to 200"></textarea>
       </section>
 
+      <section class="rule" data-tab="layout"><div class="rule-head">Layout <span class="muted" id="layout-pick">None</span></div>
+        <p class="hint">Paint the sheet. Each painted slot will only take a Credit of that palette, and the Statement is burned in this arrangement. Open slots take anything.</p>
+        <div class="chips presets" id="layout-presets">${Object.keys(LAYOUTS).map((k) => `<button type="button" data-layout="${k}">${k}</button>`).join('')}</div>
+        <div class="brushes" id="brushes">${[0, ...TRAITS.colors.map(paletteBit)].map((m) => `<button type="button" class="brush" data-brush="${m}" title="${maskLabel(m)}" aria-pressed="${m === 1}">${m ? maskInks(m).map((c) => `<i style="background:${c}"></i>`).join('') : '<span>any</span>'}</button>`).join('')}</div>
+        <div class="lgrid" id="lgrid">${Array.from({ length: 80 }, (_, i) => `<button type="button" class="lcell" data-i="${i}" aria-label="Slot ${i + 1}"></button>`).join('')}</div>
+        <p class="hint" id="layout-hint">Tap or drag across slots to paint with the chosen palette. Presets use your last two palettes.</p>
+      </section>
+
       <section class="rule" data-tab="order"><div class="rule-head">Order on the Statement</div>
-        <div class="seg wrap">${ARRANGEMENTS.map((l, i) => `<label><input type="radio" name="arr" value="${i}" ${i === 0 ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+        <div class="seg wrap">${ARRANGEMENTS.map((l, i) => `<label><input type="radio" name="arr" value="${i}" ${i === 0 ? 'checked' : ''} ${i === 4 ? 'disabled' : ''}><span>${l}</span></label>`).join('')}</div>
         <p class="hint" id="arr-hint">${ARR_HINTS[0]}</p>
       </section>
 
@@ -317,7 +339,21 @@ export async function create(app: HTMLElement) {
     const mineIds = fit.slice(0, 80);
     const mineSet = new Set(mineIds.map(String));
     let rest = ghosts.filter((g) => !mineSet.has(g.id.toString()));
-    if (pattern === 'checkered') {
+    const painted = layout.some(Boolean);
+    if (painted) {
+      const pools = new Map<number, typeof rest>();
+      for (const g of rest) pools.set(g.palette, [...(pools.get(g.palette) ?? []), g]);
+      const out: typeof rest = [];
+      const leftovers = () => [...pools.values()].flat();
+      for (let i = mineIds.length; i < 80; i++) {
+        const want = layout[i];
+        const g = want ? pools.get(want)?.shift() : leftovers().shift();
+        if (!g) break;
+        if (!want) pools.set(g.palette, (pools.get(g.palette) ?? []).filter((x) => x !== g));
+        out.push(g);
+      }
+      rest = out;
+    } else if (pattern === 'checkered') {
       const bits = TRAITS.colors.map(paletteBit).filter((b) => rules.palettes & (1 << b));
       const pools = bits.map((b) => rest.filter((g) => g.palette === b));
       const out: typeof rest = [];
@@ -333,6 +369,7 @@ export async function create(app: HTMLElement) {
     document.getElementById('preview')!.innerHTML = sheet(mineIds, {
       mine: picks,
       ghosts: rest.slice(0, 80 - mineIds.length).map((g) => ({ id: g.id, src: artOf(g.id) })),
+      layout: painted ? layout : undefined,
     });
   }
 
@@ -351,6 +388,84 @@ export async function create(app: HTMLElement) {
       document.getElementById(`${key}-pick`)!.textContent = labelsFor(key);
     }
   };
+  // ---------------------------------------------------------------- the layout painter
+  const lgrid = document.getElementById('lgrid')!;
+  const cells = [...lgrid.querySelectorAll<HTMLButtonElement>('.lcell')];
+  const arrRadios = [...app.querySelectorAll<HTMLInputElement>('input[name=arr]')];
+  const paintCell = (i: number) => {
+    const m = layout[i];
+    cells[i].innerHTML = m ? maskInks(m).map((c) => `<i style="background:${c}"></i>`).join('') : '';
+    cells[i].classList.toggle('on', !!m);
+  };
+  /// A painted layout sets the palette rule to the union of its colours (the contract enforces the slots
+  /// themselves) and forces the Layout arrangement; clearing it hands both back.
+  const syncLayout = () => {
+    const painted = layout.some(Boolean);
+    const anyOpen = layout.some((m) => !m);
+    const used = layout.reduce((s, m) => (m ? s | (1 << paletteBit([...'CMYK'].filter((_, b) => m & (1 << b)).join(''))) : s), 0);
+    rules.palettes = painted && !anyOpen ? used : 0;
+    const counts = new Map<number, number>();
+    for (const m of layout) if (m) counts.set(m, (counts.get(m) ?? 0) + 1);
+    document.getElementById('layout-pick')!.textContent = painted
+      ? [...counts.entries()].map(([m, n]) => `${n} ${maskLabel(m)}`).join(' · ') + (anyOpen ? ` · ${layout.filter((m) => !m).length} open` : '')
+      : 'None';
+    const layoutRadio = arrRadios.find((r) => r.value === '4')!;
+    layoutRadio.disabled = !painted;
+    if (painted) layoutRadio.checked = true;
+    else if (layoutRadio.checked) arrRadios[0].checked = true;
+    document.getElementById('arr-hint')!.textContent = ARR_HINTS[Number(arrRadios.find((r) => r.checked)!.value)];
+    app.querySelector<HTMLElement>('[data-rule="palettes"]')!.classList.toggle('locked', painted);
+    pattern = 'none';
+    syncTiles();
+    refresh();
+  };
+  const paint = (i: number, m: number) => {
+    if (layout[i] === m) return;
+    layout[i] = m;
+    paintCell(i);
+  };
+  let brush = brushA;
+  let painting = false;
+  lgrid.addEventListener('pointerdown', (e) => {
+    const c = (e.target as HTMLElement).closest<HTMLButtonElement>('.lcell');
+    if (!c) return;
+    painting = true;
+    lgrid.setPointerCapture(e.pointerId);
+    paint(Number(c.dataset.i), brush);
+  });
+  lgrid.addEventListener('pointermove', (e) => {
+    if (!painting) return;
+    const el = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLButtonElement>('.lcell');
+    if (el) paint(Number(el.dataset.i), brush);
+  });
+  const endPaint = () => {
+    if (!painting) return;
+    painting = false;
+    syncLayout();
+  };
+  lgrid.addEventListener('pointerup', endPaint);
+  lgrid.addEventListener('pointercancel', endPaint);
+  document.getElementById('brushes')!.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-brush]');
+    if (!b) return;
+    const m = Number(b.dataset.brush);
+    if (m !== brush && brush) brushB = brush; // remember the previous colour for two-tone presets
+    brush = m;
+    if (m) brushA = m;
+    document.querySelectorAll<HTMLButtonElement>('#brushes [data-brush]').forEach((x) => x.setAttribute('aria-pressed', String(Number(x.dataset.brush) === m)));
+  });
+  document.getElementById('layout-presets')!.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-layout]');
+    if (!b) return;
+    const fn = LAYOUTS[b.dataset.layout!];
+    for (let i = 0; i < 80; i++) {
+      const v = fn(i);
+      layout[i] = v === 'A' ? brushA : v === 'B' ? (brushB === brushA ? 8 : brushB) : 0;
+      paintCell(i);
+    }
+    syncLayout();
+  });
+
   // One tap for every palette with n inks (the single-ink "separations", every two-ink pair, …).
   document.getElementById('ink-chips')!.addEventListener('click', (e) => {
     const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-inks]');
@@ -365,6 +480,7 @@ export async function create(app: HTMLElement) {
     app.querySelector<HTMLElement>(`[data-rule="${key}"]`)!.addEventListener('click', (e) => {
       const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-bit]');
       if (!btn) return;
+      if (key === 'palettes' && layout.some(Boolean)) return toast('Palettes are set by your layout. Clear it to pick freely.', 'info');
       rules[key] ^= 1 << Number(btn.dataset.bit); // tap to add, tap again to remove
       pattern = 'none';
       syncTiles();
@@ -548,6 +664,8 @@ export async function create(app: HTMLElement) {
       idTo: BigInt(rules.idTo),
       minScore: rules.minScore,
       maxScore: 0,
+      layout0: layout.slice(0, 64).reduce((acc, m, i) => acc | (BigInt(m) << BigInt(4 * i)), 0n),
+      layout1: layout.slice(64).reduce((acc, m, i) => acc | (BigInt(m) << BigInt(4 * i)), 0n),
     };
     go.disabled = true;
     go.textContent = 'Opening…';
@@ -629,7 +747,7 @@ export async function create(app: HTMLElement) {
   const markTabs = () => {
     const set: Record<string, boolean> = {
       palettes: !!rules.palettes, prints: !!rules.prints, weights: !!rules.weights, eights: !!rules.eights,
-      time: rules.minuteFrom >= 0 || rules.minuteTo >= 0, numbers: !!(rules.idFrom || rules.idTo), list: rules.list.length > 0, rating: rules.minScore > 0,
+      time: rules.minuteFrom >= 0 || rules.minuteTo >= 0, numbers: !!(rules.idFrom || rules.idTo), list: rules.list.length > 0, rating: rules.minScore > 0, layout: layout.some(Boolean),
       credits: picks.size > 0, name: !!(document.getElementById('name') as HTMLInputElement).value.trim(),
     };
     tabs.querySelectorAll<HTMLButtonElement>('[data-tab-for]').forEach((b) => b.classList.toggle('set', !!set[b.dataset.tabFor!]));

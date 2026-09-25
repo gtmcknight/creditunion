@@ -288,6 +288,25 @@ export const batchAbi = [
   },
   {
     "type": "function",
+    "name": "canTake",
+    "inputs": [
+      {
+        "name": "ids",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "ok",
+        "type": "bool[]",
+        "internalType": "bool[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "claim",
     "inputs": [
       {
@@ -550,6 +569,16 @@ export const batchAbi = [
             "name": "maxScore",
             "type": "uint16",
             "internalType": "uint16"
+          },
+          {
+            "name": "layout0",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "layout1",
+            "type": "uint64",
+            "internalType": "uint64"
           }
         ]
       }
@@ -663,6 +692,16 @@ export const batchAbi = [
             "name": "maxScore",
             "type": "uint16",
             "internalType": "uint16"
+          },
+          {
+            "name": "layout0",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "layout1",
+            "type": "uint64",
+            "internalType": "uint64"
           }
         ]
       },
@@ -704,6 +743,32 @@ export const batchAbi = [
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "layout",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "out",
+        "type": "uint8[80]",
+        "internalType": "uint8[80]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "layoutOrder",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "out",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -780,6 +845,25 @@ export const batchAbi = [
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "paletteOf",
+    "inputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint8",
+        "internalType": "uint8"
       }
     ],
     "stateMutability": "view"
@@ -1139,6 +1223,16 @@ export const batchAbi = [
                 "name": "maxScore",
                 "type": "uint16",
                 "internalType": "uint16"
+              },
+              {
+                "name": "layout0",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "layout1",
+                "type": "uint64",
+                "internalType": "uint64"
               }
             ]
           },
@@ -1538,6 +1632,17 @@ export const batchAbi = [
   },
   {
     "type": "error",
+    "name": "LayoutMismatch",
+    "inputs": [
+      {
+        "name": "slot",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "NameTooLong",
     "inputs": []
   },
@@ -1545,6 +1650,17 @@ export const batchAbi = [
     "type": "error",
     "name": "NoDepositor",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoSlot",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",
@@ -1889,6 +2005,16 @@ export const factoryAbi = [
             "name": "maxScore",
             "type": "uint16",
             "internalType": "uint16"
+          },
+          {
+            "name": "layout0",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "layout1",
+            "type": "uint64",
+            "internalType": "uint64"
           }
         ]
       },

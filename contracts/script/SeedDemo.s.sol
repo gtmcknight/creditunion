@@ -85,6 +85,11 @@ contract SeedDemo is Script {
         // 5. Open, just started
         _openEarly(f, keys[3], "Slow Burn", _r(661, 12));
 
+        // 6. Layout: checkered, a few of each palette in
+        uint256[] memory mix = new uint256[](10);
+        for (uint256 i; i < 10; ++i) mix[i] = 581 + i; // who[2]'s: 5 odd (K) + 5 even (CMY)
+        _openLayout(f, keys[2], "Checkerboard", mix);
+
         // 6. Full, Creator's order, unburned: the creator (key 0) sees the arranger
         vm.broadcast(keys[0]);
         address b6 = f.create("Hand Arranged", none, new uint256[](0), 0, Batch.Arrangement.Creator, Batch.Split.Equal, 30 days, _r(101, 40), 200, 0);
@@ -98,6 +103,18 @@ contract SeedDemo is Script {
         win.idFrom = 700;
         vm.broadcast(keys[3]);
         f.create("Minute Seven", win, new uint256[](0), 0, Batch.Arrangement.MintTime, Batch.Split.Equal, 30 days, _r(701, 12), 200, 0);
+    }
+
+    /// A checkered CMY/K layout (mock art: even ids CMY, odd ids K), seeded with a few of each.
+    function _openLayout(BatchFactory f, uint256 k, string memory n, uint256[] memory ids) internal returns (address b) {
+        Batch.Filter memory fl;
+        for (uint256 i; i < 80; ++i) {
+            uint256 m = ((i / 8 + i % 8) % 2 == 0) ? 7 : 8;
+            if (i < 64) fl.layout0 |= m << (4 * i);
+            else fl.layout1 |= uint64(m) << uint64(4 * (i - 64));
+        }
+        vm.broadcast(k);
+        b = f.create(n, fl, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 30 days, ids, 200, 0);
     }
 
     function _openEarly(BatchFactory f, uint256 k, string memory n, uint256[] memory ids) internal returns (address b) {

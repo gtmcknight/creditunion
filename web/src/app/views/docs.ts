@@ -74,6 +74,16 @@ export function docs(app: HTMLElement) {
         `<p class="muted">Mint-time and number sorting happen in the adapter, which also receives the chosen arrangement, so whatever Jack’s contract expects can be handled there without touching batches.</p>`,
     },
     {
+      id: 'layout',
+      title: 'Layouts',
+      body: `<p>On the design page you can paint the 8×10 sheet with palettes: checkered, stripes, a border, anything. A painted slot only ever takes a Credit of that palette, so the batch can only fill in a way that realises the design, and when it burns the 80 go onto the Statement in that arrangement. Open (unpainted) slots take any palette.</p>
+      ${rules([
+        ['Enforced', 'The contract counts how many Credits of each palette are in against how many slots want them. A deposit that could not be placed is refused (§ Eligibility), and withdrawing gives the slot back.'],
+        ['The burn', 'Each painted slot takes the earliest-deposited Credit of its palette; open slots take what is left, in deposit order. The creator gets a day to reshuffle within a palette first; a swap across palettes is refused.'],
+        ['Shown', 'Empty slots on the sheet show the ink they are waiting for, on the card and on the batch page.'],
+      ])}`,
+    },
+    {
       id: 'auction',
       title: 'Auction',
       body: rules([
@@ -93,6 +103,7 @@ export function docs(app: HTMLElement) {
       ${rules([
         ['Positions', 'Your position is where your Credit sits in deposit order. Withdrawing forfeits it and everyone behind moves up; depositing again joins at the back. There is no way to jump the queue.'],
         ['The curator', 'Whoever opens a batch deposits first, so on an Early-bird batch the curator’s reward is the top slots, in proportion to what they put in: 1 Credit earns 1.5 shares; 10 Credits earn about 14.4. There is no curator fee.'],
+        ['With a layout', 'Positions are deposit order, not where a Credit lands on the sheet. Under a layout the sheet is rearranged at the burn; the payout still follows who deposited first.'],
         ['Buy-ins', 'Credits bought through OpenSea into a batch take the next positions, so a buy-in is also a way to take early slots.'],
         ['Numbers', 'On a 4 ETH sale with the 2 % protocol fee: position 1 pays 0.0735 ETH, position 40 pays 0.0494, position 80 pays 0.0245. An Equal batch pays 0.049 to every Credit.'],
         ['Shown', 'The choice is fixed when the batch opens and shown on its card and page, with your own positions once you have deposited.'],

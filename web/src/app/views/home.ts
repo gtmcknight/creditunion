@@ -1,5 +1,5 @@
 import { session } from '../chain';
-import { ARRANGEMENTS, listBatches, type Listed, type Summary } from '../data';
+import { ARRANGEMENTS, listBatches, type Listed, type Summary, hasLayout, layoutSlot } from '../data';
 import { hydrate, pct, who } from '../ens';
 import { fitByBatch } from '../fit';
 import type { Address } from 'viem';
@@ -61,7 +61,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[]) {
   const room = 80 - s.count;
   const canJoin = fit?.length ? Math.min(fit.length, room) : 0;
   return `<a class="card${canJoin ? ' can-join' : ''}" href="#/b/${s.address}">
-    ${sheet(ids, { size: 'sm', mine })}
+    ${sheet(ids, { size: 'sm', mine, layout: hasLayout(s.filter) ? Array.from({ length: 80 }, (_, i) => layoutSlot(s.filter, i)) : undefined })}
     <div class="card-body">
       <div class="row"><strong>${esc(s.name || 'Untitled')}</strong><span class="tags">${s.split === 1 ? '<span class="tag early">Early bird</span>' : ''}${canJoin ? `<span class="tag join">Join · ${canJoin} fit</span>` : ''}${mine.size ? `<span class="tag you">You · ${mine.size}</span>` : ''}<span class="tag ${s.state.toLowerCase()}">${s.state}</span></span></div>
       <div class="row creator">${who(s.creator)}${fee(s)}</div>

@@ -59,7 +59,8 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         Deposit,
         MintTime,
         Number,
-        Creator
+        Creator,
+        Layout // the sheet follows a palette layout painted when the batch was designed (Filter.layout0/1)
     }
 
     /// @notice How the depositors' share of the sale is divided among the 80 positions (deposit order).
@@ -99,6 +100,10 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         uint256 idTo; // ...to
         uint16 minScore; // official rating ×10 (80.00 → 800), 0 = any
         uint16 maxScore; // 0 = any
+        // A palette layout for the 8×10 sheet: 4 bits per slot in deposit order (slots 0–63 in layout0,
+        // 64–79 in layout1), 0 = any palette, 1–15 = the CMYK mask that slot must show. Both zero = no layout.
+        uint256 layout0;
+        uint64 layout1;
     }
 
     struct Summary {
@@ -134,6 +139,15 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     address public creator;
     string public name;
     Filter internal _filter;
+    // Layout bookkeeping: how many slots want each palette mask, how many Credits of each are in, how many
+    // "any" slots exist, and how many Credits are already spilling into them. The batch stays fillable as
+    // long as overflow ≤ anySlots (then every painted slot can be matched and the rest take the any slots).
+    uint8[16] internal _slots;
+    uint8[16] internal _have;
+    uint8 internal anySlots;
+    uint8 internal overflow;
+    /// @notice The palette mask of a deposited Credit (layout batches only), C=1 M=2 Y=4 K=8.
+    mapping(uint256 => uint8) public paletteOf;
     /// @notice When non-empty, only these Credits may join.
     uint256 public allowlistSize;
     mapping(uint256 id => bool) public allowed;
@@ -203,6 +217,8 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     error NotCreator();
     error CreatorsTurn();
     error BadOrder();
+    error NoSlot(uint256 id);
+    error LayoutMismatch(uint256 slot);
 
     // ---------------------------------------------------------------- setup
 
@@ -231,6 +247,16 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         if (filter_.maxScore != 0 && filter_.minScore > filter_.maxScore) revert BadFilter();
         if ((filter_.minScore != 0 || filter_.maxScore != 0) && address(IBatchFactory(msg.sender).ratings()) == address(0)) {
             revert BadFilter();
+        }
+        bool hasLayout = filter_.layout0 != 0 || filter_.layout1 != 0;
+        if (hasLayout != (arrangement_ == Arrangement.Layout)) revert BadFilter();
+        if (hasLayout) {
+            Filter memory lf = filter_;
+            for (uint256 i; i < SIZE; ++i) {
+                uint256 p = _slot(lf, i);
+                if (p == 0) ++anySlots;
+                else ++_slots[p];
+            }
         }
         for (uint256 i; i < allowlist_.length; ++i) {
             if (!allowed[allowlist_[i]]) {
@@ -316,6 +342,15 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         _require(State.Open);
         if (depositorOf[id] != address(0)) revert AlreadyDeposited(id);
         if (!passes(id)) revert Excluded(id);
+        if (arrangement == Arrangement.Layout) {
+            uint256 p = _paletteOf(id);
+            if (_have[p] >= _slots[p]) {
+                if (overflow >= anySlots) revert NoSlot(id); // no painted slot left for this palette, no any slot free
+                ++overflow;
+            }
+            ++_have[p];
+            paletteOf[id] = uint8(p);
+        }
         _ids.push(id);
         depositorOf[id] = from;
         ++sharesOf[from];
@@ -340,6 +375,12 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
             if (depositorOf[id] != msg.sender) revert NotDepositor(id);
             delete depositorOf[id];
             --sharesOf[msg.sender];
+            if (arrangement == Arrangement.Layout) {
+                uint256 p = paletteOf[id];
+                if (_have[p] > _slots[p]) --overflow;
+                --_have[p];
+                delete paletteOf[id];
+            }
             _remove(id);
             emit Withdrawn(msg.sender, id, _ids.length);
         }
@@ -393,6 +434,72 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         }
     }
 
+    function _paletteOf(uint256 id) internal view returns (uint256) {
+        return _paletteMask(art.describe(credits.seedOf(id), credits.timestampOf(id)).colors);
+    }
+
+    /// @dev Palette wanted at layout slot `i` (0 = any).
+    function _slot(Filter memory f, uint256 i) internal pure returns (uint256) {
+        return i < 64 ? (f.layout0 >> (4 * i)) & 15 : (f.layout1 >> (4 * (i - 64))) & 15;
+    }
+
+    /// @notice Whether each of `ids`, deposited together in this order, would find a slot (always true without a
+    ///         layout). Ids in one bundle interact (two K Credits, one K slot), so the rule is replayed over a copy
+    ///         of the books; `passes()` alone is slot-blind.
+    function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
+        ok = new bool[](ids.length);
+        uint8[16] memory have = _have;
+        uint256 spill = overflow;
+        for (uint256 i; i < ids.length; ++i) {
+            if (depositorOf[ids[i]] != address(0) || !passes(ids[i])) continue;
+            if (arrangement != Arrangement.Layout) {
+                ok[i] = true;
+                continue;
+            }
+            uint256 p = _paletteOf(ids[i]);
+            if (have[p] >= _slots[p]) {
+                if (spill >= anySlots) continue;
+                ++spill;
+            }
+            ++have[p];
+            ok[i] = true;
+        }
+    }
+
+    /// @notice The layout as 80 palette masks (0 = any); all zero when the batch has none.
+    function layout() external view returns (uint8[80] memory out) {
+        Filter memory f = _filter;
+        for (uint256 i; i < SIZE; ++i) out[i] = uint8(_slot(f, i));
+    }
+
+    /// @notice The order the sheet takes under the layout: each painted slot gets the earliest-deposited
+    ///         Credit of its palette, the any slots take what is left, in deposit order. Always completable
+    ///         once Full (deposits keep overflow ≤ anySlots).
+    function layoutOrder() public view returns (uint256[] memory out) {
+        uint256 n = _ids.length;
+        out = new uint256[](n);
+        bool[] memory used = new bool[](n);
+        Filter memory f = _filter;
+        for (uint256 i; i < n; ++i) {
+            uint256 want = _slot(f, i);
+            if (want == 0) continue;
+            for (uint256 j; j < n; ++j) {
+                if (!used[j] && paletteOf[_ids[j]] == want) {
+                    used[j] = true;
+                    out[i] = _ids[j];
+                    break;
+                }
+            }
+        }
+        uint256 k;
+        for (uint256 i; i < n; ++i) {
+            if (_slot(f, i) != 0) continue;
+            while (used[k]) ++k;
+            used[k] = true;
+            out[i] = _ids[k];
+        }
+    }
+
     /// @dev Position of `value` in a '|'-separated list; 255 if absent (which no set bit can match).
     function _index(string memory value, string memory list) internal pure returns (uint256 idx) {
         bytes memory v = bytes(value);
@@ -418,29 +525,36 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     ///         caller pays gas. With the Creator arrangement, only after the creator's grace has passed.
     function assemble() external nonReentrant {
         _require(State.Full);
-        if (arrangement == Arrangement.Creator) {
+        if (arrangement == Arrangement.Creator || arrangement == Arrangement.Layout) {
             // The creator's day starts when assembly first became possible: at fill, or, for a batch that filled
             // during the staged launch, when the assembler was activated.
             uint256 active = factory.assemblerActiveAt();
             uint256 since = active > filledAt ? active : filledAt;
             if (block.timestamp < since + CREATOR_ORDER_GRACE) revert CreatorsTurn();
         }
+        if (arrangement == Arrangement.Layout) return _assemble(layoutOrder(), Arrangement.Deposit);
         _assemble(_ids, arrangement == Arrangement.Creator ? Arrangement.Deposit : arrangement);
     }
 
     /// @notice Creator arrangement only: the creator burns with a hand-made order (a permutation of the 80).
     function assembleOrdered(uint256[] calldata order) external nonReentrant {
         _require(State.Full);
-        if (arrangement != Arrangement.Creator) revert BadOrder();
+        if (arrangement != Arrangement.Creator && arrangement != Arrangement.Layout) revert BadOrder();
         if (msg.sender != creator) revert NotCreator();
         if (order.length != SIZE) revert BadOrder();
+        Filter memory f = _filter;
         for (uint256 i; i < SIZE; ++i) {
             if (depositorOf[order[i]] == address(0)) revert BadOrder();
             for (uint256 j; j < i; ++j) {
                 if (order[j] == order[i]) revert BadOrder();
             }
+            // Under a layout the creator may only reshuffle within a palette: every painted slot keeps its colour.
+            if (arrangement == Arrangement.Layout) {
+                uint256 want = _slot(f, i);
+                if (want != 0 && paletteOf[order[i]] != want) revert LayoutMismatch(i);
+            }
         }
-        _assemble(order, Arrangement.Creator);
+        _assemble(order, Arrangement.Deposit);
     }
 
     /// @dev The assembler is fixed in the factory. It is approved as an operator for this batch's
@@ -453,6 +567,9 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         address st = asm.statement();
         if (st == address(0) || st == address(credits)) revert StatementNotReceived();
 
+        for (uint256 i; i < ids.length; ++i) {
+            if (depositorOf[ids[i]] == address(0)) revert BadOrder(); // never hand the adapter an id we do not hold
+        }
         _assembling = true;
         credits.setApprovalForAll(address(asm), true);
         uint256 sid = asm.assemble(ids, uint8(how));

@@ -41,8 +41,14 @@ export const setLabels = (mask: number, labels: readonly string[], bitOf: (label
   labels.filter((l, i) => mask & (1 << bitOf(l, i)));
 
 /// "Palette C, K · Print Registered · Paid Sep 21, 3:05–3:06 PM · #1000–2000 · 80 listed", or "" for an open batch.
+/// Ink colours for a palette mask, C=1 M=2 Y=4 K=8.
+export const INK = ['#00aeef', '#ec008c', '#fff200', '#111111'] as const;
+export const maskInks = (m: number) => INK.filter((_, b) => m & (1 << b));
+export const maskLabel = (m: number) => [...'CMYK'].filter((_, b) => m & (1 << b)).join('') || 'Any';
+
 export function describeFilter(f: Summary['filter'], allowlistSize = 0) {
   const parts: string[] = [];
+  if (f.layout0 || f.layout1) parts.push('Layout');
   if (f.palettes) parts.push(`Palette ${setLabels(f.palettes, TRAITS.colors, (l) => paletteBit(l)).join(', ')}`);
   if (f.prints) parts.push(`Print ${setLabels(f.prints, TRAITS.print, (_, i) => i).join(', ')}`);
   if (f.weights) parts.push(`Weight ${setLabels(f.weights, TRAITS.weight, (_, i) => i).join(', ')}`);

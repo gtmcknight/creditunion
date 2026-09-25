@@ -4,7 +4,7 @@
 import type { Address } from 'viem';
 import { batchAbi } from './abi';
 import { pub, session } from './chain';
-import { myCredits, ratings, type Listed, type Rated, type Summary } from './data';
+import { hasLayout, myCredits, ratings, type Listed, type Rated, type Summary } from './data';
 import { paletteBit, TRAITS } from './traits';
 
 let cache: { account: string; owned: bigint[]; traits: Map<string, Rated> } | null = null;
@@ -71,6 +71,13 @@ export async function fitByBatch(list: Listed[]): Promise<Map<Address, bigint[]>
         fit.map((id) => pub.readContract({ address: s.address, abi: batchAbi, functionName: 'allowed', args: [id] }).catch(() => false)),
       );
       fit = fit.filter((_, i) => ok[i]);
+    }
+    // Layout batches have slots per palette; the batch says which of these would actually land, as a bundle.
+    if (fit.length && hasLayout(s.filter)) {
+      try {
+        const ok = (await pub.readContract({ address: s.address, abi: batchAbi, functionName: 'canTake', args: [fit] })) as readonly boolean[];
+        fit = fit.filter((_, i) => ok[i]);
+      } catch {}
     }
     if (fit.length) out.set(s.address, fit);
   }
