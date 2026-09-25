@@ -109,7 +109,7 @@ export async function home(app: HTMLElement) {
     <div class="hero-text">
       <h1>Eighty Credits make a Statement.</h1>
       <p class="lede">Pool yours with others. At 80 it burns into a Statement, sold onchain, split 80 ways.</p>
-      <div class="actions"><a class="btn primary" href="#/new">Open a batch</a><a class="btn" href="#/how">How it works</a></div>
+      <div class="actions"><a class="btn primary" href="#/new">Open a batch</a><a class="btn" href="#/docs">How it works</a></div>
     </div>
     <div class="closest" id="closest" aria-live="polite"></div>
     <dl class="stats hero-stats" id="stats">
@@ -156,24 +156,4 @@ export async function home(app: HTMLElement) {
     const el = document.getElementById('batches');
     if (el) el.innerHTML = `<p class="error">Couldn't read batches from chain. ${esc((e as Error).message)}</p>`;
   }
-}
-
-export function how(app: HTMLElement) {
-  const rows: [string, string][] = [
-    ['Open', 'Anyone holding at least 10 Credits opens a batch with them. The opener names it, may restrict it to one trait value (Colors, Print, Weight or Eights, read from Jack’s own art contract), sets an optional reserve and a deadline of 3–90 days.'],
-    ['Deposit', 'Approve the Eighty factory once, then add any number of Credits. Or send a single Credit straight to the batch with safeTransferFrom; no approval needed. Order of deposit is the order on the Statement.'],
-    ['Withdraw', 'Until the batch holds 80, every depositor can take their Credits back at any time. No fee, no penalty.'],
-    ['Lock', 'The 80th deposit locks the batch. Nobody can withdraw or add. The deadline moves to at least 7 days out.'],
-    ['Burn', 'Anyone can call assemble(). The batch burns the 80 through Jack’s Statement contract and holds the Statement. The contract checks every Credit is gone and the Statement arrived, or the whole thing reverts.'],
-    ['Expire', 'If the deadline passes before the burn (never filled, or Statements sold out), every depositor withdraws their Credits.'],
-    ['Auction', 'The 24-hour clock starts with the first bid. Each bid must beat the last by 5% (at least 0.01 ETH). A bid in the last 15 minutes extends to 15 minutes after it. Outbid ETH is returned in the same transaction. A reserve, if set, lapses after 7 days without bids.'],
-    ['Split', 'Anyone settles when the clock runs out: the Statement goes to the winner, 1% to Eighty, and each deposited Credit claims 1/80 of the rest.'],
-    ['Trust', 'No owner, no admin keys, no upgrades, no server state. The factory can only move Credits from the person calling it into one of its own batches. Contracts and this site are open source.'],
-  ];
-  app.innerHTML = `
-  <section class="prose">
-    <h1>How it works</h1>
-    <p class="lede">Jack Butcher’s <a href="https://jack.art/credits" target="_blank" rel="noopener">Credits</a> burn 80 at a time into a Statement, at most 1,526 of them. The burn needs all 80 in one wallet. Eighty is that wallet: a contract per batch that nobody controls.</p>
-    <dl class="rules">${rows.map(([k, v], i) => `<div style="--i:${i}"><dt><span class="n">0${i + 1}</span>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>
-  </section>`;
 }

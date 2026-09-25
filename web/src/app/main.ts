@@ -2,7 +2,8 @@ import type { Address } from 'viem';
 import { chain, config, connect, loadConfig, onSession, restore, session, wallets } from './chain';
 import { batch } from './views/batch';
 import { create } from './views/create';
-import { home, how } from './views/home';
+import { home } from './views/home';
+import { docs } from './views/docs';
 import { hydrate, who } from './ens';
 import { mint } from './views/mint';
 import { profile } from './views/profile';
@@ -23,7 +24,7 @@ async function route() {
   );
   app.classList.remove('in');
   try {
-    if (page === 'how') how(app);
+    if (page === 'docs' || page === 'how') docs(app);
     else if (page === 'mint') await mint(app, route);
     else if (page === 'me') await profile(app, route);
     else if (page === 'new') await create(app);
