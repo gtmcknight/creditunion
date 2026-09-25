@@ -153,14 +153,14 @@ contract SplitTest is Test {
         assertLe(fee.balance, uint256(amount) * 2 / 100 + 12_640); // fee + at most one unit of dust per unit
     }
 
-    /// Claiming on an Early batch walks all 80 positions: affordable.
+    /// Claiming on an Early batch walks the positions: the back-of-line depositor is the worst case (~460k).
     function test_ClaimGas() public {
         Batch b = _open(alice, _range(1, 40), Batch.Split.Early);
         vm.prank(bob);
         factory.deposit(address(b), _range(81, 40));
         _sell(b, 1 ether);
         uint256 g = gasleft();
-        b.claim(alice);
-        assertLt(g - gasleft(), 450_000);
+        b.claim(bob); // positions 40..79: the early exit never fires before the end
+        assertLt(g - gasleft(), 500_000);
     }
 }

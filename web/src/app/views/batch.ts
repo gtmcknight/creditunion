@@ -185,7 +185,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
         : `<p class="small muted num">Claimed · ${m.shares} of 80</p>`
       : '';
     return `<div class="box">
-      <div class="bid-now"><div><span>Sold</span><strong class="num">${eth(s.highBid)}</strong></div><div><span>Per Credit</span><strong class="num">${eth(per)}</strong></div></div>
+      <div class="bid-now"><div><span>Sold</span><strong class="num">${eth(s.highBid)}</strong></div><div><span>${s.split === 1 ? "Avg per Credit" : "Per Credit"}</span><strong class="num">${eth(per)}</strong></div></div>
       <p class="small muted">To ${link(s.highBidder)}</p>
       ${mine}${owed}
     </div>`;
