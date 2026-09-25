@@ -443,51 +443,6 @@ nav .short {
   box-shadow: inset 0 0 0 3px #0a0a0a, 0 0 0 1px var(--line-strong);
 }
 
-/* ---------------------------------------------------------------- hero */
-
-.hero {
-  padding: clamp(28px, 5vw, 56px) 0 clamp(40px, 6vw, 64px);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 420px);
-  gap: 32px 64px;
-  align-items: start;
-}
-.hero-text {
-  display: grid;
-  gap: 24px;
-}
-.hero h1 {
-  max-width: 14ch;
-  font-size: clamp(34px, 5vw, 56px);
-  line-height: 1;
-}
-.hero-text {
-  align-content: start;
-}
-.hero-art {
-  display: grid;
-  gap: 10px;
-  text-decoration: none;
-  opacity: 0;
-  transition: opacity 500ms var(--ease);
-}
-.hero-art.in {
-  opacity: 1;
-}
-.hero-art .legend {
-  justify-content: space-between;
-}
-.hero .steps {
-  grid-column: 1 / -1;
-}
-@media (max-width: 760px) {
-  .hero {
-    grid-template-columns: 1fr;
-  }
-  .hero-art {
-    display: none;
-  }
-}
 .steps {
   list-style: none;
   margin: 24px 0 8px;
@@ -660,21 +615,19 @@ nav .short {
 /* ---------------------------------------------------------------- sheet: 8 × 10 */
 
 .sheet {
+  /* Laid out like the Statement: a white sheet, no rules, the 80 floating with a margin around them.
+     Padding is a share of the width (8 cols + 2×8.1% sides, 10 rows + 2×10.1% top/bottom) so it keeps 4:5 at any size. */
   display: grid;
   align-content: start;
   grid-template-columns: repeat(8, 1fr);
-  gap: 1px;
-  background: var(--line-strong);
+  padding: 10.1% 8.1%;
+  background: #fff;
   box-shadow: 0 0 0 1px var(--line-strong);
-  transition: gap 700ms var(--ease), box-shadow 200ms var(--ease);
-}
-.sheet.closed {
-  gap: 0;
+  transition: box-shadow 200ms var(--ease);
 }
 .cell {
   position: relative;
   aspect-ratio: 1;
-  background: var(--bg);
   overflow: hidden;
   transition: opacity 200ms var(--ease);
 }
@@ -684,6 +637,8 @@ nav .short {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* Drop the corner marks Credit art draws in its bottom row (y 280–320 of the 320 viewBox); the plates stop by 250. */
+  clip-path: inset(0 0 9.375% 0);
 }
 .cell.new {
   animation: drop 360ms var(--ease) both;
@@ -783,8 +738,7 @@ nav .short {
   align-items: start;
 }
 .batch-art {
-  position: sticky;
-  top: 88px;
+  /* Not sticky: the sheet is nearly viewport-tall, so sticky only made it jump when the side column changed height. */
   display: grid;
   gap: 12px;
 }
@@ -1505,7 +1459,7 @@ nav a[hidden] {
   }
 }
 
-/* ---------------------------------------------------------------- compact hero */
+/* ---------------------------------------------------------------- header bits */
 
 .brand {
   display: inline-flex;
@@ -1565,61 +1519,7 @@ nav a[hidden] {
   text-transform: uppercase;
   color: var(--muted);
 }
-.closest {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-.near {
-  display: grid;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--line);
-  text-decoration: none;
-}
-.near .sheet {
-  width: 52px;
-  gap: 0;
-}
-.near .sheet .cell.mine::after {
-  box-shadow: inset 0 0 0 1px #0a0a0a;
-}
-.near-body {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-}
-.near-body .row strong {
-  font-weight: 500;
-}
-.near:hover strong {
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-.hero-stats {
-  grid-column: 1 / -1;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-@media (max-width: 760px) {
-  .hero {
-    grid-template-columns: 1fr;
-  }
-}
-.hero-stats .short {
-  display: none;
-}
 @media (max-width: 560px) {
-  .hero-stats > div {
-    padding-right: 8px;
-  }
-  .hero-stats dd {
-    font-size: 20px;
-  }
-  .hero-stats .long {
-    display: none;
-  }
-  .hero-stats .short {
-    display: inline;
-  }
   .brand .net {
     display: none;
   }
@@ -2333,23 +2233,232 @@ input[type='datetime-local'] {
   opacity: 0.45;
   pointer-events: none;
 }
-.cell.empty.slot {
+
+
+/* ---------------------------------------------------------------- open-slot hover card */
+
+.slot-tip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 50;
+  width: 232px;
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms var(--ease);
+}
+.slot-tip.in {
+  opacity: 1;
+}
+.slot-tip p {
+  margin: 0;
+}
+.slot-tip .takes {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
+  font-weight: 500;
 }
-.cell.empty.slot .inks {
+.slot-tip .swatches {
   display: flex;
   gap: 2px;
 }
-.cell.empty.slot .inks i {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
+.slot-tip .swatches i {
+  width: 10px;
+  height: 10px;
   display: block;
-  opacity: 0.6;
 }
-.sheet.sm .cell.empty.slot .inks i {
-  width: 3px;
-  height: 3px;
+.slot-tip .examples {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-top: 4px;
+}
+.slot-tip figure {
+  margin: 0;
+  display: grid;
+  gap: 2px;
+}
+.slot-tip .art {
+  /* Crop the art's white margin: show 60–240 of its 320 viewBox. */
+  display: block;
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--line);
+}
+.slot-tip img {
+  display: block;
+  width: 177.8%;
+  max-width: none;
+  margin: -33.3% 0 0 -33.3%;
+}
+.slot-tip figcaption {
+  font-size: 10px;
+  color: var(--muted);
+}
+@media (hover: none) {
+  .slot-tip {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------- home: app bar over the grid */
+
+.subnav {
+  position: sticky;
+  top: 64px; /* under .top */
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0 24px;
+  padding: 12px 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.subtabs {
+  display: flex;
+  gap: 4px;
+}
+.subtabs button {
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.subtabs button:hover {
+  color: var(--fg);
+}
+.subtabs button[aria-selected='true'] {
+  background: var(--line);
+  color: var(--fg);
+  font-weight: 500;
+}
+.subtabs button[hidden] {
+  display: none;
+}
+.subtabs .num {
+  margin-left: 4px;
+  color: var(--muted);
+}
+.subnav-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.subnav-end .seg[hidden] {
+  display: none;
+}
+
+/* ---------------------------------------------------------------- batch page: progress, takes, details */
+
+.progress {
+  display: grid;
+  gap: 8px;
+}
+.progress .row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.progress .num {
+  font-size: 15px;
+  color: var(--muted);
+}
+.progress strong {
+  font-size: 28px;
+  font-weight: 500;
+  color: var(--fg);
+}
+.takes {
+  display: grid;
+  gap: 8px;
+}
+.takes .eyebrow {
+  margin: 0;
+}
+.rule-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rule-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  cursor: default;
+  transition: box-shadow 120ms var(--ease);
+}
+.rule-chip .num {
+  color: var(--muted);
+}
+.rule-chip:hover {
+  box-shadow: inset 0 0 0 1px var(--fg);
+}
+.rule-chip .swatches {
+  display: inline-flex;
+  gap: 2px;
+}
+.rule-chip .swatches i {
+  width: 10px;
+  height: 10px;
+  display: block;
+}
+.more {
+  border-top: 1px solid var(--line);
+}
+.more summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 14px 0;
+  font-size: 14px;
+  cursor: pointer;
+  list-style: none;
+}
+.more summary::-webkit-details-marker {
+  display: none;
+}
+.more summary > span:first-child::after {
+  content: ' +';
+  color: var(--muted);
+}
+.more[open] summary > span:first-child::after {
+  content: ' −';
+}
+.more .facts {
+  border-top: 0;
+}
+.box.off {
+  opacity: 0.5;
+}
+.batch-art .cell img {
+  transition: opacity 160ms var(--ease);
+}
+.batch-art.lighting .cell:not(.lit) img {
+  opacity: 0.06;
+}
+.batch-art.lighting .cell.ghost.lit img {
+  opacity: 0.6;
 }

@@ -43,7 +43,6 @@ function drawTestnet() {
   const el = document.getElementById('testnet')!;
   el.hidden = false;
   el.innerHTML = `<span><strong>Testnet preview</strong> · ${esc(chain.name)}, test Credits only. Mainnet launches with Jack’s Statement contract.</span><a href="#/mint">Mint test Credits →</a>`;
-  document.querySelector<HTMLElement>('nav a[data-nav="mint"]')?.removeAttribute('hidden');
 }
 
 /// Phone browsers have no wallet inside them: open this page in a wallet's own browser instead.

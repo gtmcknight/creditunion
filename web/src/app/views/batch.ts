@@ -3,9 +3,9 @@ import { parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi } from '../abi';
 import { config, explorer, pub, send, session } from '../chain';
 import { ARRANGEMENTS, earlyWeight, eligible, getBatch, hasLayout, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
-import { maskLabel, paletteBit } from '../traits';
+import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { hydrate, pct, who } from '../ens';
-import { describeFilter } from '../traits';
+import { fillGhosts, registerFilter } from '../ghosts';
 import { $$, art, errText, esc, eth, same, sheet, short, toast, until } from '../ui';
 
 const CHUNK = 40; // Credits per transaction; keeps each one well under the block gas limit
@@ -30,7 +30,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
   const m: Mine = account ? await me(address, account) : null;
   const myIds = new Set(b.ids.filter((_, i) => same(b.depositors[i], account)).map(String));
   const s = b.s;
-  const f = describeFilter(s.filter, s.allowlistSize);
+  const rules = filterRules(s.filter, s.allowlistSize, (i) => layoutSlot(s.filter, i));
   const burned = s.state === 'Auction' || s.state === 'Settled';
   const depositors = new Set(b.depositors.map((d) => d.toLowerCase())).size;
 
@@ -54,10 +54,11 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
       placed = placeOnLayout(slots, b.ids, (id) => byId.get(id.toString()) ?? 0);
     } catch {}
   }
+  registerFilter(s.address, s.filter);
   const artHtml = burned
     ? `<figure class="statement">${sheet(b.ids, { closed: true })}<figcaption class="legend muted small"><span>Statement #${s.statementId}</span><span>80 Credits, burned in deposit order</span></figcaption></figure>`
-    : `${sheet(b.ids, { mine: myIds, fresh: placed ? undefined : seen < s.count ? seen : undefined, closing: s.state === 'Full', layout: slots ?? undefined, placed })}
-       <div class="legend muted small">${myIds.size ? `<button type="button" class="spot" aria-pressed="false"><i class="dot mine"></i><span>Highlight yours</span><span class="num muted">${myIds.size}</span></button>` : ''}<span id="legend-order">${s.arrangement === 0 ? 'In deposit order' : s.arrangement === 4 ? (placed ? 'Shown as laid out' : 'Burned as laid out') : `Shown in deposit order · burned by ${ARRANGEMENTS[s.arrangement].toLowerCase()}`}</span></div>`;
+    : `${sheet(b.ids, { mine: myIds, fresh: placed ? undefined : seen < s.count ? seen : undefined, closing: s.state === 'Full', placed, batch: s.state === 'Open' ? s.address : undefined })}
+       <div class="legend muted small">${myIds.size ? `<button type="button" class="spot" aria-pressed="false"><i class="dot mine"></i><span>Highlight yours</span><span class="num muted">${myIds.size}</span></button>` : ''}<span id="legend-order">${s.arrangement === 0 ? 'In deposit order' : s.arrangement === 4 ? (placed ? 'Shown as laid out' : 'Burned as laid out') : `Shown in deposit order · burned by ${ARRANGEMENTS[s.arrangement].toLowerCase()}`}</span>${s.state === 'Open' ? '<span>Faded: open slots, hover for what fits</span>' : ''}</div>`;
 
   app.innerHTML = `
   <a class="back" href="#/">← Batches</a>
@@ -68,29 +69,44 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
         <span class="tag ${s.state.toLowerCase()}">${s.state}</span>
         <h1>${esc(s.name || 'Untitled')}</h1>
         <div class="byline">${who(s.creator, 'lg')}${s.creatorFeeBps ? `<span class="fee">${pct(s.creatorFeeBps)} creator fee</span>` : ''}</div>
-        ${f ? `<p class="filter">${esc(f)}</p>` : ''}
       </header>
       ${
-        s.state === 'Open' || s.state === 'Expired'
-          ? `<div class="count"><p class="num">${s.count}<span>/80</span></p><div class="bar"><i style="width:${(s.count / 80) * 100}%"></i></div></div>`
+        s.state === 'Open' || s.state === 'Full' || s.state === 'Expired'
+          ? `<div class="progress">
+          <div class="row"><span class="num"><strong>${s.count}</strong>/80</span><span class="muted small num">${s.state === 'Open' ? `${80 - s.count} to go · ${until(s.deadline)} left` : s.state === 'Full' ? `Burn within ${until(s.deadline)}` : 'Expired'}</span></div>
+          <div class="bar"><i style="width:${(s.count / 80) * 100}%"></i></div>
+        </div>`
           : ''
       }
-      <dl class="facts">
-        ${s.state === 'Open' ? fact('Deadline', `<span class="num">${until(s.deadline)}</span>`) : ''}
-        ${s.state === 'Full' ? fact('Burn by', `<span class="num">${until(s.deadline)}</span>`) : ''}
-        ${fact('Depositors', `<span class="num">${depositors}</span>`)}
-        ${fact('Order', ARRANGEMENTS[s.arrangement])}
-        ${fact('Payout', payout(b, myIds))}
-        ${s.count ? fact('Rating', `<span id="rating" class="muted">…</span>`) : ''}
-        ${s.reserve && (s.state === 'Open' || s.state === 'Full' || (s.state === 'Auction' && s.minBid === s.reserve && !s.highBid)) ? fact('Reserve', eth(s.reserve)) : ''}
-        ${fact('Sale split', split(s))}
-        ${fact('Contract', link(s.address))}
-      </dl>
+      <div class="takes"><span class="eyebrow">Takes</span><div class="rule-chips">${rules.length ? rules.map(rule).join('') : '<span class="rule-chip">Any Credit</span>'}</div></div>
       <div id="panel">${panel(b, m, myIds)}</div>
+      <details class="more">
+        <summary><span>Details</span><span class="muted small">${ARRANGEMENTS[s.arrangement]} · ${s.split === 1 ? 'Early bird' : 'Equal'} payout</span></summary>
+        <dl class="facts">
+          ${fact('Order', ARRANGEMENTS[s.arrangement])}
+          ${fact('Payout', payout(b, myIds))}
+          ${fact('Depositors', `<span class="num">${depositors}</span>`)}
+          ${s.count ? fact('Rating', `<span id="rating" class="muted">…</span>`) : ''}
+          ${s.reserve && (s.state === 'Open' || s.state === 'Full' || (s.state === 'Auction' && s.minBid === s.reserve && !s.highBid)) ? fact('Reserve', eth(s.reserve)) : ''}
+          ${fact('Sale split', split(s))}
+          ${fact('Contract', link(s.address))}
+        </dl>
+      </details>
     </div>
   </section>`;
 
   hydrate(app);
+  fillGhosts(app);
+  const art = app.querySelector<HTMLElement>('.batch-art');
+  app.querySelectorAll<HTMLElement>('.rule-chip[data-slots]').forEach((row) => {
+    row.addEventListener('pointerenter', () => {
+      const cells = [...(art?.querySelector('.sheet')?.children ?? [])];
+      const on = row.dataset.slots === 'all' ? null : new Set(row.dataset.slots!.split(',').map(Number));
+      cells.forEach((c, i) => c.classList.toggle('lit', !on || on.has(i)));
+      art?.classList.add('lighting');
+    });
+    row.addEventListener('pointerleave', () => art?.classList.remove('lighting'));
+  });
   bind(b, m, myIds, rerender);
 }
 
@@ -114,6 +130,9 @@ function split(s: Ctx['s']) {
 }
 
 const fact = (k: string, v: string) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
+/// A rule row; hovering it lights the slots it governs on the sheet (every slot unless it's a layout row).
+const rule = (r: Rule) =>
+  `<span class="rule-chip" data-slots="${r.slots ? r.slots.join(',') : 'all'}">${r.swatch ? `<span class="swatches">${maskInks(r.swatch).map((c) => `<i style="background:${c}"></i>`).join('')}</span>` : ''}${esc(r.label)} <span class="num">${esc(r.value)}</span></span>`;
 const link = (a: string) => {
   const u = explorer('address', a);
   return u ? `<a href="${u}" target="_blank" rel="noopener" class="mono">${short(a)} ↗</a>` : `<span class="mono">${short(a)}</span>`;
@@ -128,7 +147,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
 
   if (s.state === 'Open') {
     if (!m)
-      return `<div class="box"><h3>Add Credits</h3><p class="muted">Connect to see which of yours fit${config.sweeper ? ', or buy in from OpenSea' : ''}.</p>${connect}</div>`;
+      return `<div class="box"><h3>Add Credits</h3><p class="muted">Connect to see which of yours fit.</p>${connect}</div>${buyPanel(80 - s.count, false)}`;
     return `<div class="box">
       <div class="box-head"><h3>Add Credits</h3><span class="muted small num" id="pick-count"></span></div>
       <p class="small" id="fit-line">Checking which of yours fit…</p>
@@ -137,7 +156,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
       ${withdraw()}
       <p class="muted small">Withdraw any time before 80.${s.canAssemble ? '' : ' Burning opens once Jack’s Statement contract ships.'}</p>
     </div>
-    ${config.sweeper ? buyPanel(80 - s.count) : ''}`;
+    ${buyPanel(80 - s.count, true)}`;
   }
 
   if (s.state === 'Full') {
@@ -227,15 +246,17 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
 
 const BUY_STEPS = [1, 5, 10, 20, 40];
 
-function buyPanel(room: number) {
+function buyPanel(room: number, connected: boolean) {
   const steps = BUY_STEPS.filter((n) => n <= room);
   if (!steps.includes(Math.min(room, 40))) steps.push(Math.min(room, 40));
   const def = steps.includes(10) ? 10 : steps[steps.length - 1];
-  return `<div class="box" id="buy">
-    <div class="box-head"><h3>Buy Credits from OpenSea</h3><span class="muted small">Cheapest that fit</span></div>
-    <div class="seg" role="radiogroup" aria-label="How many">${steps.map((n) => `<label><input type="radio" name="buy-n" value="${n}" ${n === def ? 'checked' : ''}><span>${n}</span></label>`).join('')}</div>
+  // Shown even where buy-in is off (testnets: no sweeper), disabled, so the page reads the same everywhere.
+  const off = !config.sweeper;
+  return `<div class="box${off ? ' off' : ''}" id="buy">
+    <div class="box-head"><h3>Buy Credits from OpenSea</h3><span class="muted small">${off ? 'Mainnet only' : 'Cheapest that fit'}</span></div>
+    <div class="seg" role="radiogroup" aria-label="How many">${steps.map((n) => `<label><input type="radio" name="buy-n" value="${n}" ${n === def ? 'checked' : ''}${off ? ' disabled' : ''}><span>${n}</span></label>`).join('')}</div>
     <div id="buy-quote" class="quote muted small">Pick how many, then get a price.</div>
-    <button class="btn primary block" id="buy-go">Get price</button>
+    ${connected || off ? `<button class="btn primary block" id="buy-go"${off ? ' disabled' : ''}>Get price</button>` : '<button class="btn primary block" data-connect>Connect to buy</button>'}
     <p class="muted small">One transaction buys them and deposits them in your name. Listings that sell first are skipped and refunded.</p>
   </div>`;
 }
@@ -584,7 +605,7 @@ async function loadRatings(
   const draw = () => {
     sortable?.destroy();
     const holder = document.querySelector<HTMLElement>('.batch-art .sheet')!;
-    holder.outerHTML = sheet(order, { closing: true, layout: slots ?? undefined });
+    holder.outerHTML = sheet(order, { closing: true });
     const sheetEl = document.querySelector<HTMLElement>('.batch-art .sheet')!;
     picked = null;
     sheetEl.querySelectorAll<HTMLElement>('.cell[data-id]').forEach((c) => {

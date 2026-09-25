@@ -40,6 +40,36 @@ export const paletteBit = (p: string) => [...'CMYK'].reduce((m, ch, b) => (p.inc
 export const setLabels = (mask: number, labels: readonly string[], bitOf: (label: string, i: number) => number) =>
   labels.filter((l, i) => mask & (1 << bitOf(l, i)));
 
+const INK_NAMES = ['Cyan', 'Magenta', 'Yellow', 'Black'];
+/// "Black", "Cyan + black" for a palette mask.
+export const inkName = (m: number) => INK_NAMES.filter((_, b) => m & (1 << b)).join(' + ').replace(/ \+ (\w)/g, (_, c) => ` + ${c.toLowerCase()}`);
+
+export type Rule = { label: string; value: string; swatch?: number; slots?: number[] };
+/// A batch's rules one per row, for the batch page. `slots`: the sheet slots a row governs (all when absent).
+export function filterRules(f: Summary['filter'], allowlistSize: number, slotOf: (i: number) => number): Rule[] {
+  const rows: Rule[] = [];
+  if (f.layout0 || f.layout1) {
+    const by = new Map<number, number[]>();
+    for (let i = 0; i < 80; i++) {
+      const m = slotOf(i);
+      if (m) by.set(m, [...(by.get(m) ?? []), i]);
+    }
+    for (const [m, slots] of by) rows.push({ label: `${inkName(m)} slots`, value: String(slots.length), swatch: m, slots });
+    const open = Array.from({ length: 80 }, (_, i) => i).filter((i) => !slotOf(i));
+    if (open.length) rows.push({ label: 'Open slots', value: String(open.length), slots: open });
+  }
+  if (f.palettes) rows.push({ label: 'Palette', value: setLabels(f.palettes, TRAITS.colors, (l) => paletteBit(l)).join(', ') });
+  if (f.prints) rows.push({ label: 'Print', value: setLabels(f.prints, TRAITS.print, (_, i) => i).join(', ') });
+  if (f.weights) rows.push({ label: 'Weight', value: setLabels(f.weights, TRAITS.weight, (_, i) => i).join(', ') });
+  if (f.eights) rows.push({ label: 'Eights', value: Array.from({ length: 32 }, (_, n) => n).filter((n) => f.eights & (1 << n)).join(', ') });
+  if (f.paidFrom || f.paidTo) rows.push({ label: 'Paid', value: window(f.paidFrom, f.paidTo).replace(/^Paid /, '') });
+  if (f.minScore || f.maxScore)
+    rows.push(f.minScore && f.maxScore ? { label: 'Rating range', value: `${f.minScore / 10}–${f.maxScore / 10}` } : f.minScore ? { label: 'Min rating', value: `${f.minScore / 10}` } : { label: 'Max rating', value: `${f.maxScore / 10}` });
+  if (f.idFrom || f.idTo) rows.push({ label: 'Credit #', value: f.idFrom && f.idTo ? `${f.idFrom}–${f.idTo}` : f.idFrom ? `${f.idFrom}+` : `up to ${f.idTo}` });
+  if (allowlistSize) rows.push({ label: 'Listed', value: `${allowlistSize} Credits` });
+  return rows;
+}
+
 /// "Palette C, K · Print Registered · Paid Sep 21, 3:05–3:06 PM · #1000–2000 · 80 listed", or "" for an open batch.
 /// Ink colours for a palette mask, C=1 M=2 Y=4 K=8.
 export const INK = ['#00aeef', '#ec008c', '#fff200', '#111111'] as const;

@@ -369,7 +369,6 @@ export async function create(app: HTMLElement) {
     document.getElementById('preview')!.innerHTML = sheet(mineIds, {
       mine: picks,
       ghosts: rest.slice(0, 80 - mineIds.length).map((g) => ({ id: g.id, src: artOf(g.id) })),
-      layout: painted ? layout : undefined,
     });
   }
 

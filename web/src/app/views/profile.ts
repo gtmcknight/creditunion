@@ -3,6 +3,7 @@ import { batchAbi } from '../abi';
 import { config, disconnect, explorer, pub, send, session } from '../chain';
 import { listBatches, myCredits, type Listed } from '../data';
 import { hydrate, who } from '../ens';
+import { fillGhosts } from '../ghosts';
 import { art, errText, esc, eth, same, toast } from '../ui';
 import { card, mineIn } from './home';
 
@@ -89,6 +90,7 @@ export async function profile(app: HTMLElement, rerender: () => void) {
   </section>`;
 
   hydrate(app);
+  fillGhosts(app);
   document.getElementById('disconnect')?.addEventListener('click', () => {
     disconnect();
     location.hash = '#/';
