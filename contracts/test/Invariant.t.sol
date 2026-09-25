@@ -156,7 +156,7 @@ contract BatchInvariants is Test {
         for (uint256 i; i < 10; ++i) ids[i] = i + 1;
         vm.startPrank(creator);
         credits.setApprovalForAll(address(factory), true);
-        batch = Batch(factory.create("Inv", Batch.Filter(0, 0, 0, 0), 0.5 ether, 300, Batch.Arrangement.Deposit, 30 days, ids));
+        batch = Batch(factory.create("Inv", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0.5 ether, 300, Batch.Arrangement.Deposit, 30 days, ids));
         vm.stopPrank();
 
         handler = new Handler(credits, factory, batch, actors);

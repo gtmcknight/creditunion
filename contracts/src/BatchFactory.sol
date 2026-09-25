@@ -110,7 +110,8 @@ contract BatchFactory {
     }
 
     /// @notice Open a batch with at least `minOpen` of your Credits.
-    /// @param filter keccak256 of each required trait value, or 0 for any.
+    /// @param filter Trait hashes (0 for any), payment window and number range (0 for unbounded).
+    /// @param allowlist Up to 200 specific Credit numbers that alone may join; empty for no list.
     /// @param reserve Opening bid floor, dropped if no bid within 7 days of assembly. 0 for none.
     /// @param creatorFeeBps Your cut of the sale, 0–1000 (10%). Fixed forever; depositors see it before joining.
     /// @param arrangement How the 80 are ordered on the Statement (Batch.Arrangement).
@@ -118,6 +119,7 @@ contract BatchFactory {
     function create(
         string calldata name,
         Batch.Filter calldata filter,
+        uint256[] calldata allowlist,
         uint256 reserve,
         uint256 creatorFeeBps,
         Batch.Arrangement arrangement,
@@ -130,7 +132,9 @@ contract BatchFactory {
         batch = Clones.clone(implementation);
         isBatch[batch] = true;
         _batches.push(batch);
-        Batch(batch).initialize(msg.sender, name, filter, reserve, creatorFeeBps, arrangement, uint64(block.timestamp + duration));
+        Batch(batch).initialize(
+            msg.sender, name, filter, allowlist, reserve, creatorFeeBps, arrangement, uint64(block.timestamp + duration)
+        );
         emit BatchCreated(batch, msg.sender, name, _batches.length - 1);
 
         _move(batch, ids, msg.sender);

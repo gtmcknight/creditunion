@@ -28,7 +28,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
   const m: Mine = account ? await me(address, account) : null;
   const myIds = new Set(b.ids.filter((_, i) => same(b.depositors[i], account)).map(String));
   const s = b.s;
-  const f = describeFilter(s.filter);
+  const f = describeFilter(s.filter, s.allowlistSize);
   const burned = s.state === 'Auction' || s.state === 'Settled';
   const depositors = new Set(b.depositors.map((d) => d.toLowerCase())).size;
 

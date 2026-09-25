@@ -45,6 +45,10 @@ To take deposits before the Statement contract exists, the factory can deploy wi
 
 Batches carry an `Arrangement` (Deposit / MintTime / Number / Creator). `assembleOrdered(order)` lets the creator of a Creator-arranged batch burn with a hand-made permutation; the contract checks it is exactly the 80 pooled ids with no duplicates (O(80²), bounded). Within `CREATOR_ORDER_GRACE` (1 day of filling) only the creator can burn; afterwards anyone can, in deposit order, so a creator cannot stall. The adapter receives the arrangement value; MintTime/Number sorting happens in the adapter (insertion sort over 80). Covered by `test/Arrangement.t.sol` (8 tests). **Should be included in the external audit.**
 
+### Added after the review: eligibility
+
+`Filter` gained a payment window (`paidFrom`/`paidTo`, via `timestampOf`) and a number range; `initialize` takes an allowlist of up to 200 ids stored in a mapping (bounded loop, duplicates tolerated, backwards ranges rejected). `passes()` checks allowlist → range → window → traits, so the expensive `describe` call happens last. Covered by `test/Eligibility.t.sol` (8 tests).
+
 ### Accepted / documented
 
 - **The assembler is the trust boundary.** It is immutable and set at factory deploy. It is now isolated from Batch storage and its result is verified, but it holds operator rights over the batch's Credits for the duration of `assemble()`. The mainnet adapter must be reviewed before deploy.

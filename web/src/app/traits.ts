@@ -21,10 +21,22 @@ export const hashTrait = (v: string): Hex => (v ? keccak256(toBytes(v)) : ZERO);
 const reverse = new Map<string, string>();
 for (const vals of Object.values(TRAITS)) for (const v of vals) reverse.set(keccak256(toBytes(v)), v);
 
-/// "Colors CMY · Print Registered", or "" for an open batch.
-export function describeFilter(f: Summary['filter']) {
-  return (Object.keys(LABEL) as TraitKey[])
+const utc = (t: number) => {
+  const d = new Date(t * 1000);
+  return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })} ${d.toISOString().slice(11, 16)} UTC`;
+};
+
+/// "Colors CMY · Paid Sep 21 13:49–13:50 UTC · #1000–2000 · 80 listed", or "" for an open batch.
+export function describeFilter(f: Summary['filter'], allowlistSize = 0) {
+  const parts = (Object.keys(LABEL) as TraitKey[])
     .filter((k) => f[k] !== ZERO)
-    .map((k) => `${LABEL[k]} ${reverse.get(f[k]) ?? 'custom'}`)
-    .join(' · ');
+    .map((k) => `${LABEL[k]} ${reverse.get(f[k]) ?? 'custom'}`);
+  if (f.paidFrom || f.paidTo) {
+    parts.push(
+      f.paidFrom && f.paidTo ? `Paid ${utc(f.paidFrom)}–${utc(f.paidTo).replace(/^.* (\d\d:\d\d UTC)$/, '$1')}` : f.paidFrom ? `Paid after ${utc(f.paidFrom)}` : `Paid before ${utc(f.paidTo)}`,
+    );
+  }
+  if (f.idFrom || f.idTo) parts.push(f.idFrom && f.idTo ? `#${f.idFrom}–${f.idTo}` : f.idFrom ? `#${f.idFrom}+` : `up to #${f.idTo}`);
+  if (allowlistSize) parts.push(`${allowlistSize} listed`);
+  return parts.join(' · ');
 }

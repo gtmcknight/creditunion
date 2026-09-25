@@ -60,6 +60,19 @@ export const batchAbi = [
   },
   {
     "type": "function",
+    "name": "MAX_ALLOWLIST",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MAX_CREATOR_FEE_BPS",
     "inputs": [],
     "outputs": [
@@ -139,6 +152,38 @@ export const batchAbi = [
   {
     "type": "function",
     "name": "SIZE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "allowed",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "allowlistSize",
     "inputs": [],
     "outputs": [
       {
@@ -462,6 +507,26 @@ export const batchAbi = [
             "name": "eights",
             "type": "bytes32",
             "internalType": "bytes32"
+          },
+          {
+            "name": "paidFrom",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "paidTo",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "idFrom",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "idTo",
+            "type": "uint256",
+            "internalType": "uint256"
           }
         ]
       }
@@ -545,8 +610,33 @@ export const batchAbi = [
             "name": "eights",
             "type": "bytes32",
             "internalType": "bytes32"
+          },
+          {
+            "name": "paidFrom",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "paidTo",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "idFrom",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "idTo",
+            "type": "uint256",
+            "internalType": "uint256"
           }
         ]
+      },
+      {
+        "name": "allowlist_",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
       },
       {
         "name": "reserve_",
@@ -937,8 +1027,33 @@ export const batchAbi = [
                 "name": "eights",
                 "type": "bytes32",
                 "internalType": "bytes32"
+              },
+              {
+                "name": "paidFrom",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "paidTo",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "idFrom",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "idTo",
+                "type": "uint256",
+                "internalType": "uint256"
               }
             ]
+          },
+          {
+            "name": "allowlistSize",
+            "type": "uint256",
+            "internalType": "uint256"
           },
           {
             "name": "statement",
@@ -1224,6 +1339,11 @@ export const batchAbi = [
   },
   {
     "type": "error",
+    "name": "AllowlistTooLong",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "AlreadyDeposited",
     "inputs": [
       {
@@ -1251,6 +1371,11 @@ export const batchAbi = [
   {
     "type": "error",
     "name": "AuctionRunning",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "BadFilter",
     "inputs": []
   },
   {
@@ -1585,8 +1710,33 @@ export const factoryAbi = [
             "name": "eights",
             "type": "bytes32",
             "internalType": "bytes32"
+          },
+          {
+            "name": "paidFrom",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "paidTo",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "idFrom",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "idTo",
+            "type": "uint256",
+            "internalType": "uint256"
           }
         ]
+      },
+      {
+        "name": "allowlist",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
       },
       {
         "name": "reserve",

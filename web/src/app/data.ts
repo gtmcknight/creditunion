@@ -40,7 +40,17 @@ export type Summary = {
   minBid: bigint;
   creatorFeeBps: number;
   protocolFeeBps: number;
-  filter: { colors: `0x${string}`; print: `0x${string}`; weight: `0x${string}`; eights: `0x${string}` };
+  filter: {
+    colors: `0x${string}`;
+    print: `0x${string}`;
+    weight: `0x${string}`;
+    eights: `0x${string}`;
+    paidFrom: number;
+    paidTo: number;
+    idFrom: bigint;
+    idTo: bigint;
+  };
+  allowlistSize: number;
   statement: Address;
   statementId: bigint;
   highBidder: Address;
@@ -60,6 +70,8 @@ function toSummary(address: Address, s: Record<string, unknown>): Summary {
     auctionEnd: Number(s.auctionEnd),
     exitWindowUntil: Number(s.exitWindowUntil),
     arrangement: Number(s.arrangement),
+    allowlistSize: Number(s.allowlistSize),
+    filter: { ...(s.filter as Summary['filter']), paidFrom: Number((s.filter as { paidFrom: bigint }).paidFrom), paidTo: Number((s.filter as { paidTo: bigint }).paidTo) },
     creatorFeeBps: Number(s.creatorFeeBps),
     protocolFeeBps: Number(s.protocolFeeBps),
   };

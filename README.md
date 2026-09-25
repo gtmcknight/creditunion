@@ -8,7 +8,7 @@ Independent. Not affiliated with Jack Butcher.
 
 | | |
 |---|---|
-| **Open** | Anyone with ≥10 Credits opens a batch and sets a creator fee (0–10%, fixed forever). Optional trait filter (Colors / Print / Weight / Eights), checked onchain against Jack's own `CreditArt.describe`. Optional reserve. Deadline 3–90 days. |
+| **Open** | Anyone with ≥10 Credits opens a batch and sets a creator fee (0–10%, fixed forever). Optional eligibility, all combinable and enforced onchain on every deposit: trait filter (Colors / Print / Weight / Eights via Jack's own `CreditArt.describe`), a payment window (e.g. one minute of the mint), a Credit-number range, or an explicit list of up to 200 Credits. Optional reserve. Deadline 3–90 days. |
 | **Order** | Chosen by the opener and shown before anyone deposits: *Deposit order*, *Mint time*, *Credit number*, or *Creator's order*. With the last, the creator arranges the full sheet by hand (or by rating, mint time, number) and burns with that order; if they haven't within a day of filling, anyone can burn in deposit order. The adapter receives the arrangement too, so whatever Jack's contract wants can be handled there. |
 | **Deposit** | Approve the factory once and deposit any number, or `safeTransferFrom` one Credit straight to the batch (no approval; `data` may name a beneficiary). Deposit order is the Statement order. Plain `transferFrom` fires no hook: such strays go to the fee recipient via `rescue()` as lost-and-found. |
 | **Buy in** | The `Sweeper` buys the cheapest fitting OpenSea listings through Seaport 1.6 and deposits them in the buyer's name, in one transaction. The buyer pays the listings plus the sweep fee (1%). Unused ETH is refunded, and listings that sold first are skipped. |

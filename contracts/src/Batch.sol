@@ -43,6 +43,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     uint256 public constant MIN_RAISE = 0.01 ether;
     uint256 public constant REFUND_GAS = 50_000;
     uint256 public constant MAX_NAME = 64;
+    uint256 public constant MAX_ALLOWLIST = 200;
     uint256 public constant CREATOR_ORDER_GRACE = 1 days; // then anyone burns in deposit order
 
     /// @notice How the 80 are ordered on the Statement. Fixed when the batch opens; shown before depositing.
@@ -63,12 +64,17 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         Settled
     }
 
-    /// @notice keccak256 of a required trait value, or 0 for any. Values are CreditArt.describe strings.
+    /// @notice Who may join. Trait fields are keccak256 of a required CreditArt.describe value, or 0 for any.
+    ///         Ranges are inclusive; 0 means unbounded. An explicit allowlist is set separately at creation.
     struct Filter {
         bytes32 colors;
         bytes32 print;
         bytes32 weight;
         bytes32 eights;
+        uint64 paidFrom; // Credits paid for at or after this time
+        uint64 paidTo; // ...and at or before this one
+        uint256 idFrom; // Credit numbers from...
+        uint256 idTo; // ...to
     }
 
     struct Summary {
@@ -89,6 +95,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         uint256 creatorFeeBps;
         uint256 protocolFeeBps;
         Filter filter;
+        uint256 allowlistSize;
         address statement;
         uint256 statementId;
         address highBidder;
@@ -102,6 +109,9 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     address public creator;
     string public name;
     Filter internal _filter;
+    /// @notice When non-empty, only these Credits may join.
+    uint256 public allowlistSize;
+    mapping(uint256 id => bool) public allowed;
     uint256 public reserve;
     uint256 public creatorFeeBps;
     Arrangement public arrangement;
@@ -141,6 +151,8 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     error NotFactory();
     error WrongState(State state);
     error NameTooLong();
+    error AllowlistTooLong();
+    error BadFilter();
     error CreatorFeeTooHigh();
     error NotDepositor(uint256 id);
     error NotHeld(uint256 id);
@@ -172,6 +184,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         address creator_,
         string calldata name_,
         Filter calldata filter_,
+        uint256[] calldata allowlist_,
         uint256 reserve_,
         uint256 creatorFeeBps_,
         Arrangement arrangement_,
@@ -179,6 +192,15 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     ) external {
         if (address(factory) != address(0)) revert AlreadyInitialized();
         if (bytes(name_).length > MAX_NAME) revert NameTooLong();
+        if (allowlist_.length > MAX_ALLOWLIST) revert AllowlistTooLong();
+        if (filter_.paidTo != 0 && filter_.paidFrom > filter_.paidTo) revert BadFilter();
+        if (filter_.idTo != 0 && filter_.idFrom > filter_.idTo) revert BadFilter();
+        for (uint256 i; i < allowlist_.length; ++i) {
+            if (!allowed[allowlist_[i]]) {
+                allowed[allowlist_[i]] = true;
+                ++allowlistSize;
+            }
+        }
         if (creatorFeeBps_ > MAX_CREATOR_FEE_BPS) revert CreatorFeeTooHigh();
         factory = IBatchFactory(msg.sender);
         credits = factory.credits();
@@ -288,9 +310,16 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         _ids.pop();
     }
 
-    /// @notice Whether a Credit meets this batch's trait filter. Reads Jack's own art contract.
+    /// @notice Whether a Credit may join: allowlist, number range, payment window, then traits (read from
+    ///         Jack's own art contract).
     function passes(uint256 id) public view returns (bool) {
+        if (allowlistSize != 0 && !allowed[id]) return false;
         Filter memory f = _filter;
+        if (id < f.idFrom || (f.idTo != 0 && id > f.idTo)) return false;
+        if (f.paidFrom != 0 || f.paidTo != 0) {
+            uint64 t = credits.timestampOf(id);
+            if (t < f.paidFrom || (f.paidTo != 0 && t > f.paidTo)) return false;
+        }
         if (f.colors == 0 && f.print == 0 && f.weight == 0 && f.eights == 0) return true;
         ICreditArt.Read memory r = art.describe(credits.seedOf(id), credits.timestampOf(id));
         return (f.colors == 0 || f.colors == keccak256(bytes(r.colors)))
@@ -507,6 +536,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         s.creatorFeeBps = creatorFeeBps;
         s.protocolFeeBps = factory.protocolFeeBps();
         s.filter = _filter;
+        s.allowlistSize = allowlistSize;
         s.statement = statement;
         s.statementId = statementId;
         s.highBidder = highBidder;

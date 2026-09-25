@@ -78,7 +78,7 @@ contract TestCreditsTest is Test {
             first[i] = i + 1;
             rest[i] = i + 41;
         }
-        Batch b = Batch(f.create("Test", Batch.Filter(0, 0, 0, 0), 0, 0, Batch.Arrangement.Deposit, 14 days, first));
+        Batch b = Batch(f.create("Test", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, first));
         f.deposit(address(b), rest);
         vm.stopPrank();
         b.assemble();
@@ -99,7 +99,7 @@ contract TestCreditsTest is Test {
         one[0] = 1;
         vm.startPrank(alice);
         credits.setApprovalForAll(address(f), true);
-        Batch b = Batch(f.create("Match", fl, 0, 0, Batch.Arrangement.Deposit, 14 days, one));
+        Batch b = Batch(f.create("Match", fl, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, one));
         vm.stopPrank();
         for (uint256 id = 2; id <= 40; ++id) {
             bool same = keccak256(bytes(art.describe(credits.seedOf(id), credits.timestampOf(id)).colors))

@@ -56,7 +56,7 @@ export function mineIn(b: Listed) {
 }
 
 export function card({ s, ids, depositors }: Listed) {
-  const f = describeFilter(s.filter);
+  const f = describeFilter(s.filter, s.allowlistSize);
   const mine = mineIn({ s, ids, depositors });
   return `<a class="card" href="#/b/${s.address}">
     ${sheet(ids, { size: 'sm', mine })}

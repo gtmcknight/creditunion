@@ -43,7 +43,14 @@ export async function create(app: HTMLElement) {
         <div class="selects">${(Object.keys(TRAITS) as TraitKey[])
           .map((k) => `<label class="select"><span>${LABEL[k]}</span><select data-trait="${k}"><option value="">Any</option>${TRAITS[k].map((v) => `<option>${esc(v)}</option>`).join('')}</select></label>`)
           .join('')}</div>
-        <p class="hint">Optional. Enforced onchain.</p>
+        <details class="more"><summary>Time, numbers, or a list</summary>
+          <div class="stack">
+            <div class="pair"><label class="select"><span>Paid from (UTC)</span><input id="paid-from" type="datetime-local"></label><label class="select"><span>Paid to (UTC)</span><input id="paid-to" type="datetime-local"></label></div>
+            <div class="pair"><label class="select"><span>Credit number from</span><input id="id-from" inputmode="numeric" placeholder="1"></label><label class="select"><span>to</span><input id="id-to" inputmode="numeric" placeholder="122154"></label></div>
+            <label class="select"><span>Only these Credits</span><textarea id="allow" rows="2" placeholder="Credit numbers, separated by spaces or commas · up to 200"></textarea></label>
+          </div>
+        </details>
+        <p class="hint">Optional, all combinable. Enforced onchain on every deposit.</p>
       </div></div>
 
       <div class="field-row" role="radiogroup" aria-label="Order on the Statement"><span class="label">Order</span>
@@ -160,11 +167,31 @@ export async function create(app: HTMLElement) {
     const days = Number((app.querySelector('input[name=dur]:checked') as HTMLInputElement).value);
     const arr = Number((app.querySelector('input[name=arr]:checked') as HTMLInputElement).value);
     const ids = [...picks].map(BigInt);
+    const utcSeconds = (v: string) => (v ? Math.floor(Date.UTC(+v.slice(0, 4), +v.slice(5, 7) - 1, +v.slice(8, 10), +v.slice(11, 13), +v.slice(14, 16)) / 1000) : 0);
+    const num = (v: string) => (v.trim() ? BigInt(v.trim()) : 0n);
+    const paidFrom = utcSeconds((document.getElementById('paid-from') as HTMLInputElement).value);
+    const paidTo = utcSeconds((document.getElementById('paid-to') as HTMLInputElement).value);
+    let idFrom = 0n;
+    let idTo = 0n;
+    let allowlist: bigint[] = [];
+    try {
+      idFrom = num((document.getElementById('id-from') as HTMLInputElement).value);
+      idTo = num((document.getElementById('id-to') as HTMLInputElement).value);
+      allowlist = [...new Set((document.getElementById('allow') as HTMLTextAreaElement).value.split(/[\s,#]+/).filter(Boolean))].map(BigInt);
+    } catch {
+      return toast('Credit numbers must be whole numbers.', 'err');
+    }
+    if ((paidTo && paidFrom > paidTo) || (idTo && idFrom > idTo)) return toast('The range is backwards.', 'err');
+    if (allowlist.length > 200) return toast('At most 200 listed Credits.', 'err');
     const f = {
       colors: hashTrait(filter.colors),
       print: hashTrait(filter.print),
       weight: hashTrait(filter.weight),
       eights: hashTrait(filter.eights),
+      paidFrom: BigInt(paidFrom),
+      paidTo: BigInt(paidTo),
+      idFrom,
+      idTo,
     };
     go.disabled = true;
     go.textContent = 'Opening…';
@@ -173,7 +200,7 @@ export async function create(app: HTMLElement) {
         address: config.factory,
         abi: factoryAbi,
         functionName: 'create',
-        args: [name, f, reserve, BigInt(bps), arr, BigInt(days * 86400), ids.slice(0, CHUNK)],
+        args: [name, f, allowlist, reserve, BigInt(bps), arr, BigInt(days * 86400), ids.slice(0, CHUNK)],
       });
       const ev = receipt.logs
         .map((l) => {

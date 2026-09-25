@@ -48,7 +48,7 @@ contract AuditSweeperTest is Test {
     ///      mistake; the factory only ever moves the caller's Credits.)
     function test_DepositForRejectsSinks() public {
         vm.prank(alice);
-        Batch b = Batch(factory.create("Audit", noFilter, 0, 0, Batch.Arrangement.Deposit, 14 days, _range(1, 40)));
+        Batch b = Batch(factory.create("Audit", noFilter, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, _range(1, 40)));
         vm.startPrank(bob);
         vm.expectRevert(BatchFactory.NoDepositor.selector);
         factory.depositFor(address(b), _range(90, 1), address(b));
@@ -63,7 +63,7 @@ contract AuditSweeperTest is Test {
 
     function test_DepositForOnlyMovesCallersCredits() public {
         vm.prank(alice);
-        Batch b = Batch(factory.create("Audit", noFilter, 0, 0, Batch.Arrangement.Deposit, 14 days, _range(1, 10)));
+        Batch b = Batch(factory.create("Audit", noFilter, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, _range(1, 10)));
         // bob names alice as depositor but tries to move alice's Credit 11: fails at transferFrom.
         vm.prank(bob);
         vm.expectRevert();
