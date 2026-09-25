@@ -77,8 +77,7 @@ export const maskInks = (m: number) => INK.filter((_, b) => m & (1 << b));
 export const maskLabel = (m: number) => [...'CMYK'].filter((_, b) => m & (1 << b)).join('') || 'Any';
 
 export function describeFilter(f: Summary['filter'], allowlistSize = 0) {
-  const parts: string[] = [];
-  if (f.layout0 || f.layout1) parts.push('Layout');
+  const parts: string[] = []; // a layout shows as the arrangement ('Order · Layout'), not as a rule
   if (f.palettes) parts.push(`Palette ${setLabels(f.palettes, TRAITS.colors, (l) => paletteBit(l)).join(', ')}`);
   if (f.prints) parts.push(`Print ${setLabels(f.prints, TRAITS.print, (_, i) => i).join(', ')}`);
   if (f.weights) parts.push(`Weight ${setLabels(f.weights, TRAITS.weight, (_, i) => i).join(', ')}`);
