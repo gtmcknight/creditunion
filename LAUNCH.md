@@ -11,7 +11,7 @@ Everything deployed here is immutable except the one-time adapter activation (se
 - [ ] Confirm fees: protocol 2 %, creator 0 %, buy-in 2 % (all changeable later by `FEE_RECIPIENT`, new batches only).
 - [ ] Fund the deployer `0x75BD…eD5C`. Rehearsed on a mainnet fork: **60.1 M gas over 14 txs** (score table 11 chunks + reader, factory, sweeper). At 0.2 gwei that is 0.012 ETH; at 2 gwei 0.12 ETH. Fund `60M × gas price × 1.5`; check `cast gas-price` right before.
 - [ ] Etherscan API key for source verification.
-- [ ] Decide the launch domain (eighty.rhps.fun stays, or a custom one → add the route in `wrangler.jsonc`).
+- [x] Launch domain: eighty.fun, attached to the `eighty` Worker; eighty.rhps.fun still serves.
 
 **Deploy (me, with you watching)**
 - [ ] Run `DeployMainnet` (§ 1); record `RATINGS`, `FACTORY`, `SWEEPER`, implementation.
