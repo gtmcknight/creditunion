@@ -68,6 +68,10 @@ forge verify-contract --chain 1 --etherscan-api-key $ETHERSCAN_KEY --watch \
   $SWEEPER src/Sweeper.sol:Sweeper
 ```
 
+Without an Etherscan key, Sourcify works with the same commands plus `--verifier sourcify` (no key; Etherscan
+imports Sourcify matches). Rehearsed on Sepolia for all four contracts. For `Ratings`, the constructor args are
+`(address[] chunks, 122154)`: `cast call $RATINGS "chunks()(address[])"` gives the list.
+
 ## 3. Sanity checks on chain
 
 ```sh
