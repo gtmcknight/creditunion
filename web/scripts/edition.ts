@@ -1,10 +1,12 @@
 // Builds public/edition.bin from the full Credits edition (credits.json: { id: [seed, paidAt] }) and
 // verifies a few Credits against jack.art's official rating API.
 //   node scripts/edition.ts path/to/credits.json
+import { gunzipSync } from 'node:zlib';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { buildEdition, fmtScore, rate, traitsOf, TRAIT_KEYS, type Traits } from '../src/shared/credits.ts';
 
-const src = JSON.parse(readFileSync(process.argv[2], 'utf8')) as Record<string, [string, number]>;
+const raw = readFileSync(process.argv[2]);
+const src = JSON.parse((process.argv[2].endsWith('.gz') ? gunzipSync(raw) : raw).toString('utf8')) as Record<string, [string, number]>;
 const ids = Object.keys(src).map(Number).sort((a, b) => a - b);
 console.log('credits', ids.length, 'first', ids[0], 'last', ids[ids.length - 1]);
 

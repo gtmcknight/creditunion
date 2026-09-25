@@ -23,6 +23,19 @@ Independent. Not affiliated with Jack Butcher.
 
 Batch pages show each Credit's **official rating**: Jack Butcher's published formula (methodology v3.4.0, [jack.art/credits/rating](https://jack.art/credits/rating)), reproduced in `web/src/shared/credits.ts` from his MIT-licensed art contracts and verified to match his API exactly (score and rank) on sampled Credits. The frozen edition (122,154 Credits: seeds and payment times from the `Distributed` events) is compiled into `web/public/edition.bin` by `node scripts/edition.ts credits.json`; the Worker's `/ratings` endpoint rates any ids against it, including testnet Credits.
 
+## Reproducing the edition data
+
+Everything derived about the edition — trait bits, the mint timeline, the rating statistics and the score table that is frozen onchain — comes from one file, `web/data/credits.json.gz` (`{ id: [seed, paidAt] }` for all 122,154 Credits), which is itself rebuilt from the Credits contract's `Distributed` events:
+
+```sh
+cd web
+MAINNET_RPC=… node scripts/fetch-credits.ts data/credits.json   # ~140 log queries from the deploy block
+gzip -k data/credits.json
+node scripts/edition.ts data/credits.json.gz                     # writes public/*.bin, minutes.json, ../contracts/data/scores.bin
+```
+
+Re-running both on Sept 25 2026 reproduced every committed file byte for byte. `forge script script/CheckRatings.s.sol` compares the deployed `Ratings` table against `contracts/data/scores.bin`.
+
 ## Fees
 
 | | Launch | Set by | Ceiling (in code) |
