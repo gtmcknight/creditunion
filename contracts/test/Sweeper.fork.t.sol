@@ -53,7 +53,7 @@ contract SweeperForkTest is Test {
                         one[0] = id;
                         vm.startPrank(o);
                         CREDITS.setApprovalForAll(address(factory), true);
-                        batch = Batch(factory.create("Fork", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, one, 100, 0));
+                        batch = Batch(factory.create("Fork", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, one, 100, 0));
                         vm.stopPrank();
                     } else {
                         vm.prank(o);

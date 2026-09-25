@@ -62,6 +62,19 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         Creator
     }
 
+    /// @notice How the depositors' share of the sale is divided among the 80 positions (deposit order).
+    ///         Equal: 1/80 each. Early: a straight line from 1.5 shares at position 1 to 0.5 at position 80,
+    ///         so the first money in, which carried the most coordination risk, earns the most. Withdrawing
+    ///         forfeits the position (everyone behind moves up) and re-depositing joins at the back.
+    enum Split {
+        Equal,
+        Early
+    }
+
+    /// @dev Early weights in integer units: position i (0-based) gets 237 - 2i units; they sum to 80 × 158.
+    uint256 internal constant EARLY_UNITS = 12_640;
+    uint256 internal constant EARLY_MID = 158; // units of one equal share, for display
+
     enum State {
         Open,
         Full,
@@ -112,6 +125,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         address highBidder;
         uint256 highBid;
         uint256 payoutPerShare;
+        Split split;
     }
 
     IBatchFactory public factory;
@@ -128,6 +142,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     uint256 public creatorFeeBps;
     uint256 public protocolFeeBps;
     Arrangement public arrangement;
+    Split public split;
     uint64 public deadline;
     uint64 public filledAt;
     uint64 public assembledAt;
@@ -143,7 +158,8 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     uint256 public highBid;
     bool public settled;
     bool public statementUnclaimed; // settle() could not push the Statement to the winner; they pull it
-    uint256 public payoutPerShare;
+    /// @notice Wei per unit of the split (a unit is one share when Equal, 1/158 of a share when Early).
+    uint256 public payoutPerUnit;
     mapping(address => bool) public claimed;
     mapping(address => uint256) public owed; // ETH whose push failed; pull with withdrawOwed
 
@@ -204,6 +220,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         uint256 protocolFeeBps_,
         uint256 creatorFeeBps_,
         Arrangement arrangement_,
+        Split split_,
         uint64 deadline_
     ) external {
         if (address(factory) != address(0)) revert AlreadyInitialized();
@@ -233,6 +250,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         creatorFeeBps = creatorFeeBps_;
         protocolFeeBps = protocolFeeBps_;
         arrangement = arrangement_;
+        split = split_;
         deadline = deadline_;
     }
 
@@ -495,10 +513,12 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
 
         uint256 creatorFee = highBid * creatorFeeBps / 10_000;
         uint256 fee = highBid * protocolFeeBps / 10_000;
-        uint256 per = (highBid - fee - creatorFee) / SIZE;
-        payoutPerShare = per;
-        fee = highBid - creatorFee - per * SIZE; // rounding dust goes with the protocol fee
-        emit Settled(highBidder, highBid, fee, creatorFee, per);
+        // Equal: 80 units of one share each. Early: 12,640 units spread 237 - 2i over the positions.
+        uint256 units = split == Split.Equal ? SIZE : EARLY_UNITS;
+        uint256 per = (highBid - fee - creatorFee) / units;
+        payoutPerUnit = per;
+        fee = highBid - creatorFee - per * units; // rounding dust goes with the protocol fee
+        emit Settled(highBidder, highBid, fee, creatorFee, payoutPerShare());
 
         // A Statement contract that refuses the transfer must not trap the sale: the winner pulls instead.
         try IERC721(statement).transferFrom(address(this), highBidder, statementId) {}
@@ -519,9 +539,28 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
 
     // ---------------------------------------------------------------- payouts
 
+    /// @notice What one equal share pays (the average per Credit); Early positions pay 0.5–1.5× this.
+    function payoutPerShare() public view returns (uint256) {
+        return split == Split.Equal ? payoutPerUnit : payoutPerUnit * EARLY_MID;
+    }
+
+    /// @notice A depositor's units of the split: their share count, or, when Early, the sum of their
+    ///         positions' weights (237 - 2i, i = 0..79 in deposit order).
+    function unitsOf(address depositor) public view returns (uint256 units) {
+        if (split == Split.Equal) return sharesOf[depositor];
+        uint256 n = _ids.length;
+        uint256 left = sharesOf[depositor]; // stop once all of theirs are found
+        for (uint256 i; i < n && left != 0; ++i) {
+            if (depositorOf[_ids[i]] == depositor) {
+                units += 237 - 2 * i;
+                --left;
+            }
+        }
+    }
+
     function claimable(address depositor) public view returns (uint256) {
         if (!settled || claimed[depositor]) return 0;
-        return sharesOf[depositor] * payoutPerShare;
+        return unitsOf(depositor) * payoutPerUnit;
     }
 
     /// @notice Pays a depositor their share. Anyone can call it for anyone.
@@ -611,6 +650,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         s.statementId = statementId;
         s.highBidder = highBidder;
         s.highBid = highBid;
-        s.payoutPerShare = payoutPerShare;
+        s.payoutPerShare = payoutPerShare();
+        s.split = split;
     }
 }

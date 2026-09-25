@@ -149,6 +149,7 @@ contract BatchFactory {
     ///        since, so a fee change can never be slipped in front of an opening batch.
     /// @dev The batch takes the factory's current protocol and creator fees and keeps them forever.
     /// @param arrangement How the 80 are ordered on the Statement (Batch.Arrangement).
+    /// @param split How the sale is divided among the 80 positions (Batch.Split): equal, or early money earns more.
     /// @param duration Seconds until the deadline; a batch that fills always gets 7 more days to assemble.
     function create(
         string calldata name,
@@ -156,6 +157,7 @@ contract BatchFactory {
         uint256[] calldata allowlist,
         uint256 reserve,
         Batch.Arrangement arrangement,
+        Batch.Split split,
         uint256 duration,
         uint256[] calldata ids,
         uint256 expectProtocolFeeBps,
@@ -171,7 +173,7 @@ contract BatchFactory {
         isBatch[batch] = true;
         _batches.push(batch);
         Batch(batch).initialize(
-            msg.sender, name, filter, allowlist, reserve, protocolFeeBps, creatorFeeBps, arrangement, uint64(block.timestamp + duration)
+            msg.sender, name, filter, allowlist, reserve, protocolFeeBps, creatorFeeBps, arrangement, split, uint64(block.timestamp + duration)
         );
         emit BatchCreated(batch, msg.sender, name, _batches.length - 1);
 

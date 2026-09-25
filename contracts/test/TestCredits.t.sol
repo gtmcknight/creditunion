@@ -78,7 +78,7 @@ contract TestCreditsTest is Test {
             first[i] = i + 1;
             rest[i] = i + 41;
         }
-        Batch b = Batch(f.create("Test", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, first, 100, 0));
+        Batch b = Batch(f.create("Test", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, first, 100, 0));
         f.deposit(address(b), rest);
         vm.stopPrank();
         b.assemble();
@@ -115,7 +115,7 @@ contract TestCreditsTest is Test {
         one[0] = 1;
         vm.startPrank(alice);
         credits.setApprovalForAll(address(f), true);
-        Batch b = Batch(f.create("Two", fl, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, one, 100, 0));
+        Batch b = Batch(f.create("Two", fl, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, one, 100, 0));
         vm.stopPrank();
         for (uint256 id = 2; id <= 60; ++id) {
             uint256 m = _mask(art.describe(credits.seedOf(id), credits.timestampOf(id)).colors);
@@ -127,7 +127,7 @@ contract TestCreditsTest is Test {
         g.eights = 1;
         uint256[] memory seed = _first(art);
         vm.prank(alice);
-        Batch c = Batch(f.create("PE", g, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, seed, 100, 0));
+        Batch c = Batch(f.create("PE", g, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, seed, 100, 0));
         for (uint256 id = 2; id <= 60; ++id) {
             CreditArt.Read memory r = art.describe(credits.seedOf(id), credits.timestampOf(id));
             bool pr = keccak256(bytes(r.register)) == keccak256("Registered") || keccak256(bytes(r.register)) == keccak256("Nudge");
@@ -161,7 +161,7 @@ contract TestCreditsTest is Test {
         one[0] = 1;
         vm.startPrank(alice);
         credits.setApprovalForAll(address(f), true);
-        Batch b = Batch(f.create("Match", fl, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, one, 100, 0));
+        Batch b = Batch(f.create("Match", fl, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, one, 100, 0));
         vm.stopPrank();
         for (uint256 id = 2; id <= 40; ++id) {
             bool same = keccak256(bytes(art.describe(credits.seedOf(id), credits.timestampOf(id)).colors))

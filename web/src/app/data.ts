@@ -6,6 +6,9 @@ export const STATES = ['Open', 'Full', 'Expired', 'Auction', 'Settled'] as const
 export type StateName = (typeof STATES)[number];
 
 export const ARRANGEMENTS = ['Deposit order', 'Mint time', 'Credit number', 'Creator’s order'] as const;
+export const SPLITS = ['Equal', 'Early bird'] as const;
+/// Early-bird weight of a 0-based position, in shares (1.5 at the first slot, 0.5 at the last).
+export const earlyWeight = (i: number) => (237 - 2 * i) / 158;
 
 export type Rated = {
   id: string;
@@ -26,6 +29,7 @@ export type Summary = {
   address: Address;
   state: StateName;
   arrangement: number;
+  split: number;
   canAssemble: boolean;
   exitWindow: boolean;
   exitWindowUntil: number;
@@ -72,6 +76,7 @@ function toSummary(address: Address, s: Record<string, unknown>): Summary {
     auctionEnd: Number(s.auctionEnd),
     exitWindowUntil: Number(s.exitWindowUntil),
     arrangement: Number(s.arrangement),
+    split: Number(s.split),
     allowlistSize: Number(s.allowlistSize),
     filter: { ...(s.filter as Summary['filter']), paidFrom: Number((s.filter as { paidFrom: bigint }).paidFrom), paidTo: Number((s.filter as { paidTo: bigint }).paidTo) },
     creatorFeeBps: Number(s.creatorFeeBps),

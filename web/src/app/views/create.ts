@@ -2,7 +2,7 @@ import { decodeEventLog, parseEther } from 'viem';
 import { creditsAbi, factoryAbi } from '../abi';
 import { config, send, session } from '../chain';
 import { pct } from '../ens';
-import { ARRANGEMENTS, creatorFeeBps, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Rated } from '../data';
+import { ARRANGEMENTS, SPLITS, creatorFeeBps, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Rated } from '../data';
 import { paletteBit, TRAITS } from '../traits';
 import { $$, art, errText, esc, sheet, toast } from '../ui';
 
@@ -183,6 +183,11 @@ export async function create(app: HTMLElement) {
       <section class="rule" data-tab="order"><div class="rule-head">Order on the Statement</div>
         <div class="seg wrap">${ARRANGEMENTS.map((l, i) => `<label><input type="radio" name="arr" value="${i}" ${i === 0 ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
         <p class="hint" id="arr-hint">${ARR_HINTS[0]}</p>
+      </section>
+
+      <section class="rule" data-tab="terms"><div class="rule-head">Payout</div>
+        <div class="seg">${SPLITS.map((l, i) => `<label><input type="radio" name="split" value="${i}" ${i === 0 ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+        <p class="hint" id="split-hint">Every Credit earns 1/80 of the sale.</p>
       </section>
 
       <section class="rule split3" data-tab="terms">
@@ -479,6 +484,11 @@ export async function create(app: HTMLElement) {
     owned.filter(qualifies).slice(0, 80).forEach((id) => picks.add(id.toString()));
     refresh();
   });
+  app.querySelectorAll<HTMLInputElement>('input[name=split]').forEach((r) =>
+    r.addEventListener('change', () => (document.getElementById('split-hint')!.textContent = r.value === '1'
+      ? 'Position 1 earns 1.5 shares, position 80 earns 0.5, straight line between. You deposit first, so you take the top slots. Leaving forfeits your slots.'
+      : 'Every Credit earns 1/80 of the sale.')),
+  );
   app.querySelectorAll<HTMLInputElement>('input[name=arr]').forEach((r) =>
     r.addEventListener('change', () => (document.getElementById('arr-hint')!.textContent = ARR_HINTS[Number(r.value)])),
   );
@@ -514,6 +524,7 @@ export async function create(app: HTMLElement) {
     const name = (document.getElementById('name') as HTMLInputElement).value.trim();
     const days = Number((app.querySelector('input[name=dur]:checked') as HTMLInputElement).value);
     const arr = Number((app.querySelector('input[name=arr]:checked') as HTMLInputElement).value);
+    const split = Number((app.querySelector('input[name=split]:checked') as HTMLInputElement).value);
     const ids = [...picks].map(BigInt);
     const f = {
       palettes: rules.palettes,
@@ -535,7 +546,7 @@ export async function create(app: HTMLElement) {
         abi: factoryAbi,
         functionName: 'create',
         // The fees shown on this page go along: the open reverts if they changed underneath you.
-        args: [name, f, rules.list.map(BigInt), reserve, arr, BigInt(days * 86400), ids.slice(0, CHUNK), BigInt(protocolBps), BigInt(creatorBps)],
+        args: [name, f, rules.list.map(BigInt), reserve, arr, split, BigInt(days * 86400), ids.slice(0, CHUNK), BigInt(protocolBps), BigInt(creatorBps)],
       });
       const ev = receipt.logs
         .map((l) => {

@@ -35,7 +35,7 @@ export function docs(app: HTMLElement) {
         ['Lock', 'The 80th deposit locks the batch. Nobody can add or withdraw. The deadline moves to at least 7 days out so there is time to burn.'],
         ['Burn', 'Anyone can burn a full batch (the caller pays the gas, roughly 4–7 M). The batch approves the adapter for exactly that call, then checks that all 80 Credits are gone and that it now owns the Statement, or the whole transaction reverts.'],
         ['Auction', 'The Statement is sold by a 24-hour auction that starts at the first bid (§ Auction).'],
-        ['Split', 'Anyone settles when the clock runs out. The Statement goes to the winner; the protocol fee (and the creator fee, if one is set) comes off the top; each Credit that went in claims 1/80 of the rest.'],
+        ['Split', 'Anyone settles when the clock runs out. The Statement goes to the winner; the protocol fee comes off the top; the rest goes to the 80 Credits that went in: 1/80 each, or, on an Early-bird batch, weighted by deposit order (§ Early bird).'],
         ['Expire', 'If a batch is not burned by its deadline (never filled, or Statements sold out), everyone withdraws their Credits. Nothing is ever stuck.'],
       ]),
     },
@@ -75,6 +75,18 @@ export function docs(app: HTMLElement) {
         ['Settle', 'Anyone can settle after the clock ends. If the Statement contract refuses the transfer to the winner, the winner collects it themselves.'],
         ['Why no proxy bids', 'On a public chain your maximum would be visible, so a rival could bid just under it. Every bid is the full amount, escrowed, and returned the moment you are outbid.'],
       ]),
+    },
+    {
+      id: 'early',
+      title: 'Early bird',
+      body: `<p>A batch is opened as <strong>Equal</strong> (every Credit earns 1/80 of the sale) or <strong>Early bird</strong>: the 80 positions, in deposit order, earn a straight line from 1.5 shares at position 1 down to 0.5 at position 80. The weights add up to exactly 80, so nothing is created; the sale is tilted toward the money that showed up first and carried the risk that the batch might never fill.</p>
+      ${rules([
+        ['Positions', 'Your position is where your Credit sits in deposit order. Withdrawing forfeits it and everyone behind moves up; depositing again joins at the back. There is no way to jump the queue.'],
+        ['The curator', 'Whoever opens a batch deposits first, so on an Early-bird batch the curator’s reward is the top slots, in proportion to what they put in: 1 Credit earns 1.5 shares; 10 Credits earn about 14.4. There is no curator fee.'],
+        ['Buy-ins', 'Credits bought through OpenSea into a batch take the next positions, so a buy-in is also a way to take early slots.'],
+        ['Numbers', 'On a 4 ETH sale with the 2 % protocol fee: position 1 pays 0.0735 ETH, position 40 pays 0.0494, position 80 pays 0.0245. An Equal batch pays 0.049 to every Credit.'],
+        ['Shown', 'The choice is fixed when the batch opens and shown on its card and page, with your own positions once you have deposited.'],
+      ])}`,
     },
     {
       id: 'fees',

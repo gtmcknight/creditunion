@@ -2,7 +2,7 @@ import Sortable from 'sortablejs';
 import { parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi } from '../abi';
 import { config, explorer, pub, send, session } from '../chain';
-import { ARRANGEMENTS, eligible, getBatch, me, ratings, type Rated } from '../data';
+import { ARRANGEMENTS, earlyWeight, eligible, getBatch, me, ratings, type Rated } from '../data';
 import { hydrate, pct, who } from '../ens';
 import { describeFilter } from '../traits';
 import { $$, art, errText, esc, eth, same, sheet, short, toast, until } from '../ui';
@@ -67,6 +67,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
         ${s.state === 'Full' ? fact('Burn by', `<span class="num">${until(s.deadline)}</span>`) : ''}
         ${fact('Depositors', `<span class="num">${depositors}</span>`)}
         ${fact('Order', ARRANGEMENTS[s.arrangement])}
+        ${fact('Payout', payout(b, myIds))}
         ${s.count ? fact('Rating', `<span id="rating" class="muted">…</span>`) : ''}
         ${s.reserve && (s.state === 'Open' || s.state === 'Full' || (s.state === 'Auction' && s.minBid === s.reserve && !s.highBid)) ? fact('Reserve', eth(s.reserve)) : ''}
         ${fact('Sale split', split(s))}
@@ -78,6 +79,17 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
 
   hydrate(app);
   bind(b, m, myIds, rerender);
+}
+
+/// "Early bird · 1.5× → 0.5×", plus the connected wallet's own positions and what they add up to.
+function payout(b: Ctx, myIds: Set<string>) {
+  if (b.s.split !== 1) return 'Equal · 1/80 each';
+  const mine = b.ids.map((id, i) => [String(id), i] as const).filter(([id]) => myIds.has(id));
+  const shares = mine.reduce((n, [, i]) => n + earlyWeight(i), 0);
+  const yours = mine.length
+    ? ` <span class="muted">· yours ${mine.map(([, i]) => `#${i + 1}`).slice(0, 4).join(' ')}${mine.length > 4 ? '…' : ''} = ${shares.toFixed(2)} shares</span>`
+    : '';
+  return `Early bird · <span class="num">1.5× → 0.5×</span>${yours}`;
 }
 
 /// "1% protocol · 5% creator · 94% to depositors"

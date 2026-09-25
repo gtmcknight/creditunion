@@ -45,7 +45,7 @@ contract StagedTest is Test {
 
     function _full() internal returns (Batch b) {
         vm.prank(alice);
-        b = Batch(factory.create("Early", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, _range(1, 40), 100, 0));
+        b = Batch(factory.create("Early", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0));
         vm.prank(bob);
         factory.deposit(address(b), _range(51, 40));
     }

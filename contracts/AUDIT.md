@@ -108,6 +108,10 @@ ETH accounting under mixed reverting/gas-burning receivers; reentrancy via refun
 - `/ens`, `/art`, `/config.json` are usable cross-site (cached, rate limited); the quote endpoint's same-site check is defence in depth, the key never leaves the Worker and no CORS headers are set.
 - `style-src 'unsafe-inline'` remains for the inline widths on sheets and bars.
 
+### Added after round 2: Early-bird split
+
+Per-batch `Split { Equal, Early }` fixed at `initialize`. Early: position i (0-based, deposit order) earns `237 − 2i` units of `net / 12,640` (= 80 × 158), i.e. 1.5 shares at the first slot down to 0.5 at the last; Equal is unchanged (`net / 80` per share, same dust rule). `unitsOf()` walks `_ids` at claim time (≤ 80 SLOAD pairs, ~450k gas worst case, early exit once all of a depositor's Credits are found); `settle()` does no extra work. Positions shift on withdraw exactly as `_ids` does, so leaving forfeits the slot and re-depositing joins at the back; `depositFor` (the Sweeper) takes the next slots for the buyer. `test/Split.t.sol`: weights, shifting, Sweeper positions, Equal unchanged, and a fuzz over any bid and any three-way division proving payouts + fee == bid exactly.
+
 ## Before mainnet
 
 1. Write `JackAssembler` against the published Statement contract; add fork tests against it.

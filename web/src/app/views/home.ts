@@ -63,7 +63,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[]) {
   return `<a class="card${canJoin ? ' can-join' : ''}" href="#/b/${s.address}">
     ${sheet(ids, { size: 'sm', mine })}
     <div class="card-body">
-      <div class="row"><strong>${esc(s.name || 'Untitled')}</strong><span class="tags">${canJoin ? `<span class="tag join">Join · ${canJoin} fit</span>` : ''}${mine.size ? `<span class="tag you">You · ${mine.size}</span>` : ''}<span class="tag ${s.state.toLowerCase()}">${s.state}</span></span></div>
+      <div class="row"><strong>${esc(s.name || 'Untitled')}</strong><span class="tags">${s.split === 1 ? '<span class="tag early">Early bird</span>' : ''}${canJoin ? `<span class="tag join">Join · ${canJoin} fit</span>` : ''}${mine.size ? `<span class="tag you">You · ${mine.size}</span>` : ''}<span class="tag ${s.state.toLowerCase()}">${s.state}</span></span></div>
       <div class="row creator">${who(s.creator)}${fee(s)}</div>
       <div class="bar"><i style="width:${(s.count / 80) * 100}%"></i></div>
       <div class="row muted small"><span class="num">${s.count}/80</span><span>${status(s)}</span></div>

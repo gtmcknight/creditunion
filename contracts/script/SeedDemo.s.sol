@@ -83,11 +83,11 @@ contract SeedDemo is Script {
         _dep(f, keys[1], b4, evens2);
 
         // 5. Open, just started
-        _open(f, keys[3], "Slow Burn", none, 0, _r(661, 12));
+        _openEarly(f, keys[3], "Slow Burn", _r(661, 12));
 
         // 6. Full, Creator's order, unburned: the creator (key 0) sees the arranger
         vm.broadcast(keys[0]);
-        address b6 = f.create("Hand Arranged", none, new uint256[](0), 0, Batch.Arrangement.Creator, 30 days, _r(101, 40), 200, 0);
+        address b6 = f.create("Hand Arranged", none, new uint256[](0), 0, Batch.Arrangement.Creator, Batch.Split.Equal, 30 days, _r(101, 40), 200, 0);
         _dep(f, keys[2], b6, _r(481, 40));
         console.log("ARRANGE_ME", b6);
 
@@ -97,7 +97,13 @@ contract SeedDemo is Script {
         win.paidTo = 760;
         win.idFrom = 700;
         vm.broadcast(keys[3]);
-        f.create("Minute Seven", win, new uint256[](0), 0, Batch.Arrangement.MintTime, 30 days, _r(701, 12), 200, 0);
+        f.create("Minute Seven", win, new uint256[](0), 0, Batch.Arrangement.MintTime, Batch.Split.Equal, 30 days, _r(701, 12), 200, 0);
+    }
+
+    function _openEarly(BatchFactory f, uint256 k, string memory n, uint256[] memory ids) internal returns (address b) {
+        Batch.Filter memory none;
+        vm.broadcast(k);
+        b = f.create(n, none, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Early, 30 days, ids, 200, 0);
     }
 
     function _open(
@@ -109,7 +115,7 @@ contract SeedDemo is Script {
         uint256[] memory ids
     ) internal returns (address b) {
         vm.broadcast(k);
-        b = f.create(n, fl, new uint256[](0), res, Batch.Arrangement.Deposit, 30 days, ids, 200, 0);
+        b = f.create(n, fl, new uint256[](0), res, Batch.Arrangement.Deposit, Batch.Split.Equal, 30 days, ids, 200, 0);
     }
 
     function _dep(BatchFactory f, uint256 k, address b, uint256[] memory ids) internal {

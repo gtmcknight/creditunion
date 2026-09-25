@@ -1364,8 +1364,11 @@ nav a[hidden] {
 
 .tags {
   display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .tag.you {
   background: #fff;
@@ -2255,4 +2258,10 @@ input[type='datetime-local'] {
   margin: 0;
   font-size: 15px;
   font-weight: 500;
+}
+
+.tag.early {
+  background: var(--fg);
+  color: var(--bg);
+  border-color: var(--fg);
 }

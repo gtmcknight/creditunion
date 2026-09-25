@@ -692,6 +692,11 @@ export const batchAbi = [
         "internalType": "enum Batch.Arrangement"
       },
       {
+        "name": "split_",
+        "type": "uint8",
+        "internalType": "enum Batch.Split"
+      },
+      {
         "name": "deadline_",
         "type": "uint64",
         "internalType": "uint64"
@@ -813,6 +818,19 @@ export const batchAbi = [
   },
   {
     "type": "function",
+    "name": "payoutPerUnit",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "protocolFeeBps",
     "inputs": [],
     "outputs": [
@@ -908,6 +926,19 @@ export const batchAbi = [
         "name": "depositors",
         "type": "address[]",
         "internalType": "address[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "split",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint8",
+        "internalType": "enum Batch.Split"
       }
     ],
     "stateMutability": "view"
@@ -1140,8 +1171,32 @@ export const batchAbi = [
             "name": "payoutPerShare",
             "type": "uint256",
             "internalType": "uint256"
+          },
+          {
+            "name": "split",
+            "type": "uint8",
+            "internalType": "enum Batch.Split"
           }
         ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "unitsOf",
+    "inputs": [
+      {
+        "name": "depositor",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "units",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -1851,6 +1906,11 @@ export const factoryAbi = [
         "name": "arrangement",
         "type": "uint8",
         "internalType": "enum Batch.Arrangement"
+      },
+      {
+        "name": "split",
+        "type": "uint8",
+        "internalType": "enum Batch.Split"
       },
       {
         "name": "duration",
