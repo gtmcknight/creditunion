@@ -21,7 +21,7 @@ contract EligibilityTest is Test {
     function setUp() public {
         credits = new MockCredits();
         MockStatement st = new MockStatement(ICredits(address(credits)));
-        factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(st), address(0), address(0xFEE), 100, 1);
+        factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(st), address(0), address(0xFEE), 100, 0, 1);
         credits.mint(alice, 200);
         vm.prank(alice);
         credits.setApprovalForAll(address(factory), true);
@@ -34,7 +34,7 @@ contract EligibilityTest is Test {
 
     function _open(Batch.Filter memory f, uint256[] memory list, uint256 seed) internal returns (Batch b) {
         vm.prank(alice);
-        b = Batch(factory.create("E", f, list, 0, 0, Batch.Arrangement.Deposit, 14 days, _one(seed)));
+        b = Batch(factory.create("E", f, list, 0, Batch.Arrangement.Deposit, 14 days, _one(seed)));
     }
 
     /// Rating rules read the frozen score table. Here: ids 1..4 score 1000, 5000, 8000, 5500 (×10).
@@ -43,13 +43,13 @@ contract EligibilityTest is Test {
         Ratings r = RatingsDeploy.deploy(data);
         assertEq(r.scoreOf(2), 5000);
         MockStatement st = new MockStatement(ICredits(address(credits)));
-        BatchFactory f2 = new BatchFactory(ICredits(address(credits)), IRatings(address(r)), new MockAssembler(st), address(0), address(0xFEE), 100, 1);
+        BatchFactory f2 = new BatchFactory(ICredits(address(credits)), IRatings(address(r)), new MockAssembler(st), address(0), address(0xFEE), 100, 0, 1);
         vm.prank(alice);
         credits.setApprovalForAll(address(f2), true);
         Batch.Filter memory f;
         f.minScore = 4000;
         vm.prank(alice);
-        Batch b = Batch(f2.create("R", f, none, 0, 0, Batch.Arrangement.Deposit, 14 days, _one(2)));
+        Batch b = Batch(f2.create("R", f, none, 0, Batch.Arrangement.Deposit, 14 days, _one(2)));
         assertFalse(b.passes(1)); // 100.0 < 400.0
         assertTrue(b.passes(2));
         assertTrue(b.passes(3));
@@ -57,7 +57,7 @@ contract EligibilityTest is Test {
         assertFalse(b.passes(5)); // unknown id scores 0
         f.maxScore = 6000;
         vm.prank(alice);
-        Batch c = Batch(f2.create("R2", f, none, 0, 0, Batch.Arrangement.Deposit, 14 days, _one(4)));
+        Batch c = Batch(f2.create("R2", f, none, 0, Batch.Arrangement.Deposit, 14 days, _one(4)));
         assertTrue(c.passes(2));
         assertFalse(c.passes(3)); // 800 > 600
         assertFalse(c.passes(1));
@@ -68,7 +68,7 @@ contract EligibilityTest is Test {
         f.minScore = 100; // this factory has no ratings table
         vm.prank(alice);
         vm.expectRevert(Batch.BadFilter.selector);
-        factory.create("R", f, none, 0, 0, Batch.Arrangement.Deposit, 14 days, _one(9));
+        factory.create("R", f, none, 0, Batch.Arrangement.Deposit, 14 days, _one(9));
     }
 
     function test_PaymentWindow() public {
@@ -140,7 +140,7 @@ contract EligibilityTest is Test {
         Batch.Filter memory f;
         vm.prank(alice);
         vm.expectRevert(Batch.AllowlistTooLong.selector);
-        factory.create("E", f, list, 0, 0, Batch.Arrangement.Deposit, 14 days, _one(1));
+        factory.create("E", f, list, 0, Batch.Arrangement.Deposit, 14 days, _one(1));
     }
 
     function test_BadRangesRejected() public {
@@ -149,13 +149,13 @@ contract EligibilityTest is Test {
         f.paidTo = 5;
         vm.prank(alice);
         vm.expectRevert(Batch.BadFilter.selector);
-        factory.create("E", f, none, 0, 0, Batch.Arrangement.Deposit, 14 days, _one(7));
+        factory.create("E", f, none, 0, Batch.Arrangement.Deposit, 14 days, _one(7));
         Batch.Filter memory g;
         g.idFrom = 10;
         g.idTo = 5;
         vm.prank(alice);
         vm.expectRevert(Batch.BadFilter.selector);
-        factory.create("E", g, none, 0, 0, Batch.Arrangement.Deposit, 14 days, _one(7));
+        factory.create("E", g, none, 0, Batch.Arrangement.Deposit, 14 days, _one(7));
     }
 
     function test_CreatorsOwnDepositMustQualify() public {
@@ -163,6 +163,6 @@ contract EligibilityTest is Test {
         f.idFrom = 100;
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Batch.Excluded.selector, 5));
-        factory.create("E", f, none, 0, 0, Batch.Arrangement.Deposit, 14 days, _one(5));
+        factory.create("E", f, none, 0, Batch.Arrangement.Deposit, 14 days, _one(5));
     }
 }

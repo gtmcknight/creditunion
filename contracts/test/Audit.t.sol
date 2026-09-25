@@ -55,7 +55,7 @@ contract AuditTest is Test {
     function setUp() public {
         credits = new MockCredits();
         statement = new MockStatement(ICredits(address(credits)));
-        factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(statement), address(0), fee, 100, 10);
+        factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(statement), address(0), fee, 100, 0, 10);
         credits.mint(alice, 50); // 1..50
         credits.mint(bob, 50); // 51..100
         for (uint256 i; i < 3; ++i) {
@@ -78,7 +78,7 @@ contract AuditTest is Test {
 
     function _open(address who, uint256[] memory ids) internal returns (Batch) {
         vm.prank(who);
-        return Batch(factory.create("Audit", noFilter, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, ids));
+        return Batch(factory.create("Audit", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, ids));
     }
 
     // ---------------------------------------------------------------- F1: delegatecall storage exposure
@@ -87,13 +87,13 @@ contract AuditTest is Test {
     ///      in assemble() must not be able to touch Batch storage. Under the old delegatecall design its
     ///      `++assembled` rewrote slot 0 (factory) and settle() reverted forever with the ETH stuck.
     function test_Audit_BuggyAssemblerStorageWriteBricksSettle() public {
-        BatchFactory f2 = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new CounterAssembler(statement), address(0), fee, 100, 10);
+        BatchFactory f2 = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new CounterAssembler(statement), address(0), fee, 100, 0, 10);
         vm.prank(alice);
         credits.setApprovalForAll(address(f2), true);
         vm.prank(bob);
         credits.setApprovalForAll(address(f2), true);
         vm.prank(alice);
-        Batch b = Batch(f2.create("Bug", noFilter, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, _range(1, 40)));
+        Batch b = Batch(f2.create("Bug", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, _range(1, 40)));
         vm.prank(bob);
         f2.deposit(address(b), _range(51, 40));
 

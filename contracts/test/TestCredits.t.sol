@@ -68,7 +68,7 @@ contract TestCreditsTest is Test {
     /// Full flow on TestCredits: a filtered batch, 80 deposits, burn into a Statement.
     function test_BatchToStatement() public {
         MockStatement st = new MockStatement(ICredits(address(credits)));
-        BatchFactory f = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(st), address(0), address(0xFEE), 100, 10);
+        BatchFactory f = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(st), address(0), address(0xFEE), 100, 0, 10);
         for (uint256 i; i < 2; ++i) credits.mint(alice, 40);
         vm.startPrank(alice);
         credits.setApprovalForAll(address(f), true);
@@ -78,7 +78,7 @@ contract TestCreditsTest is Test {
             first[i] = i + 1;
             rest[i] = i + 41;
         }
-        Batch b = Batch(f.create("Test", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, first));
+        Batch b = Batch(f.create("Test", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, first));
         f.deposit(address(b), rest);
         vm.stopPrank();
         b.assemble();
@@ -99,7 +99,7 @@ contract TestCreditsTest is Test {
     /// Sets: a filter accepting two palettes admits Credits of either and nothing else.
     function test_FilterAcceptsSets() public {
         MockStatement st = new MockStatement(ICredits(address(credits)));
-        BatchFactory f = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(st), address(0), address(0xFEE), 100, 1);
+        BatchFactory f = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(st), address(0), address(0xFEE), 100, 0, 1);
         credits.mint(alice, 40);
         credits.mint(alice, 40);
         CreditArt art = credits.art();
@@ -115,7 +115,7 @@ contract TestCreditsTest is Test {
         one[0] = 1;
         vm.startPrank(alice);
         credits.setApprovalForAll(address(f), true);
-        Batch b = Batch(f.create("Two", fl, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, one));
+        Batch b = Batch(f.create("Two", fl, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, one));
         vm.stopPrank();
         for (uint256 id = 2; id <= 60; ++id) {
             uint256 m = _mask(art.describe(credits.seedOf(id), credits.timestampOf(id)).colors);
@@ -127,7 +127,7 @@ contract TestCreditsTest is Test {
         g.eights = 1;
         uint256[] memory seed = _first(art);
         vm.prank(alice);
-        Batch c = Batch(f.create("PE", g, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, seed));
+        Batch c = Batch(f.create("PE", g, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, seed));
         for (uint256 id = 2; id <= 60; ++id) {
             CreditArt.Read memory r = art.describe(credits.seedOf(id), credits.timestampOf(id));
             bool pr = keccak256(bytes(r.register)) == keccak256("Registered") || keccak256(bytes(r.register)) == keccak256("Nudge");
@@ -151,7 +151,7 @@ contract TestCreditsTest is Test {
     /// A trait filter accepts exactly the Credits the real art says match.
     function test_FilterUsesRealTraits() public {
         MockStatement st = new MockStatement(ICredits(address(credits)));
-        BatchFactory f = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(st), address(0), address(0xFEE), 100, 1);
+        BatchFactory f = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(st), address(0), address(0xFEE), 100, 0, 1);
         credits.mint(alice, 40);
         CreditArt art = credits.art();
         string memory want = art.describe(credits.seedOf(1), credits.timestampOf(1)).colors;
@@ -161,7 +161,7 @@ contract TestCreditsTest is Test {
         one[0] = 1;
         vm.startPrank(alice);
         credits.setApprovalForAll(address(f), true);
-        Batch b = Batch(f.create("Match", fl, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, one));
+        Batch b = Batch(f.create("Match", fl, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, one));
         vm.stopPrank();
         for (uint256 id = 2; id <= 40; ++id) {
             bool same = keccak256(bytes(art.describe(credits.seedOf(id), credits.timestampOf(id)).colors))

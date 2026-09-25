@@ -58,7 +58,7 @@ Trait rules are now sets: `Filter.palettes` (uint16, bit = C|M|Y|K mask of the c
 - A depositor that is a contract without `receive()` cannot be paid; `claim()` reverts for them and there is no alternate recipient by design (ERC721 gives no other attribution). Self-inflicted.
 - `settle()` after `RESERVE_WINDOW` lets a 1 wei bid start the 24 h clock. Design: the reserve is a 7-day option, not a floor forever.
 - Slither Mediums not acted on: rounding in `settle()` is intentional (dust to the protocol fee; fuzz proves the split is exact); `ownerOf` return is intentionally unused inside `try/catch`.
-- Protocol fees, the creator fee cap (10 %), and the sweep fee are immutable once deployed.
+- Fees are adjustable by the fee recipient within hard caps (protocol 5 %, creator 10 %, sweep 5 %). A batch snapshots both sale fees in `initialize` and settles on those, so a change cannot reach a batch anyone has already joined; the sweep fee is part of every quote and covered by the caller's `msg.value` check, so a raise between quote and purchase makes the sweep revert (`FeeNotCovered`) rather than overcharge. The fee recipient itself is immutable.
 
 ### Hypotheses checked and rejected (summary)
 

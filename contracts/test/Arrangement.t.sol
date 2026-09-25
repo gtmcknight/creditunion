@@ -39,7 +39,7 @@ contract ArrangementTest is Test {
     function setUp() public {
         credits = new MockCredits();
         statement = new RecordingStatement(ICredits(address(credits)));
-        factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(statement), address(0), fee, 100, 10);
+        factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(statement), address(0), fee, 100, 0, 10);
         credits.mint(alice, 50);
         credits.mint(bob, 50);
         for (uint256 i; i < 2; ++i) {
@@ -57,7 +57,7 @@ contract ArrangementTest is Test {
     /// bob deposits first (51..90), then alice (1..40): deposit order differs from id order.
     function _full(Batch.Arrangement how) internal returns (Batch b) {
         vm.prank(bob);
-        b = Batch(factory.create("Arr", noFilter, new uint256[](0), 0, 0, how, 14 days, _range(51, 40)));
+        b = Batch(factory.create("Arr", noFilter, new uint256[](0), 0, how, 14 days, _range(51, 40)));
         vm.prank(alice);
         factory.deposit(address(b), _range(1, 40));
     }

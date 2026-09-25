@@ -1,7 +1,8 @@
 import { decodeEventLog, parseEther } from 'viem';
 import { creditsAbi, factoryAbi } from '../abi';
 import { config, send, session } from '../chain';
-import { ARRANGEMENTS, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Rated } from '../data';
+import { pct } from '../ens';
+import { ARRANGEMENTS, creatorFeeBps, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Rated } from '../data';
 import { paletteBit, TRAITS } from '../traits';
 import { $$, art, errText, esc, sheet, toast } from '../ui';
 
@@ -102,11 +103,12 @@ export async function create(app: HTMLElement) {
     return;
   }
 
-  const [owned, approved, min, protocolBps, minutes] = await Promise.all([
+  const [owned, approved, min, protocolBps, creatorBps, minutes] = await Promise.all([
     myCredits(session.account),
     isApproved(session.account),
     minOpen(),
     protocolFeeBps(),
+    creatorFeeBps(),
     fetch('/minutes.json').then((r) => r.json() as Promise<Minutes>).catch(() => [] as Minutes),
   ]);
   const rules: Rules = { palettes: 0, prints: 0, weights: 0, eights: 0, minuteFrom: -1, minuteTo: -1, idFrom: 0, idTo: 0, minScore: 0, list: [] };
@@ -184,7 +186,7 @@ export async function create(app: HTMLElement) {
       </section>
 
       <section class="rule split3" data-tab="terms">
-        <div><div class="rule-head">Your fee</div><div class="field"><input id="cfee" inputmode="decimal" placeholder="0" autocomplete="off"><span>%</span></div><p class="hint" id="cfee-hint">0–10 % of the sale.</p></div>
+        <div><div class="rule-head">Sale split</div><p class="split-note">${protocolBps ? `${pct(protocolBps)} protocol` : ''}${creatorBps ? ` · ${pct(creatorBps)} creator` : ''} · ${pct(10_000 - protocolBps - creatorBps)} to depositors</p><p class="hint">Every batch opened now gets this split, for good.</p></div>
         <div><div class="rule-head">Reserve</div><div class="field"><input id="reserve" inputmode="decimal" placeholder="0" autocomplete="off"><span>ETH</span></div><p class="hint">Minimum first bid, for 7 days.</p></div>
         <div><div class="rule-head">Deadline</div><div class="seg">${DURATIONS.map((d) => `<label><input type="radio" name="dur" value="${d}" ${d === 30 ? 'checked' : ''}><span>${d}d</span></label>`).join('')}</div><p class="hint">Then everyone withdraws.</p></div>
       </section>
@@ -480,20 +482,6 @@ export async function create(app: HTMLElement) {
   app.querySelectorAll<HTMLInputElement>('input[name=arr]').forEach((r) =>
     r.addEventListener('change', () => (document.getElementById('arr-hint')!.textContent = ARR_HINTS[Number(r.value)])),
   );
-  const cfee = document.getElementById('cfee') as HTMLInputElement;
-  const feeBps = () => {
-    const v = cfee.value.trim();
-    if (!v) return 0;
-    const n = Number(v);
-    return Number.isFinite(n) && n >= 0 && n <= 10 ? Math.round(n * 100) : NaN;
-  };
-  cfee.addEventListener('input', () => {
-    const bps = feeBps();
-    const hint = document.getElementById('cfee-hint')!;
-    if (Number.isNaN(bps)) hint.textContent = 'Between 0 and 10.';
-    else if (!bps) hint.textContent = '0–10 % of the sale.';
-    else hint.textContent = `3 ETH sale: ${fmt((3 * bps) / 10_000)} ETH to you, ${fmt((3 * (1 - (protocolBps + bps) / 10_000)) / 80)} ETH per Credit.`;
-  });
 
   document.getElementById('approve')?.addEventListener('click', async (e) => {
     const b = e.currentTarget as HTMLButtonElement;
@@ -521,8 +509,6 @@ export async function create(app: HTMLElement) {
     } catch {
       return toast('Reserve must be an ETH amount.', 'err');
     }
-    const bps = feeBps();
-    if (Number.isNaN(bps)) return toast('Your fee must be between 0 and 10%.', 'err');
     if (rules.idTo && rules.idFrom > rules.idTo) return toast('The number range is backwards.', 'err');
     if (rules.list.length > 200) return toast('At most 200 listed Credits.', 'err');
     const name = (document.getElementById('name') as HTMLInputElement).value.trim();
@@ -548,7 +534,7 @@ export async function create(app: HTMLElement) {
         address: config.factory,
         abi: factoryAbi,
         functionName: 'create',
-        args: [name, f, rules.list.map(BigInt), reserve, BigInt(bps), arr, BigInt(days * 86400), ids.slice(0, CHUNK)],
+        args: [name, f, rules.list.map(BigInt), reserve, arr, BigInt(days * 86400), ids.slice(0, CHUNK)],
       });
       const ev = receipt.logs
         .map((l) => {

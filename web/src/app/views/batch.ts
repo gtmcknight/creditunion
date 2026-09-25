@@ -54,7 +54,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
       <header>
         <span class="tag ${s.state.toLowerCase()}">${s.state}</span>
         <h1>${esc(s.name || 'Untitled')}</h1>
-        <div class="byline">${who(s.creator, 'lg')}<span class="fee${s.creatorFeeBps ? '' : ' none'}">${s.creatorFeeBps ? `${pct(s.creatorFeeBps)} creator fee` : 'No creator fee'}</span></div>
+        <div class="byline">${who(s.creator, 'lg')}${s.creatorFeeBps ? `<span class="fee">${pct(s.creatorFeeBps)} creator fee</span>` : ''}</div>
         ${f ? `<p class="filter">${esc(f)}</p>` : ''}
       </header>
       ${

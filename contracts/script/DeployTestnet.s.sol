@@ -29,10 +29,10 @@ contract DeployTestnet is Script {
         // STAGED=1 mirrors the mainnet launch: no assembler at deploy, the deployer proposes it later.
         MockAssembler asm = new MockAssembler(statement);
         bool staged = vm.envOr("STAGED", false);
-        BatchFactory factory = new BatchFactory(ICredits(address(credits)), IRatings(address(ratings)), staged ? IAssembler(address(0)) : asm, staged ? msg.sender : address(0), feeTo, 100, 1
+        BatchFactory factory = new BatchFactory(ICredits(address(credits)), IRatings(address(ratings)), staged ? IAssembler(address(0)) : asm, staged ? msg.sender : address(0), feeTo, 200, 0, 1
         );
         // Seaport 1.6 has the same address on Sepolia; buy-in only matters where OpenSea lists these.
-        Sweeper sweeper = new Sweeper(ISeaport(0x0000000000000068F116a894984e2DB1123eB395), factory, 100);
+        Sweeper sweeper = new Sweeper(ISeaport(0x0000000000000068F116a894984e2DB1123eB395), factory, 200);
         vm.stopBroadcast();
 
         console.log("CREDITS", address(credits));

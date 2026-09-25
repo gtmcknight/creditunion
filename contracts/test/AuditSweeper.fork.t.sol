@@ -68,7 +68,7 @@ contract AuditSweeperForkTest is Test {
         seller = vm.addr(sellerKey);
         zoneSigner = vm.addr(zoneSignerKey);
 
-        factory = new BatchFactory(CREDITS, IRatings(address(0)), IAssembler(address(0)), address(this), fee, 100, 1);
+        factory = new BatchFactory(CREDITS, IRatings(address(0)), IAssembler(address(0)), address(this), fee, 100, 0, 1);
         sweeper = new Sweeper(SEAPORT, factory, 100);
 
         // Live Credits: one for the creator, four to the seller.
@@ -82,7 +82,7 @@ contract AuditSweeperForkTest is Test {
                         one[0] = id;
                         vm.startPrank(o);
                         CREDITS.setApprovalForAll(address(factory), true);
-                        batch = Batch(factory.create("Fork", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, one));
+                        batch = Batch(factory.create("Fork", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, one));
                         vm.stopPrank();
                     } else {
                         vm.prank(o);

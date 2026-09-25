@@ -23,7 +23,6 @@ function status(s: Summary) {
 
 const SORTS = [
   ['fullest', 'Fullest'],
-  ['fee', 'Lowest fee'],
   ['new', 'Newest'],
 ] as const;
 type SortKey = (typeof SORTS)[number][0];
@@ -44,13 +43,12 @@ function sortList(list: Listed[], k: SortKey) {
   list.sort(
     (a, b) =>
       STAGE[a.s.state] - STAGE[b.s.state] ||
-      (k === 'fee' ? a.s.creatorFeeBps - b.s.creatorFeeBps : 0) ||
       (k === 'new' ? age.get(a.s.address)! - age.get(b.s.address)! : b.s.count - a.s.count),
   );
 }
 
-const fee = (s: Summary) =>
-  `<span class="fee${s.creatorFeeBps ? '' : ' none'}">${s.creatorFeeBps ? `${pct(s.creatorFeeBps)} fee` : 'No fee'}</span>`;
+/// Shown only when the batch carries a creator fee (a factory-level setting, 0 at launch).
+const fee = (s: Summary) => (s.creatorFeeBps ? `<span class="fee">${pct(s.creatorFeeBps)} creator fee</span>` : '');
 
 /// Ids in this batch deposited by the connected wallet.
 export function mineIn(b: Listed) {

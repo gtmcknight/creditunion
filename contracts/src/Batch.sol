@@ -40,6 +40,7 @@ interface IBatchFactory {
 contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     uint256 public constant SIZE = 80;
     uint256 public constant MAX_CREATOR_FEE_BPS = 1000; // 10%
+    uint256 public constant MAX_PROTOCOL_FEE_BPS = 500; // 5%
     uint256 public constant FILL_GRACE = 7 days; // a batch that fills always has at least this long to assemble
     uint256 public constant RESERVE_WINDOW = 7 days; // with no bid by then, the reserve no longer applies
     uint256 public constant AUCTION_LENGTH = 24 hours;
@@ -123,7 +124,9 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     uint256 public allowlistSize;
     mapping(uint256 id => bool) public allowed;
     uint256 public reserve;
+    /// @notice The split this batch opened with. Later changes on the factory never reach it.
     uint256 public creatorFeeBps;
+    uint256 public protocolFeeBps;
     Arrangement public arrangement;
     uint64 public deadline;
     uint64 public filledAt;
@@ -164,6 +167,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     error AllowlistTooLong();
     error BadFilter();
     error CreatorFeeTooHigh();
+    error ProtocolFeeTooHigh();
     error NotDepositor(uint256 id);
     error NotHeld(uint256 id);
     error AlreadyDeposited(uint256 id);
@@ -196,6 +200,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         Filter calldata filter_,
         uint256[] calldata allowlist_,
         uint256 reserve_,
+        uint256 protocolFeeBps_,
         uint256 creatorFeeBps_,
         Arrangement arrangement_,
         uint64 deadline_
@@ -216,6 +221,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
             }
         }
         if (creatorFeeBps_ > MAX_CREATOR_FEE_BPS) revert CreatorFeeTooHigh();
+        if (protocolFeeBps_ > MAX_PROTOCOL_FEE_BPS) revert ProtocolFeeTooHigh();
         factory = IBatchFactory(msg.sender);
         credits = factory.credits();
         art = credits.art();
@@ -224,6 +230,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         _filter = filter_;
         reserve = reserve_;
         creatorFeeBps = creatorFeeBps_;
+        protocolFeeBps = protocolFeeBps_;
         arrangement = arrangement_;
         deadline = deadline_;
     }
@@ -476,7 +483,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         settled = true;
 
         uint256 creatorFee = highBid * creatorFeeBps / 10_000;
-        uint256 fee = highBid * factory.protocolFeeBps() / 10_000;
+        uint256 fee = highBid * protocolFeeBps / 10_000;
         uint256 per = (highBid - fee - creatorFee) / SIZE;
         payoutPerShare = per;
         fee = highBid - creatorFee - per * SIZE; // rounding dust goes with the protocol fee
@@ -586,7 +593,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         s.reserve = reserve;
         s.minBid = statement != address(0) && !settled ? minBid() : 0;
         s.creatorFeeBps = creatorFeeBps;
-        s.protocolFeeBps = factory.protocolFeeBps();
+        s.protocolFeeBps = protocolFeeBps;
         s.filter = _filter;
         s.allowlistSize = allowlistSize;
         s.statement = statement;

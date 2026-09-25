@@ -99,6 +99,19 @@ export const batchAbi = [
   },
   {
     "type": "function",
+    "name": "MAX_PROTOCOL_FEE_BPS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MIN_RAISE",
     "inputs": [],
     "outputs": [
@@ -664,6 +677,11 @@ export const batchAbi = [
         "internalType": "uint256"
       },
       {
+        "name": "protocolFeeBps_",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
         "name": "creatorFeeBps_",
         "type": "uint256",
         "internalType": "uint256"
@@ -783,6 +801,19 @@ export const batchAbi = [
   {
     "type": "function",
     "name": "payoutPerShare",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "protocolFeeBps",
     "inputs": [],
     "outputs": [
       {
@@ -1509,6 +1540,11 @@ export const batchAbi = [
   },
   {
     "type": "error",
+    "name": "ProtocolFeeTooHigh",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ReentrancyGuardReentrantCall",
     "inputs": []
   },
@@ -1570,6 +1606,11 @@ export const factoryAbi = [
         "internalType": "uint256"
       },
       {
+        "name": "creatorFeeBps_",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
         "name": "minOpen_",
         "type": "uint256",
         "internalType": "uint256"
@@ -1580,6 +1621,19 @@ export const factoryAbi = [
   {
     "type": "function",
     "name": "ASSEMBLER_DELAY",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_CREATOR_FEE_BPS",
     "inputs": [],
     "outputs": [
       {
@@ -1789,11 +1843,6 @@ export const factoryAbi = [
         "internalType": "uint256"
       },
       {
-        "name": "creatorFeeBps",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
         "name": "arrangement",
         "type": "uint8",
         "internalType": "enum Batch.Arrangement"
@@ -1817,6 +1866,19 @@ export const factoryAbi = [
       }
     ],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "creatorFeeBps",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -2009,6 +2071,24 @@ export const factoryAbi = [
     "stateMutability": "view"
   },
   {
+    "type": "function",
+    "name": "setFees",
+    "inputs": [
+      {
+        "name": "protocolFeeBps_",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "creatorFeeBps_",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
     "type": "event",
     "name": "AssemblerActivated",
     "inputs": [
@@ -2072,6 +2152,25 @@ export const factoryAbi = [
     "anonymous": false
   },
   {
+    "type": "event",
+    "name": "FeesSet",
+    "inputs": [
+      {
+        "name": "protocolFeeBps",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "creatorFeeBps",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
     "type": "error",
     "name": "AssemblerFixed",
     "inputs": []
@@ -2079,6 +2178,11 @@ export const factoryAbi = [
   {
     "type": "error",
     "name": "BadDuration",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CreatorFeeTooHigh",
     "inputs": []
   },
   {
@@ -2120,6 +2224,11 @@ export const factoryAbi = [
   {
     "type": "error",
     "name": "NotBatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotFeeRecipient",
     "inputs": []
   },
   {
@@ -2277,6 +2386,19 @@ export const sweeperAbi = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "setFee",
+    "inputs": [
+      {
+        "name": "feeBps_",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -2452,6 +2574,19 @@ export const sweeperAbi = [
   },
   {
     "type": "event",
+    "name": "FeeSet",
+    "inputs": [
+      {
+        "name": "feeBps",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "Swept",
     "inputs": [
       {
@@ -2517,6 +2652,11 @@ export const sweeperAbi = [
   {
     "type": "error",
     "name": "NotBatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotFeeRecipient",
     "inputs": []
   },
   {

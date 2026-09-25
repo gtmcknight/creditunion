@@ -26,7 +26,7 @@ contract AuditSweeperTest is Test {
     function setUp() public {
         credits = new MockCredits();
         statement = new MockStatement(ICredits(address(credits)));
-        factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(statement), address(0), fee, 100, 10);
+        factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(statement), address(0), fee, 100, 0, 10);
         sweeper = new Sweeper(ISeaport(makeAddr("seaport")), factory, 100);
         credits.mint(alice, 50); // ids 1..50
         credits.mint(bob, 50); // ids 51..100
@@ -48,7 +48,7 @@ contract AuditSweeperTest is Test {
     ///      mistake; the factory only ever moves the caller's Credits.)
     function test_DepositForRejectsSinks() public {
         vm.prank(alice);
-        Batch b = Batch(factory.create("Audit", noFilter, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, _range(1, 40)));
+        Batch b = Batch(factory.create("Audit", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, _range(1, 40)));
         vm.startPrank(bob);
         vm.expectRevert(BatchFactory.NoDepositor.selector);
         factory.depositFor(address(b), _range(90, 1), address(b));
@@ -63,7 +63,7 @@ contract AuditSweeperTest is Test {
 
     function test_DepositForOnlyMovesCallersCredits() public {
         vm.prank(alice);
-        Batch b = Batch(factory.create("Audit", noFilter, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, _range(1, 10)));
+        Batch b = Batch(factory.create("Audit", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, _range(1, 10)));
         // bob names alice as depositor but tries to move alice's Credit 11: fails at transferFrom.
         vm.prank(bob);
         vm.expectRevert();
@@ -74,5 +74,20 @@ contract AuditSweeperTest is Test {
         vm.expectRevert();
         factory.depositFor(address(b), _range(101, 1), bob);
         assertEq(credits.ownerOf(101), address(sweeper));
+    }
+
+    /// The buy-in fee moves only by the fee recipient, never above the cap, and every quote reads the current one.
+    function test_FeeSetterCapped() public {
+        assertEq(sweeper.quote(1 ether), 1.01 ether);
+        vm.prank(bob);
+        vm.expectRevert(Sweeper.NotFeeRecipient.selector);
+        sweeper.setFee(200);
+        vm.prank(fee);
+        vm.expectRevert(Sweeper.FeeTooHigh.selector);
+        sweeper.setFee(501);
+        vm.prank(fee);
+        sweeper.setFee(200);
+        assertEq(sweeper.feeBps(), 200);
+        assertEq(sweeper.quote(1 ether), 1.02 ether);
     }
 }

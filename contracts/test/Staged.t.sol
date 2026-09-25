@@ -27,7 +27,7 @@ contract StagedTest is Test {
         credits = new MockCredits();
         statement = new MockStatement(ICredits(address(credits)));
         asm = new MockAssembler(statement);
-        factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), IAssembler(address(0)), setter, fee, 100, 10);
+        factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), IAssembler(address(0)), setter, fee, 100, 0, 10);
         credits.mint(alice, 50);
         credits.mint(bob, 50);
         for (uint256 i; i < 2; ++i) {
@@ -45,14 +45,14 @@ contract StagedTest is Test {
 
     function _full() internal returns (Batch b) {
         vm.prank(alice);
-        b = Batch(factory.create("Early", noFilter, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, _range(1, 40)));
+        b = Batch(factory.create("Early", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, _range(1, 40)));
         vm.prank(bob);
         factory.deposit(address(b), _range(51, 40));
     }
 
     function test_NeedsAssemblerOrSetter() public {
         vm.expectRevert(BatchFactory.NoAssembler.selector);
-        new BatchFactory(ICredits(address(credits)), IRatings(address(0)), IAssembler(address(0)), address(0), fee, 100, 10);
+        new BatchFactory(ICredits(address(credits)), IRatings(address(0)), IAssembler(address(0)), address(0), fee, 100, 0, 10);
     }
 
     function test_PoolsAndLocksButCannotBurnYet() public {
@@ -174,7 +174,7 @@ contract StagedTest is Test {
     }
 
     function test_ConstructorAssemblerIsActiveImmediately() public {
-        BatchFactory f = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), asm, address(0), fee, 100, 10);
+        BatchFactory f = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), asm, address(0), fee, 100, 0, 10);
         assertEq(address(f.assembler()), address(asm));
         assertGt(f.assemblerActiveAt(), 0);
         assertFalse(f.exitWindowOpen());

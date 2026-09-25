@@ -14,8 +14,9 @@ import {ISeaport} from "../src/interfaces/ISeaport.sol";
 /// @notice Mainnet, in two stages.
 ///
 ///   Stage 1 (pooling): ASSEMBLER unset. SETTER (a multisig, ideally) is the one address that can later
-///   propose the adapter. FEE_RECIPIENT required. PROTOCOL_FEE_BPS / SWEEP_FEE_BPS default 100 (1%),
-///   capped at 500 in the contracts.
+///   propose the adapter. FEE_RECIPIENT required. PROTOCOL_FEE_BPS / SWEEP_FEE_BPS default 200 (2%),
+///   CREATOR_FEE_BPS default 0; capped at 500 / 500 / 1000. The fee recipient can change them later
+///   (within the caps) for batches opened afterwards.
 ///     FEE_RECIPIENT=… SETTER=… forge script script/DeployMainnet.s.sol --broadcast
 ///
 ///   Stage 2 (after Jack's Statement contract ships and the adapter is reviewed): from the setter,
@@ -40,9 +41,9 @@ contract DeployMainnet is Script {
         address ratingsAddr = vm.envOr("RATINGS", address(0));
         if (ratingsAddr == address(0)) ratingsAddr = address(RatingsDeploy.deploy(vm.readFileBinary("data/scores.bin")));
         BatchFactory factory = new BatchFactory(
-            CREDITS, IRatings(ratingsAddr), assembler, setter, feeTo, vm.envOr("PROTOCOL_FEE_BPS", uint256(100)), 1
+            CREDITS, IRatings(ratingsAddr), assembler, setter, feeTo, vm.envOr("PROTOCOL_FEE_BPS", uint256(200)), vm.envOr("CREATOR_FEE_BPS", uint256(0)), 1
         );
-        Sweeper sweeper = new Sweeper(SEAPORT, factory, vm.envOr("SWEEP_FEE_BPS", uint256(100)));
+        Sweeper sweeper = new Sweeper(SEAPORT, factory, vm.envOr("SWEEP_FEE_BPS", uint256(200)));
         vm.stopBroadcast();
         console.log("RATINGS", ratingsAddr);
         console.log("FACTORY", address(factory));

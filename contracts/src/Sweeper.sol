@@ -22,7 +22,8 @@ contract Sweeper is ReentrancyGuardTransient {
     uint256 public constant MAX_FEE_BPS = 500;
 
     /// @notice Fee on what the listings cost, in basis points. Fixed at deploy.
-    uint256 public immutable feeBps;
+    /// @notice Fee on each buy-in, quoted before anyone signs. The fee recipient may change it within MAX_FEE_BPS.
+    uint256 public feeBps;
 
     ISeaport public immutable seaport;
     BatchFactory public immutable factory;
@@ -37,15 +38,27 @@ contract Sweeper is ReentrancyGuardTransient {
     error FeeNotCovered(uint256 fee);
     error PaymentFailed();
     error FeeTooHigh();
+    error NotFeeRecipient();
+
+    event FeeSet(uint256 feeBps);
 
     constructor(ISeaport seaport_, BatchFactory factory_, uint256 feeBps_) {
         if (feeBps_ > MAX_FEE_BPS) revert FeeTooHigh();
         feeBps = feeBps_;
+        emit FeeSet(feeBps_);
         seaport = seaport_;
         factory = factory_;
         credits = factory_.credits();
         feeRecipient = factory_.feeRecipient();
         credits.setApprovalForAll(address(factory_), true);
+    }
+
+    /// @notice Change the buy-in fee, never above MAX_FEE_BPS. Every quote and sweep reads the current value.
+    function setFee(uint256 feeBps_) external {
+        if (msg.sender != feeRecipient) revert NotFeeRecipient();
+        if (feeBps_ > MAX_FEE_BPS) revert FeeTooHigh();
+        feeBps = feeBps_;
+        emit FeeSet(feeBps_);
     }
 
     /// @param orders Seaport listings, each selling exactly one Credit for ETH (as returned by OpenSea).

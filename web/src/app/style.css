@@ -2249,3 +2249,10 @@ input[type='datetime-local'] {
   background: var(--fg);
   border: 3px solid var(--bg);
 }
+
+/* fixed sale split on the design page */
+.split-note {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+}

@@ -61,7 +61,7 @@ contract BatchTest is Test {
     function setUp() public {
         credits = new MockCredits();
         statement = new MockStatement(ICredits(address(credits)));
-        factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(statement), address(0), fee, 100, 10);
+        factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(statement), address(0), fee, 100, 0, 10);
         credits.mint(alice, 50); // ids 1..50
         credits.mint(bob, 50); // ids 51..100
         for (uint256 i; i < 3; ++i) {
@@ -79,7 +79,7 @@ contract BatchTest is Test {
 
     function _open(address who, uint256[] memory ids, uint256 reserve) internal returns (Batch) {
         vm.prank(who);
-        return Batch(factory.create("Test", noFilter, new uint256[](0), reserve, 0, Batch.Arrangement.Deposit, 14 days, ids));
+        return Batch(factory.create("Test", noFilter, new uint256[](0), reserve, Batch.Arrangement.Deposit, 14 days, ids));
     }
 
     function _full(uint256 reserve) internal returns (Batch b) {
@@ -93,15 +93,15 @@ contract BatchTest is Test {
     function test_OpenRequiresMinimum() public {
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(BatchFactory.TooFewToOpen.selector, 10));
-        factory.create("x", noFilter, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, _range(1, 9));
+        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, _range(1, 9));
     }
 
     function test_OpenRejectsBadDuration() public {
         vm.startPrank(alice);
         vm.expectRevert(BatchFactory.BadDuration.selector);
-        factory.create("x", noFilter, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 1 days, _range(1, 10));
+        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, 1 days, _range(1, 10));
         vm.expectRevert(BatchFactory.BadDuration.selector);
-        factory.create("x", noFilter, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 91 days, _range(1, 10));
+        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, 91 days, _range(1, 10));
     }
 
     function test_CannotDepositSomeoneElsesCredits() public {
@@ -156,10 +156,10 @@ contract BatchTest is Test {
     function test_ImplementationAndClonesCannotBeReinitialized() public {
         Batch b = _open(alice, _range(1, 10), 0);
         vm.expectRevert(Batch.AlreadyInitialized.selector);
-        b.initialize(bob, "x", noFilter, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 1);
+        b.initialize(bob, "x", noFilter, new uint256[](0), 0, 0, 0, Batch.Arrangement.Deposit, 1);
         Batch impl = Batch(factory.implementation());
         vm.expectRevert(Batch.AlreadyInitialized.selector);
-        impl.initialize(bob, "x", noFilter, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 1);
+        impl.initialize(bob, "x", noFilter, new uint256[](0), 0, 0, 0, Batch.Arrangement.Deposit, 1);
     }
 
     function test_Filter() public {
@@ -168,7 +168,7 @@ contract BatchTest is Test {
         uint256[] memory evens = new uint256[](10);
         for (uint256 i; i < 10; ++i) evens[i] = 2 + 2 * i;
         vm.prank(alice);
-        Batch b = Batch(factory.create("Evens", f, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, evens));
+        Batch b = Batch(factory.create("Evens", f, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, evens));
         assertEq(b.count(), 10);
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Batch.Excluded.selector, 1));
@@ -218,7 +218,7 @@ contract BatchTest is Test {
 
     function test_FillExtendsDeadline() public {
         vm.prank(alice);
-        Batch b = Batch(factory.create("x", noFilter, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 3 days, _range(1, 40)));
+        Batch b = Batch(factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, 3 days, _range(1, 40)));
         skip(2 days);
         vm.prank(bob);
         factory.deposit(address(b), _range(51, 40));
@@ -257,13 +257,13 @@ contract BatchTest is Test {
 
     function test_AssembleRejectsAssemblerThatDoesNotBurn() public {
         BatchFactory bad =
-            new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new StealingAssembler(carol, statement), address(0), fee, 100, 10);
+            new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new StealingAssembler(carol, statement), address(0), fee, 100, 0, 10);
         vm.prank(alice);
         credits.setApprovalForAll(address(bad), true);
         vm.prank(bob);
         credits.setApprovalForAll(address(bad), true);
         vm.prank(alice);
-        Batch b = Batch(bad.create("x", noFilter, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, _range(1, 40)));
+        Batch b = Batch(bad.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, _range(1, 40)));
         vm.prank(bob);
         bad.deposit(address(b), _range(51, 40));
         vm.expectRevert(Batch.CreditsNotBurned.selector);
@@ -364,20 +364,62 @@ contract BatchTest is Test {
     // ---------------------------------------------------------------- fees
 
     function test_CreatorFeeCappedAt10Percent() public {
+        MockAssembler asm = new MockAssembler(statement);
+        vm.expectRevert(BatchFactory.CreatorFeeTooHigh.selector);
+        new BatchFactory(ICredits(address(credits)), IRatings(address(0)), asm, address(0), fee, 100, 1001, 10);
+        vm.prank(fee);
+        vm.expectRevert(BatchFactory.CreatorFeeTooHigh.selector);
+        factory.setFees(100, 1001);
+    }
+
+    /// Fees can move within the caps, only by the fee recipient, and only for batches opened afterwards.
+    function test_FeeChangesOnlyReachLaterBatches() public {
+        Batch early = _open(alice, _range(1, 10), 0);
         vm.prank(alice);
-        vm.expectRevert(Batch.CreatorFeeTooHigh.selector);
-        factory.create("x", noFilter, new uint256[](0), 0, 1001, Batch.Arrangement.Deposit, 14 days, _range(1, 10));
+        vm.expectRevert(BatchFactory.NotFeeRecipient.selector);
+        factory.setFees(200, 100);
+        vm.prank(fee);
+        vm.expectRevert(BatchFactory.ProtocolFeeTooHigh.selector);
+        factory.setFees(501, 0);
+        vm.prank(fee);
+        factory.setFees(200, 100);
+        assertEq(factory.protocolFeeBps(), 200);
+        assertEq(factory.creatorFeeBps(), 100);
+        Batch late = _open(bob, _range(51, 10), 0);
+        assertEq(early.protocolFeeBps(), 100);
+        assertEq(early.creatorFeeBps(), 0);
+        assertEq(late.protocolFeeBps(), 200);
+        assertEq(late.creatorFeeBps(), 100);
+        assertEq(early.summary().protocolFeeBps, 100);
+        assertEq(late.summary().creatorFeeBps, 100);
+        // the earlier batch settles on the split it opened with
+        vm.prank(bob);
+        factory.deposit(address(early), _range(61, 40)); // bob: 51..60 went to `after`, 61..100 here
+        vm.prank(alice);
+        factory.deposit(address(early), _range(11, 30));
+        early.assemble();
+        vm.prank(carol);
+        early.bid{value: 1 ether}();
+        skip(1 days);
+        uint256 aliceBefore = alice.balance;
+        early.settle();
+        assertEq(fee.balance, 0.01 ether); // 1%, not 2%
+        assertEq(early.payoutPerShare(), 0.99 ether / 80);
+        early.claim(alice);
+        assertEq(alice.balance - aliceBefore, 40 * (0.99 ether / 80)); // 40 shares, no creator fee
     }
 
     function test_ProtocolFeeCappedAt5Percent() public {
         MockAssembler asm = new MockAssembler(statement);
         vm.expectRevert(BatchFactory.ProtocolFeeTooHigh.selector);
-        new BatchFactory(ICredits(address(credits)), IRatings(address(0)), asm, address(0), fee, 501, 10);
+        new BatchFactory(ICredits(address(credits)), IRatings(address(0)), asm, address(0), fee, 501, 0, 10);
     }
 
     function test_CreatorAndProtocolSplit() public {
+        vm.prank(fee);
+        factory.setFees(100, 200); // 2% creator
         vm.prank(alice);
-        Batch b = Batch(factory.create("Fee", noFilter, new uint256[](0), 0, 200, Batch.Arrangement.Deposit, 14 days, _range(1, 40))); // 2% creator
+        Batch b = Batch(factory.create("Fee", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, _range(1, 40)));
         vm.prank(bob);
         factory.deposit(address(b), _range(51, 40));
         b.assemble();
@@ -401,8 +443,10 @@ contract BatchTest is Test {
         amount = uint96(bound(amount, 1, 1_000_000 ether));
         uint256 a = bound(aliceShare, 30, 50); // bob holds 50
         creatorFee = uint16(bound(creatorFee, 0, 1000));
+        vm.prank(fee);
+        factory.setFees(100, creatorFee);
         vm.prank(alice);
-        Batch b = Batch(factory.create("F", noFilter, new uint256[](0), 0, creatorFee, Batch.Arrangement.Deposit, 14 days, _range(1, a)));
+        Batch b = Batch(factory.create("F", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, _range(1, a)));
         vm.prank(bob);
         factory.deposit(address(b), _range(51, 80 - a));
         b.assemble();
@@ -450,7 +494,7 @@ contract BatchTest is Test {
     function test_GasFor40Deposit() public {
         vm.prank(alice);
         uint256 g = gasleft();
-        factory.create("Gas", noFilter, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, _range(1, 40));
+        factory.create("Gas", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, 14 days, _range(1, 40));
         emit log_named_uint("create with 40", g - gasleft());
     }
 }

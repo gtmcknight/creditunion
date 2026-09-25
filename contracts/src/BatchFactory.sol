@@ -21,7 +21,8 @@ import {IAssembler} from "./interfaces/IAssembler.sol";
 contract BatchFactory {
     uint256 public constant MIN_DURATION = 3 days;
     uint256 public constant MAX_DURATION = 90 days;
-    uint256 public constant MAX_PROTOCOL_FEE_BPS = 500; // hard ceiling for any deploy: 5%
+    uint256 public constant MAX_PROTOCOL_FEE_BPS = 500; // hard ceiling, deploy or later: 5%
+    uint256 public constant MAX_CREATOR_FEE_BPS = 1000; // 10%
     uint256 public constant ASSEMBLER_DELAY = 3 days;
 
     ICredits public immutable credits;
@@ -35,8 +36,13 @@ contract BatchFactory {
     uint64 public assemblerActiveAt;
     IAssembler public pendingAssembler;
     uint64 public pendingUntil;
-    /// @notice Protocol share of each Statement sale, in basis points. Fixed at deploy.
-    uint256 public immutable protocolFeeBps;
+    /// @notice Protocol share of each Statement sale, in basis points. The fee recipient may change it within
+    ///         MAX_PROTOCOL_FEE_BPS, but a batch fixes its split the moment it opens, so a change only ever
+    ///         affects batches opened afterwards.
+    uint256 public protocolFeeBps;
+    /// @notice Creator share of each Statement sale, in basis points, the same for every batch opened while it
+    ///         is set. Same rules as the protocol fee; capped at MAX_CREATOR_FEE_BPS.
+    uint256 public creatorFeeBps;
     /// @notice Credits the creator must put in to open a batch.
     uint256 public immutable minOpen;
     address public immutable implementation;
@@ -47,12 +53,15 @@ contract BatchFactory {
     event BatchCreated(address indexed batch, address indexed creator, string name, uint256 index);
     event AssemblerProposed(address indexed assembler, uint64 activatableAt);
     event AssemblerActivated(address indexed assembler);
+    event FeesSet(uint256 protocolFeeBps, uint256 creatorFeeBps);
 
     error TooFewToOpen(uint256 min);
     error BadDuration();
     error NotBatch();
     error NoDepositor();
     error ProtocolFeeTooHigh();
+    error CreatorFeeTooHigh();
+    error NotFeeRecipient();
     error NoFeeRecipient();
     error NotSetter();
     error AssemblerFixed();
@@ -68,14 +77,14 @@ contract BatchFactory {
         address setter_,
         address feeRecipient_,
         uint256 protocolFeeBps_,
+        uint256 creatorFeeBps_,
         uint256 minOpen_
     ) {
         ratings = ratings_;
-        if (protocolFeeBps_ > MAX_PROTOCOL_FEE_BPS) revert ProtocolFeeTooHigh();
         if (feeRecipient_ == address(0)) revert NoFeeRecipient();
         if (address(assembler_) == address(0) && setter_ == address(0)) revert NoAssembler();
         credits = credits_;
-        protocolFeeBps = protocolFeeBps_;
+        _setFees(protocolFeeBps_, creatorFeeBps_);
         feeRecipient = feeRecipient_;
         minOpen = minOpen_;
         assemblerSetter = setter_;
@@ -84,6 +93,23 @@ contract BatchFactory {
             assemblerActiveAt = uint64(block.timestamp);
         }
         implementation = address(new Batch());
+    }
+
+    // ---------------------------------------------------------------- fees
+
+    /// @notice Change the fees for batches opened from now on. Open, full and auctioning batches keep the
+    ///         split they opened with. Only the fee recipient; never above the caps.
+    function setFees(uint256 protocolFeeBps_, uint256 creatorFeeBps_) external {
+        if (msg.sender != feeRecipient) revert NotFeeRecipient();
+        _setFees(protocolFeeBps_, creatorFeeBps_);
+    }
+
+    function _setFees(uint256 protocolFeeBps_, uint256 creatorFeeBps_) internal {
+        if (protocolFeeBps_ > MAX_PROTOCOL_FEE_BPS) revert ProtocolFeeTooHigh();
+        if (creatorFeeBps_ > MAX_CREATOR_FEE_BPS) revert CreatorFeeTooHigh();
+        protocolFeeBps = protocolFeeBps_;
+        creatorFeeBps = creatorFeeBps_;
+        emit FeesSet(protocolFeeBps_, creatorFeeBps_);
     }
 
     // ---------------------------------------------------------------- assembler
@@ -118,7 +144,7 @@ contract BatchFactory {
     /// @param filter Trait hashes (0 for any), payment window and number range (0 for unbounded).
     /// @param allowlist Up to 200 specific Credit numbers that alone may join; empty for no list.
     /// @param reserve Opening bid floor, dropped if no bid within 7 days of assembly. 0 for none.
-    /// @param creatorFeeBps Your cut of the sale, 0–1000 (10%). Fixed forever; depositors see it before joining.
+    /// @dev The batch takes the factory's current protocol and creator fees and keeps them forever.
     /// @param arrangement How the 80 are ordered on the Statement (Batch.Arrangement).
     /// @param duration Seconds until the deadline; a batch that fills always gets 7 more days to assemble.
     function create(
@@ -126,7 +152,6 @@ contract BatchFactory {
         Batch.Filter calldata filter,
         uint256[] calldata allowlist,
         uint256 reserve,
-        uint256 creatorFeeBps,
         Batch.Arrangement arrangement,
         uint256 duration,
         uint256[] calldata ids
@@ -138,7 +163,7 @@ contract BatchFactory {
         isBatch[batch] = true;
         _batches.push(batch);
         Batch(batch).initialize(
-            msg.sender, name, filter, allowlist, reserve, creatorFeeBps, arrangement, uint64(block.timestamp + duration)
+            msg.sender, name, filter, allowlist, reserve, protocolFeeBps, creatorFeeBps, arrangement, uint64(block.timestamp + duration)
         );
         emit BatchCreated(batch, msg.sender, name, _batches.length - 1);
 

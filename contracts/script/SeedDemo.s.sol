@@ -30,7 +30,7 @@ contract SeedDemo is Script {
         MockCredits credits = new MockCredits();
         MockStatement statement = new MockStatement(ICredits(address(credits)));
         Ratings ratings = RatingsDeploy.deploy(vm.readFileBinary("data/scores.bin")); // the real score table
-        BatchFactory f = new BatchFactory(ICredits(address(credits)), IRatings(address(ratings)), new MockAssembler(statement), address(0), who[0], 100, 1);
+        BatchFactory f = new BatchFactory(ICredits(address(credits)), IRatings(address(ratings)), new MockAssembler(statement), address(0), who[0], 200, 0, 1);
         for (uint256 i; i < 4; ++i) credits.mint(who[i], 200); // ids 1..800
         vm.stopBroadcast();
 
@@ -60,7 +60,7 @@ contract SeedDemo is Script {
         cyan.palettes = 1 << 7; // CMY
 
         // 2. Auction running with bids
-        address b2 = _open(f, keys[1], "Registered", none, 0, 250, _r(241, 30));
+        address b2 = _open(f, keys[1], "Registered", none, 0, _r(241, 30));
         _dep(f, keys[2], b2, _r(401, 30));
         _dep(f, keys[3], b2, _r(601, 20));
         vm.broadcast(keys[3]);
@@ -77,7 +77,7 @@ contract SeedDemo is Script {
         // 4. Open, mostly filled, filtered (even ids only in the mock art)
         uint256[] memory evens = new uint256[](26);
         for (uint256 i; i < 26; ++i) evens[i] = 42 + 2 * i;
-        address b4 = _open(f, keys[0], "All Cyan", cyan, 0, 500, evens);
+        address b4 = _open(f, keys[0], "All Cyan", cyan, 0, evens);
         uint256[] memory evens2 = new uint256[](38);
         for (uint256 i; i < 38; ++i) evens2[i] = 272 + 2 * i;
         _dep(f, keys[1], b4, evens2);
@@ -87,7 +87,7 @@ contract SeedDemo is Script {
 
         // 6. Full, Creator's order, unburned: the creator (key 0) sees the arranger
         vm.broadcast(keys[0]);
-        address b6 = f.create("Hand Arranged", none, new uint256[](0), 0, 0, Batch.Arrangement.Creator, 30 days, _r(101, 40));
+        address b6 = f.create("Hand Arranged", none, new uint256[](0), 0, Batch.Arrangement.Creator, 30 days, _r(101, 40));
         _dep(f, keys[2], b6, _r(481, 40));
         console.log("ARRANGE_ME", b6);
 
@@ -97,14 +97,7 @@ contract SeedDemo is Script {
         win.paidTo = 760;
         win.idFrom = 700;
         vm.broadcast(keys[3]);
-        f.create("Minute Seven", win, new uint256[](0), 0, 0, Batch.Arrangement.MintTime, 30 days, _r(701, 12));
-    }
-
-    function _open(BatchFactory f, uint256 k, string memory n, Batch.Filter memory fl, uint256 res, uint256[] memory ids)
-        internal
-        returns (address b)
-    {
-        b = _open(f, k, n, fl, res, 0, ids);
+        f.create("Minute Seven", win, new uint256[](0), 0, Batch.Arrangement.MintTime, 30 days, _r(701, 12));
     }
 
     function _open(
@@ -113,11 +106,10 @@ contract SeedDemo is Script {
         string memory n,
         Batch.Filter memory fl,
         uint256 res,
-        uint256 creatorFee,
         uint256[] memory ids
     ) internal returns (address b) {
         vm.broadcast(k);
-        b = f.create(n, fl, new uint256[](0), res, creatorFee, Batch.Arrangement.Deposit, 30 days, ids);
+        b = f.create(n, fl, new uint256[](0), res, Batch.Arrangement.Deposit, 30 days, ids);
     }
 
     function _dep(BatchFactory f, uint256 k, address b, uint256[] memory ids) internal {

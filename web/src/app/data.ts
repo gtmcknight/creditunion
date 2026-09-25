@@ -144,3 +144,8 @@ export async function minOpen() {
 export async function protocolFeeBps() {
   return Number(await pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'protocolFeeBps' }));
 }
+
+/// The creator share every batch opened now receives; set on the factory, not per batch.
+export async function creatorFeeBps() {
+  return Number(await pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'creatorFeeBps' }));
+}
