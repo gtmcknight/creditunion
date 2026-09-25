@@ -86,6 +86,68 @@ contract TestCreditsTest is Test {
         assertEq(credits.balanceOf(address(b)), 0);
     }
 
+    function _mask(string memory colors) internal pure returns (uint256 m) {
+        bytes memory b = bytes(colors);
+        for (uint256 i; i < b.length; ++i) {
+            if (b[i] == "C") m |= 1;
+            else if (b[i] == "M") m |= 2;
+            else if (b[i] == "Y") m |= 4;
+            else if (b[i] == "K") m |= 8;
+        }
+    }
+
+    /// Sets: a filter accepting two palettes admits Credits of either and nothing else.
+    function test_FilterAcceptsSets() public {
+        MockStatement st = new MockStatement(ICredits(address(credits)));
+        BatchFactory f = new BatchFactory(ICredits(address(credits)), new MockAssembler(st), address(0), address(0xFEE), 100, 1);
+        credits.mint(alice, 40);
+        credits.mint(alice, 40);
+        CreditArt art = credits.art();
+        string memory a = art.describe(credits.seedOf(1), credits.timestampOf(1)).colors;
+        uint256 second;
+        for (uint256 id = 2; id <= 60 && second == 0; ++id) {
+            if (_mask(art.describe(credits.seedOf(id), credits.timestampOf(id)).colors) != _mask(a)) second = id;
+        }
+        string memory b2 = art.describe(credits.seedOf(second), credits.timestampOf(second)).colors;
+        Batch.Filter memory fl;
+        fl.palettes = uint16((1 << _mask(a)) | (1 << _mask(b2)));
+        uint256[] memory one = new uint256[](1);
+        one[0] = 1;
+        vm.startPrank(alice);
+        credits.setApprovalForAll(address(f), true);
+        Batch b = Batch(f.create("Two", fl, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, one));
+        vm.stopPrank();
+        for (uint256 id = 2; id <= 60; ++id) {
+            uint256 m = _mask(art.describe(credits.seedOf(id), credits.timestampOf(id)).colors);
+            assertEq(b.passes(id), m == _mask(a) || m == _mask(b2));
+        }
+        // prints and eights sets too: Registered or Nudge, and any Credit with no eights
+        Batch.Filter memory g;
+        g.prints = 3;
+        g.eights = 1;
+        uint256[] memory seed = _first(art);
+        vm.prank(alice);
+        Batch c = Batch(f.create("PE", g, new uint256[](0), 0, 0, Batch.Arrangement.Deposit, 14 days, seed));
+        for (uint256 id = 2; id <= 60; ++id) {
+            CreditArt.Read memory r = art.describe(credits.seedOf(id), credits.timestampOf(id));
+            bool pr = keccak256(bytes(r.register)) == keccak256("Registered") || keccak256(bytes(r.register)) == keccak256("Nudge");
+            assertEq(c.passes(id), pr && r.eights == 0);
+        }
+    }
+
+    function _first(CreditArt art) internal view returns (uint256[] memory one) {
+        one = new uint256[](1);
+        for (uint256 id = 2; id <= 60; ++id) {
+            CreditArt.Read memory r = art.describe(credits.seedOf(id), credits.timestampOf(id));
+            bool pr = keccak256(bytes(r.register)) == keccak256("Registered") || keccak256(bytes(r.register)) == keccak256("Nudge");
+            if (pr && r.eights == 0 && credits.ownerOf(id) == alice) {
+                one[0] = id;
+                return one;
+            }
+        }
+        revert("no fit");
+    }
+
     /// A trait filter accepts exactly the Credits the real art says match.
     function test_FilterUsesRealTraits() public {
         MockStatement st = new MockStatement(ICredits(address(credits)));
@@ -94,7 +156,7 @@ contract TestCreditsTest is Test {
         CreditArt art = credits.art();
         string memory want = art.describe(credits.seedOf(1), credits.timestampOf(1)).colors;
         Batch.Filter memory fl;
-        fl.colors = keccak256(bytes(want));
+        fl.palettes = uint16(1 << _mask(want));
         uint256[] memory one = new uint256[](1);
         one[0] = 1;
         vm.startPrank(alice);

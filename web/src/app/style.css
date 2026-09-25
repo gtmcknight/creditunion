@@ -2079,3 +2079,133 @@ input[type='datetime-local'] {
 .card.can-join .sheet {
   box-shadow: 0 0 0 2px var(--fg);
 }
+
+/* ---------------------------------------------------------------- design: tabs on phones */
+
+.tabs {
+  display: none;
+}
+@media (max-width: 820px) {
+  .design {
+    gap: 12px;
+  }
+  .design-preview {
+    position: sticky;
+    top: 64px;
+    z-index: 5;
+    grid-template-columns: 88px minmax(0, 1fr);
+    gap: 0 14px;
+    align-items: center;
+    padding: 12px 0;
+    background: var(--bg);
+    box-shadow: 0 1px 0 var(--line);
+  }
+  .design-preview #preview {
+    grid-row: 1 / 3;
+  }
+  .design-preview .sheet {
+    gap: 0;
+  }
+  .design-preview .cell.mine::after {
+    display: none;
+  }
+  .design-stats {
+    grid-template-columns: 1fr 1fr;
+    border-top: 0;
+  }
+  .design-stats > div {
+    padding: 0;
+  }
+  .design-stats strong {
+    font-size: 22px;
+  }
+  .design-stats .small {
+    font-size: 11px;
+  }
+  .design-rules {
+    margin: 0;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .design-form header {
+    margin-bottom: 4px;
+  }
+  .tabs {
+    position: sticky;
+    top: 176px;
+    z-index: 4;
+    display: flex;
+    gap: 6px;
+    margin: 0 calc(-1 * var(--gutter));
+    padding: 8px var(--gutter);
+    overflow-x: auto;
+    scrollbar-width: none;
+    background: var(--bg);
+    box-shadow: 0 1px 0 var(--line);
+  }
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .tabs button {
+    position: relative;
+    flex: none;
+    height: 34px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 999px;
+    background: none;
+    color: var(--muted);
+    font: 500 13px var(--sans);
+    box-shadow: inset 0 0 0 1px var(--line-strong);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .tabs button[aria-selected='true'] {
+    background: var(--fg);
+    color: var(--bg);
+    box-shadow: none;
+  }
+  .tabs button.set::after {
+    content: '';
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .rule {
+    border-top: 0;
+    padding-top: 12px;
+  }
+}
+
+/* ---------------------------------------------------------------- preview ghosts, designs */
+
+.cell.ghost img {
+  opacity: 0.28;
+  filter: saturate(0.9);
+}
+:root[data-mode='dark'] .cell.ghost img {
+  opacity: 0.4;
+}
+.designs {
+  margin-top: 4px;
+}
+
+.cell.swap {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.cell.drop-slot {
+  opacity: 0.25;
+}
+.cell.lifted {
+  opacity: 1 !important;
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.35);
+}

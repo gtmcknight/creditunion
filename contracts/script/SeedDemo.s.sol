@@ -53,7 +53,7 @@ contract SeedDemo is Script {
     function later(BatchFactory f) external {
         Batch.Filter memory none;
         Batch.Filter memory cyan;
-        cyan.colors = keccak256("CMY");
+        cyan.palettes = 1 << 7; // CMY
 
         // 2. Auction running with bids
         address b2 = _open(f, keys[1], "Registered", none, 0, 250, _r(241, 30));

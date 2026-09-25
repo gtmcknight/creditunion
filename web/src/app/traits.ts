@@ -34,11 +34,19 @@ function window(from: number, to: number) {
   return from ? `Paid after ${dayTime.format(new Date(from * 1000))}` : `Paid before ${dayTime.format(new Date((to + 1) * 1000))}`;
 }
 
-/// "Colors CMY · Paid Sep 21 13:49–13:50 UTC · #1000–2000 · 80 listed", or "" for an open batch.
+/// Bit for a palette string ("CMY" → 7); the set bit is 1 << that.
+export const paletteBit = (p: string) => [...'CMYK'].reduce((m, ch, b) => (p.includes(ch) ? m | (1 << b) : m), 0);
+/// Labels a set selects, in display order.
+export const setLabels = (mask: number, labels: readonly string[], bitOf: (label: string, i: number) => number) =>
+  labels.filter((l, i) => mask & (1 << bitOf(l, i)));
+
+/// "Palette C, K · Print Registered · Paid Sep 21, 3:05–3:06 PM · #1000–2000 · 80 listed", or "" for an open batch.
 export function describeFilter(f: Summary['filter'], allowlistSize = 0) {
-  const parts = (Object.keys(LABEL) as TraitKey[])
-    .filter((k) => f[k] !== ZERO)
-    .map((k) => `${LABEL[k]} ${reverse.get(f[k]) ?? 'custom'}`);
+  const parts: string[] = [];
+  if (f.palettes) parts.push(`Palette ${setLabels(f.palettes, TRAITS.colors, (l) => paletteBit(l)).join(', ')}`);
+  if (f.prints) parts.push(`Print ${setLabels(f.prints, TRAITS.print, (_, i) => i).join(', ')}`);
+  if (f.weights) parts.push(`Weight ${setLabels(f.weights, TRAITS.weight, (_, i) => i).join(', ')}`);
+  if (f.eights) parts.push(`Eights ${Array.from({ length: 32 }, (_, n) => n).filter((n) => f.eights & (1 << n)).join(', ')}`);
   if (f.paidFrom || f.paidTo) parts.push(window(f.paidFrom, f.paidTo));
   if (f.idFrom || f.idTo) parts.push(f.idFrom && f.idTo ? `#${f.idFrom}–${f.idTo}` : f.idFrom ? `#${f.idFrom}+` : `up to #${f.idTo}`);
   if (allowlistSize) parts.push(`${allowlistSize} listed`);

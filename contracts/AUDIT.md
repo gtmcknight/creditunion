@@ -45,7 +45,10 @@ To take deposits before the Statement contract exists, the factory can deploy wi
 
 Batches carry an `Arrangement` (Deposit / MintTime / Number / Creator). `assembleOrdered(order)` lets the creator of a Creator-arranged batch burn with a hand-made permutation; the contract checks it is exactly the 80 pooled ids with no duplicates (O(80²), bounded). Within `CREATOR_ORDER_GRACE` (1 day of filling) only the creator can burn; afterwards anyone can, in deposit order, so a creator cannot stall. The adapter receives the arrangement value; MintTime/Number sorting happens in the adapter (insertion sort over 80). Covered by `test/Arrangement.t.sol` (8 tests). **Should be included in the external audit.**
 
-### Added after the review: eligibility
+### Added after the review: eligibility (updated: sets)
+
+Trait rules are now sets: `Filter.palettes` (uint16, bit = C|M|Y|K mask of the combination), `prints` (uint8, bit per registration kind), `weights` (uint8), `eights` (uint32, bit n = n eights); 0 means any. `passes()` derives each value from `CreditArt.describe` and tests the bit, so "cyan or black" and "with any number of eights" are single onchain rules. Label lookups use a bounded `_index` over a constant list. Covered by `test/TestCredits.t.sol::test_FilterAcceptsSets` and the eligibility suite.
+
 
 `Filter` gained a payment window (`paidFrom`/`paidTo`, via `timestampOf`) and a number range; `initialize` takes an allowlist of up to 200 ids stored in a mapping (bounded loop, duplicates tolerated, backwards ranges rejected). `passes()` checks allowlist → range → window → traits, so the expensive `describe` call happens last. Covered by `test/Eligibility.t.sol` (8 tests).
 

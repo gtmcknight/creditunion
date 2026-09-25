@@ -164,7 +164,7 @@ contract BatchTest is Test {
 
     function test_Filter() public {
         Batch.Filter memory f;
-        f.colors = keccak256("CMY"); // even ids only in the mock
+        f.palettes = 1 << 7; // CMY only; even ids in the mock
         uint256[] memory evens = new uint256[](10);
         for (uint256 i; i < 10; ++i) evens[i] = 2 + 2 * i;
         vm.prank(alice);

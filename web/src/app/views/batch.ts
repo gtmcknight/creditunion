@@ -1,3 +1,4 @@
+import Sortable from 'sortablejs';
 import { parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi } from '../abi';
 import { config, explorer, pub, send, session } from '../chain';
@@ -134,7 +135,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
       const until = new Date((s.filledAt + CREATOR_GRACE) * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric' });
       if (same(s.creator, session.account)) {
         return `<div class="box" id="arrange">
-          <div class="box-head"><h3>Arrange the sheet</h3><span class="muted small">Tap two Credits to swap</span></div>
+          <div class="box-head"><h3>Arrange the sheet</h3><span class="muted small">Drag to reorder, or tap two to swap</span></div>
           <div class="chips presets">${[['rating', 'Rarest first'], ['mint', 'Mint time'], ['number', 'Credit number'], ['deposit', 'Deposit order']].map(([k, l]) => `<button type="button" data-preset="${k}">${l}</button>`).join('')}</div>
           <button class="btn primary block" id="burn-ordered">Burn with this order</button>
           <p class="muted small">Until ${until} only you can burn, with your order. After that anyone can, in deposit order.</p>
@@ -507,24 +508,56 @@ async function loadRatings(
   const arrange = document.getElementById('arrange');
   if (!arrange) return;
   let order = [...b.ids];
-  let picked: number | null = null;
-  const holder = document.querySelector<HTMLElement>('.batch-art .sheet')!;
+  let picked: HTMLElement | null = null;
+  let sortable: Sortable | null = null;
+  const fromDom = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('.cell[data-id]')].map((c) => BigInt(c.dataset.id!));
+  /// Render once per preset; drags and taps then move cells in place, so Sortable can animate them.
   const draw = () => {
+    sortable?.destroy();
+    const holder = document.querySelector<HTMLElement>('.batch-art .sheet')!;
     holder.outerHTML = sheet(order, { closing: true });
-    const cells = document.querySelectorAll<HTMLElement>('.batch-art .sheet .cell[data-id]');
-    cells.forEach((c, i) => {
+    const sheetEl = document.querySelector<HTMLElement>('.batch-art .sheet')!;
+    picked = null;
+    sheetEl.querySelectorAll<HTMLElement>('.cell[data-id]').forEach((c) => {
       c.classList.add('swap');
-      c.classList.toggle('sel', i === picked);
       const r = rated[c.dataset.id!];
       if (r) c.title = `Credit #${c.dataset.id} · ${fmtScore(r.score)}`;
+      // Tap one Credit, then another: they swap places.
       c.addEventListener('click', () => {
-        if (picked === null) picked = i;
-        else {
-          [order[picked], order[i]] = [order[i], order[picked]];
-          picked = null;
+        if (!picked) {
+          picked = c;
+          c.classList.add('sel');
+          return;
         }
-        draw();
+        if (picked !== c) {
+          const a = picked, bEl = c;
+          const aNext = a.nextSibling;
+          if (aNext === bEl) sheetEl.insertBefore(bEl, a);
+          else {
+            sheetEl.insertBefore(a, bEl);
+            sheetEl.insertBefore(bEl, aNext);
+          }
+          order = fromDom(sheetEl);
+        }
+        picked.classList.remove('sel');
+        picked = null;
       });
+    });
+    // Drag a Credit to any slot: the others shift along, animated. Fallback mode so mouse and touch match.
+    sortable = Sortable.create(sheetEl, {
+      animation: 150,
+      forceFallback: true,
+      fallbackTolerance: 6,
+      draggable: '.cell[data-id]',
+      ghostClass: 'drop-slot',
+      dragClass: 'lifted',
+      onStart: () => {
+        picked?.classList.remove('sel');
+        picked = null;
+      },
+      onEnd: () => {
+        order = fromDom(sheetEl);
+      },
     });
   };
   const key = {

@@ -41,10 +41,10 @@ export type Summary = {
   creatorFeeBps: number;
   protocolFeeBps: number;
   filter: {
-    colors: `0x${string}`;
-    print: `0x${string}`;
-    weight: `0x${string}`;
-    eights: `0x${string}`;
+    palettes: number; // sets: one bit per accepted value, 0 = any (see Batch.Filter)
+    prints: number;
+    weights: number;
+    eights: number;
     paidFrom: number;
     paidTo: number;
     idFrom: bigint;

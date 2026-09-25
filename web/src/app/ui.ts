@@ -39,11 +39,23 @@ export const art = (id: bigint | number) => `/art/${config.credits.toLowerCase()
 /// `fresh`: cells from this index on drop in, in order.
 export function sheet(
   ids: readonly bigint[],
-  opts: { mine?: Set<string>; size?: 'sm' | 'lg'; closed?: boolean; closing?: boolean; fresh?: number } = {},
+  opts: {
+    mine?: Set<string>;
+    size?: 'sm' | 'lg';
+    closed?: boolean;
+    closing?: boolean;
+    fresh?: number;
+    /// Credits shown faded after `ids`: previews of what could fill the rest, with their own art URLs.
+    ghosts?: { id: bigint; src: string }[];
+  } = {},
 ) {
   const cells = Array.from({ length: 80 }, (_, i) => {
     const id = ids[i];
-    if (id === undefined) return `<i class="cell empty"></i>`;
+    if (id === undefined) {
+      const g = opts.ghosts?.[i - ids.length];
+      if (g) return `<i class="cell ghost" title="Credit #${g.id}"><img src="${g.src}" alt="" loading="lazy" decoding="async"></i>`;
+      return `<i class="cell empty"></i>`;
+    }
     const mine = opts.mine?.has(id.toString()) ? ' mine' : '';
     const fresh = opts.fresh !== undefined && i >= opts.fresh ? ` new" style="--k:${i - opts.fresh}` : '';
     return `<i class="cell${mine}${fresh}" data-id="${id}" title="Credit #${id}"><img src="${art(id)}" alt="" loading="lazy" decoding="async"></i>`;

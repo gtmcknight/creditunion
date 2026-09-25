@@ -2,7 +2,7 @@ import { decodeEventLog, parseEther } from 'viem';
 import { creditsAbi, factoryAbi } from '../abi';
 import { config, send, session } from '../chain';
 import { ARRANGEMENTS, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Rated } from '../data';
-import { hashTrait, TRAITS } from '../traits';
+import { paletteBit, TRAITS } from '../traits';
 import { $$, art, errText, esc, sheet, toast } from '../ui';
 
 const CHUNK = 40;
@@ -21,12 +21,12 @@ const EIGHTS_MAX = 5;
 
 type Minutes = [number, number][];
 
-/// The rules being designed. Traits hold the contract's label strings ('' = any).
+/// The rules being designed. Trait sets are bitmasks in the contract's encoding (0 = any).
 type Rules = {
-  palette: string;
-  print: string;
-  weight: string;
-  eights: string;
+  palettes: number;
+  prints: number;
+  weights: number;
+  eights: number;
   minuteFrom: number; // index into minutes, -1 = any
   minuteTo: number;
   idFrom: number;
@@ -34,7 +34,6 @@ type Rules = {
   list: number[];
 };
 
-const paletteMask = (p: string) => [...'CMYK'].reduce((m, ch, b) => (p.includes(ch) ? m | (1 << b) : m), 0);
 const weightOf = (r: Rated) => {
   const marks = r.traits.activeBits, cap = r.traits.palette.length * 64;
   if (marks * 256 >= 120 * cap && marks * 256 <= 136 * cap) return 'even';
@@ -79,6 +78,18 @@ const weightGlyph = (name: string) => {
 
 const eightsChip = (n: number) => (n === 0 ? 'no 8s' : '8'.repeat(n));
 
+/// Starting points. Rules use the contract's set encoding; `pattern` only shapes the preview.
+const DESIGNS: { name: string; rules: Partial<Rules>; arrangement?: number; pattern?: 'checkered'; minute80?: number }[] = [
+  { name: 'All cyan', rules: { palettes: 1 << 1 } },
+  { name: 'All yellow', rules: { palettes: 1 << 4 } },
+  { name: 'Full CMYK', rules: { palettes: 1 << 15 } },
+  { name: 'Checkered', rules: { palettes: (1 << 1) | (1 << 8) }, arrangement: 3, pattern: 'checkered' },
+  { name: 'Registered only', rules: { prints: 1 } },
+  { name: 'With an 8', rules: { eights: 0b111110 } },
+  { name: 'One minute', rules: {}, minute80: 0, arrangement: 1 },
+  { name: 'First 80', rules: { idFrom: 1, idTo: 80 }, arrangement: 2 },
+];
+
 // ---------------------------------------------------------------- page
 
 export async function create(app: HTMLElement) {
@@ -96,7 +107,10 @@ export async function create(app: HTMLElement) {
     protocolFeeBps(),
     fetch('/minutes.json').then((r) => r.json() as Promise<Minutes>).catch(() => [] as Minutes),
   ]);
-  const rules: Rules = { palette: '', print: '', weight: '', eights: '', minuteFrom: -1, minuteTo: -1, idFrom: 0, idTo: 0, list: [] };
+  const rules: Rules = { palettes: 0, prints: 0, weights: 0, eights: 0, minuteFrom: -1, minuteTo: -1, idFrom: 0, idTo: 0, list: [] };
+  const artOf = (id: bigint) => (config.chainId === 1 ? art(id) : `/art/mainnet/${id}.svg`);
+  let ghosts: { id: bigint; palette: number }[] = [];
+  let pattern: 'none' | 'checkered' = 'none';
   const picks = new Set<string>();
   const last = Math.max(0, minutes.length - 1);
 
@@ -112,27 +126,32 @@ export async function create(app: HTMLElement) {
     </div>
 
     <form id="create" class="design-form" novalidate>
-      <header><h1>Design a batch</h1><p class="lede">Tap rules to see who fits. Everything here is fixed once the batch opens, and shown to everyone before they join.</p></header>
+      <header><h1>Design a batch</h1><p class="lede">Tap rules to see who fits; the sheet fills with real Credits that do. Everything here is fixed once the batch opens, and shown to everyone before they join.</p>
+      <div class="chips presets designs" id="designs">${DESIGNS.map((d, i) => `<button type="button" data-design="${i}">${d.name}</button>`).join('')}</div></header>
+      <nav class="tabs" id="tabs" aria-label="Sections">${[
+        ['name', 'Name'], ['palette', 'Palette'], ['print', 'Print'], ['weight', 'Weight'], ['eights', 'Eights'], ['time', 'Time'],
+        ['numbers', 'Numbers'], ['list', 'List'], ['order', 'Order'], ['terms', 'Terms'], ['credits', 'Credits'],
+      ].map(([k, l], i) => `<button type="button" data-tab-for="${k}" aria-selected="${i === 0}">${l}</button>`).join('')}</nav>
 
-      <section class="rule"><label class="rule-head" for="name">Name</label><input id="name" maxlength="64" placeholder="e.g. Cyan Minute" autocomplete="off"></section>
+      <section class="rule" data-tab="name"><label class="rule-head" for="name">Name</label><input id="name" maxlength="64" placeholder="e.g. Cyan Minute" autocomplete="off"></section>
 
-      <section class="rule"><div class="rule-head">Palette <span class="muted" id="palette-pick">Any</span></div>
-        <div class="tiles" data-rule="palette">${TRAITS.colors.map((p) => `<button type="button" class="tile" data-v="${p}" aria-pressed="false" title="${p}">${swatch(p)}<span>${p}</span></button>`).join('')}</div>
+      <section class="rule" data-tab="palette"><div class="rule-head">Palette <span class="muted" id="palettes-pick">Any</span></div>
+        <div class="tiles" data-rule="palettes">${TRAITS.colors.map((p) => `<button type="button" class="tile" data-bit="${paletteBit(p)}" aria-pressed="false" title="${p}">${swatch(p)}<span>${p}</span></button>`).join('')}</div>
       </section>
 
-      <section class="rule"><div class="rule-head">Print <span class="muted" id="print-pick">Any</span></div>
-        <div class="tiles" data-rule="print">${PRINTS.map((p) => `<button type="button" class="tile" data-v="${p}" aria-pressed="false" title="${p}">${printGlyph(p)}<span>${p}</span></button>`).join('')}</div>
+      <section class="rule" data-tab="print"><div class="rule-head">Print <span class="muted" id="prints-pick">Any</span></div>
+        <div class="tiles" data-rule="prints">${PRINTS.map((p, i) => `<button type="button" class="tile" data-bit="${i}" aria-pressed="false" title="${p}">${printGlyph(p)}<span>${p}</span></button>`).join('')}</div>
       </section>
 
-      <section class="rule"><div class="rule-head">Weight <span class="muted" id="weight-pick">Any</span></div>
-        <div class="tiles" data-rule="weight">${WEIGHTS.map((w) => `<button type="button" class="tile" data-v="${w}" aria-pressed="false" title="${w}">${weightGlyph(w)}<span>${w}</span></button>`).join('')}</div>
+      <section class="rule" data-tab="weight"><div class="rule-head">Weight <span class="muted" id="weights-pick">Any</span></div>
+        <div class="tiles" data-rule="weights">${WEIGHTS.map((w, i) => `<button type="button" class="tile" data-bit="${i}" aria-pressed="false" title="${w}">${weightGlyph(w)}<span>${w}</span></button>`).join('')}</div>
       </section>
 
-      <section class="rule"><div class="rule-head">Eights <span class="muted" id="eights-pick">Any</span></div>
-        <div class="chips presets" data-rule="eights">${Array.from({ length: EIGHTS_MAX + 1 }, (_, n) => `<button type="button" data-v="${TRAITS.eights[n]}" aria-pressed="false">${eightsChip(n)}</button>`).join('')}</div>
+      <section class="rule" data-tab="eights"><div class="rule-head">Eights <span class="muted" id="eights-pick">Any</span></div>
+        <div class="chips presets" data-rule="eights">${Array.from({ length: EIGHTS_MAX + 1 }, (_, n) => `<button type="button" data-bit="${n}" aria-pressed="false">${eightsChip(n)}</button>`).join('')}</div>
       </section>
 
-      <section class="rule"><div class="rule-head">Paid during <span id="win-text">Any time</span></div>
+      <section class="rule" data-tab="time"><div class="rule-head">Paid during <span id="win-text">Any time</span></div>
         <div class="timeline">
           <svg id="hist" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
           <div class="dual"><input type="range" id="win-from" min="0" max="${last}" value="0" aria-label="Window start"><input type="range" id="win-to" min="0" max="${last}" value="${last}" aria-label="Window end"></div>
@@ -141,26 +160,26 @@ export async function create(app: HTMLElement) {
         <p class="hint" id="win-count">Drag the handles over the mint. Each bar is a minute.</p>
       </section>
 
-      <section class="rule"><div class="rule-head">Credit numbers <span class="muted" id="id-hint">Any</span></div>
+      <section class="rule" data-tab="numbers"><div class="rule-head">Credit numbers <span class="muted" id="id-hint">Any</span></div>
         <div class="pair"><label class="select"><span>From</span><input id="id-from" inputmode="numeric" placeholder="1"></label><label class="select"><span>To</span><input id="id-to" inputmode="numeric" placeholder="122154"></label></div>
       </section>
 
-      <section class="rule"><div class="rule-head">Only these Credits <span class="muted" id="allow-hint">No list</span></div>
+      <section class="rule" data-tab="list"><div class="rule-head">Only these Credits <span class="muted" id="allow-hint">No list</span></div>
         <textarea id="allow" rows="2" placeholder="Credit numbers, separated by spaces or commas · up to 200"></textarea>
       </section>
 
-      <section class="rule"><div class="rule-head">Order on the Statement</div>
+      <section class="rule" data-tab="order"><div class="rule-head">Order on the Statement</div>
         <div class="seg wrap">${ARRANGEMENTS.map((l, i) => `<label><input type="radio" name="arr" value="${i}" ${i === 0 ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
         <p class="hint" id="arr-hint">${ARR_HINTS[0]}</p>
       </section>
 
-      <section class="rule split3">
+      <section class="rule split3" data-tab="terms">
         <div><div class="rule-head">Your fee</div><div class="field"><input id="cfee" inputmode="decimal" placeholder="0" autocomplete="off"><span>%</span></div><p class="hint" id="cfee-hint">0–10 % of the sale.</p></div>
         <div><div class="rule-head">Reserve</div><div class="field"><input id="reserve" inputmode="decimal" placeholder="0" autocomplete="off"><span>ETH</span></div><p class="hint">Minimum first bid, for 7 days.</p></div>
         <div><div class="rule-head">Deadline</div><div class="seg">${DURATIONS.map((d) => `<label><input type="radio" name="dur" value="${d}" ${d === 30 ? 'checked' : ''}><span>${d}d</span></label>`).join('')}</div><p class="hint">Then everyone withdraws.</p></div>
       </section>
 
-      <section class="rule"><div class="rule-head">Your Credits <span class="muted num" id="n">Min ${min}</span><button type="button" class="link small" id="all">Select all that fit</button></div>
+      <section class="rule" data-tab="credits"><div class="rule-head">Your Credits <span class="muted num" id="n">Min ${min}</span><button type="button" class="link small" id="all">Select all that fit</button></div>
         <div class="picker lg" id="picker">${
           owned.length
             ? owned.map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="false" title="Credit #${id}"><img src="${art(id)}" alt="Credit #${id}" loading="lazy"></button>`).join('')
@@ -193,11 +212,11 @@ export async function create(app: HTMLElement) {
     if (rules.list.length && !rules.list.includes(Number(id))) return false;
     if (rules.idFrom && Number(id) < rules.idFrom) return false;
     if (rules.idTo && Number(id) > rules.idTo) return false;
-    if (!r) return !rules.palette && !rules.print && !rules.weight && !rules.eights && rules.minuteFrom < 0 && rules.minuteTo < 0;
-    if (rules.palette && r.traits.palette !== rules.palette) return false;
-    if (rules.print && r.traits.registration !== rules.print) return false;
-    if (rules.weight && weightOf(r) !== rules.weight) return false;
-    if (rules.eights && TRAITS.eights[r.traits.eights] !== rules.eights) return false;
+    if (!r) return !rules.palettes && !rules.prints && !rules.weights && !rules.eights && rules.minuteFrom < 0 && rules.minuteTo < 0;
+    if (rules.palettes && !(rules.palettes & (1 << paletteBit(r.traits.palette)))) return false;
+    if (rules.prints && !(rules.prints & (1 << PRINTS.indexOf(r.traits.registration as (typeof PRINTS)[number])))) return false;
+    if (rules.weights && !(rules.weights & (1 << WEIGHTS.indexOf(weightOf(r) as (typeof WEIGHTS)[number])))) return false;
+    if (rules.eights && !(rules.eights & (1 << r.traits.eights))) return false;
     if (rules.minuteFrom >= 0 && r.paidAt < minutes[rules.minuteFrom][0]) return false;
     if (rules.minuteTo >= 0 && r.paidAt > minutes[rules.minuteTo][0] + 59) return false;
     return true;
@@ -212,10 +231,10 @@ export async function create(app: HTMLElement) {
 
   const describe = () => {
     const parts: string[] = [];
-    if (rules.palette) parts.push(`Palette ${rules.palette}`);
-    if (rules.print) parts.push(`Print ${rules.print}`);
-    if (rules.weight) parts.push(`Weight ${rules.weight}`);
-    if (rules.eights) parts.push(`Eights ${rules.eights}`);
+    if (rules.palettes) parts.push(`Palette ${TRAITS.colors.filter((p) => rules.palettes & (1 << paletteBit(p))).join(', ')}`);
+    if (rules.prints) parts.push(`Print ${PRINTS.filter((_, i) => rules.prints & (1 << i)).join(', ')}`);
+    if (rules.weights) parts.push(`Weight ${WEIGHTS.filter((_, i) => rules.weights & (1 << i)).join(', ')}`);
+    if (rules.eights) parts.push(`Eights ${Array.from({ length: EIGHTS_MAX + 1 }, (_, n) => n).filter((n) => rules.eights & (1 << n)).join(', ')}`);
     if (rules.minuteFrom >= 0 || rules.minuteTo >= 0) parts.push(document.getElementById('win-text')!.textContent!.replace(/^/, 'Paid '));
     if (rules.idFrom || rules.idTo) parts.push(rules.idFrom && rules.idTo ? `#${rules.idFrom}–${rules.idTo}` : rules.idFrom ? `#${rules.idFrom}+` : `up to #${rules.idTo}`);
     if (rules.list.length) parts.push(`${rules.list.length} listed`);
@@ -225,7 +244,7 @@ export async function create(app: HTMLElement) {
   function refresh() {
     const fit = owned.filter(qualifies);
     for (const id of [...picks]) if (!fit.some((f) => f.toString() === id)) picks.delete(id);
-    document.getElementById('preview')!.innerHTML = sheet(fit.slice(0, 80), { mine: picks });
+    drawPreview(fit);
     document.getElementById('st-mine')!.textContent = String(fit.length);
     document.getElementById('rules-text')!.textContent = describe();
     $$<HTMLButtonElement>('.pick', app).forEach((p) => {
@@ -248,10 +267,10 @@ export async function create(app: HTMLElement) {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            palette: paletteMask(rules.palette),
-            print: rules.print ? PRINTS.indexOf(rules.print as (typeof PRINTS)[number]) : -1,
-            weight: rules.weight ? WEIGHTS.indexOf(rules.weight as (typeof WEIGHTS)[number]) : -1,
-            eights: rules.eights ? TRAITS.eights.indexOf(rules.eights as (typeof TRAITS.eights)[number]) : -1,
+            palettes: rules.palettes,
+            prints: rules.prints,
+            weights: rules.weights,
+            eights: rules.eights,
             minuteFrom: rules.minuteFrom,
             minuteTo: rules.minuteTo,
             idFrom: rules.idFrom,
@@ -259,8 +278,11 @@ export async function create(app: HTMLElement) {
             list: rules.list.slice(0, 200),
           }),
         });
-        const d = (await r.json()) as { count?: number };
-        if (seq === editionSeq && typeof d.count === 'number') el.textContent = d.count.toLocaleString();
+        const d = (await r.json()) as { count?: number; sample?: number[]; palettes?: number[] };
+        if (seq !== editionSeq) return;
+        if (typeof d.count === 'number') el.textContent = d.count.toLocaleString();
+        ghosts = (d.sample ?? []).map((id, i) => ({ id: BigInt(id), palette: d.palettes?.[i] ?? 0 }));
+        drawPreview(owned.filter(qualifies));
       } catch {
         if (seq === editionSeq) el.textContent = '–';
       }
@@ -268,14 +290,53 @@ export async function create(app: HTMLElement) {
   }
 
   // ---------------------------------------------------------------- trait tiles (tap to pick, tap again to clear)
-  for (const key of ['palette', 'print', 'weight', 'eights'] as const) {
-    const group = app.querySelector<HTMLElement>(`[data-rule="${key}"]`)!;
-    group.addEventListener('click', (e) => {
-      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-v]');
+  /// Your qualifying Credits solid, then real matching Credits from the edition, faded, up to 80.
+  /// The checkered design alternates the two palettes so the pattern is visible before anyone joins.
+  function drawPreview(fit: bigint[]) {
+    const mineIds = fit.slice(0, 80);
+    const mineSet = new Set(mineIds.map(String));
+    let rest = ghosts.filter((g) => !mineSet.has(g.id.toString()));
+    if (pattern === 'checkered') {
+      const bits = TRAITS.colors.map(paletteBit).filter((b) => rules.palettes & (1 << b));
+      const pools = bits.map((b) => rest.filter((g) => g.palette === b));
+      const out: typeof rest = [];
+      for (let i = 0; out.length < 80 - mineIds.length; i++) {
+        const row = Math.floor(i / 8), col = i % 8;
+        const pool = pools[(row + col) % Math.max(1, pools.length)];
+        const g = pool?.shift();
+        if (!g) break;
+        out.push(g);
+      }
+      rest = out;
+    }
+    document.getElementById('preview')!.innerHTML = sheet(mineIds, {
+      mine: picks,
+      ghosts: rest.slice(0, 80 - mineIds.length).map((g) => ({ id: g.id, src: artOf(g.id) })),
+    });
+  }
+
+  const SET_KEYS = ['palettes', 'prints', 'weights', 'eights'] as const;
+  const labelsFor = (key: (typeof SET_KEYS)[number]) => {
+    const m = rules[key];
+    if (!m) return 'Any';
+    if (key === 'palettes') return TRAITS.colors.filter((p) => m & (1 << paletteBit(p))).join(', ');
+    if (key === 'prints') return PRINTS.filter((_, i) => m & (1 << i)).join(', ');
+    if (key === 'weights') return WEIGHTS.filter((_, i) => m & (1 << i)).join(', ');
+    return Array.from({ length: EIGHTS_MAX + 1 }, (_, n) => n).filter((n) => m & (1 << n)).map(eightsChip).join(', ');
+  };
+  const syncTiles = () => {
+    for (const key of SET_KEYS) {
+      app.querySelectorAll<HTMLElement>(`[data-rule="${key}"] [data-bit]`).forEach((b) => b.setAttribute('aria-pressed', String(!!(rules[key] & (1 << Number(b.dataset.bit))))));
+      document.getElementById(`${key}-pick`)!.textContent = labelsFor(key);
+    }
+  };
+  for (const key of SET_KEYS) {
+    app.querySelector<HTMLElement>(`[data-rule="${key}"]`)!.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-bit]');
       if (!btn) return;
-      rules[key] = rules[key] === btn.dataset.v ? '' : btn.dataset.v!;
-      group.querySelectorAll('[data-v]').forEach((b) => b.setAttribute('aria-pressed', String((b as HTMLElement).dataset.v === rules[key])));
-      document.getElementById(`${key}-pick`)!.textContent = rules[key] || 'Any';
+      rules[key] ^= 1 << Number(btn.dataset.bit); // tap to add, tap again to remove
+      pattern = 'none';
+      syncTiles();
       refresh();
     });
   }
@@ -436,10 +497,10 @@ export async function create(app: HTMLElement) {
     const arr = Number((app.querySelector('input[name=arr]:checked') as HTMLInputElement).value);
     const ids = [...picks].map(BigInt);
     const f = {
-      colors: hashTrait(rules.palette),
-      print: hashTrait(rules.print),
-      weight: hashTrait(rules.weight),
-      eights: hashTrait(rules.eights),
+      palettes: rules.palettes,
+      prints: rules.prints,
+      weights: rules.weights,
+      eights: rules.eights,
       paidFrom: BigInt(rules.minuteFrom >= 0 ? minutes[rules.minuteFrom][0] : 0),
       paidTo: BigInt(rules.minuteTo >= 0 ? minutes[rules.minuteTo][0] + 59 : 0),
       idFrom: BigInt(rules.idFrom),
@@ -476,6 +537,59 @@ export async function create(app: HTMLElement) {
       refresh();
     }
   });
+
+  // Built-in designs: a starting point you can keep tweaking.
+  document.getElementById('designs')!.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-design]');
+    if (!btn) return;
+    const d = DESIGNS[Number(btn.dataset.design)];
+    Object.assign(rules, { palettes: 0, prints: 0, weights: 0, eights: 0, minuteFrom: -1, minuteTo: -1, idFrom: 0, idTo: 0, list: [] }, d.rules);
+    pattern = d.pattern ?? 'none';
+    if (d.minute80 !== undefined) {
+      const m = eighty[d.minute80];
+      if (m) rules.minuteFrom = rules.minuteTo = m[1];
+    }
+    from.value = String(Math.max(0, rules.minuteFrom));
+    to.value = String(rules.minuteTo >= 0 ? rules.minuteTo : last);
+    idFromEl.value = rules.idFrom ? String(rules.idFrom) : '';
+    idToEl.value = rules.idTo ? String(rules.idTo) : '';
+    allowEl.value = '';
+    (app.querySelector(`input[name=arr][value="${d.arrangement ?? 0}"]`) as HTMLInputElement).checked = true;
+    document.getElementById('arr-hint')!.textContent = ARR_HINTS[d.arrangement ?? 0];
+    document.querySelectorAll<HTMLButtonElement>('#designs [data-design]').forEach((b) => b.setAttribute('aria-pressed', String(b === btn)));
+    syncTiles();
+    drawWindow();
+    readIds();
+  });
+
+  // On narrow screens the sections become tabs; a rule that is set shows a dot on its tab.
+  const tabs = document.getElementById('tabs')!;
+  const narrow = matchMedia('(max-width: 820px)');
+  const sections = [...app.querySelectorAll<HTMLElement>('.rule[data-tab]')];
+  let active = 'name';
+  const applyTabs = () => {
+    sections.forEach((s) => (s.hidden = narrow.matches && s.dataset.tab !== active));
+    tabs.querySelectorAll<HTMLButtonElement>('[data-tab-for]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tabFor === active)));
+  };
+  tabs.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-tab-for]');
+    if (!b) return;
+    active = b.dataset.tabFor!;
+    applyTabs();
+    b.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+  });
+  narrow.addEventListener('change', applyTabs);
+  applyTabs();
+  const markTabs = () => {
+    const set: Record<string, boolean> = {
+      palettes: !!rules.palettes, prints: !!rules.prints, weights: !!rules.weights, eights: !!rules.eights,
+      time: rules.minuteFrom >= 0 || rules.minuteTo >= 0, numbers: !!(rules.idFrom || rules.idTo), list: rules.list.length > 0,
+      credits: picks.size > 0, name: !!(document.getElementById('name') as HTMLInputElement).value.trim(),
+    };
+    tabs.querySelectorAll<HTMLButtonElement>('[data-tab-for]').forEach((b) => b.classList.toggle('set', !!set[b.dataset.tabFor!]));
+  };
+  app.addEventListener('input', markTabs);
+  app.addEventListener('click', () => requestAnimationFrame(markTabs));
 
   refresh();
 }

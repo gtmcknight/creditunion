@@ -44,7 +44,7 @@ export function docs(app: HTMLElement) {
       title: 'Eligibility',
       body: `<p>Who may join is set when the batch opens and enforced by the contract on every deposit. Rules combine.</p>` +
         rules([
-          ['Traits', 'One required value for any of Colors, Print, Weight or Eights, read from Jack’s own art contract onchain, so a filter can never be fooled.'],
+          ['Traits', 'Any set of accepted values for Palette, Print, Weight and Eights: one, several, or all. Read from Jack’s own art contract onchain, so a filter can never be fooled.'],
           ['Payment window', 'Only Credits paid for between two moments, e.g. a single minute of the mint.'],
           ['Credit numbers', 'Only Credits in a numeric range.'],
           ['A list', 'Only specific Credits, up to 200 numbers, stored in the batch.'],

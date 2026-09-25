@@ -45,6 +45,7 @@ const RPC_METHODS = new Set([
   'eth_getBlockByNumber',
 ]);
 const MAX_RPC_BODY = 64_000;
+const MAINNET_CREDITS: Address = '0x97630aA70AB14ed9883B41dAfccBc11349723043';
 const MAX_RPC_BATCH = 50;
 
 const rpcUrl = (env: Env) => env.RPC_URL || env.FALLBACK_RPC;
@@ -144,10 +145,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       const list = Array.isArray(b.list) ? b.list : [];
       if (list.length > 200 || list.some((x) => typeof x !== 'number' || !Number.isInteger(x) || x < 1 || x > 1e7)) throw 0;
       rules = {
-        palette: int('palette', 0, 15, 0),
-        print: int('print', -1, 5, -1),
-        weight: int('weight', -1, 3, -1),
-        eights: int('eights', -1, 31, -1),
+        palettes: int('palettes', 0, 0xffff, 0),
+        prints: int('prints', 0, 63, 0),
+        weights: int('weights', 0, 15, 0),
+        eights: int('eights', 0, 0x7fffffff, 0),
         minuteFrom: int('minuteFrom', -1, 4000, -1),
         minuteTo: int('minuteTo', -1, 4000, -1),
         idFrom: int('idFrom', 0, 1e7, 0),
@@ -248,23 +249,29 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     return res;
   }
 
-  const art = url.pathname.match(/^\/art\/(?:0x[0-9a-fA-F]{40}\/)?(\d{1,7})\.svg$/);
+  // /art/<id>.svg and /art/<contract>/<id>.svg: the configured Credits. /art/mainnet/<id>.svg: the real
+  // edition, for previews of Credits you don't hold, on any network.
+  const art = url.pathname.match(/^\/art\/(?:(mainnet)\/|0x[0-9a-fA-F]{40}\/)?(\d{1,7})\.svg$/);
   if (art) {
+    const real = art[1] === 'mainnet' && env.CHAIN_ID !== '1';
+    const creditsAddr = real ? MAINNET_CREDITS : env.CREDITS;
     // Keyed by contract too: art never changes for a given Credits, but the contract can (testnets).
     const cache = caches.default;
-    const key = new Request(`${url.origin}/art/${env.CREDITS.toLowerCase()}/${art[1]}.svg`);
+    const key = new Request(`${url.origin}/art/${creditsAddr.toLowerCase()}/${art[2]}.svg`);
     const hit = await cache.match(key);
     if (hit) return hit;
-    if (await limited(env.RL_ART, req)) return text('slow down', 429); // a page loads up to 80 at once
-    const c = client(env);
-    const id = BigInt(art[1]);
+    if (await limited(env.RL_ART, req)) return text('slow down', 429);
+    const c = real
+      ? createPublicClient({ transport: http(env.ENS_RPC || 'https://eth.drpc.org', { timeout: 8_000 }) })
+      : client(env);
+    const id = BigInt(art[2]);
     // Even opened directly, the SVG can run nothing and reach nothing.
     const svgHeaders = { 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" };
     try {
       const [seed, ts, artAddr] = await Promise.all([
-        c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'seedOf', args: [id] }),
-        c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'timestampOf', args: [id] }),
-        c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'art' }),
+        c.readContract({ address: creditsAddr, abi: creditsAbi, functionName: 'seedOf', args: [id] }),
+        c.readContract({ address: creditsAddr, abi: creditsAbi, functionName: 'timestampOf', args: [id] }),
+        c.readContract({ address: creditsAddr, abi: creditsAbi, functionName: 'art' }),
       ]);
       if (/^0x0+$/.test(seed)) {
         const miss = new Response('no such credit', { status: 404, headers: { 'cache-control': 'public, max-age=300' } });

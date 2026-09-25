@@ -5,7 +5,7 @@ import type { Address } from 'viem';
 import { batchAbi } from './abi';
 import { pub, session } from './chain';
 import { myCredits, ratings, type Listed, type Rated, type Summary } from './data';
-import { traitLabel, TRAITS } from './traits';
+import { paletteBit, TRAITS } from './traits';
 
 let cache: { account: string; owned: bigint[]; traits: Map<string, Rated> } | null = null;
 
@@ -43,20 +43,15 @@ export function fitsRules(s: Summary, id: bigint, r: Rated | undefined): boolean
   const f = s.filter;
   if (f.idFrom && id < f.idFrom) return false;
   if (f.idTo && id > f.idTo) return false;
-  const wantsTraits = [f.colors, f.print, f.weight, f.eights].some((h) => !/^0x0+$/.test(h)) || f.paidFrom || f.paidTo;
+  const wantsTraits = f.palettes || f.prints || f.weights || f.eights || f.paidFrom || f.paidTo;
   if (!wantsTraits) return true;
   if (!r) return false;
   if (f.paidFrom && r.paidAt < f.paidFrom) return false;
   if (f.paidTo && r.paidAt > f.paidTo) return false;
-  const want = (h: `0x${string}`) => (/^0x0+$/.test(h) ? null : (traitLabel(h) ?? '∅'));
-  const c = want(f.colors);
-  if (c !== null && r.traits.palette !== c) return false;
-  const p = want(f.print);
-  if (p !== null && r.traits.registration !== p) return false;
-  const w = want(f.weight);
-  if (w !== null && weightOf(r) !== w) return false;
-  const e = want(f.eights);
-  if (e !== null && TRAITS.eights[r.traits.eights] !== e) return false;
+  if (f.palettes && !(f.palettes & (1 << paletteBit(r.traits.palette)))) return false;
+  if (f.prints && !(f.prints & (1 << TRAITS.print.indexOf(r.traits.registration as (typeof TRAITS.print)[number])))) return false;
+  if (f.weights && !(f.weights & (1 << TRAITS.weight.indexOf(weightOf(r) as (typeof TRAITS.weight)[number])))) return false;
+  if (f.eights && !(f.eights & (1 << r.traits.eights))) return false;
   return true;
 }
 

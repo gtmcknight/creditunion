@@ -64,13 +64,16 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         Settled
     }
 
-    /// @notice Who may join. Trait fields are keccak256 of a required CreditArt.describe value, or 0 for any.
+    /// @notice Who may join. Trait fields are sets, one bit per accepted value, 0 for any:
+    ///         palettes: bit (C=1 | M=2 | Y=4 | K=8) of the plate combination, so CMY is bit 7;
+    ///         prints: bit 0 Registered, 1 Nudge, 2 Slip, 3 Skew, 4 Drift, 5 Loose;
+    ///         weights: bit 0 even, 1 lean, 2 sparse, 3 extreme; eights: bit n for n eights.
     ///         Ranges are inclusive; 0 means unbounded. An explicit allowlist is set separately at creation.
     struct Filter {
-        bytes32 colors;
-        bytes32 print;
-        bytes32 weight;
-        bytes32 eights;
+        uint16 palettes;
+        uint8 prints;
+        uint8 weights;
+        uint32 eights;
         uint64 paidFrom; // Credits paid for at or after this time
         uint64 paidTo; // ...and at or before this one
         uint256 idFrom; // Credit numbers from...
@@ -320,12 +323,46 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
             uint64 t = credits.timestampOf(id);
             if (t < f.paidFrom || (f.paidTo != 0 && t > f.paidTo)) return false;
         }
-        if (f.colors == 0 && f.print == 0 && f.weight == 0 && f.eights == 0) return true;
+        if (f.palettes == 0 && f.prints == 0 && f.weights == 0 && f.eights == 0) return true;
         ICreditArt.Read memory r = art.describe(credits.seedOf(id), credits.timestampOf(id));
-        return (f.colors == 0 || f.colors == keccak256(bytes(r.colors)))
-            && (f.print == 0 || f.print == keccak256(bytes(r.register)))
-            && (f.weight == 0 || f.weight == keccak256(bytes(r.weight)))
-            && (f.eights == 0 || f.eights == keccak256(bytes(r.eightsLabel)));
+        if (f.palettes != 0 && f.palettes & (1 << _paletteMask(r.colors)) == 0) return false;
+        if (f.prints != 0 && f.prints & (1 << _index(r.register, PRINTS)) == 0) return false;
+        if (f.weights != 0 && f.weights & (1 << _index(r.weight, WEIGHTS)) == 0) return false;
+        if (f.eights != 0 && (r.eights > 31 || f.eights & (1 << r.eights) == 0)) return false;
+        return true;
+    }
+
+    string internal constant PRINTS = "Registered|Nudge|Slip|Skew|Drift|Loose";
+    string internal constant WEIGHTS = "even|lean|sparse|extreme";
+
+    /// @dev C=1, M=2, Y=4, K=8 from the describe() letters.
+    function _paletteMask(string memory colors) internal pure returns (uint256 m) {
+        bytes memory b = bytes(colors);
+        for (uint256 i; i < b.length; ++i) {
+            if (b[i] == "C") m |= 1;
+            else if (b[i] == "M") m |= 2;
+            else if (b[i] == "Y") m |= 4;
+            else if (b[i] == "K") m |= 8;
+        }
+    }
+
+    /// @dev Position of `value` in a '|'-separated list; 255 if absent (which no set bit can match).
+    function _index(string memory value, string memory list) internal pure returns (uint256 idx) {
+        bytes memory v = bytes(value);
+        bytes memory l = bytes(list);
+        uint256 start;
+        for (uint256 i; i <= l.length; ++i) {
+            if (i == l.length || l[i] == "|") {
+                if (i - start == v.length) {
+                    bool same = true;
+                    for (uint256 j; j < v.length && same; ++j) same = l[start + j] == v[j];
+                    if (same) return idx;
+                }
+                start = i + 1;
+                ++idx;
+            }
+        }
+        return 255;
     }
 
     // ---------------------------------------------------------------- assemble

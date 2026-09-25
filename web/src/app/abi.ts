@@ -489,24 +489,24 @@ export const batchAbi = [
         "internalType": "struct Batch.Filter",
         "components": [
           {
-            "name": "colors",
-            "type": "bytes32",
-            "internalType": "bytes32"
+            "name": "palettes",
+            "type": "uint16",
+            "internalType": "uint16"
           },
           {
-            "name": "print",
-            "type": "bytes32",
-            "internalType": "bytes32"
+            "name": "prints",
+            "type": "uint8",
+            "internalType": "uint8"
           },
           {
-            "name": "weight",
-            "type": "bytes32",
-            "internalType": "bytes32"
+            "name": "weights",
+            "type": "uint8",
+            "internalType": "uint8"
           },
           {
             "name": "eights",
-            "type": "bytes32",
-            "internalType": "bytes32"
+            "type": "uint32",
+            "internalType": "uint32"
           },
           {
             "name": "paidFrom",
@@ -592,24 +592,24 @@ export const batchAbi = [
         "internalType": "struct Batch.Filter",
         "components": [
           {
-            "name": "colors",
-            "type": "bytes32",
-            "internalType": "bytes32"
+            "name": "palettes",
+            "type": "uint16",
+            "internalType": "uint16"
           },
           {
-            "name": "print",
-            "type": "bytes32",
-            "internalType": "bytes32"
+            "name": "prints",
+            "type": "uint8",
+            "internalType": "uint8"
           },
           {
-            "name": "weight",
-            "type": "bytes32",
-            "internalType": "bytes32"
+            "name": "weights",
+            "type": "uint8",
+            "internalType": "uint8"
           },
           {
             "name": "eights",
-            "type": "bytes32",
-            "internalType": "bytes32"
+            "type": "uint32",
+            "internalType": "uint32"
           },
           {
             "name": "paidFrom",
@@ -1009,24 +1009,24 @@ export const batchAbi = [
             "internalType": "struct Batch.Filter",
             "components": [
               {
-                "name": "colors",
-                "type": "bytes32",
-                "internalType": "bytes32"
+                "name": "palettes",
+                "type": "uint16",
+                "internalType": "uint16"
               },
               {
-                "name": "print",
-                "type": "bytes32",
-                "internalType": "bytes32"
+                "name": "prints",
+                "type": "uint8",
+                "internalType": "uint8"
               },
               {
-                "name": "weight",
-                "type": "bytes32",
-                "internalType": "bytes32"
+                "name": "weights",
+                "type": "uint8",
+                "internalType": "uint8"
               },
               {
                 "name": "eights",
-                "type": "bytes32",
-                "internalType": "bytes32"
+                "type": "uint32",
+                "internalType": "uint32"
               },
               {
                 "name": "paidFrom",
@@ -1692,24 +1692,24 @@ export const factoryAbi = [
         "internalType": "struct Batch.Filter",
         "components": [
           {
-            "name": "colors",
-            "type": "bytes32",
-            "internalType": "bytes32"
+            "name": "palettes",
+            "type": "uint16",
+            "internalType": "uint16"
           },
           {
-            "name": "print",
-            "type": "bytes32",
-            "internalType": "bytes32"
+            "name": "prints",
+            "type": "uint8",
+            "internalType": "uint8"
           },
           {
-            "name": "weight",
-            "type": "bytes32",
-            "internalType": "bytes32"
+            "name": "weights",
+            "type": "uint8",
+            "internalType": "uint8"
           },
           {
             "name": "eights",
-            "type": "bytes32",
-            "internalType": "bytes32"
+            "type": "uint32",
+            "internalType": "uint32"
           },
           {
             "name": "paidFrom",

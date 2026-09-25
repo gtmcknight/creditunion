@@ -11,6 +11,9 @@ importers:
       '@noble/hashes':
         specifier: ^2.4.0
         version: 2.4.0
+      sortablejs:
+        specifier: ^1.15.7
+        version: 1.15.7
       viem:
         specifier: ^2.56.8
         version: 2.56.8(typescript@7.0.2)
@@ -21,6 +24,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^5.20260923.1
         version: 5.20260923.1
+      '@types/sortablejs':
+        specifier: ^1.15.9
+        version: 1.15.9
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -567,6 +573,9 @@ packages:
   '@speed-highlight/core@1.2.24':
     resolution: {integrity: sha512-qeW2e1l78afw8VhRPfPQ1Gjj+KU5XFQ/OFV5ti6eTa9bruO7mJyZtA4vw0ofqmA3tKCkROE9xLk3VZoeRc98nw==}
 
+  '@types/sortablejs@1.15.9':
+    resolution: {integrity: sha512-7HP+rZGE2p886PKV9c9OJzLBI6BBJu1O7lJGYnPyG3fS4/duUCcngkNCjsLwIMV+WMqANe3tt4irrXHSIe68OQ==}
+
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
     engines: {node: '>=16.20.0'}
@@ -869,6 +878,9 @@ packages:
     peerDependenciesMeta:
       '@types/node':
         optional: true
+
+  sortablejs@1.15.7:
+    resolution: {integrity: sha512-Kk8wLQPlS+yi1ZEf48a4+fzHa4yxjC30M/Sr2AnQu+f/MPwvvX9XjZ6OWejiz8crBsLwSq8GHqaxaET7u6ux0A==}
 
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
@@ -1314,6 +1326,8 @@ snapshots:
 
   '@speed-highlight/core@1.2.24': {}
 
+  '@types/sortablejs@1.15.9': {}
+
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
 
@@ -1577,6 +1591,8 @@ snapshots:
       '@img/sharp-win32-arm64': 0.35.4
       '@img/sharp-win32-ia32': 0.35.4
       '@img/sharp-win32-x64': 0.35.4
+
+  sortablejs@1.15.7: {}
 
   source-map-js@1.2.1: {}
 
