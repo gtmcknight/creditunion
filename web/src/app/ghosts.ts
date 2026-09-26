@@ -71,8 +71,8 @@ async function fillSheet(el: HTMLElement) {
   const want = cells.map((_, i) => (hasLayout(f) ? layoutSlot(f, i) : 0));
   const empties = cells.map((c, i) => [c, i] as const).filter(([c]) => c.classList.contains('empty'));
   if (!empties.length) return;
-  // The sheet shows a mix of whatever the batch accepts; each slot's own rule (a layout palette,
-  // value v = set bit 1 << v) is fetched for the hover card.
+  // Each empty slot shows an example that fits it: a painted slot one of its own value, an open slot a mix
+  // of whatever the batch accepts. The same rule feeds the hover card.
   const keys = [...new Set([0, ...empties.map(([, i]) => want[i])])];
   // A painted slot admits exactly the Credits with its value of the painted trait (on top of the party's rules).
   const slotFit = (k: number) => {
@@ -85,10 +85,15 @@ async function fillSheet(el: HTMLElement) {
   if (!pool.length) return;
   // Different batches with the same rules shouldn't look identical: start each at its own offset.
   const seed = parseInt(el.dataset.batch!.slice(2, 8), 16) || 0;
-  empties.forEach(([c, i], n) => {
+  const used = new Map<number, number>();
+  empties.forEach(([c, i]) => {
+    const own = fits.get(want[i])!.sample;
+    const from = own.length ? own : pool;
+    const n = used.get(want[i]) ?? 0;
+    used.set(want[i], n + 1);
     c.className = 'cell ghost';
     c.removeAttribute('title');
-    c.innerHTML = `<img src="${editionArt(pool[(seed + n) % pool.length])}" alt="" loading="lazy" decoding="async">`;
+    c.innerHTML = `<img src="${editionArt(from[(seed + n) % from.length])}" alt="" loading="lazy" decoding="async">`;
     slotOf.set(c, { i, want: want[i], f, fit: fits.get(want[i])! });
   });
 }
