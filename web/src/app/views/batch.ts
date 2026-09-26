@@ -79,6 +79,10 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
       }
       <div class="takes"><span class="eyebrow">Takes</span><div class="rule-chips">${rules.length ? rules.map(rule).join('') : '<span class="rule-chip">Any Credit</span>'}</div></div>
       <div id="panel">${panel(b, m, myIds)}</div>
+      ${s.state === 'Auction' || s.state === 'Settled' ? `<details class="more" id="bids" open>
+        <summary><span>Bids</span><span class="muted small" id="bids-count">…</span></summary>
+        <ol class="bid-list" id="bid-list"><li class="muted small">Loading…</li></ol>
+      </details>` : ''}
       <details class="more">
         <summary><span>Details</span><span class="muted small">${ARRANGEMENTS[s.arrangement]} · ${s.split === 1 ? 'Early bird' : 'Equal'} payout</span></summary>
         <dl class="facts">
@@ -96,6 +100,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
 
   hydrate(app);
   document.getElementById('depositors-btn')?.addEventListener('click', () => openDepositors(b, account ?? null));
+  loadBids(s.address, account ?? null);
   fillGhosts(app);
   // Share a link stamped with where the party stands, so X, Telegram and the rest fetch a fresh card for it
   // instead of showing the one they cached for an earlier state.
@@ -712,4 +717,41 @@ function openDepositors(b: Ctx, account: string | null) {
     d.remove();
   });
   d.showModal();
+}
+
+
+/// The auction's bids, newest first: amount, who, when, and the transaction.
+async function loadBids(address: Address, account: string | null) {
+  const list = document.getElementById('bid-list');
+  const count = document.getElementById('bids-count');
+  if (!list || !count) return;
+  type Row = { bidder: Address; amount: string; end: number; block: number; tx: string; time: number };
+  let rows: Row[] = [];
+  try {
+    const r = await fetch(`/bids/${address}`);
+    const j = (await r.json()) as { bids?: Row[]; error?: string };
+    if (!r.ok || j.error) throw new Error(j.error ?? 'No bids');
+    rows = j.bids ?? [];
+  } catch {
+    count.textContent = 'unavailable';
+    list.innerHTML = '';
+    return;
+  }
+  count.textContent = rows.length ? `${rows.length} bid${rows.length === 1 ? '' : 's'}` : 'None yet';
+  const ago = (t: number) => {
+    const d = Math.max(0, Math.floor(Date.now() / 1000 - t));
+    return d < 60 ? 'just now' : d < 3600 ? `${Math.floor(d / 60)}m ago` : d < 86400 ? `${Math.floor(d / 3600)}h ago` : `${Math.floor(d / 86400)}d ago`;
+  };
+  list.innerHTML = rows.length
+    ? rows
+        .map(
+          (r, i) => `<li class="bid${i === 0 ? ' top' : ''}">
+            <span class="num bid-amt">${eth(BigInt(r.amount))}</span>
+            <span class="bid-who">${who(r.bidder)}${account && same(r.bidder, account) ? '<span class="tag you">You</span>' : ''}</span>
+            <span class="muted small num bid-when">${r.time ? ago(r.time) : ''}${explorer('tx', r.tx) ? ` <a href="${explorer('tx', r.tx)}" target="_blank" rel="noopener" title="Transaction">↗</a>` : ''}</span>
+          </li>`,
+        )
+        .join('')
+    : '';
+  hydrate(list);
 }

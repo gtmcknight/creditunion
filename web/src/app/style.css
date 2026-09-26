@@ -3567,3 +3567,37 @@ dialog.people header h3 {
   outline-offset: -3px;
   z-index: 1;
 }
+
+/* ---------------------------------------------------------------- bid history */
+.bid-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+.bid {
+  display: grid;
+  grid-template-columns: 6.5em 1fr auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  border-top: 1px solid var(--line);
+}
+.bid-amt {
+  font-weight: 600;
+}
+.bid.top .bid-amt::after {
+  content: ' · high';
+  font-weight: 400;
+  color: var(--muted);
+}
+.bid-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.bid-when a {
+  color: inherit;
+  text-decoration: none;
+}

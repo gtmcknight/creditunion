@@ -5,7 +5,7 @@
 ///   /opensea/quote cheapest OpenSea listings that fit a batch, as signed Seaport orders for the Sweeper
 ///   /ens/:address  primary ENS name (always from mainnet), cached a day
 /// Every response carries the security headers in `secure()`.
-import { createPublicClient, http, type Address } from 'viem';
+import { createPublicClient, http, type Address, parseAbiItem } from 'viem';
 import { mainnet } from 'viem/chains';
 import { batchAbi, creditsAbi, creditArtAbi, factoryAbi } from '../app/abi';
 import { quote, scan } from './opensea';
@@ -278,6 +278,51 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       return Response.json(result, { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
       return Response.json({ error: (e as Error).message.slice(0, 200) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
+  }
+
+  // Bid history for a party's auction, from its Bid events. Bids only exist after assembly, so the scan starts
+  // near the assembly time (12 s blocks, with margin) and walks forward in windows public RPCs accept.
+  const bids = url.pathname.match(/^\/bids\/(0x[0-9a-fA-F]{40})$/);
+  if (bids) {
+    const cache = caches.default;
+    const key = new Request(url.origin + url.pathname.toLowerCase());
+    const hit = await cache.match(key);
+    if (hit) return hit;
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    const batch = bids[1].toLowerCase() as Address;
+    if (!(await isBatch(env, url, batch))) return text('not a batch', 404);
+    try {
+      const c = client(env);
+      const [assembledAt, head] = await Promise.all([
+        c.readContract({ address: batch, abi: batchAbi, functionName: 'assembledAt' }),
+        c.getBlockNumber(),
+      ]);
+      const out: { bidder: string; amount: string; end: number; block: number; tx: string; time: number }[] = [];
+      if (Number(assembledAt) > 0) {
+        const since = Math.max(0, Math.floor(Date.now() / 1000) - Number(assembledAt));
+        let from = head - BigInt(Math.ceil(since / 12) + 2_000);
+        if (from < 0n) from = 0n;
+        const event = parseAbiItem('event Bid(address indexed bidder, uint256 amount, uint64 auctionEnd)');
+        const logs = [] as Awaited<ReturnType<typeof c.getLogs<typeof event>>>;
+        for (let f = from; f <= head; f += 45_000n) {
+          const t = f + 44_999n > head ? head : f + 44_999n;
+          logs.push(...(await c.getLogs({ address: batch, event, fromBlock: f, toBlock: t })));
+        }
+        const blocks = new Map<bigint, number>();
+        await Promise.all(
+          [...new Set(logs.map((l) => l.blockNumber))].map(async (n) => blocks.set(n, Number((await c.getBlock({ blockNumber: n })).timestamp))),
+        );
+        for (const l of logs) {
+          out.push({ bidder: l.args.bidder!, amount: String(l.args.amount), end: Number(l.args.auctionEnd), block: Number(l.blockNumber), tx: l.transactionHash, time: blocks.get(l.blockNumber) ?? 0 });
+        }
+        out.sort((a, b) => b.block - a.block || b.time - a.time);
+      }
+      const res = Response.json({ bids: out }, { headers: { 'cache-control': 'public, max-age=15' } });
+      ctx.waitUntil(cache.put(key, res.clone()));
+      return res;
+    } catch (e) {
+      return Response.json({ error: String((e as Error).message).replace(/https?:\/\/\S+/g, '<url>').slice(0, 200) }, { status: 502 });
     }
   }
 
