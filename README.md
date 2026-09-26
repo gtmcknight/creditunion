@@ -1,6 +1,6 @@
 <a href="https://eighty.fun"><img src="docs/banner.jpg" alt="Eighty: turn 80 Credits into a Statement, together"></a>
 
-<p align="center"><b><a href="https://eighty.fun">eighty.fun</a></b> · <a href="#how-a-party-works">How it works</a> · <a href="contracts/AUDIT.md">Audit</a> · <a href="#deployed-addresses">Addresses</a></p>
+<p align="center"><b><a href="https://eighty.fun">eighty.fun</a></b> · <a href="#how-a-party-works">How it works</a> · <a href="contracts/AUDIT.md">Audit</a> · <a href="contracts/ADAPTER.md">Adapter plan</a> · <a href="#deployed-addresses">Addresses</a></p>
 
 # Eighty
 
@@ -36,6 +36,7 @@ contracts/          Foundry
   test/             unit, fuzz, invariant, adversarial and mainnet fork tests
   data/scores.bin   the frozen rating table deployed onchain
   AUDIT.md          internal review log
+  ADAPTER.md        the plan for connecting Jack's Statement contract
 web/                Cloudflare Worker + static site (Vite, TypeScript, viem, no framework)
   src/app/          the site; reads the chain directly, wallets sign in the browser (EIP-6963)
   src/worker/       the Worker: config, RPC proxy, art, ratings, OpenSea, link cards
@@ -65,6 +66,8 @@ The factory can deploy with no assembler. Parties fill but never lock, so anyone
 Fees are set at deploy and capped in code: protocol 2% (max 5%), creator 0% (max 10%), sweep 2% (max 5%). The fee recipient can change them within the caps; a party keeps the fees it opened with.
 
 Review history, findings and fixes: [contracts/AUDIT.md](contracts/AUDIT.md).
+
+How burning gets switched on once Jack's Statement contract ships, who controls it, and how it's tested: [contracts/ADAPTER.md](contracts/ADAPTER.md).
 
 #### Build and test
 

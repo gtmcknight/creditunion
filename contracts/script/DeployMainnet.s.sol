@@ -20,7 +20,7 @@ import {ISeaport} from "../src/interfaces/ISeaport.sol";
 ///     FEE_RECIPIENT=… SETTER=… forge script script/DeployMainnet.s.sol --broadcast
 ///
 ///   Stage 2 (after Jack's Statement contract ships and the adapter is reviewed): from the setter,
-///     cast send $FACTORY "proposeAssembler(address)" $ASSEMBLER      // opens the 30-minute exit window
+///     cast send $FACTORY "proposeAssembler(address)" $ASSEMBLER      // starts the 30-minute notice (nothing is locked before activation)
 ///     cast send $FACTORY "activateAssembler()"                        // anyone, 30 minutes later
 ///
 ///   Or, if the adapter already exists at deploy, set ASSEMBLER and it is active from the start.
