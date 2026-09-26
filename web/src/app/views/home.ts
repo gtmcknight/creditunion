@@ -98,8 +98,8 @@ export type HomeTab = 'parties' | 'auctions';
 export async function home(app: HTMLElement, tab: HomeTab = 'parties') {
   const head =
     tab === 'parties'
-      ? ['Parties', 'Each party pools Credits toward 80. Join one with Credits that fit its rules, and take them back anytime before it fills.']
-      : ['Auctions', 'Every Statement a party makes is auctioned here. Bidding runs 24 hours from the first bid, and the sale is split among the party.'];
+      ? ['Parties', 'Each party pools Credits toward 80. Join with ones that fit, and leave anytime before it fills.']
+      : ['Auctions', 'Every Statement a party makes is sold here. 24 hours from the first bid, split among the party.'];
   app.innerHTML = `
   <header class="create-head"><h1>${head[0]}</h1><p class="create-lede">${head[1]}</p></header>
   <section class="home">

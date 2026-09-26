@@ -25,10 +25,10 @@
     { "pattern": "eighty.rhps.fun", "custom_domain": true }
   ],
   "observability": { "enabled": true },
-  // Per-IP rate limits (Workers Rate Limiting API). Keys are cf-connecting-ip.
+  // Per-IP rate limits (Workers Rate Limiting API). Keys are cf-connecting-ip. RL_RPC counts JSON-RPC calls, not requests.
   "unsafe": {
     "bindings": [
-      { "name": "RL_RPC", "type": "ratelimit", "namespace_id": "8001", "simple": { "limit": 300, "period": 60 } },
+      { "name": "RL_RPC", "type": "ratelimit", "namespace_id": "8001", "simple": { "limit": 1200, "period": 60 } },
       { "name": "RL_QUOTE", "type": "ratelimit", "namespace_id": "8002", "simple": { "limit": 6, "period": 60 } },
       { "name": "RL_MISC", "type": "ratelimit", "namespace_id": "8003", "simple": { "limit": 300, "period": 60 } },
       { "name": "RL_ART", "type": "ratelimit", "namespace_id": "8004", "simple": { "limit": 3000, "period": 60 } }

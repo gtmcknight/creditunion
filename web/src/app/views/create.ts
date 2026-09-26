@@ -188,7 +188,7 @@ function markPaint(cell: HTMLElement, icon: string) {
 export async function create(app: HTMLElement) {
   if (!session.account) {
     app.innerHTML = `
-    <section class="narrow"><h1>Make Statement Party</h1><p class="lede">Invite everyone to pool their Credits. At 80 they burn into a Statement, it goes to auction, and the sale is split among everyone in.</p>
+    <section class="narrow"><h1>Make Statement Party</h1><p class="lede">Set the rules, add your Credits, invite everyone. At 80 they burn into a Statement and everyone in splits the sale.</p>
     <button class="btn primary" data-connect>Connect wallet</button></section>`;
     return;
   }
@@ -229,7 +229,7 @@ export async function create(app: HTMLElement) {
 
   // Title and one line across the top; under them the sheet (match count below it) and the form start level.
   app.innerHTML = `
-  <header class="create-head"><h1>Make Statement Party</h1><p class="create-lede">Invite everyone to pool their Credits. At 80 they burn into a Statement, it goes to auction, and the sale is split among everyone in. <a href="/">How it works →</a></p></header>
+  <header class="create-head"><h1>Make Statement Party</h1><p class="create-lede">Set the rules, add your Credits, invite everyone. At 80 they burn into a Statement and everyone in splits the sale. <a href="/">How it works →</a></p></header>
   <section class="design">
     <div class="design-preview">
       <div id="preview">${sheet([])}</div>
@@ -1085,7 +1085,9 @@ export async function create(app: HTMLElement) {
         // The fees shown on this page go along: the open reverts if they changed underneath you.
         args: [name, f, rules.list.map(BigInt), reserve, arr, split, BigInt(days * 86400), ids.slice(0, CHUNK), BigInt(protocolBps), BigInt(creatorBps)],
       });
+      // Only the factory's own logs: any contract the call touched could emit a look-alike BatchCreated.
       const ev = receipt.logs
+        .filter((l) => l.address.toLowerCase() === config.factory.toLowerCase())
         .map((l) => {
           try {
             return decodeEventLog({ abi: factoryAbi, ...l });

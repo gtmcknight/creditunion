@@ -52,6 +52,9 @@ const RPC_METHODS = new Set([
 const MAX_RPC_BODY = 64_000;
 const MAINNET_CREDITS: Address = '0x97630aA70AB14ed9883B41dAfccBc11349723043';
 const MAX_RPC_BATCH = 50;
+/// Credits ever minted; ids outside 1..SUPPLY are refused before any RPC.
+const SUPPLY = 122_154;
+const inSupply = (id: number) => Number.isInteger(id) && id >= 1 && id <= SUPPLY;
 
 const rpcUrl = (env: Env) => env.RPC_URL || env.FALLBACK_RPC;
 /// Listing scans in progress, per batch, so a burst of quotes costs one scan.
@@ -126,14 +129,29 @@ async function readBody(req: Request, max: number): Promise<string | null> {
   return new TextDecoder().decode(all);
 }
 
-async function limited(rl: RateLimit | undefined, req: Request) {
-  if (!rl) return false;
+/// Charges `n` hits to the caller's limit; true if any of them is over.
+async function limited(rl: RateLimit | undefined, req: Request, n = 1) {
+  if (!rl || n < 1) return false;
   const key = ipKey(req.headers.get('cf-connecting-ip') ?? 'anon');
   try {
-    return !(await rl.limit({ key })).success;
+    const r = await Promise.all(Array.from({ length: n }, () => rl.limit({ key })));
+    return r.some((x) => !x.success);
   } catch {
     return false;
   }
+}
+
+/// An error fit for a response body: short, with no URL or key in it. viem's messages carry the RPC URL (and so
+/// the provider key) on 429s and timeouts, so only its shortMessage is used, and scrubbed anyway.
+export function safeError(e: unknown): string {
+  const raw = (e as { shortMessage?: unknown } | null)?.shortMessage ?? (e as Error | null)?.message ?? e;
+  const s = (typeof raw === 'string' ? raw : '')
+    .split('\n')[0]
+    .replace(/https?:\/\/\S+/g, '<url>')
+    .replace(/[A-Za-z0-9_-]{32,}/g, (m) => (/^0x[0-9a-fA-F]+$/.test(m) ? m : '<key>')) // keep addresses and hashes
+    .trim()
+    .slice(0, 200);
+  return s || 'Upstream error';
 }
 
 /// Cross-site pages may not drive our endpoints, even fire-and-forget.
@@ -149,7 +167,7 @@ export default {
       res = await handle(req, env, ctx, url);
     } catch (e) {
       // Never let a stack trace or an RPC URL out; the class of error is enough to debug.
-      const msg = String((e as Error)?.message ?? e).replace(/https?:\/\/\S+/g, '<url>').slice(0, 300);
+      const msg = safeError(e);
       console.error('worker error', url.pathname, msg);
       res = new Response(`worker error: ${msg}`, { status: 500 });
     }
@@ -209,7 +227,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     try {
       return Response.json(await match(env.ASSETS, url.origin, rules), { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
-      return Response.json({ error: String((e as Error).message).slice(0, 200) }, { status: 502 });
+      return Response.json({ error: safeError(e) }, { status: 502 });
     }
   }
 
@@ -224,7 +242,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       const body = JSON.parse(raw) as { ids?: unknown };
       if (!Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > 200) throw 0;
       ids = body.ids.map((x) => {
-        if (!/^\d{1,7}$/.test(String(x)) || Number(x) < 1 || Number(x) > 1e7) throw 0;
+        if (!/^\d{1,6}$/.test(String(x)) || !inSupply(Number(x))) throw 0;
         return BigInt(String(x));
       });
     } catch {
@@ -234,7 +252,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       const r = await ratings({ assets: env.ASSETS, origin: url.origin, rpc: rpcUrl(env), credits: env.CREDITS, ids });
       return Response.json(r, { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
-      return Response.json({ error: String((e as Error).message).replace(/https?:\/\/\S+/g, '<url>').slice(0, 200) }, { status: 502 });
+      return Response.json({ error: safeError(e) }, { status: 502 });
     }
   }
 
@@ -253,7 +271,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       const listings = live ? await fitting(env, url, ctx, batch as Address) : await previewFitting(env, url, ctx, batch as Address);
       return Response.json({ listings: listings.map((l) => ({ id: l.id, price: l.price })), preview: !live }, { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
-      return Response.json({ error: (e as Error).message.slice(0, 200) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
     }
   }
 
@@ -278,7 +296,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       const result = await quote({ key: env.OPENSEA_API_KEY, sweeper: env.SWEEPER, listings, n, origin: url.origin });
       return Response.json(result, { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
-      return Response.json({ error: (e as Error).message.slice(0, 200) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
     }
   }
 
@@ -323,7 +341,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       ctx.waitUntil(cache.put(key, res.clone()));
       return res;
     } catch (e) {
-      return Response.json({ error: String((e as Error).message).replace(/https?:\/\/\S+/g, '<url>').slice(0, 200) }, { status: 502 });
+      return Response.json({ error: safeError(e) }, { status: 502 });
     }
   }
 
@@ -381,6 +399,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const key = new Request(`${url.origin}/art/${creditsAddr.toLowerCase()}/${art[2]}.svg`);
     const hit = await cache.match(key);
     if (hit) return hit;
+    if (!inSupply(Number(art[2]))) return new Response('no such credit', { status: 404, headers: { 'cache-control': 'public, max-age=86400' } });
     if (await limited(env.RL_ART, req)) return text('slow down', 429);
     const c = real
       ? createPublicClient({ transport: http(env.ENS_RPC || 'https://eth.drpc.org', { timeout: 8_000 }) })
@@ -412,12 +431,13 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
 
   // Link cards drawn per party (and made-up ones for /og).
   const drawn = url.pathname.match(/^\/og\/(party|sample)\/([0-9a-zA-Zx]+)\.png$/);
-  if (drawn) return linkCard(env, url, ctx, drawn[1], drawn[2]);
+  if (drawn) return linkCard(req, env, url, ctx, drawn[1], drawn[2]);
 
   // Pages: the app shell with this route's link-preview tags; a party page describes that party.
   let card = req.method === 'GET' ? cardFor(url.pathname) : null;
   const party = url.pathname.match(/^\/(?:party|b)\/(0x[0-9a-fA-F]{40})$/)?.[1];
-  if (card && party) {
+  // Each party page costs RPC reads, so it is rate limited; over the limit, or not one of ours, it gets the generic card.
+  if (card && party && !(await limited(env.RL_MISC, req)) && (await isBatch(env, url, party.toLowerCase() as Address))) {
     const p = await readParty(env, party as Address).catch(() => null);
     if (p) card = partyCard(party, p.name, p.state, p.count, p.highBid > 0n ? ethText(p.highBid) : '', stamp(p.state, p.count, p.highBid));
   }
@@ -442,7 +462,7 @@ async function readParty(env: Env, batch: Address): Promise<PartyCard> {
   ]);
   const sum = s as unknown as { name: string; state: number; count: bigint; split: number; highBid: bigint; auctionEnd: bigint; canAssemble: boolean };
   return {
-    name: sum.name,
+    name: [...sum.name].slice(0, 64).join(''), // names are the creator's; cards and tags show at most 64 characters
     state: STATE_NAMES[Number(sum.state)],
     count: Number(sum.count),
     ids: (slots[0] as readonly bigint[]).map(Number),
@@ -454,18 +474,23 @@ async function readParty(env: Env, batch: Address): Promise<PartyCard> {
 }
 
 /// /og/party/<address>.png and /og/sample/<kind>.png. Party cards are cached a minute: they change as it fills.
-async function linkCard(env: Env, url: URL, ctx: ExecutionContext, kind: string, key: string): Promise<Response> {
+/// Cached by path plus the `s` stamp only, so made-up query strings can't force a redraw.
+async function linkCard(req: Request, env: Env, url: URL, ctx: ExecutionContext, kind: string, key: string): Promise<Response> {
   const cache = caches.default;
-  const hit = await cache.match(url.toString());
+  const s = kind === 'party' ? (url.searchParams.get('s') ?? '') : '';
+  const cacheKey = `${url.origin}${url.pathname.toLowerCase()}${/^[0-9a-z.]{1,24}$/.test(s) ? `?s=${s}` : ''}`;
+  const hit = await cache.match(cacheKey);
   if (hit) return hit;
+  const generic = () => env.ASSETS.fetch(new Request(new URL('/og/party.png', url)));
+  if (await limited(env.RL_MISC, req)) return generic();
   let p: PartyCard | null;
   if (kind === 'sample') p = sample(key);
-  else if (/^0x[0-9a-fA-F]{40}$/.test(key)) p = await readParty(env, key as Address).catch(() => null);
+  else if (/^0x[0-9a-fA-F]{40}$/.test(key) && (await isBatch(env, url, key.toLowerCase() as Address))) p = await readParty(env, key as Address).catch(() => null);
   else p = null;
-  if (!p) return env.ASSETS.fetch(new Request(new URL('/og/party.png', url)));
+  if (!p) return generic();
   const body = await drawParty(env.ASSETS, url.origin, p);
   const res = new Response(body, { headers: { 'content-type': 'image/png', 'cache-control': `public, max-age=${kind === 'sample' ? 3600 : 60}` } });
-  ctx.waitUntil(cache.put(url.toString(), res.clone()));
+  ctx.waitUntil(cache.put(cacheKey, res.clone()));
   return res;
 }
 
@@ -488,6 +513,8 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
   }
   const calls = Array.isArray(parsed) ? parsed : [parsed];
   if (calls.length === 0 || calls.length > MAX_RPC_BATCH) return text('bad batch', 400);
+  // Every call in a batch counts against the limit, not just the request (one was charged above).
+  if (await limited(env.RL_RPC, req, calls.length - 1)) return text('slow down', 429);
 
   const allowed = new Set([env.CREDITS, env.FACTORY, env.SWEEPER].map((a) => a?.toLowerCase()).filter(Boolean));
   const clean: { jsonrpc: string; id: unknown; method: string; params: unknown[] }[] = [];
@@ -539,7 +566,12 @@ async function previewFitting(env: Env, url: URL, ctx: ExecutionContext, batch: 
   const key = new Request(`${url.origin}/opensea/preview/${batch}`);
   const hit = await cache.match(key);
   if (hit) return hit.json<Awaited<ReturnType<typeof scan>>>();
-  const s = (await client(env).readContract({ address: batch, abi: batchAbi, functionName: 'summary' })) as { filter: Record<string, bigint | number>; allowlistSize: bigint };
+  let s: { filter: Record<string, bigint | number>; allowlistSize: bigint };
+  try {
+    s = (await client(env).readContract({ address: batch, abi: batchAbi, functionName: 'summary' })) as typeof s;
+  } catch (e) {
+    throw new Error(`party unreadable: ${safeError(e)}`);
+  }
   const f = s.filter;
   const layout = [BigInt(f.layout0), BigInt(f.layout1)];
   let palettes = Number(f.palettes);

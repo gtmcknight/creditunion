@@ -20,7 +20,10 @@ let picks = new Set<string>();
 export async function batch(app: HTMLElement, address: Address, rerender: () => void) {
   let b: Ctx;
   try {
-    b = await getBatch(address);
+    // Only parties our factory made: any contract can answer summary() with a made-up party.
+    const [ours, got] = await Promise.all([pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'isBatch', args: [address] }), getBatch(address)]);
+    if (!ours) throw 0;
+    b = got;
   } catch {
     app.innerHTML = `<section class="prose"><h1>Party not found</h1><p><a href="/parties">← Parties</a></p></section>`;
     return;

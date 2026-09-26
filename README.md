@@ -147,9 +147,9 @@ Ratings follow Jack's published formula (methodology v3.4.0), reproduced in `web
 
 | | |
 |---|---|
-| BatchFactory | [`0x412B2490D792f19442dF1d7107a6383D0eD99f56`](https://sepolia.etherscan.io/address/0x412B2490D792f19442dF1d7107a6383D0eD99f56) |
-| Ratings | [`0xd64fE96d6A4f7C891dd55A2b494dA71f8b604510`](https://sepolia.etherscan.io/address/0xd64fE96d6A4f7C891dd55A2b494dA71f8b604510) |
-| Test Credits | [`0xce3a6B673eE04f0a63C511755992Cc5c41D7D1C0`](https://sepolia.etherscan.io/address/0xce3a6B673eE04f0a63C511755992Cc5c41D7D1C0) |
+| BatchFactory | [`0xA18298a11484458344Ce41DE96C99B43dB8F21a3`](https://sepolia.etherscan.io/address/0xA18298a11484458344Ce41DE96C99B43dB8F21a3) |
+| Ratings | [`0x8EfBe9Ae0b08E78Df2CB475ef1053268375ccFa7`](https://sepolia.etherscan.io/address/0x8EfBe9Ae0b08E78Df2CB475ef1053268375ccFa7) |
+| Test Credits | [`0xcd24833Ddf226C13a9B3944cAC984abd33865Cd3`](https://sepolia.etherscan.io/address/0xcd24833Ddf226C13a9B3944cAC984abd33865Cd3) |
 | Sweeper | not configured (OpenSea can't list test Credits) |
 
 **Mainnet:** TBD. Credits is [`0x97630aA70AB14ed9883B41dAfccBc11349723043`](https://etherscan.io/address/0x97630aA70AB14ed9883B41dAfccBc11349723043).

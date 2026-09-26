@@ -66,7 +66,7 @@ ETH accounting under mixed reverting/gas-burning receivers; reentrancy via refun
 
 ### Buy-in rehearsal on a mainnet fork (Sept 24)
 
-`DeployMainnet` run against a fork of mainnet: 60.1 M gas over 14 txs; every § 3 sanity check passes; the constructor-args encodings in LAUNCH.md match the deployed bytecode byte for byte. A real OpenSea quote surfaced a listing that passed the on-chain liveness check (owner, approval) yet was dead on OpenSea's side (`Order not valid`, a gasless cancel). The Worker now skips such listings and backfills with the next cheapest instead of failing the quote. A 5-Credit sweep through the real Seaport then went through with no page errors.
+`DeployMainnet` run against a fork of mainnet: 60.1 M gas over 14 txs; every § 3 sanity check passes; the constructor-args encodings match the deployed bytecode byte for byte. A real OpenSea quote surfaced a listing that passed the on-chain liveness check (owner, approval) yet was dead on OpenSea's side (`Order not valid`, a gasless cancel). The Worker now skips such listings and backfills with the next cheapest instead of failing the quote. A 5-Credit sweep through the real Seaport then went through with no page errors.
 
 ### Ratings (score table)
 
