@@ -71,7 +71,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[]) {
   const cta = s.state === 'Open' ? 'Join' : live ? 'Bid' : '';
   const fits = fit?.length ?? 0;
   const fitText =
-    s.state !== 'Open' ? '' : mine.size ? `You’re in · ${mine.size}` : !session.account ? '' : fits ? `${fits} of yours fit` : 'None of yours fit';
+    s.state !== 'Open' ? '' : mine.size ? `You’re in · ${mine.size}` : !session.account ? '' : fits ? `${fits} of yours fit` : '';
   const state = s.state === 'Open' ? '' : `<span class="tag state ${s.state.toLowerCase()}">${s.state}</span>`;
   registerFilter(s.address, s.filter);
   registerDeposits(ids, depositors);
