@@ -1,6 +1,6 @@
-<a href="https://creditunion.party"><img src="docs/banner.jpg" alt="Eighty: turn 80 Credits into a Statement, together"></a>
+<a href="https://creditunion.fun"><img src="docs/banner.jpg" alt="Eighty: turn 80 Credits into a Statement, together"></a>
 
-<p align="center"><b><a href="https://creditunion.party">creditunion.party</a></b> · <a href="#how-a-party-works">How it works</a> · <a href="contracts/AUDIT.md">Audit</a> · <a href="contracts/ADAPTER.md">Adapter plan</a> · <a href="#deployed-addresses">Addresses</a></p>
+<p align="center"><b><a href="https://creditunion.fun">creditunion.fun</a></b> · <a href="#how-a-party-works">How it works</a> · <a href="contracts/AUDIT.md">Audit</a> · <a href="contracts/ADAPTER.md">Adapter plan</a> · <a href="#deployed-addresses">Addresses</a></p>
 
 # Eighty
 

@@ -21,6 +21,7 @@
   // Sepolia: SWEEPER stays zero (OpenSea can't list the mock Credits), which hides buy-in.
   // Mainnet addresses go here after DeployMainnet.
   "routes": [
+    { "pattern": "creditunion.fun", "custom_domain": true },
     { "pattern": "creditunion.party", "custom_domain": true },
     { "pattern": "eighty.fun", "custom_domain": true },
     { "pattern": "eighty.rhps.fun", "custom_domain": true }

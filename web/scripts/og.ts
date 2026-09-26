@@ -99,8 +99,8 @@ function card(name: string, ground: Buffer, title: string[], line: string) {
   <rect x="${x}" y="${y}" width="${labelW}" height="${labelH}" fill="#fff"/>
   ${title.map((t, i) => `<text x="${W / 2}" y="${y + pad + 58 + i * lh}" text-anchor="middle" font-family="Geist" font-weight="700" font-size="68" letter-spacing="-2" fill="#0a0a0a">${esc(t)}</text>`).join('')}
   <text x="${W / 2}" y="${y + pad + title.length * lh + 30}" text-anchor="middle" font-family="Geist" font-size="28" fill="#555">${esc(line)}</text>
-  <rect x="${W - 268}" y="${H - 72}" width="236" height="40" fill="#fff"/>
-  <text x="${W - 150}" y="${H - 44}" text-anchor="middle" font-family="Geist" font-weight="700" font-size="22" fill="#0a0a0a">creditunion.party</text>
+  <rect x="${W - 240}" y="${H - 72}" width="208" height="40" fill="#fff"/>
+  <text x="${W - 136}" y="${H - 44}" text-anchor="middle" font-family="Geist" font-weight="700" font-size="22" fill="#0a0a0a">creditunion.fun</text>
 </svg>`;
   const out = execFileSync('rsvg-convert', ['-w', String(W), '-h', String(H), '-f', 'png'], { input: svg, maxBuffer: 64 << 20 });
   writeFileSync(pub(`og/${name}.png`), out);
