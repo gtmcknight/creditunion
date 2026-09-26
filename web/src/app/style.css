@@ -3577,7 +3577,7 @@ dialog.people header h3 {
 }
 .bid {
   display: grid;
-  grid-template-columns: 6.5em 1fr auto;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 12px;
   min-height: 44px;
@@ -3585,6 +3585,7 @@ dialog.people header h3 {
 }
 .bid-amt {
   font-weight: 600;
+  white-space: nowrap;
 }
 .bid.top .bid-amt::after {
   content: ' · high';
