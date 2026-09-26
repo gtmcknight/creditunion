@@ -1,6 +1,6 @@
 import { session } from '../chain';
 import { ARRANGEMENTS, listBatches, type Listed, type Summary, hasLayout, layoutSlot } from '../data';
-import { hydrate, pct, who } from '../ens';
+import { hydrate, pct } from '../ens';
 import { fitByBatch } from '../fit';
 import { editionArt, examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
 import type { Address } from 'viem';
@@ -55,8 +55,6 @@ function sortList(list: Listed[], k: SortKey) {
   );
 }
 
-/// Shown only when the batch carries a creator fee (a factory-level setting, 0 at launch).
-const fee = (s: Summary) => (s.creatorFeeBps ? `<span class="fee">${pct(s.creatorFeeBps)} creator fee</span>` : '');
 
 /// Ids in this batch deposited by the connected wallet.
 export function mineIn(b: Listed) {
@@ -68,16 +66,24 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[]) {
   const mine = mineIn({ s, ids, depositors });
   const room = 80 - s.count;
   const canJoin = fit?.length ? Math.min(fit.length, room) : 0;
+  const rule = [f || 'Any Credit', s.arrangement ? ARRANGEMENTS[s.arrangement] : '', s.split === 1 ? 'Early bird payout' : 'Equal payout', s.creatorFeeBps ? `${pct(s.creatorFeeBps)} creator fee` : ''].filter(Boolean).join(' · ');
+  const live = s.state === 'Auction' && !(s.highBid && Date.now() / 1000 >= s.auctionEnd);
+  const cta = s.state === 'Open' ? 'Join' : live ? 'Bid' : '';
+  const fits = fit?.length ?? 0;
+  const fitText =
+    s.state !== 'Open' ? '' : mine.size ? `You’re in · ${mine.size}` : !session.account ? '' : fits ? `${fits} of yours fit` : 'None of yours fit';
+  const state = s.state === 'Open' ? '' : `<span class="tag state ${s.state.toLowerCase()}">${s.state}</span>`;
   registerFilter(s.address, s.filter);
   registerDeposits(ids, depositors);
   return `<a class="card${canJoin ? ' can-join' : ''}" href="/party/${s.address}">
-    ${sheet(ids, { size: 'sm', mine, batch: s.state === 'Open' ? s.address : undefined })}
-    <div class="card-body">
-      <div class="row"><strong>${esc(s.name || 'Untitled')}</strong><span class="tags">${s.split === 1 ? '<span class="tag early">Early bird</span>' : ''}${canJoin ? `<span class="tag join">Join · ${canJoin} fit</span>` : ''}${mine.size ? `<span class="tag you">You · ${mine.size}</span>` : ''}<span class="tag ${s.state.toLowerCase()}">${s.state}</span></span></div>
-      <div class="row creator">${who(s.creator)}${fee(s)}</div>
-      <div class="bar"><i style="width:${(s.count / 80) * 100}%"></i></div>
-      <div class="row muted small"><span class="num">${s.count}/80</span><span>${status(s)}</span></div>
-      ${f || s.arrangement ? `<div class="small filter">${[f, s.arrangement ? ARRANGEMENTS[s.arrangement] : ''].filter(Boolean).map(esc).join(' · ')}</div>` : ''}
+    <div class="card-art">${sheet(ids, { size: 'sm', mine, batch: s.state === 'Open' ? s.address : undefined })}<span class="count num">${s.count}/80</span>${state}</div>
+    <div class="card-meta">
+      <div class="meta-text">
+        <strong>${esc(s.name || 'Untitled')}</strong>
+        <span class="meta-rule" title="${esc(rule)}">${esc(rule)}</span>
+        ${fitText ? `<span class="${fits || mine.size ? 'fit' : ''}">${fitText}</span>` : s.state !== 'Open' ? `<span>${esc(status(s))}</span>` : ''}
+      </div>
+      ${cta ? `<span class="btn sm primary cta">${cta}</span>` : ''}
     </div>
   </a>`;
 }
@@ -89,7 +95,12 @@ export type HomeTab = 'parties' | 'auctions';
 /// Two tabs over one list: parties still pooling, and Statements at or past auction. Each leads with
 /// "For you" (what you're in, can join, or are bidding on), then everything else.
 export async function home(app: HTMLElement, tab: HomeTab = 'parties') {
+  const head =
+    tab === 'parties'
+      ? ['Parties', 'Each party pools Credits toward 80. Join one with Credits that fit its rules, and take them back anytime before it fills.']
+      : ['Auctions', 'Every Statement a party makes is auctioned here. Bidding runs 24 hours from the first bid, and the sale is split among the party.'];
   app.innerHTML = `
+  <header class="create-head"><h1>${head[0]}</h1><p class="create-lede">${head[1]}</p></header>
   <section class="home">
     <div class="list-tools" id="sort-row" hidden>
       <div class="seg sm" role="radiogroup" aria-label="Sort">${SORTS.map(([k, l]) => `<label><input type="radio" name="sort" value="${k}" ${k === sortKey() ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>

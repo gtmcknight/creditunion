@@ -3033,8 +3033,16 @@ input[type='datetime-local'] {
   gap: 8px;
   margin-top: 20px;
 }
-.wall-label .wall-cta .btn.primary {
-  color: #fff;
+/* The label is paper in both themes, so its buttons use the light palette. */
+.wall-label {
+  --bg: #fff;
+  --fg: #0a0a0a;
+  --muted: #6b6b6b;
+  --line: rgba(0, 0, 0, 0.08);
+  --line-strong: rgba(0, 0, 0, 0.16);
+  --surface: #f4f4f2;
+  --accent: #0a0a0a;
+  --on-accent: #fff;
 }
 .wall-frame[data-mode='one'] .wall-label,
 .wall-frame.expanded .wall-label {
@@ -4466,4 +4474,141 @@ a.who:hover .who-name {
     top: 60px;
     max-width: calc(100% - 32px);
   }
+}
+
+/* Party cards: state sits on the sheet (only when it isn't simply open); a plain line says what you can do. */
+.card-art {
+  position: relative;
+}
+.card-art .tag.state {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+.card-art .tag.expired {
+  background: var(--bg);
+}
+.card .filter {
+  font-family: var(--sans);
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.fit-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+  color: var(--fg);
+}
+.fit-line b {
+  font-weight: 600;
+}
+.fit-line .go {
+  font-weight: 500;
+}
+.card:hover .fit-line .go {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Party card meta, two lines: name and count; who can join and what you can do. */
+.card-meta {
+  display: grid;
+  gap: 4px;
+}
+.meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+.meta-row > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.meta-row > :last-child {
+  flex: none;
+}
+.meta-row strong {
+  font-weight: 500;
+}
+.meta-row .num {
+  color: var(--muted);
+  font-size: 14px;
+}
+.meta-row.sub {
+  font-size: 13px;
+  color: var(--muted);
+}
+.meta-row .fit {
+  color: var(--fg);
+  font-weight: 500;
+}
+.meta-row.act {
+  margin-top: 8px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+.meta-row.act .fit {
+  color: var(--fg);
+  font-weight: 500;
+}
+.btn.sm.cta {
+  height: 30px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+.card:hover .btn.cta {
+  opacity: 0.88;
+}
+.create-head + .home {
+  padding-top: 28px;
+}
+
+/* Card v3: the count sits on the sheet; under it, three evenly spaced lines and the button beside them. */
+.card-art .count {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  font-size: 12px;
+  color: #6b6b6b;
+}
+.card-meta {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+.meta-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.meta-text > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.meta-text strong {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--fg);
+}
+.meta-text .fit {
+  color: var(--fg);
+}
+.card-meta .btn.cta {
+  flex: none;
 }

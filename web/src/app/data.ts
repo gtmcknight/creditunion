@@ -5,7 +5,7 @@ import { config, pub } from './chain';
 export const STATES = ['Open', 'Full', 'Expired', 'Auction', 'Settled'] as const;
 export type StateName = (typeof STATES)[number];
 
-export const ARRANGEMENTS = ['Deposit order', 'Mint time', 'Credit number', 'Creator’s order', 'Layout'] as const;
+export const ARRANGEMENTS = ['Deposit order', 'Mint time', 'Credit number', 'Creator’s order', 'Painted'] as const;
 /// Palette wanted at layout slot i (0 = any), from the packed Filter fields.
 export const layoutSlot = (f: { layout0: bigint; layout1: bigint }, i: number) =>
   Number(i < 64 ? (f.layout0 >> BigInt(4 * i)) & 15n : (f.layout1 >> BigInt(4 * (i - 64))) & 15n);
