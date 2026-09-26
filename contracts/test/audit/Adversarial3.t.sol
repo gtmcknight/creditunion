@@ -10,6 +10,7 @@ import {IAssembler} from "../../src/interfaces/IAssembler.sol";
 import {ICredits} from "../../src/interfaces/ICredits.sol";
 import {MockCredits} from "../../src/mocks/MockCredits.sol";
 import {MockStatement} from "../../src/mocks/MockStatement.sol";
+import {ready} from "../utils/Ready.sol";
 
 /// @dev Credits that can safeMint straight into a batch (from == 0 in the hook). Real Credits are sealed and
 ///      used plain _mint; this models any future/test edition that does not.
@@ -301,16 +302,16 @@ contract Adversarial3Test is Test {
         assertEq(b3.depositorOf(101), carol);
     }
 
-    function test_ExitWindowWithdrawThenRefillLocksAgain() public {
+    /// No active assembler: a full batch never locks, a leave reopens it and the refill restamps filledAt
+    /// (still no countdown until activation).
+    function test_NoAssemblerFullBatchWithdrawThenRefill() public {
         BatchFactory f = new BatchFactory(
             ICredits(address(credits)), IRatings(address(0)), IAssembler(address(0)), setter, fee, 100, 0, 10
         );
         _approveAll(f);
         Batch b = _full(f, Batch.Arrangement.Deposit);
         uint64 filled = b.filledAt();
-        vm.prank(bob);
-        vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Full));
-        b.withdraw(_one(51));
+        assertEq(b.lockAt(), 0);
         MockAssembler pending = new MockAssembler(statement);
         vm.prank(setter);
         f.proposeAssembler(pending);
@@ -318,16 +319,15 @@ contract Adversarial3Test is Test {
         vm.prank(bob);
         b.withdraw(_one(51));
         assertEq(uint256(b.state()), uint256(Batch.State.Open));
+        assertEq(b.filledAt(), 0);
         assertEq(b.sharesOf(bob), 39);
         assertEq(credits.ownerOf(51), bob);
         vm.prank(carol);
         f.deposit(address(b), _one(101));
         assertEq(uint256(b.state()), uint256(Batch.State.Full));
-        // Leaving a still-locked batch (only possible in the exit window) gave the lock back, so the real fill
-        // locks again. Harmless: while the window is open anyone may leave regardless of the lock.
         assertEq(b.filledAt(), block.timestamp);
         assertGt(b.filledAt(), filled);
-        assertEq(b.unlocksAt(), block.timestamp + b.UNLOCK_AFTER());
+        assertEq(b.lockAt(), 0, "still no countdown: the assembler is only proposed");
         assertEq(b.ids().length, 80);
         assertEq(b.ids()[79], 101);
     }
@@ -338,6 +338,7 @@ contract Adversarial3Test is Test {
         BatchFactory f = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), asm, address(0), fee, 100, 0, 10);
         _approveAll(f);
         Batch b = _full(f, Batch.Arrangement.Deposit);
+        ready(b);
         b.assemble();
         assertEq(asm.leaked(), 0, "some reentrant call succeeded");
         assertEq(uint256(b.state()), uint256(Batch.State.Auction));
@@ -353,6 +354,7 @@ contract Adversarial3Test is Test {
         );
         _approveAll(f);
         Batch b = _full(f, Batch.Arrangement.Deposit);
+        ready(b);
         vm.expectRevert(Batch.StatementNotReceived.selector);
         b.assemble();
         assertEq(credits.ownerOf(1), address(b));
@@ -367,6 +369,7 @@ contract Adversarial3Test is Test {
         BatchFactory f2 = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), d, address(0), fee, 100, 0, 10);
         _approveAll(f2);
         Batch b2 = _full(f2, Batch.Arrangement.Deposit);
+        ready(b2);
         b2.assemble();
         assertEq(b2.statementId(), 1);
         assertEq(statement.ownerOf(1), address(b2));
@@ -382,6 +385,7 @@ contract Adversarial3Test is Test {
         vm.prank(carol);
         vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Full));
         b.bid{value: 1 ether}();
+        ready(b);
         b.assemble();
         vm.expectRevert(Batch.AuctionRunning.selector);
         b.settle(); // no bid yet
@@ -444,6 +448,7 @@ contract Adversarial3Test is Test {
 
     function test_GasBurningBidderRefundBecomesOwedAndBalanceIsExact() public {
         Batch b = _full();
+        ready(b);
         b.assemble();
         GasBurner g = new GasBurner();
         vm.deal(address(g), 10 ether);
@@ -467,6 +472,7 @@ contract Adversarial3Test is Test {
         Batch b = Batch(factory.create("R", noFilter, new uint256[](0), 5 ether, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0));
         vm.prank(bob);
         factory.deposit(address(b), _range(51, 40));
+        ready(b);
         b.assemble();
         assertEq(b.minBid(), 5 ether);
         vm.warp(b.assembledAt() + 7 days - 1);
@@ -511,24 +517,5 @@ contract Adversarial3Test is Test {
         factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 90 days, _range(101, 10), 100, 0);
     }
 
-    /// The lock's edge, on a staged factory (no assembler): one second before unlocksAt no withdrawal;
-    /// at unlocksAt withdrawal works and the batch reopens. Activation later doesn't re-lock it.
-    function test_UnlockEdges() public {
-        BatchFactory f = new BatchFactory(
-            ICredits(address(credits)), IRatings(address(0)), IAssembler(address(0)), setter, fee, 100, 0, 10
-        );
-        _approveAll(f);
-        Batch b = _full(f, Batch.Arrangement.Deposit);
-        uint256 at = b.unlocksAt();
-        vm.warp(at - 1);
-        vm.prank(bob);
-        vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Full));
-        b.withdraw(_one(51));
-        vm.warp(at);
-        vm.prank(bob);
-        b.withdraw(_one(51));
-        assertEq(b.count(), 79);
-        assertEq(uint256(b.state()), uint256(Batch.State.Open));
-        assertEq(b.unlocksAt(), 0);
-    }
+    // test_UnlockEdges covered the retired 7-day lock; the new edges are in test/Lock.t.sol.
 }

@@ -13,17 +13,17 @@ import {IAssembler} from "./interfaces/IAssembler.sol";
 ///         the caller into a batch it created. Everything is fixed at deploy, with one exception:
 ///
 ///         The assembler (the adapter for the Statement contract) may not exist yet when pooling opens.
-///         The factory can deploy without one; batches then fill and lock but cannot burn. The setter
-///         proposes an assembler once it exists, which opens an exit window of ASSEMBLER_DELAY during
-///         which every batch, full ones included, can be withdrawn from. After the delay anyone activates
-///         it, permanently. The setter can replace a pending proposal (restarting the window) but has no
-///         other power, and none at all once an assembler is active.
+///         The factory can deploy without one; batches then fill but never lock or burn, so every depositor
+///         can always leave. The setter proposes an assembler once it exists; after ASSEMBLER_DELAY anyone
+///         activates it, permanently. The delay is the notice: nothing locks until activation, and a full
+///         batch then counts down Batch.LOCK_DELAY before it locks. The setter can replace a pending proposal
+///         (restarting the delay) but has no other power, and none at all once an assembler is active.
 contract BatchFactory {
     uint256 public constant MIN_DURATION = 3 days;
     uint256 public constant MAX_DURATION = 90 days;
     uint256 public constant MAX_PROTOCOL_FEE_BPS = 500; // hard ceiling, deploy or later: 5%
     uint256 public constant MAX_CREATOR_FEE_BPS = 1000; // 10%
-    uint256 public constant ASSEMBLER_DELAY = 30 minutes; // notice before a new assembler goes live; anyone may leave meanwhile
+    uint256 public constant ASSEMBLER_DELAY = 30 minutes; // notice before a proposed assembler can go live
 
     ICredits public immutable credits;
     /// @notice The frozen official score table, or zero if rating rules are unavailable on this deployment.
@@ -115,7 +115,7 @@ contract BatchFactory {
 
     // ---------------------------------------------------------------- assembler
 
-    /// @notice Propose the assembler. Opens the exit window; replaces any pending proposal.
+    /// @notice Propose the assembler; it can be activated after ASSEMBLER_DELAY. Replaces any pending proposal.
     function proposeAssembler(IAssembler a) external {
         if (msg.sender != assemblerSetter) revert NotSetter();
         if (address(assembler) != address(0)) revert AssemblerFixed();
@@ -125,7 +125,7 @@ contract BatchFactory {
         emit AssemblerProposed(address(a), pendingUntil);
     }
 
-    /// @notice After the exit window, anyone makes the pending assembler permanent.
+    /// @notice After ASSEMBLER_DELAY, anyone makes the pending assembler permanent.
     function activateAssembler() external {
         if (address(pendingAssembler) == address(0)) revert NothingPending();
         if (block.timestamp < pendingUntil) revert TooEarly();
@@ -134,11 +134,6 @@ contract BatchFactory {
         delete pendingAssembler;
         delete pendingUntil;
         emit AssemblerActivated(address(assembler));
-    }
-
-    /// @notice True while a proposal is pending: every batch can be withdrawn from.
-    function exitWindowOpen() public view returns (bool) {
-        return address(pendingAssembler) != address(0);
     }
 
     /// @notice Open a batch with at least `minOpen` of your Credits.
@@ -151,7 +146,7 @@ contract BatchFactory {
     /// @param arrangement How the 80 are ordered on the Statement (Batch.Arrangement).
     /// @param split How the sale is divided among the 80 positions (Batch.Split): equal, or early money earns more.
     /// @param duration Still validated and stored, no longer enforced: open batches don't expire, and a full one
-    ///        unlocks Batch.UNLOCK_AFTER after filling. Kept so the interface doesn't change.
+    ///        follows Batch's countdown and burn window. Kept so the interface doesn't change.
     function create(
         string calldata name,
         Batch.Filter calldata filter,

@@ -9,6 +9,7 @@ import {IAssembler} from "../../src/interfaces/IAssembler.sol";
 import {ICredits} from "../../src/interfaces/ICredits.sol";
 import {MockCredits} from "../../src/mocks/MockCredits.sol";
 import {MockStatement} from "../../src/mocks/MockStatement.sol";
+import {ready} from "../utils/Ready.sol";
 
 /// @dev A depositor that tries to re-enter claim()/withdraw() from its ETH receive hook.
 contract ReentrantClaimer {
@@ -153,6 +154,7 @@ contract Adversarial4Test is Test {
         }
         assertEq(total, 12_640);
 
+        ready(b);
         b.assemble();
         uint256 amount = 7.123456789012345678 ether;
         _bidAndSettle(b, amount);
@@ -185,6 +187,7 @@ contract Adversarial4Test is Test {
         Batch b = _open(factory, alice, _range(1, 40), Batch.Split.Early, Batch.Arrangement.Deposit);
         vm.prank(bob);
         factory.deposit(address(b), _range(81, 40));
+        ready(b);
         b.assemble();
         _bidAndSettle(b, 1 ether);
         uint256 g = gasleft();
@@ -237,6 +240,7 @@ contract Adversarial4Test is Test {
         }
         assertEq(sum, 12_640);
 
+        ready(b);
         b.assemble();
         _bidAndSettle(b, amount);
         address[] memory ds = new address[](3);
@@ -251,6 +255,7 @@ contract Adversarial4Test is Test {
         Batch b = _open(factory, alice, _range(1, 40), Batch.Split.Equal, Batch.Arrangement.Deposit);
         vm.prank(bob);
         factory.deposit(address(b), _range(81, 40));
+        ready(b);
         b.assemble();
         uint256 net = uint256(amount) - uint256(amount) * FEE_BPS / 10_000;
         uint256 per = net / 80;
@@ -278,6 +283,7 @@ contract Adversarial4Test is Test {
         Batch b = _open(factory, alice, _range(1, 40), Batch.Split.Early, Batch.Arrangement.Deposit);
         vm.prank(bob);
         factory.deposit(address(b), _range(81, 40));
+        ready(b);
         b.assemble();
         uint256 amount = 5 ether + 12_345;
         uint256 net = amount - amount * FEE_BPS / 10_000;
@@ -301,6 +307,7 @@ contract Adversarial4Test is Test {
         Batch b = _open(factory, alice, _range(1, 40), Batch.Split.Early, Batch.Arrangement.Deposit);
         vm.prank(bob);
         factory.deposit(address(b), _range(81, 40));
+        ready(b);
         b.assemble();
         assertEq(b.minBid(), 0.01 ether);
         vm.prank(carol);
@@ -351,7 +358,7 @@ contract Adversarial4Test is Test {
         assertEq(uint256(b.state()), uint256(Batch.State.Full));
         vm.prank(setter);
         staged.proposeAssembler(asm);
-        assertTrue(b.summary().exitWindow);
+        assertEq(uint256(b.summary().phase), uint256(Batch.Phase.Waiting));
 
         // bob pulls 5 of his (positions 10..14): carol moves up 5; bob re-deposits them at the back
         vm.prank(bob);
@@ -372,6 +379,7 @@ contract Adversarial4Test is Test {
 
         skip(3 days);
         staged.activateAssembler();
+        ready(b);
         b.assemble();
         uint256 amount = 2.5 ether;
         _bidAndSettle(b, amount);
@@ -386,17 +394,18 @@ contract Adversarial4Test is Test {
         Batch b = _open(factory, alice, _range(1, 40), Batch.Split.Early, Batch.Arrangement.Deposit);
         vm.prank(bob);
         factory.deposit(address(b), _range(81, 40));
+        ready(b);
         b.assemble();
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Auction));
+        vm.expectRevert(abi.encodeWithSelector(Batch.WrongPhase.selector, Batch.Phase.Assembled));
         b.withdraw(_one(1));
-        // the exit window does not reopen an auctioning batch either
+        // nor can anyone deposit into an auctioning batch
         vm.prank(carol);
         vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Auction));
         factory.deposit(address(b), _one(161));
         _bidAndSettle(b, 1 ether);
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Settled));
+        vm.expectRevert(abi.encodeWithSelector(Batch.WrongPhase.selector, Batch.Phase.Assembled));
         b.withdraw(_one(1));
         assertEq(b.count(), 80);
         // Credits are burned; rescue cannot touch a recorded id even though ownerOf reverts
@@ -448,6 +457,7 @@ contract Adversarial4Test is Test {
         vm.prank(bob);
         factory.depositFor(address(b), _range(81, 40), address(rc));
         rc.arm(b, alice);
+        ready(b);
         b.assemble();
         _bidAndSettle(b, 3 ether);
         uint256 due = b.claimable(address(rc));

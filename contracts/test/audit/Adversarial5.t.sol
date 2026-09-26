@@ -9,6 +9,7 @@ import {MockAssembler} from "../../src/mocks/MockAssembler.sol";
 import {IAssembler} from "../../src/interfaces/IAssembler.sol";
 import {ICredits, ICreditArt} from "../../src/interfaces/ICredits.sol";
 import {MockStatement} from "../../src/mocks/MockStatement.sol";
+import {ready} from "../utils/Ready.sol";
 
 /// @dev Art with the mainnet plate rule (paidAt % 15 + 1 is the CMYK mask, so all 15 palettes exist) plus one
 ///      case mainnet can never produce: paidAt == BLANK returns letters that map to no plate (mask 0).
@@ -226,6 +227,7 @@ contract Adversarial5Test is Test {
         if (b.count() < 80) return;
         _assertOrderValid(b, s);
         skip(1 days);
+        ready(b);
         b.assemble();
         assertEq(statement.ownerOf(1), address(b));
     }
@@ -239,7 +241,7 @@ contract Adversarial5Test is Test {
         assertEq(uint256(b.state()), uint256(Batch.State.Full));
         vm.prank(setter);
         staged.proposeAssembler(asm);
-        assertTrue(staged.exitWindowOpen());
+        assertEq(uint256(b.phase()), uint256(Batch.Phase.Waiting)); // proposed, not active: never locked
         vm.prank(bob);
         b.withdraw(_one(41));
         assertEq(uint256(b.state()), uint256(Batch.State.Open));
@@ -251,6 +253,7 @@ contract Adversarial5Test is Test {
         staged.activateAssembler();
         skip(1 days);
         _assertOrderValid(b, _checkered());
+        ready(b);
         b.assemble();
         assertEq(statement.ownerOf(1), address(b));
     }
@@ -328,6 +331,7 @@ contract Adversarial5Test is Test {
         Batch b = Batch(factory.create("D", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 200, 0));
         _deposit(factory, bob, b, _range(41, 40));
         uint256 g = gasleft();
+        ready(b);
         b.assemble();
         g -= gasleft();
         emit log_named_uint("assemble() gas, Deposit baseline", g);
@@ -340,6 +344,7 @@ contract Adversarial5Test is Test {
         _deposit(factory, bob, b, _range(41, 40));
         skip(1 days);
         uint256 g = gasleft();
+        ready(b);
         b.assemble();
         g -= gasleft();
         emit log_named_uint("assemble() gas, checkered", g);
@@ -358,6 +363,7 @@ contract Adversarial5Test is Test {
         _deposit(factory, bob, b, _range(42, 39));
         skip(1 days);
         uint256 g = gasleft();
+        ready(b);
         b.assemble();
         g -= gasleft();
         emit log_named_uint("assemble() gas, worst case", g);
@@ -375,6 +381,7 @@ contract Adversarial5Test is Test {
         _deposit(factory, bob, b, _range(41, 40));
         skip(1 days);
         uint256 g = gasleft();
+        ready(b);
         b.assemble();
         g -= gasleft();
         emit log_named_uint("assemble() gas, reversed halves", g);
@@ -400,6 +407,7 @@ contract Adversarial5Test is Test {
         assertEq(order[79], 1, "blank goes to the any slot");
         _assertOrderValid(b, s);
         skip(1 days);
+        ready(b);
         b.assemble();
         assertEq(statement.ownerOf(1), address(b));
     }

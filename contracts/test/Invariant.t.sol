@@ -8,6 +8,7 @@ import {MockAssembler} from "../src/mocks/MockAssembler.sol";
 import {ICredits} from "../src/interfaces/ICredits.sol";
 import {MockCredits} from "../src/mocks/MockCredits.sol";
 import {MockStatement} from "../src/mocks/MockStatement.sol";
+import {ready} from "./utils/Ready.sol";
 
 /// @dev Random walk over one batch's whole life: deposits, withdrawals, time, assembly, bids, settle, claims.
 ///      Actors include an EOA-like receiver, one that reverts on receive, and one that burns gas.
@@ -74,8 +75,13 @@ contract Handler is Test {
         skip(bound(secs, 1, 3 days));
     }
 
-    function assemble() external {
+    function assemble(bool wait) external {
+        if (wait) ready(batch); // otherwise try at whatever phase the walk is in
         try batch.assemble() {} catch {}
+    }
+
+    function restartCountdown() external {
+        try batch.restartCountdown() {} catch {}
     }
 
     function bid(uint256 seed, uint96 amount) external {

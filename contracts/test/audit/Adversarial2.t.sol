@@ -12,6 +12,7 @@ import {ICredits} from "../../src/interfaces/ICredits.sol";
 import {IAssembler} from "../../src/interfaces/IAssembler.sol";
 import {MockCredits} from "../../src/mocks/MockCredits.sol";
 import {MockStatement} from "../../src/mocks/MockStatement.sol";
+import {ready} from "../utils/Ready.sol";
 import {
     AdvancedOrder,
     ConsiderationItem,
@@ -134,6 +135,7 @@ contract Adversarial2Test is Test {
         factory.setFees(500, 1000); // raise both to the caps
         vm.prank(bob);
         factory.deposit(address(b), _range(51, 40));
+        ready(b);
         b.assemble();
         vm.prank(carol);
         b.bid{value: 10 ether}();

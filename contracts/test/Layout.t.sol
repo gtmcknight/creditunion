@@ -8,6 +8,7 @@ import {MockAssembler} from "../src/mocks/MockAssembler.sol";
 import {ICredits} from "../src/interfaces/ICredits.sol";
 import {MockCredits} from "../src/mocks/MockCredits.sol";
 import {MockStatement} from "../src/mocks/MockStatement.sol";
+import {ready} from "./utils/Ready.sol";
 
 /// @notice Palette layouts. MockCredits: even ids print CMY (mask 7), odd ids print K (mask 8).
 contract LayoutTest is Test {
@@ -142,6 +143,7 @@ contract LayoutTest is Test {
         }
         // burn after the creator's day: the assembler receives that order
         skip(1 days);
+        ready(b);
         vm.prank(carol);
         b.assemble();
         assertEq(statement.ownerOf(1), address(b));
@@ -152,6 +154,7 @@ contract LayoutTest is Test {
         Batch b = _open(_layout(_checkered()), _parity(2, 40, true));
         vm.prank(bob);
         factory.deposit(address(b), _parity(201, 40, false));
+        ready(b);
         vm.prank(carol);
         b.assemble();
         assertEq(statement.ownerOf(1), address(b));
@@ -191,6 +194,7 @@ contract LayoutTest is Test {
             if (s[i] != 0) assertEq(b.keyOf(order[i]), s[i]);
         }
         skip(1 days);
+        ready(b);
         b.assemble();
         assertEq(statement.ownerOf(1), address(b));
     }
@@ -213,6 +217,7 @@ contract LayoutTest is Test {
         assertEq(b.keyOf(201), 1);
         uint256[] memory order = b.layoutOrder();
         for (uint256 i; i < 80; ++i) assertEq(b.keyOf(order[i]), s[i], "slot value");
+        ready(b);
         b.assemble();
     }
 

@@ -8,6 +8,7 @@ import {MockAssembler} from "../src/mocks/MockAssembler.sol";
 import {ICredits} from "../src/interfaces/ICredits.sol";
 import {MockCredits} from "../src/mocks/MockCredits.sol";
 import {MockStatement} from "../src/mocks/MockStatement.sol";
+import {ready} from "./utils/Ready.sol";
 
 /// @dev Records the order the Statement contract received.
 contract RecordingStatement is MockStatement {
@@ -64,6 +65,7 @@ contract ArrangementTest is Test {
 
     function test_DepositOrderPassesThrough() public {
         Batch b = _full(Batch.Arrangement.Deposit);
+        ready(b);
         b.assemble();
         uint256[] memory got = statement.lastOrder();
         assertEq(got[0], 51);
@@ -73,17 +75,18 @@ contract ArrangementTest is Test {
 
     function test_NumberSortsById() public {
         Batch b = _full(Batch.Arrangement.Number);
+        ready(b);
         b.assemble();
         uint256[] memory got = statement.lastOrder();
         for (uint256 i; i < 80; ++i) assertEq(got[i], i < 40 ? i + 1 : i + 11);
     }
 
-    function test_MintTimeSortsByTimestamp() public {
-        // MockCredits stamps timestampOf(id) = id, so MintTime equals Number here; the point is the path.
-        Batch b = _full(Batch.Arrangement.MintTime);
+    function test_NumberDescSortsByIdHighToLow() public {
+        Batch b = _full(Batch.Arrangement.NumberDesc);
+        ready(b);
         b.assemble();
-        assertEq(statement.lastOrder()[0], 1);
-        assertEq(statement.lastOrder()[79], 90);
+        assertEq(statement.lastOrder()[0], 90);
+        assertEq(statement.lastOrder()[79], 1);
     }
 
     /// Creator's order is retired: new batches can't choose it.
@@ -94,7 +97,7 @@ contract ArrangementTest is Test {
     }
 
     function test_ArrangementInSummary() public {
-        Batch b = _full(Batch.Arrangement.MintTime);
-        assertEq(uint256(b.summary().arrangement), uint256(Batch.Arrangement.MintTime));
+        Batch b = _full(Batch.Arrangement.NumberDesc);
+        assertEq(uint256(b.summary().arrangement), uint256(Batch.Arrangement.NumberDesc));
     }
 }

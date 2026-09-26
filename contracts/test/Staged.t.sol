@@ -55,15 +55,18 @@ contract StagedTest is Test {
         new BatchFactory(ICredits(address(credits)), IRatings(address(0)), IAssembler(address(0)), address(0), fee, 100, 0, 10);
     }
 
-    function test_PoolsAndLocksButCannotBurnYet() public {
+    /// No assembler: a full batch pools but never locks, and can't burn.
+    function test_PoolsButNeverLocksOrBurnsYet() public {
         Batch b = _full();
         assertEq(uint256(b.state()), uint256(Batch.State.Full));
-        vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Full));
-        b.withdraw(_range(1, 1)); // locked as usual: no exit window yet
-        vm.expectRevert(Batch.AssemblerNotReady.selector);
+        assertEq(uint256(b.phase()), uint256(Batch.Phase.Waiting));
+        assertEq(b.lockAt(), 0);
+        vm.expectRevert(abi.encodeWithSelector(Batch.WrongPhase.selector, Batch.Phase.Waiting));
         b.assemble();
         assertFalse(b.summary().canAssemble);
+        vm.prank(alice);
+        b.withdraw(_range(1, 1)); // free to leave at 80/80
+        assertEq(uint256(b.state()), uint256(Batch.State.Open));
     }
 
     function test_OnlySetterProposes() public {
@@ -75,15 +78,14 @@ contract StagedTest is Test {
         factory.proposeAssembler(IAssembler(address(0)));
     }
 
-    function test_ExitWindowOpensFullBatches() public {
+    function test_ProposedAssemblerStillUnlocked() public {
         Batch b = _full();
         vm.prank(setter);
         factory.proposeAssembler(asm);
-        assertTrue(factory.exitWindowOpen());
-        assertTrue(b.summary().exitWindow);
+        assertEq(uint256(b.summary().phase), uint256(Batch.Phase.Waiting));
 
-        // Still can't burn; but bob can leave, even though the batch is full.
-        vm.expectRevert(Batch.AssemblerNotReady.selector);
+        // Still can't burn; bob can leave, even though the batch is full.
+        vm.expectRevert(abi.encodeWithSelector(Batch.WrongPhase.selector, Batch.Phase.Waiting));
         b.assemble();
         vm.prank(bob);
         b.withdraw(_range(51, 40));
@@ -102,11 +104,12 @@ contract StagedTest is Test {
         skip(factory.ASSEMBLER_DELAY());
         factory.activateAssembler(); // anyone
         assertEq(address(factory.assembler()), address(asm));
-        assertFalse(factory.exitWindowOpen());
 
-        // Window closed: locked again, and the burn works.
+        // Active: a 5-minute countdown, then locked and burnable.
+        assertEq(b.lockAt(), block.timestamp + b.LOCK_DELAY());
+        skip(b.LOCK_DELAY());
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Full));
+        vm.expectRevert(abi.encodeWithSelector(Batch.WrongPhase.selector, Batch.Phase.Burnable));
         b.withdraw(_range(1, 1));
         b.assemble();
         assertEq(statement.ownerOf(1), address(b));
@@ -144,21 +147,22 @@ contract StagedTest is Test {
         assertEq(address(factory.assembler()), address(asm));
     }
 
-    /// A batch that filled long before activation is still full on arrival (unlocked, nobody left):
-    /// it can be assembled as soon as the assembler is active.
+    /// A batch that filled long before activation is still full on arrival (nobody left): it can be
+    /// assembled LOCK_DELAY after the assembler goes live.
     function test_FullBatchWaitsForActivation() public {
         Batch b = _full();
-        skip(20 days); // well past the lock
+        skip(20 days);
         assertEq(uint256(b.state()), uint256(Batch.State.Full));
         vm.prank(setter);
         factory.proposeAssembler(asm);
         skip(3 days);
         factory.activateAssembler();
+        skip(b.LOCK_DELAY());
         b.assemble();
         assertEq(statement.ownerOf(1), address(b));
     }
 
-    /// If someone left while it was unlocked, it stays open (under 80) rather than reviving as full.
+    /// If someone left before activation, it stays open (under 80) rather than reviving as full.
     function test_UnlockedWithdrawalIsRespected() public {
         Batch b = _full();
         skip(20 days);
@@ -176,6 +180,5 @@ contract StagedTest is Test {
         BatchFactory f = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), asm, address(0), fee, 100, 0, 10);
         assertEq(address(f.assembler()), address(asm));
         assertGt(f.assemblerActiveAt(), 0);
-        assertFalse(f.exitWindowOpen());
     }
 }

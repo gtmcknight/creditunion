@@ -11,6 +11,7 @@ import {MockCredits} from "../../src/mocks/MockCredits.sol";
 import {MockStatement} from "../../src/mocks/MockStatement.sol";
 import {TestCredits} from "../../src/mocks/TestCredits.sol";
 import {CreditArt} from "../../src/vendor/credits/CreditArt.sol";
+import {ready} from "../utils/Ready.sol";
 
 /// @notice Round 6 audit. First block re-verifies the four round 5 fixes against an independent model and the
 ///         real CreditArt; the R6-n tests demonstrate the new findings.
@@ -154,6 +155,7 @@ contract Audit6Test is Test {
             Batch b = _create(factory, _blank(), new uint256[](0), reserves[k], a);
             factory.deposit(address(b), c);
             vm.stopPrank();
+            ready(b);
             b.assemble();
             assertGe(b.minBid(), 0.01 ether);
             skip(7 days);
@@ -259,7 +261,7 @@ contract Audit6Test is Test {
         assertEq(b.filledAt(), filled);
         vm.prank(alice);
         b.withdraw(_range(1, 1));
-        assertEq(b.filledAt(), 0, "a real leave in the exit window gives the lock back");
+        assertEq(b.filledAt(), 0, "a real leave stops the countdown");
     }
 
     // ------------------------------------------------------------------ R6-1: the layout check and Bits

@@ -10,6 +10,7 @@ import {ICredits} from "../../src/interfaces/ICredits.sol";
 import {MockCredits} from "../../src/mocks/MockCredits.sol";
 import {MockStatement} from "../../src/mocks/MockStatement.sol";
 import {TestCredits} from "../../src/mocks/TestCredits.sol";
+import {ready} from "../utils/Ready.sol";
 
 /// @notice Round 5 audit. Each test demonstrates a finding (R5-n) or re-verifies an earlier property
 ///         after the layoutTrait change. MockCredits: even ids print CMY (mask 7), odd ids K (mask 8);
@@ -90,6 +91,7 @@ contract Audit5Test is Test {
         Batch b = _open(factory, noFilter, 0.01 ether, Batch.Arrangement.Deposit, _range(41, 40));
         vm.prank(bob);
         factory.deposit(address(b), _range(81, 40));
+        ready(b);
         b.assemble();
         assertEq(b.minBid(), 0.01 ether);
         vm.prank(eve);
@@ -205,9 +207,9 @@ contract Audit5Test is Test {
 
     // ------------------------------------------------------------------ R5-3 empty withdraw by anyone
 
-    /// R5-3 (Info, fixed). During the exit window anyone used to be able to call withdraw([]) on a locked Full
-    /// batch and zero its filledAt. An empty withdraw now reverts, so filledAt holds and a later refill doesn't
-    /// re-lock.
+    /// R5-3 (Info, fixed). During the old exit window anyone could call withdraw([]) on a Full batch and zero its
+    /// filledAt. An empty withdraw still reverts, so a stranger can't touch the countdown. (The refill half of
+    /// this test asserted the retired one-lock rule; the new cycle is in test/Lock.t.sol.)
     function test_R5_3_StrangerEmptyWithdrawRejected() public {
         Batch b = _open(staged, noFilter, 0, Batch.Arrangement.Deposit, _range(1, 40));
         vm.prank(bob);
@@ -221,32 +223,6 @@ contract Audit5Test is Test {
         vm.expectRevert(Batch.NothingToClaim.selector);
         b.withdraw(new uint256[](0));
         assertEq(b.filledAt(), filled, "filledAt kept");
-
-        skip(30 minutes);
-        staged.activateAssembler();
-        skip(7 days);
-        vm.startPrank(alice);
-        b.withdraw(_range(1, 1));
-        staged.deposit(address(b), _range(1, 1)); // refill
-        vm.stopPrank();
-        assertLe(b.unlocksAt(), block.timestamp, "refill did not re-lock");
-    }
-
-    /// Control for R5-3: without the stranger's call the same refill does not re-lock.
-    function test_R5_3_ControlRefillWithoutResetStaysUnlocked() public {
-        Batch b = _open(staged, noFilter, 0, Batch.Arrangement.Deposit, _range(1, 40));
-        vm.prank(bob);
-        staged.deposit(address(b), _range(81, 40));
-        vm.prank(setter);
-        staged.proposeAssembler(asm);
-        skip(30 minutes);
-        staged.activateAssembler();
-        skip(7 days);
-        vm.startPrank(alice);
-        b.withdraw(_range(1, 1));
-        staged.deposit(address(b), _range(1, 1));
-        vm.stopPrank();
-        assertLe(b.unlocksAt(), block.timestamp);
     }
 
     // ------------------------------------------------------------------ re-verification with the real art
@@ -290,6 +266,7 @@ contract Audit5Test is Test {
         Batch b = _open(factory, f, 0, Batch.Arrangement.Layout, _range(1, 40)); // 20 CMY + 20 K
         vm.prank(bob);
         factory.deposit(address(b), _range(81, 40));
+        ready(b);
         b.assemble();
         vm.prank(eve);
         b.bid{value: 1 ether + 3}();

@@ -10,6 +10,7 @@ import {IAssembler} from "../../src/interfaces/IAssembler.sol";
 import {ICredits} from "../../src/interfaces/ICredits.sol";
 import {MockCredits} from "../../src/mocks/MockCredits.sol";
 import {MockStatement} from "../../src/mocks/MockStatement.sol";
+import {ready} from "../utils/Ready.sol";
 
 /// @dev An honest adapter with one innocent-looking storage variable. Under the old DELEGATECALL design
 ///      its slot 0 was Batch.factory; with a plain call its storage is its own.
@@ -170,6 +171,7 @@ contract AuditTest is Test {
         factory.deposit(address(b), _range(51, 40));
         address asm = address(factory.assembler());
         assertFalse(credits.isApprovedForAll(address(b), asm));
+        ready(b);
         b.assemble();
         assertFalse(credits.isApprovedForAll(address(b), asm));
     }
@@ -179,6 +181,7 @@ contract AuditTest is Test {
         Batch b = _open(alice, _range(1, 40));
         vm.prank(bob);
         factory.deposit(address(b), _range(51, 40));
+        ready(b);
         b.assemble();
         uint256 sid = b.statementId();
         vm.expectRevert(Batch.NotStray.selector);

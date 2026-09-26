@@ -9,6 +9,7 @@ import {ICredits} from "../src/interfaces/ICredits.sol";
 import {TestCredits} from "../src/mocks/TestCredits.sol";
 import {MockStatement} from "../src/mocks/MockStatement.sol";
 import {CreditArt} from "../src/vendor/credits/CreditArt.sol";
+import {ready} from "./utils/Ready.sol";
 
 contract TestCreditsTest is Test {
     TestCredits credits;
@@ -81,6 +82,7 @@ contract TestCreditsTest is Test {
         Batch b = Batch(f.create("Test", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, first, 100, 0));
         f.deposit(address(b), rest);
         vm.stopPrank();
+        ready(b);
         b.assemble();
         assertEq(st.ownerOf(1), address(b));
         assertEq(credits.balanceOf(address(b)), 0);

@@ -12,6 +12,9 @@ import {Ratings} from "../src/Ratings.sol";
 import {RatingsDeploy} from "./DeployRatings.s.sol";
 
 /// @notice Local anvil only: deploys mocks and leaves batches in every state for UI work.
+///         Assembly needs a full batch's 5-minute countdown to have passed. The vm.warp calls cover the
+///         simulation; a broadcast to anvil sends the fill and the burn seconds apart, so the burn reverts
+///         there unless anvil's clock is moved between them (e.g. split the run and `cast rpc evm_increaseTime 300`).
 contract SeedDemo is Script {
     // anvil default keys 0..4
     uint256[5] keys = [
@@ -43,6 +46,7 @@ contract SeedDemo is Script {
         // 1. Settled: 80 → burned → sold
         address b1 = _open(f, keys[0], "First Light", none, 0.5 ether, _r(1, 40));
         _dep(f, keys[1], b1, _r(201, 40));
+        vm.warp(Batch(b1).lockAt()); // simulation only: on anvil, advance 5 minutes first (see note below)
         vm.broadcast(keys[2]);
         Batch(b1).assemble();
         vm.broadcast(keys[4]);
@@ -63,6 +67,7 @@ contract SeedDemo is Script {
         address b2 = _open(f, keys[1], "Registered", none, 0, _r(241, 30));
         _dep(f, keys[2], b2, _r(401, 30));
         _dep(f, keys[3], b2, _r(601, 20));
+        vm.warp(Batch(b2).lockAt()); // simulation only, as above
         vm.broadcast(keys[3]);
         Batch(b2).assemble();
         vm.broadcast(keys[4]);
@@ -102,7 +107,7 @@ contract SeedDemo is Script {
         win.paidTo = 760;
         win.idFrom = 700;
         vm.broadcast(keys[3]);
-        f.create("Minute Seven", win, new uint256[](0), 0, Batch.Arrangement.MintTime, Batch.Split.Equal, 30 days, _r(701, 12), 200, 0);
+        f.create("Minute Seven", win, new uint256[](0), 0, Batch.Arrangement.Number, Batch.Split.Equal, 30 days, _r(701, 12), 200, 0);
     }
 
     /// A checkered CMY/K layout (mock art: even ids CMY, odd ids K), seeded with a few of each.

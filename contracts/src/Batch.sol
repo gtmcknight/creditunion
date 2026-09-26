@@ -16,8 +16,6 @@ interface IBatchFactory {
     function ratings() external view returns (IRatings);
     function assembler() external view returns (IAssembler);
     function assemblerActiveAt() external view returns (uint64);
-    function exitWindowOpen() external view returns (bool);
-    function pendingUntil() external view returns (uint64);
     function feeRecipient() external view returns (address);
     function isBatch(address) external view returns (bool);
 }
@@ -27,12 +25,18 @@ interface IBatchFactory {
 ///
 ///         Open      Anyone deposits Credits that pass the batch's filter. Depositors withdraw theirs at any time.
 ///                   An open batch never expires: it stays open until it holds 80.
-///         Full      The 80th Credit locks the batch for UNLOCK_AFTER. Anyone can assemble the Statement once
-///                   the factory has an active assembler, locked or not. After UNLOCK_AFTER without assembly
-///                   the lock lifts: depositors may withdraw (dropping it back to Open) or stay, and it can
-///                   still be assembled while all 80 remain. The lock runs once, from the first fill; a
-///                   refill never re-locks. While an assembler is only proposed, every
-///                   batch (full ones too) can be withdrawn from: the exit window.
+///         Full      80 held. See `phase()` for the lock:
+///                   Waiting    no active assembler yet (none set, or proposed and still in its 30-minute delay):
+///                              never locked, depositors withdraw freely.
+///                   Countdown  from max(filledAt, assembler activation) until lockAt = that + LOCK_DELAY
+///                              (5 minutes): last chance to leave. Leaving drops it under 80; refilling starts
+///                              a new countdown.
+///                   Burnable   from lockAt for BURN_WINDOW (1 hour): withdrawals revert and anyone can
+///                              assemble. This is the only time a burn can happen, and it always follows at
+///                              least 5 minutes of notice in which everyone could leave.
+///                   Expired    nobody burned in the window: withdrawals work again, assemble does not.
+///                              Anyone may call restartCountdown() to give it a fresh 5-minute notice and
+///                              window, the same effect as one depositor leaving and rejoining.
 ///         Expired   No longer entered. Kept so the enum's values (and every client decoding them) don't shift.
 ///         Auction   The batch holds the Statement. The 24-hour clock starts with the first bid.
 ///         Settled   The Statement went to the winner. Protocol fee and the creator's fee (fixed when the
@@ -45,7 +49,8 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     uint256 public constant SIZE = 80;
     uint256 public constant MAX_CREATOR_FEE_BPS = 1000; // 10%
     uint256 public constant MAX_PROTOCOL_FEE_BPS = 500; // 5%
-    uint256 public constant UNLOCK_AFTER = 7 days; // a full batch locks this long, then depositors may leave
+    uint256 public constant LOCK_DELAY = 5 minutes; // notice between a full batch's countdown start and its lock
+    uint256 public constant BURN_WINDOW = 1 hours; // how long it stays locked and burnable
     uint256 public constant RESERVE_WINDOW = 7 days; // with no bid by then, the reserve no longer applies
     uint256 public constant AUCTION_LENGTH = 24 hours;
     uint256 public constant EXTENSION = 15 minutes;
@@ -56,16 +61,19 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     uint256 public constant MAX_ALLOWLIST = 200;
 
     /// @notice How the 80 are ordered on the Statement. Fixed when the batch opens; shown before depositing.
-    ///         Deposit: as deposited. MintTime / Number: sorted by the adapter. Layout: as painted, each slot
-    ///         holding a Credit of its palette. Everything is decided up front, so anyone can burn at once.
-    ///         Creator (hand-arranged after filling) is retired: its value stays so the others don't shift,
-    ///         and new batches can't choose it.
+    ///         Deposit: as deposited. Number / NumberDesc: by Credit number, low to high / high to low.
+    ///         Layout: as painted, each slot holding a Credit of its palette. The Batch computes the order
+    ///         itself (`burnOrder()`), so anyone can check it and burn at once.
+    ///         Retired (values kept so the others don't shift; new batches can't choose them): Creator
+    ///         (hand-arranged after filling) and MintTime (Credit numbers follow payment time on mainnet, so it
+    ///         was Number under another name).
     enum Arrangement {
         Deposit,
         MintTime,
         Number,
         Creator,
-        Layout // the sheet follows a layout painted when the batch was designed (Filter.layout0/1, layoutTrait)
+        Layout, // the sheet follows a layout painted when the batch was designed (Filter.layout0/1, layoutTrait)
+        NumberDesc
     }
 
     /// @notice How the depositors' share of the sale is divided among the 80 positions (deposit order).
@@ -87,6 +95,17 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         Expired,
         Auction,
         Settled
+    }
+
+    /// @notice Where a batch is in its lock cycle (see the contract notes). Open: under 80. Assembled: the
+    ///         Statement exists (State Auction or Settled).
+    enum Phase {
+        Open,
+        Waiting,
+        Countdown,
+        Burnable,
+        Expired,
+        Assembled
     }
 
     /// @notice Who may join. Trait fields are sets, one bit per accepted value, 0 for any:
@@ -122,8 +141,8 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         State state;
         Arrangement arrangement;
         bool canAssemble; // an assembler is active
-        bool exitWindow; // a proposed assembler is pending: withdrawals open even when Full
-        uint64 exitWindowUntil;
+        Phase phase;
+        uint64 lockAt; // when a full batch locks and becomes burnable; 0 when not counting down
         string name;
         address creator;
         uint256 count;
@@ -193,7 +212,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
 
     event Deposited(address indexed from, uint256 indexed id, uint256 count);
     event Withdrawn(address indexed to, uint256 indexed id, uint256 count);
-    event Filled(uint64 unlocksAt);
+    event Filled(uint64 lockAt); // lockAt is 0 while no assembler is active
     event Assembled(address indexed caller, address statement, uint256 statementId, uint256[] order);
     event Bid(address indexed bidder, uint256 amount, uint64 auctionEnd);
     event Settled(address indexed winner, uint256 amount, uint256 protocolFee, uint256 creatorFee, uint256 payoutPerShare);
@@ -205,6 +224,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     error AlreadyInitialized();
     error NotFactory();
     error WrongState(State state);
+    error WrongPhase(Phase phase);
     error NameTooLong();
     error AllowlistTooLong();
     error BadFilter();
@@ -225,7 +245,6 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     error PaymentFailed();
     error NotStray();
     error NotWinner();
-    error AssemblerNotReady();
     error ArrangementRetired();
     error BadOrder();
     error NoSlot(uint256 id);
@@ -266,7 +285,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         if ((filter_.minScore != 0 || filter_.maxScore != 0) && address(IBatchFactory(msg.sender).ratings()) == address(0)) {
             revert BadFilter();
         }
-        if (arrangement_ == Arrangement.Creator) revert ArrangementRetired();
+        if (arrangement_ == Arrangement.Creator || arrangement_ == Arrangement.MintTime) revert ArrangementRetired();
         // A reserve under the 0.01 ETH floor would lower it (minBid returns the reserve while it stands).
         if (reserve_ != 0 && reserve_ < MIN_RAISE) revert ReserveTooLow();
         bool hasLayout = filter_.layout0 != 0 || filter_.layout1 != 0;
@@ -314,18 +333,39 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         return _ids.length == SIZE ? State.Full : State.Open;
     }
 
-    /// @notice When a full batch's lock lifts; 0 while it is not full. The lock runs UNLOCK_AFTER from the first
-    ///         fill, or from the assembler's activation if that came later: a batch always gets one full lock in
-    ///         which it can actually be burned. Activation happens once, so this can't be used to re-lock.
-    function unlocksAt() public view returns (uint256) {
-        if (_ids.length != SIZE) return 0;
+    /// @notice When a full, unassembled batch locks and becomes burnable: LOCK_DELAY after it filled or after the
+    ///         assembler went live, whichever is later. 0 when under 80, assembled, or no assembler is active.
+    function lockAt() public view returns (uint256) {
+        if (_ids.length != SIZE || statement != address(0)) return 0;
         uint256 active = factory.assemblerActiveAt();
-        return (active > filledAt ? active : filledAt) + UNLOCK_AFTER;
+        if (active == 0) return 0;
+        return (active > filledAt ? active : filledAt) + LOCK_DELAY;
     }
 
-    /// @notice Kept for clients of the old interface: the same as unlocksAt().
-    function effectiveDeadline() external view returns (uint256) {
-        return unlocksAt();
+    /// @notice When the burn window closes and the batch unlocks again; 0 when lockAt() is 0.
+    function burnDeadline() public view returns (uint256) {
+        uint256 at = lockAt();
+        return at == 0 ? 0 : at + BURN_WINDOW;
+    }
+
+    function phase() public view returns (Phase) {
+        if (statement != address(0)) return Phase.Assembled;
+        if (_ids.length != SIZE) return Phase.Open;
+        uint256 at = lockAt();
+        if (at == 0) return Phase.Waiting;
+        if (block.timestamp < at) return Phase.Countdown;
+        if (block.timestamp < at + BURN_WINDOW) return Phase.Burnable;
+        return Phase.Expired;
+    }
+
+    /// @notice After a burn window lapses unused, start a new 5-minute countdown (then a new window). Anyone may
+    ///         call it; a depositor could get the same by leaving and rejoining. Credits stay withdrawable
+    ///         through the countdown, so this never locks anyone in without notice.
+    function restartCountdown() external {
+        Phase p = phase();
+        if (p != Phase.Expired) revert WrongPhase(p);
+        filledAt = uint64(block.timestamp);
+        emit Filled(uint64(lockAt()));
     }
 
     function _require(State s) internal view {
@@ -386,25 +426,20 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         ++sharesOf[from];
         emit Deposited(from, id, _ids.length);
         if (_ids.length == SIZE) {
-            // The lock runs once, from the first fill. A refill after someone left does not re-lock: otherwise one
-            // depositor could leave and rejoin in a single transaction to lock everyone else again, forever.
-            if (filledAt == 0) filledAt = uint64(block.timestamp);
-            emit Filled(uint64(unlocksAt()));
+            // Every fill starts a countdown. A leave-and-rejoin can restart it, but each restart gives everyone
+            // LOCK_DELAY to leave and the lock that follows lasts BURN_WINDOW, during which anyone can burn.
+            filledAt = uint64(block.timestamp);
+            emit Filled(uint64(lockAt()));
         }
     }
 
-    /// @notice Take your Credits back. Allowed while Open (under 80), from a full batch once its lock has lifted
-    ///         (UNLOCK_AFTER since filling, not assembled), and from any unassembled batch while the factory's
-    ///         exit window is open.
+    /// @notice Take your Credits back. Allowed at any time before assembly except in the burn window
+    ///         (phase Burnable: from lockAt() for BURN_WINDOW). Leaving a full batch stops its countdown.
     function withdraw(uint256[] calldata ids) external nonReentrant {
         if (ids.length == 0) revert NothingToClaim(); // an empty call would still reset filledAt below
-        State s = state();
-        bool lockLifted = s == State.Full && block.timestamp >= unlocksAt();
-        bool unlocked = lockLifted || (s == State.Full && factory.exitWindowOpen());
-        if (s != State.Open && !unlocked) revert WrongState(s);
-        // Leaving a still-locked batch (only possible through the exit window) gives the lock back: otherwise
-        // filling and leaving in one block would spend the batch's only lock before it ever really fills.
-        if (s == State.Full && !lockLifted) filledAt = 0;
+        Phase p = phase();
+        if (p == Phase.Burnable || p == Phase.Assembled) revert WrongPhase(p);
+        filledAt = 0; // under 80 from here; the next fill starts a new countdown
         // Book everything first, then move tokens.
         for (uint256 i; i < ids.length; ++i) {
             uint256 id = ids[i];
@@ -651,35 +686,62 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
 
     // ---------------------------------------------------------------- assemble
 
-    /// @notice Burn the 80 into a Statement with the batch's arrangement. Anyone can call once Full; the
-    ///         caller pays gas.
+    /// @notice The exact order `assemble()` hands the adapter: deposit order, sorted by Credit number, or
+    ///         `layoutOrder()`. The adapter burns in this order and never reorders.
+    /// @dev A MintTime batch (retired; only one opened before the retirement can hold it) sorts by number
+    ///      ascending: on mainnet Credit numbers are assigned in payment order, so the two orders are identical.
+    function burnOrder() public view returns (uint256[] memory out) {
+        Arrangement a = arrangement;
+        if (a == Arrangement.Layout) return layoutOrder();
+        out = _ids;
+        if (a != Arrangement.Number && a != Arrangement.NumberDesc && a != Arrangement.MintTime) return out;
+        bool desc = a == Arrangement.NumberDesc;
+        // Insertion sort in place; n is at most 80 and ids are distinct. Assembly only to skip bounds checks.
+        assembly ("memory-safe") {
+            let base := add(out, 0x20)
+            let end := add(base, shl(5, mload(out)))
+            for { let p := add(base, 0x20) } lt(p, end) { p := add(p, 0x20) } {
+                let v := mload(p)
+                let q := p
+                for {} gt(q, base) { q := sub(q, 0x20) } {
+                    let w := mload(sub(q, 0x20))
+                    if iszero(xor(desc, gt(w, v))) { break } // asc: stop once w < v; desc: once w > v
+                    mstore(q, w)
+                }
+                mstore(q, v)
+            }
+        }
+    }
+
+    /// @notice Burn the 80 into a Statement in `burnOrder()`. Anyone can call, only during the burn window
+    ///         (phase Burnable); the caller pays gas.
     function assemble() external nonReentrant {
-        _require(State.Full);
-        if (arrangement == Arrangement.Layout) return _assemble(layoutOrder(), Arrangement.Deposit);
-        _assemble(_ids, arrangement);
+        Phase p = phase();
+        if (p != Phase.Burnable) revert WrongPhase(p);
+        _assemble(burnOrder());
     }
 
     /// @dev The assembler is fixed in the factory. It is approved as an operator for this batch's
     ///      Credits only for the duration of the call, and its work is checked afterwards: none of the 80
     ///      Credits may still exist, and this batch must own the Statement the adapter says it minted.
     ///      Its storage is its own; nothing it does can reach this contract's state.
-    function _assemble(uint256[] memory ids, Arrangement how) internal {
-        IAssembler asm = factory.assembler();
-        if (address(asm) == address(0)) revert AssemblerNotReady();
+    ///      The order is final: the adapter is always told Deposit (pass through).
+    function _assemble(uint256[] memory order) internal {
+        IAssembler asm = factory.assembler(); // set: phase Burnable needs an active assembler
         address st = asm.statement();
         if (st == address(0) || st == address(credits)) revert StatementNotReceived();
 
-        for (uint256 i; i < ids.length; ++i) {
-            if (depositorOf[ids[i]] == address(0)) revert BadOrder(); // never hand the adapter an id we do not hold
+        for (uint256 i; i < order.length; ++i) {
+            if (depositorOf[order[i]] == address(0)) revert BadOrder(); // never hand the adapter an id we do not hold
         }
         _assembling = true;
         credits.setApprovalForAll(address(asm), true);
-        uint256 sid = asm.assemble(ids, uint8(how));
+        uint256 sid = asm.assemble(order, uint8(Arrangement.Deposit));
         credits.setApprovalForAll(address(asm), false);
         _assembling = false;
 
         for (uint256 i; i < SIZE; ++i) {
-            try credits.ownerOf(ids[i]) returns (address) {
+            try credits.ownerOf(order[i]) returns (address) {
                 revert CreditsNotBurned();
             } catch {}
         }
@@ -688,7 +750,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         statement = st;
         statementId = sid;
         assembledAt = uint64(block.timestamp);
-        emit Assembled(msg.sender, st, sid, ids);
+        emit Assembled(msg.sender, st, sid, order);
     }
 
     // ---------------------------------------------------------------- auction
@@ -850,12 +912,12 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         s.state = state();
         s.arrangement = arrangement;
         s.canAssemble = address(factory.assembler()) != address(0);
-        s.exitWindow = factory.exitWindowOpen();
-        s.exitWindowUntil = factory.pendingUntil();
+        s.phase = phase();
+        s.lockAt = uint64(lockAt());
         s.name = name;
         s.creator = creator;
         s.count = _ids.length;
-        s.deadline = uint64(unlocksAt()); // when a full batch unlocks; 0 while open
+        s.deadline = uint64(burnDeadline()); // when the burn window closes; 0 when not counting down
         s.filledAt = filledAt;
         s.assembledAt = assembledAt;
         s.auctionEnd = auctionEnd;

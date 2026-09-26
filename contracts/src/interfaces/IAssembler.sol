@@ -11,9 +11,9 @@ interface IAssembler {
     /// @notice The Statement contract this adapter mints from.
     function statement() external view returns (address);
 
-    /// @param ids The 80 Credits. For Deposit and Creator arrangements this is already the intended order;
-    ///        for the others the adapter sorts as the Statement contract expects (see Batch.Arrangement).
-    /// @param arrangement The batch's arrangement, as a Batch.Arrangement value.
+    /// @param ids The 80 Credits in their final order. The Batch computes it (Batch.burnOrder()) for every
+    ///        arrangement; the adapter must burn them in exactly this order and never reorder.
+    /// @param arrangement Informational only. Batches always pass 0 (Batch.Arrangement.Deposit: pass through).
     /// @return statementId The Statement now owned by the calling Batch.
     function assemble(uint256[] calldata ids, uint8 arrangement) external returns (uint256 statementId);
 }

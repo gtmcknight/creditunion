@@ -8,6 +8,7 @@ import {MockAssembler} from "../src/mocks/MockAssembler.sol";
 import {ICredits} from "../src/interfaces/ICredits.sol";
 import {MockCredits} from "../src/mocks/MockCredits.sol";
 import {MockStatement} from "../src/mocks/MockStatement.sol";
+import {ready} from "./utils/Ready.sol";
 
 /// @notice Early-bird split: position i (deposit order, 0-based) earns 237 - 2i units of 12,640.
 contract SplitTest is Test {
@@ -49,6 +50,7 @@ contract SplitTest is Test {
     }
 
     function _sell(Batch b, uint256 amount) internal {
+        ready(b);
         b.assemble();
         vm.deal(address(0xB1D), amount);
         vm.prank(address(0xB1D));

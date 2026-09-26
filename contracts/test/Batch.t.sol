@@ -9,6 +9,7 @@ import {IAssembler} from "../src/interfaces/IAssembler.sol";
 import {ICredits} from "../src/interfaces/ICredits.sol";
 import {MockCredits} from "../src/mocks/MockCredits.sol";
 import {MockStatement} from "../src/mocks/MockStatement.sol";
+import {ready} from "./utils/Ready.sol";
 
 /// @dev Assembler that pretends: as operator it moves the Credits away instead of burning them.
 contract StealingAssembler is IAssembler {
@@ -90,6 +91,7 @@ contract BatchTest is Test {
         b = _open(alice, _range(1, 40), reserve);
         vm.prank(bob);
         factory.deposit(address(b), _range(51, 40));
+        skip(b.LOCK_DELAY()); // countdown over: locked and burnable
     }
 
     // ---------------------------------------------------------------- open / deposit
@@ -206,8 +208,8 @@ contract BatchTest is Test {
         Batch b = _full(0);
         assertEq(uint256(b.state()), uint256(Batch.State.Full));
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Full));
-        b.withdraw(_range(1, 1));
+        vm.expectRevert(abi.encodeWithSelector(Batch.WrongPhase.selector, Batch.Phase.Burnable));
+        b.withdraw(_range(1, 1)); // _full skips the countdown: in the burn window
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Full));
         factory.deposit(address(b), _range(41, 1));
@@ -226,63 +228,19 @@ contract BatchTest is Test {
         Batch b = Batch(factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 3 days, _range(1, 40), 100, 0));
         skip(365 days);
         assertEq(uint256(b.state()), uint256(Batch.State.Open));
-        assertEq(b.unlocksAt(), 0);
+        assertEq(b.lockAt(), 0);
         vm.prank(bob);
         factory.deposit(address(b), _range(51, 40));
         assertEq(uint256(b.state()), uint256(Batch.State.Full));
     }
 
-    /// Filling locks the batch for UNLOCK_AFTER: no withdrawals until then.
-    function test_FillStartsLock() public {
-        Batch b = _full(0);
-        assertEq(b.unlocksAt(), block.timestamp + b.UNLOCK_AFTER());
-        skip(b.UNLOCK_AFTER() - 1);
-        vm.prank(bob);
-        vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Full));
-        b.withdraw(_range(51, 1));
-    }
-
-    /// After the lock lifts, depositors may leave; the batch drops back to Open and can't be assembled.
-    function test_UnlockLetsDepositorsLeave() public {
-        Batch b = _full(0);
-        vm.warp(b.unlocksAt());
-        assertEq(uint256(b.state()), uint256(Batch.State.Full));
-        vm.prank(bob);
-        b.withdraw(_range(51, 40));
-        assertEq(credits.balanceOf(bob), 50);
-        assertEq(uint256(b.state()), uint256(Batch.State.Open));
-        vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Open));
-        b.assemble();
-    }
-
-    /// Nobody has to leave: an unlocked batch that still holds all 80 can be assembled.
-    function test_UnlockedFullBatchCanStillAssemble() public {
-        Batch b = _full(0);
-        skip(30 days);
-        b.assemble();
-        assertEq(uint256(b.state()), uint256(Batch.State.Auction));
-    }
-
-    /// The lock runs once: leaving and rejoining an unlocked batch can't lock everyone else again.
-    function test_RefillDoesNotRelock() public {
-        Batch b = _full(0);
-        uint256 at = b.unlocksAt();
-        vm.warp(at);
-        vm.prank(bob);
-        b.withdraw(_range(51, 1));
-        vm.prank(bob);
-        factory.deposit(address(b), _range(51, 1)); // same block: leave and rejoin
-        assertEq(uint256(b.state()), uint256(Batch.State.Full));
-        assertEq(b.unlocksAt(), at);
-        vm.prank(alice);
-        b.withdraw(_range(1, 1)); // still free to leave
-        assertEq(uint256(b.state()), uint256(Batch.State.Open));
-    }
+    // The lock cycle (countdown, burn window, expiry) is covered in test/Lock.t.sol.
 
     // ---------------------------------------------------------------- assemble
 
     function test_AssembleBurnsInDepositOrder() public {
         Batch b = _full(0);
+        ready(b);
         vm.prank(carol);
         b.assemble();
         assertEq(uint256(b.state()), uint256(Batch.State.Auction));
@@ -294,7 +252,8 @@ contract BatchTest is Test {
 
     function test_AssembleOnlyWhenFull() public {
         Batch b = _open(alice, _range(1, 40), 0);
-        vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Open));
+        ready(b);
+        vm.expectRevert(abi.encodeWithSelector(Batch.WrongPhase.selector, Batch.Phase.Open));
         b.assemble();
     }
 
@@ -309,6 +268,7 @@ contract BatchTest is Test {
         Batch b = Batch(bad.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0));
         vm.prank(bob);
         bad.deposit(address(b), _range(51, 40));
+        ready(b);
         vm.expectRevert(Batch.CreditsNotBurned.selector);
         b.assemble();
         assertEq(credits.ownerOf(1), address(b)); // rolled back
@@ -318,6 +278,7 @@ contract BatchTest is Test {
 
     function test_ReserveThenLapses() public {
         Batch b = _full(2 ether);
+        ready(b);
         b.assemble();
         vm.prank(carol);
         vm.expectRevert(abi.encodeWithSelector(Batch.BidTooLow.selector, 2 ether));
@@ -337,6 +298,7 @@ contract BatchTest is Test {
 
     function test_FullAuctionAndSplit() public {
         Batch b = _full(0);
+        ready(b);
         b.assemble();
         vm.prank(carol);
         b.bid{value: 3 ether}();
@@ -376,6 +338,7 @@ contract BatchTest is Test {
 
     function test_AntiSnipe() public {
         Batch b = _full(0);
+        ready(b);
         b.assemble();
         vm.prank(carol);
         b.bid{value: 1 ether}();
@@ -387,6 +350,7 @@ contract BatchTest is Test {
 
     function test_RevertingBidderCannotBlock() public {
         Batch b = _full(0);
+        ready(b);
         b.assemble();
         RevertingReceiver r = new RevertingReceiver(b);
         r.bid{value: 1 ether}();
@@ -398,6 +362,7 @@ contract BatchTest is Test {
 
     function test_NoSettleWithoutBids() public {
         Batch b = _full(0);
+        ready(b);
         b.assemble();
         skip(365 days);
         vm.expectRevert(Batch.AuctionRunning.selector);
@@ -440,6 +405,7 @@ contract BatchTest is Test {
         factory.deposit(address(early), _range(61, 40)); // bob: 51..60 went to `after`, 61..100 here
         vm.prank(alice);
         factory.deposit(address(early), _range(11, 30));
+        ready(early);
         early.assemble();
         vm.prank(carol);
         early.bid{value: 1 ether}();
@@ -465,6 +431,7 @@ contract BatchTest is Test {
         Batch b = Batch(factory.create("Fee", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 200));
         vm.prank(bob);
         factory.deposit(address(b), _range(51, 40));
+        ready(b);
         b.assemble();
         vm.prank(carol);
         b.bid{value: 3 ether}();
@@ -492,6 +459,7 @@ contract BatchTest is Test {
         Batch b = Batch(factory.create("F", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, a), 100, creatorFee));
         vm.prank(bob);
         factory.deposit(address(b), _range(51, 80 - a));
+        ready(b);
         b.assemble();
         vm.deal(carol, amount);
         vm.prank(carol);

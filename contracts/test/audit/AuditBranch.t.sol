@@ -9,6 +9,7 @@ import {IAssembler} from "../../src/interfaces/IAssembler.sol";
 import {ICredits} from "../../src/interfaces/ICredits.sol";
 import {MockCredits} from "../../src/mocks/MockCredits.sol";
 import {MockStatement} from "../../src/mocks/MockStatement.sol";
+import {ready} from "../utils/Ready.sol";
 
 /// Audit tests for the unlock / Bits / Creator-retirement branch.
 contract AuditBranchTest is Test {
@@ -50,8 +51,8 @@ contract AuditBranchTest is Test {
         factory.deposit(address(b), _range(51, 39));
     }
 
-    /// Staged launch: a batch that filled >7 days before the assembler went live still gets a full lock from
-    /// activation, so it can be burned before anyone can pull out.
+    /// Staged launch: a batch that filled long before the assembler went live counts down from activation,
+    /// so it gets the full LOCK_DELAY notice and then a burn window.
     function test_LockRunsFromActivation() public {
         Batch b = _open79();
         vm.prank(bob);
@@ -61,53 +62,18 @@ contract AuditBranchTest is Test {
         factory.proposeAssembler(asm);
         skip(3 days);
         factory.activateAssembler();
-        assertEq(b.unlocksAt(), block.timestamp + 7 days);
+        assertEq(b.lockAt(), block.timestamp + b.LOCK_DELAY());
+        skip(b.LOCK_DELAY());
         vm.prank(bob);
-        vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Full));
+        vm.expectRevert(abi.encodeWithSelector(Batch.WrongPhase.selector, Batch.Phase.Burnable));
         b.withdraw(_range(90, 1));
+        ready(b);
         b.assemble();
         assertEq(uint256(b.state()), uint256(Batch.State.Auction));
     }
 
-    /// Filling and leaving during the exit window gives the lock back: the real fill still locks.
-    function test_ExitWindowFillAndLeaveKeepsLock() public {
-        Batch b = _open79();
-        vm.prank(setter);
-        factory.proposeAssembler(asm);
-        // eve fills and leaves in the same block (exit window lets Full batches withdraw)
-        vm.startPrank(eve);
-        factory.deposit(address(b), _range(101, 1));
-        b.withdraw(_range(101, 1));
-        vm.stopPrank();
-        assertEq(b.filledAt(), 0);
-        skip(7 days);
-        factory.activateAssembler();
-        skip(8 days);
-        // The honest fill locks for a full 7 days.
-        vm.prank(bob);
-        factory.deposit(address(b), _range(90, 1));
-        assertEq(uint256(b.state()), uint256(Batch.State.Full));
-        assertEq(b.unlocksAt(), block.timestamp + 7 days);
-        vm.prank(bob);
-        vm.expectRevert(abi.encodeWithSelector(Batch.WrongState.selector, Batch.State.Full));
-        b.withdraw(_range(90, 1));
-        b.assemble();
-    }
-
-    /// After the lock lifts, leaving and rejoining never re-locks.
-    function test_RefillAfterUnlockDoesNotRelock() public {
-        Batch b = _open79();
-        vm.prank(bob);
-        factory.deposit(address(b), _range(90, 1));
-        uint256 first = b.unlocksAt();
-        skip(7 days);
-        vm.prank(bob);
-        b.withdraw(_range(90, 1));
-        vm.prank(bob);
-        factory.deposit(address(b), _range(90, 1));
-        assertEq(b.unlocksAt(), first);
-        assertLe(b.unlocksAt(), block.timestamp);
-    }
+    // test_ExitWindowFillAndLeaveKeepsLock and test_RefillAfterUnlockDoesNotRelock covered the retired
+    // exit-window and one-lock rules; the new cycle is in test/Lock.t.sol.
 
     /// Bits filter: marks==0 cannot be targeted exactly (0/0 = no filter); bitsFrom alone works; reversed reverts.
     function test_BitsFilter() public {

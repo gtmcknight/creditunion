@@ -294,3 +294,61 @@ edition supply in the painter.
 
 Tests: `test/audit/Audit6.t.sol` 13 of 13 pass. Full suite: 194 of 195, the one failure the pre-existing
 `Adversarial2.test_ConstructorRejectsBadLengths`.
+
+## Round 7: the Batch sets the burn order; a short lock replaces the 7-day one (Sept 26)
+
+Before this change, Number and MintTime batches handed the adapter deposit order plus the arrangement and trusted
+the adapter to sort. The mainnet adapter is not written yet, so the burn order depended on code that did not exist.
+
+**Changed.**
+- New `burnOrder()` view (`Batch.sol`): the exact list `assemble()` hands the adapter. Deposit: deposit order.
+  Number: Credit number, low to high. NumberDesc (new, value 5, appended so nothing shifts): high to low. Layout:
+  `layoutOrder()`. `assemble()` calls it, so the page, anyone checking, and the burn read one source.
+- The adapter is always told `Deposit` (0) and burns the list as given. `IAssembler` NatSpec now says so; the
+  arrangement argument is informational. `MockAssembler` no longer sorts.
+- MintTime retired for new batches like Creator (`ArrangementRetired`). On mainnet Credit numbers are assigned in
+  payment order, so it was Number under another name. A MintTime batch that already exists sorts by number, low to
+  high, which is the same order.
+- Sorting is an in-place insertion sort over at most 80 distinct ids. About 160k gas on a churned batch, about 310k
+  worst case (fully reversed), against roughly 3M for the burn itself.
+- Runtime size 23,201 to 22,682 bytes (limit 24,576).
+
+**Tests.** `test/BurnOrder.t.sol`, 9 of 9 pass. Through a recording adapter, the ids received equal `burnOrder()`
+and the arrangement received is 0, for Deposit, Number, NumberDesc and Layout after a withdraw and re-deposit
+churn; the Layout order puts a Credit of the painted palette in every slot; a sorted batch keeps its order when a
+depositor leaves and rejoins; a fuzz over random deposit orders gives strictly sorted output both ways; a legacy
+MintTime batch (arrangement byte set with `vm.store`) burns by number; `initialize` rejects MintTime and Creator and
+accepts NumberDesc. `test/Arrangement.t.sol` moved from MintTime to NumberDesc.
+
+**Lock rules (replace the 7-day lock and the exit window).**
+- No active assembler (none set, or proposed and inside its 30-minute `ASSEMBLER_DELAY`): a batch never locks.
+  Withdrawals work at 80 of 80; deposits still stop at 80. With nothing locked before activation the exit window
+  had no job, so it is gone (`BatchFactory.exitWindowOpen`, the Batch branch, `UNLOCK_AFTER`, `unlocksAt`,
+  `effectiveDeadline`, `AssemblerNotReady`). The 30-minute delay stays: it is the notice before a bad adapter could
+  go live.
+- Countdown: a full batch locks at `lockAt() = max(filledAt, assemblerActiveAt) + LOCK_DELAY` (5 minutes).
+  Withdrawals still work until then. Any withdrawal zeroes `filledAt`; every fill stamps it again, so a refill
+  starts a new countdown.
+- Burn window: from `lockAt()` for `BURN_WINDOW` (1 hour) withdrawals revert and anyone can `assemble()`.
+  `assemble()` works only here (`WrongPhase` otherwise), so no burn can happen without the 5-minute notice.
+- Expired: nobody burned in the hour. Withdrawals work again and `assemble()` does not. A batch that stays at 80
+  gets a new cycle from `restartCountdown()` (anyone, Expired only): it stamps `filledAt = now`, so another 5-minute
+  notice, then another hour. A depositor could do the same by leaving and rejoining, so it adds no power.
+- Worst case for a depositor: someone restarts every cycle. Credits are then withdrawable for 5 minutes out of
+  every 65, and during the other 60 anyone can burn. Nothing is ever trapped, and nothing burns without notice.
+- New views `lockAt()`, `burnDeadline()`, `phase()` (Open, Waiting, Countdown, Burnable, Expired, Assembled). New
+  error `WrongPhase(Phase)`. `Summary` loses `exitWindow`/`exitWindowUntil` and gains `phase`/`lockAt`;
+  `deadline` is now `burnDeadline()`. `State` is unchanged.
+- Unchanged: the burn order (`burnOrder()`), the held-id and burned checks after the adapter, fees and splits.
+  Runtime size 22,819 bytes.
+
+**Lock tests.** `test/Lock.t.sol`, 14 of 14 pass: withdraw at 80 with no assembler and with one only proposed;
+countdown from the fill (assembler already live) and from activation (already full); withdraw in the countdown
+resets and a refill restarts; `assemble` reverts in the countdown (same block and `lockAt - 1`) and at expiry, and
+works at `lockAt` and `burnDeadline - 1`; withdraw reverts at `lockAt` and `burnDeadline - 1`; withdraw works again
+at `burnDeadline`; `restartCountdown` only when Expired and never gives an instant burn; a fuzz over fill,
+proposal, activation and probe times proving Credits are withdrawable exactly outside `[lockAt, lockAt + 1h)` and
+burnable exactly inside it. Tests that asserted the old rules were rewritten or removed (listed in the report);
+tests that assembled right after filling now step into the burn window first (`test/utils/Ready.sol`).
+
+Full suite: 209 of 210, the one failure the pre-existing `Adversarial2.test_ConstructorRejectsBadLengths`.
