@@ -544,11 +544,12 @@ async function drawPicker(
     actions.innerHTML = `
       <div class="row small"><button type="button" class="link small" id="pick-all">Select ${Math.min(fits.length, room) === fits.length ? 'all' : Math.min(fits.length, room)}</button>${n ? '<button type="button" class="link small" id="pick-none">Clear</button>' : ''}</div>
       ${
-        !way
-          ? `<button class="btn primary block" id="approve">Approve Eighty · once</button>`
-          : n
-            ? `<button class="btn primary block" id="deposit" ${over ? 'disabled' : ''}>${over ? `Only ${room} open` : `Deposit ${plural(n)}${way === 'deposit' && txs > 1 ? ` · ${txs} transactions` : ''}`}</button>`
-            : ''
+        // Always one button: nothing picked yet says so; approval only shows when a pick needs it.
+        !n
+          ? `<button class="btn primary block" disabled>Select Credits to deposit</button>`
+          : !way
+            ? `<button class="btn primary block" id="approve">Approve Eighty · once</button>`
+            : `<button class="btn primary block" id="deposit" ${over ? 'disabled' : ''}>${over ? `Only ${room} open` : `Deposit ${plural(n)}${way === 'deposit' && txs > 1 ? ` · ${txs} transactions` : ''}`}</button>`
       }`;
     document.getElementById('pick-all')?.addEventListener('click', () => {
       picks = new Set(fits.slice(0, room).map(String));
