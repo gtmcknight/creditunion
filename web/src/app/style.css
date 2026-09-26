@@ -1,14 +1,14 @@
 /* Eighty — one grid, two inks. */
 
 :root {
-  --bg: #fff;
+  --bg: #eeeeec;
   --fg: #0a0a0a;
   --muted: #6b6b6b;
   --faint: #a3a3a3;
-  --line: rgba(0, 0, 0, 0.08);
-  --line-strong: rgba(0, 0, 0, 0.16);
-  --surface: #f6f6f6;
-  --empty: #f1f1f1;
+  --line: rgba(0, 0, 0, 0.09);
+  --line-strong: rgba(0, 0, 0, 0.18);
+  --surface: #e6e6e3;
+  --empty: #e2e2df;
   --accent: #0a0a0a;
   --on-accent: #fff;
   --ok: #0a7d34;
@@ -1088,6 +1088,7 @@ input::placeholder {
   min-width: 52px;
   height: 40px;
   padding: 0 10px;
+  white-space: nowrap;
   border-radius: calc(var(--r) - 2px);
   font-size: 14px;
   color: var(--muted);
@@ -5857,4 +5858,23 @@ dialog.eligible::backdrop {
 #tab-body .wallet-grid + .section-head,
 #tab-body .section-head + p + .section-head {
   margin-top: 40px;
+}
+
+/* Light mode sits on gray; the Credit sheets stay white with a soft lift, so the grids read as objects. */
+:root:not([data-mode='dark']) :is(.card .sheet, .batch-art .sheet) {
+  background: #fff;
+  border-color: transparent;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 8px 24px -12px rgba(0, 0, 0, 0.18);
+}
+
+/* Phones: two cards to a row leave the sheet little margin, so the count gets its own strip above the grid. */
+@media (max-width: 640px) {
+  .card .sheet {
+    padding-top: 28px;
+  }
+  .card-art .count {
+    top: 8px;
+    left: 8px;
+    font-size: 11px;
+  }
 }

@@ -32,8 +32,8 @@ export function fullStatus(s: Summary) {
 }
 
 const SORTS = [
-  ['fullest', 'Most complete'],
-  ['emptiest', 'Least complete'],
+  ['fullest', 'Fullest'],
+  ['emptiest', 'Emptiest'],
   ['new', 'Newest'],
   ['old', 'Oldest'],
 ] as const;
