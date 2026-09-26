@@ -1,6 +1,15 @@
+<a href="https://eighty.fun"><img src="docs/banner.jpg" alt="Eighty: turn 80 Credits into a Statement, together"></a>
+
+<p align="center"><b><a href="https://eighty.fun">eighty.fun</a></b> · <a href="#how-a-party-works">How it works</a> · <a href="contracts/AUDIT.md">Audit</a> · <a href="#deployed-addresses">Addresses</a></p>
+
 # Eighty
 
-Eighty lets holders of Jack Butcher's [Credits](https://jack.art/credits) pool 80 Credits into a party. At 80, the party burns them into one Statement, auctions it onchain, and splits the sale among everyone in the party. Contracts hold the Credits and the ETH; there is no owner, admin, pause or upgrade. The site runs at [eighty.fun](https://eighty.fun). It is live on Sepolia testnet; mainnet is not deployed yet.
+Eighty lets holders of Jack Butcher's [Credits](https://jack.art/credits) pool 80 Credits into a party. At 80 the party burns them into one Statement, auctions it onchain, and splits the sale among everyone in. Contracts hold the Credits and the ETH: no owner, admin, pause or upgrade. Live on Sepolia testnet; mainnet is not deployed yet.
+
+<table>
+<tr><td width="33%" valign="top"><img src="docs/lifecycle.svg" alt="Party together"><br><b>Party together</b><br>Pool your Credits with other holders. At 80 they burn into a Statement, and everyone in shares the sale.</td><td width="33%" valign="top"><img src="docs/eligibility.svg" alt="Guest list"><br><b>Guest list</b><br>Let any Credit holder join, or pick traits to make a special Statement.</td><td width="33%" valign="top"><img src="docs/order.svg" alt="Custom seating"><br><b>Custom seating</b><br>Set the order they burn in: deposit order, original mint time, or a custom design.</td></tr>
+<tr><td width="33%" valign="top"><img src="docs/buying.svg" alt="Buy refreshments"><br><b>Buy refreshments</b><br>Buy the cheapest Credits that fit from OpenSea, straight into any party.</td><td width="33%" valign="top"><img src="docs/exit.svg" alt="Exit plan"><br><b>Exit plan</b><br>Withdraw anytime before the party fills. If a full party isn’t burned within 7 days, anyone can leave.</td><td width="33%" valign="top"><img src="docs/auction.svg" alt="Afterparty"><br><b>Afterparty</b><br>The Statement goes to auction, and the proceeds are split across everyone in the party.</td></tr>
+</table>
 
 ## How a party works
 
@@ -15,7 +24,10 @@ Eighty lets holders of Jack Butcher's [Credits](https://jack.art/credits) pool 8
 
 **Burn order.** Deposit order, mint time, Credit number, the creator's order, or a painted sheet (the 8×10 grid painted by palette; each painted slot only takes a matching Credit).
 
-## Repo layout
+## For developers
+
+<details>
+<summary><b>Repo layout</b></summary>
 
 ```
 contracts/          Foundry
@@ -35,7 +47,10 @@ web/                Cloudflare Worker + static site (Vite, TypeScript, viem, no 
 
 There is no database or indexer. Parties, slots and bids are read from the contracts.
 
-## Contracts
+</details>
+
+<details>
+<summary><b>Contracts</b></summary>
 
 | Contract | What it does |
 |---|---|
@@ -51,7 +66,7 @@ Fees are set at deploy and capped in code: protocol 2% (max 5%), creator 0% (max
 
 Review history, findings and fixes: [contracts/AUDIT.md](contracts/AUDIT.md).
 
-### Build and test
+#### Build and test
 
 ```sh
 git submodule update --init --recursive
@@ -62,7 +77,7 @@ forge test
 
 The fork tests (`*.fork.t.sol`) run against mainnet Seaport and Credits through a public node. Set `MAINNET_RPC` to use your own.
 
-### Deploy
+#### Deploy
 
 Copy `contracts/.env.example` to `contracts/.env`, fill it in, and load it with `set -a; . ./.env; set +a`.
 
@@ -88,7 +103,10 @@ anvil --gas-limit 60000000
 forge script script/SeedDemo.s.sol --rpc-url http://127.0.0.1:8545 --broadcast --slow
 ```
 
-## Web
+</details>
+
+<details>
+<summary><b>Web</b></summary>
 
 ```sh
 cd web
@@ -115,7 +133,7 @@ Worker endpoints:
 
 Rate limits are per IP (`unsafe.bindings` in `wrangler.jsonc`).
 
-### Deploy
+#### Deploy
 
 ```sh
 cd web
@@ -127,7 +145,7 @@ pnpm run deploy                            # abi check, typecheck, vite build, w
 
 Use `pnpm run deploy`, not `pnpm deploy` (that is a built-in pnpm command). Edit the `routes` in `wrangler.jsonc` to deploy under your own domain.
 
-### Edition data
+#### Edition data
 
 Trait bits, the mint timeline, rating statistics and the onchain score table all derive from `web/data/credits.json.gz` (`{ id: [seed, paidAt] }` for all 122,154 Credits), rebuilt from the Credits contract's `Distributed` events:
 
@@ -140,6 +158,8 @@ node scripts/wall.ts                           # public/wall.bin, bits.bin, time
 ```
 
 Ratings follow Jack's published formula (methodology v3.4.0), reproduced in `web/src/shared/credits.ts` and checked against his API.
+
+</details>
 
 ## Deployed addresses
 
