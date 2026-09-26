@@ -747,7 +747,7 @@ async function loadBids(address: Address, account: string | null) {
   list.innerHTML = rows.length
     ? rows
         .map(
-          (r, i) => `<li class="bid${i === 0 ? ' top' : ''}">
+          (r, i) => `<li class="bid${i === 0 ? ' high' : ''}">
             <span class="num bid-amt">${eth(BigInt(r.amount))}</span>
             <span class="bid-who">${who(r.bidder)}${account && same(r.bidder, account) ? '<span class="tag you">You</span>' : ''}</span>
             <span class="muted small num bid-when">${r.time ? ago(r.time) : ''}${explorer('tx', r.tx) ? ` <a href="${explorer('tx', r.tx)}" target="_blank" rel="noopener" title="Transaction">↗</a>` : ''}</span>
