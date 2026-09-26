@@ -48,6 +48,7 @@ async function route() {
     else if (page === 'mint') await mint(app, route);
     else if (page === 'og') await previews(app);
     else if (page === 'me') await profile(app, route);
+    else if (page === 'member' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await profile(app, route, arg as Address);
     else if (page === 'create') await create(app);
     else if (page === 'party' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await party(app, arg as Address, route);
     else if (page === 'parties' || page === 'auctions') await lists(app, page);
@@ -164,11 +165,20 @@ onSession(() => {
 window.addEventListener('popstate', () => route());
 // Same-site links navigate in place; new tabs, modified clicks and the Worker's own paths load normally.
 document.addEventListener('click', (e) => {
+  // A link inside a link (a card's creator): its own place, not the card's.
+  const inner = (e.target as HTMLElement).closest?.<HTMLElement>('[data-href]');
+  if (inner && e.button === 0) {
+    e.preventDefault();
+    if (e.metaKey || e.ctrlKey) window.open(inner.dataset.href, '_blank');
+    else go(inner.dataset.href!);
+    return;
+  }
   const a = (e.target as HTMLElement).closest?.('a');
   if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || a.target) return;
   const url = new URL(a.href, location.href);
   if (url.origin !== location.origin || /^\/(rpc|ratings|edition|art|opensea|ens|config\.json)/.test(url.pathname)) return;
   e.preventDefault();
+  document.querySelectorAll<HTMLDialogElement>('dialog[open]').forEach((d) => d.close());
   go(url.pathname);
 });
 

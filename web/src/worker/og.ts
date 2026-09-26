@@ -13,6 +13,7 @@ const CARDS: Record<string, Card> = {
   party: { title: 'Join this credit union', description: '80 Credits. One Statement. Split 80 ways. Leave any time before it fills.', image: '/og/party.png' },
   mint: { title: 'Mint test Credits · Credit Union', description: 'Real Credits art on testnet, to try a credit union end to end.', image: '/og/mint.png' },
   me: { title: 'Your credit unions', description: 'Your Credits in credit unions, and what they’re worth.', image: '/og/home.png' },
+  member: { title: 'Member · Credit Union', description: 'Their credit unions and Credits.', image: '/og/home.png' },
   og: { title: 'Link previews · Credit Union', description: 'Every page’s link card.', image: '/og/home.png' },
 };
 
@@ -22,6 +23,7 @@ export function cardFor(path: string): Card | null {
   if (first === '') return CARDS.home;
   if (first === 'b' || first === 'party' || first === 'union') return CARDS.party;
   if (first === 'unions') return CARDS.parties;
+  if (first === 'member') return CARDS.member;
   if (first === 'docs' || first === 'how') return CARDS.about;
   if (first === 'new') return CARDS.create;
   return CARDS[first] ?? null;

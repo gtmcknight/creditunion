@@ -63,9 +63,9 @@ function sortList(list: Listed[], k: SortKey) {
 }
 
 
-/// Ids in this batch deposited by the connected wallet.
-export function mineIn(b: Listed) {
-  return new Set(b.ids.filter((_, i) => same(b.depositors[i], session.account)).map(String));
+/// Ids in this batch deposited by `by` (the connected wallet by default).
+export function mineIn(b: Listed, by = session.account) {
+  return new Set(b.ids.filter((_, i) => same(b.depositors[i], by)).map(String));
 }
 
 export function card({ s, ids, depositors }: Listed, fit?: bigint[]) {
@@ -87,7 +87,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[]) {
     <div class="card-meta">
       <div class="meta-text">
         <strong>${esc(s.name || 'Untitled')}</strong>
-        <span class="meta-by">${who(s.creator)}</span>
+        <span class="meta-by">${who(s.creator, 'sm', 'nested')}</span>
         <span class="meta-rule" title="${esc(rule)}">${esc(rule)}</span>
         ${fitText ? `<span class="${fits || mine.size ? 'fit' : ''}">${fitText}</span>` : s.state !== 'Open' ? `<span>${esc(status(s))}</span>` : ''}
       </div>

@@ -9,9 +9,8 @@ import { paletteBit, TRAITS } from './traits';
 
 let cache: { account: string; owned: bigint[]; traits: Map<string, Rated> } | null = null;
 
-/// The connected wallet's Credits with their traits. Cached per account for the session.
-export async function myTraits(): Promise<{ owned: bigint[]; traits: Map<string, Rated> }> {
-  const account = session.account;
+/// A wallet's Credits (the connected one by default) with their traits. Cached per account for the session.
+export async function myTraits(account = session.account): Promise<{ owned: bigint[]; traits: Map<string, Rated> }> {
   if (!account) return { owned: [], traits: new Map() };
   if (cache && cache.account === account) return cache;
   const owned = [...(await myCredits(account))];
@@ -59,9 +58,9 @@ export function fitsRules(s: Summary, id: bigint, r: Rated | undefined): boolean
 }
 
 /// For each open batch, the ids of the wallet's Credits that could be deposited.
-export async function fitByBatch(list: Listed[]): Promise<Map<Address, bigint[]>> {
+export async function fitByBatch(list: Listed[], account = session.account): Promise<Map<Address, bigint[]>> {
   const out = new Map<Address, bigint[]>();
-  const { owned, traits } = await myTraits();
+  const { owned, traits } = await myTraits(account);
   if (!owned.length) return out;
   for (const { s } of list) {
     if (s.state !== 'Open') continue;

@@ -4446,8 +4446,11 @@ a.who:hover .who-name {
   -webkit-mask-image: linear-gradient(#000 calc(100% - 32px), transparent);
 }
 
-/* Phones: "Start a party" shortens to "Start" so the nav keeps one line. */
-@media (max-width: 420px) {
+/* Phones: "Credit Unions" and "Start a credit union" shorten to "Unions" and "Start" so the nav keeps one line. */
+.top nav a {
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
   .nav-long {
     display: none;
   }
@@ -5833,4 +5836,25 @@ dialog.eligible::backdrop {
 }
 .progress .row.small {
   font-size: 13px;
+}
+
+/* A card's creator opens their page: underline on hover, like a link. */
+.who.linked {
+  cursor: pointer;
+}
+.who.linked:hover .who-name {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Member page tabs: room under the tabs, and between the two Credit groups. */
+.member-tabs .subtabs {
+  margin-bottom: 24px;
+}
+#tab-body .section-head {
+  margin-bottom: 16px;
+}
+#tab-body .wallet-grid + .section-head,
+#tab-body .section-head + p + .section-head {
+  margin-top: 40px;
 }

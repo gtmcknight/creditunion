@@ -31,14 +31,16 @@ export function identicon(a: string) {
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
-/// Creator chip; names and avatars fill in by `hydrate`. `link` makes it open the address on the explorer
-/// (not inside cards, which are already links).
-export const who = (a: Address, size: 'sm' | 'lg' = 'sm', link = false) => {
+/// Wallet chip; names and avatars fill in by `hydrate`. `link` makes it open the wallet's member page. Inside
+/// something that's already a link (a card), 'nested' does the same without an <a>: main.ts routes data-href.
+export const who = (a: Address, size: 'sm' | 'lg' = 'sm', link: boolean | 'nested' = false) => {
   const inner = `<img src="${identicon(a)}" alt=""><span class="who-name mono">${short(a)}</span>`;
-  const url = link ? explorer('address', a) : null;
-  return url
-    ? `<a class="who ${size}" data-ens="${esc(a)}" href="${url}" target="_blank" rel="noopener" title="View on the explorer">${inner}</a>`
-    : `<span class="who ${size}" data-ens="${esc(a)}">${inner}</span>`;
+  const href = `/member/${esc(a)}`;
+  return link === 'nested'
+    ? `<span class="who ${size} linked" data-ens="${esc(a)}" data-href="${href}" role="link">${inner}</span>`
+    : link
+      ? `<a class="who ${size}" data-ens="${esc(a)}" href="${href}">${inner}</a>`
+      : `<span class="who ${size}" data-ens="${esc(a)}">${inner}</span>`;
 };
 
 export function hydrate(root: ParentNode = document) {
