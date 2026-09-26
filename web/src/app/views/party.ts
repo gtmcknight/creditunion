@@ -109,6 +109,9 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       placed = b.ids.length ? placeOnLayout(slots, b.ids, (id) => keyed!.get(id.toString()) ?? 0) : undefined;
     } catch {}
   }
+  // Painted slot chips count the spaces left, not what the sheet was painted with.
+  if (placed && s.state === 'Open')
+    for (const r of rules) if (r.slots) r.value = String(r.slots.filter((i) => placed![i] == null).length);
   registerFilter(s.address, s.filter);
   registerDeposits(b.ids, b.depositors, b.s.split === 1);
   const artHtml = burned
@@ -193,21 +196,38 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       sessionStorage.removeItem('eighty-created');
       openCreated(b, placed);
     }
+    // Just deposited here: the same card, as "You're in", with how many went in.
+    const [joinedAt, n] = (sessionStorage.getItem('eighty-joined') ?? '').split(':');
+    if (joinedAt?.toLowerCase() === address.toLowerCase()) {
+      sessionStorage.removeItem('eighty-joined');
+      openCreated(b, placed, Number(n) || 1);
+    }
   } catch {}
 }
 
-/// Congrats on a new party, with its link and ways to pass it on.
-function openCreated(b: Ctx, placed?: (bigint | null)[]) {
+/// Remember a deposit that just landed, so the rerendered page opens the "You're in" card once.
+function justJoined(address: string, n: number) {
+  try {
+    sessionStorage.setItem('eighty-joined', `${address}:${n}`);
+  } catch {}
+}
+
+/// Congrats on a new credit union, or on joining one (`joined` = Credits just deposited), with its link and
+/// ways to pass it on.
+function openCreated(b: Ctx, placed?: (bigint | null)[], joined?: number) {
   const s = b.s;
   const url = shareUrl(s);
   const name = s.name || 'Untitled';
-  const text = `Join my credit union: ${name}. 80 Credits make a Statement.`;
+  const left = 80 - s.count;
+  const text = joined
+    ? `I joined ${name}, a credit union pooling 80 Credits into a Statement.${left > 0 ? ` ${left} to go.` : ''}`
+    : `Join my credit union: ${name}. 80 Credits make a Statement.`;
   const x = `https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
   const d = document.createElement('dialog');
   d.className = 'created';
   d.innerHTML = `<form method="dialog">
     <div class="created-art">${sheet(b.ids, { size: 'sm', placed })}</div>
-    <div class="created-head"><h3>Your credit union is live</h3><p class="muted">${esc(name)}</p></div>
+    <div class="created-head"><h3>${joined ? 'You’re in' : 'Your credit union is live'}</h3><p class="muted">${joined ? `${joined} ${joined === 1 ? 'Credit' : 'Credits'} in ${esc(name)} · ${left > 0 ? `${left} to go` : 'full'}` : esc(name)}</p></div>
     <input class="created-link" type="text" readonly value="${esc(url)}" aria-label="Credit union link">
     <div class="created-actions">
       <a class="btn primary" href="${esc(x)}" target="_blank" rel="noopener">Share on X</a>
@@ -430,7 +450,7 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
     }
     try {
       await fn();
-      toast(ok, 'ok');
+      if (ok) toast(ok, 'ok');
       rerender();
     } catch (e) {
       toast(errText(e), 'err', 8000);
@@ -724,7 +744,8 @@ async function drawPicker(
           );
         else for (const chunk of chunks) await send(deposit(chunk), txNote);
         picks.clear();
-      }, 'Deposited.'),
+        justJoined(s.address, ids.length);
+      }, ''),
     );
   };
   // Each pick uses up a slot for its value (or an open one): once none is left, the rest of that value grey out.
@@ -912,9 +933,10 @@ async function bindBuy(
     }
     const quote = q;
     stopTimer();
-    await run(go, 'Buying…', () =>
-      send({ address: config.sweeper!, abi: sweeperAbi, functionName: 'sweep', args: [batch, quote.orders, 1n, quotedFeeBps], value }, txNote),
-    'Bought and deposited.');
+    await run(go, 'Buying…', async () => {
+      await send({ address: config.sweeper!, abi: sweeperAbi, functionName: 'sweep', args: [batch, quote.orders, 1n, quotedFeeBps], value }, txNote);
+      justJoined(batch, quote.ids.length);
+    }, '');
   });
 }
 
