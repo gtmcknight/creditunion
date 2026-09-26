@@ -1,6 +1,6 @@
 import { session } from '../chain';
 import { ARRANGEMENTS, listBatches, type Listed, type Summary, hasLayout, layoutSlot } from '../data';
-import { hydrate, pct } from '../ens';
+import { hydrate, pct, who } from '../ens';
 import { fitByBatch } from '../fit';
 import { editionArt, examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
 import type { Address } from 'viem';
@@ -80,6 +80,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[]) {
     <div class="card-meta">
       <div class="meta-text">
         <strong>${esc(s.name || 'Untitled')}</strong>
+        <span class="meta-by">${who(s.creator)}</span>
         <span class="meta-rule" title="${esc(rule)}">${esc(rule)}</span>
         ${fitText ? `<span class="${fits || mine.size ? 'fit' : ''}">${fitText}</span>` : s.state !== 'Open' ? `<span>${esc(status(s))}</span>` : ''}
       </div>

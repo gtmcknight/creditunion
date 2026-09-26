@@ -4626,8 +4626,23 @@ a.who:hover .who-name {
 }
 .card-meta .btn.cta {
   flex: none;
+}
 
 /* Theme toggle: no lingering focus ring after a pointer click (keyboard focus still shows). */
 .theme:focus:not(:focus-visible) {
   outline: 0;
+}
+
+/* Party card: who opened it, quiet, under the name. */
+.meta-text .meta-by {
+  display: flex;
+}
+.meta-text .who {
+  font-size: 13px;
+  color: var(--muted);
+}
+.meta-text .who img {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
 }
