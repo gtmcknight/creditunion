@@ -62,11 +62,11 @@ const isDev = (url: URL) => url.hostname === 'localhost' || url.hostname === '12
 
 const CSP = [
   "default-src 'self'",
-  "script-src 'self'",
+  "script-src 'self' https://static.cloudflareinsights.com", // Cloudflare Web Analytics beacon
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com", // inline style attributes size the sheets
   'font-src https://fonts.gstatic.com',
   "img-src 'self' data: https://metadata.ens.domains",
-  "connect-src 'self'",
+  "connect-src 'self' https://cloudflareinsights.com",
   "frame-ancestors 'none'",
   "base-uri 'none'",
   "object-src 'none'",
