@@ -251,16 +251,15 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
   const net = (s.highBid * 99n) / 100n / 80n;
   return `<div class="box">
     <div class="bid-now">
-      <div><span>${s.highBid ? 'Current bid' : hasMin ? 'Reserve' : 'Opening bid'}</span><strong class="num">${s.highBid ? eth(s.highBid) : hasMin ? eth(s.minBid) : 'Any'}</strong></div>
-      <div><span>${ended ? 'Ended' : 'Ends in'}</span><strong class="num"${s.highBid && !ended ? ` data-countdown="${s.auctionEnd}"` : ''}>${!s.highBid ? '24h' : ended ? '—' : until(s.auctionEnd)}</strong></div>
+      <div><span>${s.highBid ? 'Current bid' : hasMin ? 'Reserve' : 'Opening bid'}</span><strong class="num">${s.highBid ? eth(s.highBid) : hasMin ? eth(s.minBid) : 'Any'}</strong><em class="sub">${s.highBid ? `by ${link(s.highBidder)}` : 'The clock starts at the first bid.'}</em></div>
+      <div><span>${ended ? 'Ended' : 'Ends in'}</span><strong class="num"${s.highBid && !ended ? ` data-countdown="${s.auctionEnd}"` : ''}>${!s.highBid ? '24h' : ended ? '—' : until(s.auctionEnd)}</strong>${!ended ? '<em class="sub">Late bids add 15 min</em>' : ''}</div>
     </div>
-    ${s.highBid ? `<p class="small muted">by ${link(s.highBidder)}</p>` : `<p class="small muted">The clock starts at the first bid.</p>`}
     ${
       ended
         ? `<button class="btn primary block" id="settle">Settle</button>`
         : m
           ? `<form class="bid-form" id="bid-form"><label class="field"><input id="bid" inputmode="decimal" autocomplete="off" placeholder="${hasMin ? minEth(s.minBid) : '0.1'}" aria-label="Bid in ETH"><span>ETH</span></label><button class="btn primary">Bid</button></form>
-             <p class="small muted">${hasMin ? `Min ${minEth(s.minBid)}. ` : ''}Outbid ETH returns instantly. Late bids add 15 min.</p>`
+             <p class="small muted">${hasMin ? `Min ${minEth(s.minBid)}. ` : ''}Outbid ETH returns instantly.</p>`
           : connect
     }
     ${m?.shares ? `<p class="small">Your share <strong class="num">${m.shares}/80</strong>${s.highBid ? ` · <span class="num">≈${eth(net * BigInt(m.shares))}</span> now` : ''}</p>` : ''}
