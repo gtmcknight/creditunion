@@ -680,7 +680,11 @@ nav a .num {
 }
 /* Fade the art, not the cell, so the sheet stays paper-white */
 .batch-art.spotlight .cell:not(.mine) img {
-  opacity: 0.12;
+  filter: grayscale(1);
+  opacity: 0.35;
+}
+.batch-art .cell img {
+  transition: opacity 200ms var(--ease), filter 200ms var(--ease);
 }
 .spot {
   position: relative;
@@ -690,7 +694,7 @@ nav a .num {
   height: 32px;
   padding: 0 12px 0 10px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--r);
   background: none;
   color: var(--fg);
   font: 500 13px/1 var(--sans);
@@ -1560,7 +1564,7 @@ nav a[hidden] {
   height: 32px;
   padding: 0 12px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--r);
   background: none;
   color: var(--fg);
   font: 500 13px var(--sans);
@@ -1796,7 +1800,7 @@ input[type='datetime-local'] {
     margin: 0;
     padding: 6px 10px;
     border-left: 0;
-    border-radius: 999px;
+    border-radius: var(--r);
     white-space: nowrap;
   }
   .toc a.current {
@@ -3941,7 +3945,7 @@ a.who:hover .who-name {
   align-items: center;
   gap: 6px;
   padding: 4px 4px 4px 10px;
-  border-radius: 999px;
+  border-radius: var(--r);
   background: var(--bg);
   box-shadow: inset 0 0 0 1px var(--line-strong);
 }
@@ -4155,7 +4159,7 @@ a.who:hover .who-name {
   height: 26px;
   padding: 0 9px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--r);
   background: none;
   box-shadow: inset 0 0 0 1px var(--line-strong);
   font: 400 12px var(--sans);
@@ -5775,3 +5779,41 @@ dialog.eligible::backdrop {
 /* Party sheet: your Credits get a short ink bar under them instead of a frame, so neighbours never stack into
    double borders. "Highlight yours" still fades everyone else's. */
 
+
+/* Party page: 80 slots as 80 small squares, one per Credit, filled as they arrive. */
+.progress .slots {
+  display: grid;
+  grid-template-columns: repeat(40, minmax(0, 1fr));
+  gap: 3px;
+}
+.progress .slots i {
+  aspect-ratio: 1;
+  background: var(--line-strong);
+  border-radius: 1px;
+}
+.progress .slots i.in {
+  background: var(--fg);
+}
+/* Quiet dividers in the side column: the hard ink rule read as a stray border. */
+.batch-side .box {
+  border-top-color: var(--line);
+}
+.batch-side .takes h3 {
+  margin: 0;
+}
+
+/* "Yours in this party" follows the same rhythm as the deposit block above it. */
+.yours-in {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+.yours-in .fit-row {
+  margin: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.progress .row.small {
+  font-size: 13px;
+}

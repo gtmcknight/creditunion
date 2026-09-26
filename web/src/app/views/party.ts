@@ -128,12 +128,12 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       ${
         s.state === 'Open' || s.state === 'Full' || s.state === 'Expired'
           ? `<div class="progress">
-          <div class="row"><span class="num"><strong>${s.count}</strong>/80</span><span class="muted small num">${s.state === 'Open' ? `${80 - s.count} to go` : s.state === 'Full' ? stage(s) : 'Expired'}</span></div>
-          <div class="bar"><i style="width:${(s.count / 80) * 100}%"></i></div>
+          <div class="slots" aria-hidden="true">${Array.from({ length: 80 }, (_, i) => `<i${i < s.count ? ' class="in"' : ''}></i>`).join('')}</div>
+          <div class="row small"><span class="num">${s.count} of 80 Credits in</span><span class="muted num">${s.state === 'Open' ? `${80 - s.count} to go` : s.state === 'Full' ? stage(s) : 'Expired'}</span></div>
         </div>`
           : ''
       }
-      <div class="takes"><span class="eyebrow">Who can join</span><div class="rule-chips">${rules.length ? rules.map(rule).join('') : '<span class="rule-chip">Any Credit</span>'}</div></div>
+      <div class="takes"><h3>Who can join</h3><div class="rule-chips">${rules.length ? rules.map(rule).join('') : '<span class="rule-chip">Any Credit</span>'}</div></div>
       <div id="panel">${panel(b, m, myIds)}</div>
       <div class="folds">
       ${s.state === 'Auction' || s.state === 'Settled' ? `<details class="more" id="bids" open>

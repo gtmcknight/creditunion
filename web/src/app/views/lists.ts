@@ -91,7 +91,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[]) {
         <span class="meta-rule" title="${esc(rule)}">${esc(rule)}</span>
         ${fitText ? `<span class="${fits || mine.size ? 'fit' : ''}">${fitText}</span>` : s.state !== 'Open' ? `<span>${esc(status(s))}</span>` : ''}
       </div>
-      ${cta ? `<span class="btn sm primary cta">${cta}</span>` : ''}
+      ${cta ? (s.state === 'Open' && mine.size ? `<span class="btn sm cta joined">Joined</span>` : `<span class="btn sm primary cta">${cta}</span>`) : ''}
     </div>
   </a>`;
 }
