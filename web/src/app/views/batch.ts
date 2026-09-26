@@ -79,6 +79,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
       }
       <div class="takes"><span class="eyebrow">Takes</span><div class="rule-chips">${rules.length ? rules.map(rule).join('') : '<span class="rule-chip">Any Credit</span>'}</div></div>
       <div id="panel">${panel(b, m, myIds)}</div>
+      <div class="folds">
       ${s.state === 'Auction' || s.state === 'Settled' ? `<details class="more" id="bids" open>
         <summary><span>Bids</span><span class="muted small" id="bids-count">…</span></summary>
         <ol class="bid-list" id="bid-list"><li class="muted small">Loading…</li></ol>
@@ -95,6 +96,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
           ${fact('Contract', link(s.address))}
         </dl>
       </details>
+      </div>
     </div>
   </section>`;
 

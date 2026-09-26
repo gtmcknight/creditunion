@@ -3626,3 +3626,9 @@ a.bid-when:hover {
   color: var(--fg);
   text-decoration-color: var(--fg);
 }
+
+/* Stacked folds (Bids, Details) touch: one rule between them, no grid gap. */
+.folds {
+  display: grid;
+  gap: 0;
+}
