@@ -2,13 +2,13 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {Batch, IRatings} from "../src/Batch.sol";
-import {BatchFactory} from "../src/BatchFactory.sol";
-import {MockAssembler} from "../src/MockAssembler.sol";
-import {IAssembler} from "../src/interfaces/IAssembler.sol";
-import {ICredits} from "../src/interfaces/ICredits.sol";
-import {MockCredits} from "../src/mocks/MockCredits.sol";
-import {MockStatement} from "../src/mocks/MockStatement.sol";
+import {Batch, IRatings} from "../../src/Batch.sol";
+import {BatchFactory} from "../../src/BatchFactory.sol";
+import {MockAssembler} from "../../src/mocks/MockAssembler.sol";
+import {IAssembler} from "../../src/interfaces/IAssembler.sol";
+import {ICredits} from "../../src/interfaces/ICredits.sol";
+import {MockCredits} from "../../src/mocks/MockCredits.sol";
+import {MockStatement} from "../../src/mocks/MockStatement.sol";
 
 /// Audit tests for the unlock / Bits / Creator-retirement branch.
 contract AuditBranchTest is Test {

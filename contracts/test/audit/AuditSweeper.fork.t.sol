@@ -2,11 +2,11 @@
 pragma solidity 0.8.28;
 
 import {Test, stdError} from "forge-std/Test.sol";
-import {Batch, IRatings} from "../src/Batch.sol";
-import {BatchFactory} from "../src/BatchFactory.sol";
-import {Sweeper} from "../src/Sweeper.sol";
-import {IAssembler} from "../src/interfaces/IAssembler.sol";
-import {ICredits} from "../src/interfaces/ICredits.sol";
+import {Batch, IRatings} from "../../src/Batch.sol";
+import {BatchFactory} from "../../src/BatchFactory.sol";
+import {Sweeper} from "../../src/Sweeper.sol";
+import {IAssembler} from "../../src/interfaces/IAssembler.sol";
+import {ICredits} from "../../src/interfaces/ICredits.sol";
 import {
     AdvancedOrder,
     ConsiderationItem,
@@ -16,7 +16,7 @@ import {
     OrderComponents,
     OrderParameters,
     OrderType
-} from "../src/interfaces/ISeaport.sol";
+} from "../../src/interfaces/ISeaport.sol";
 
 /// @dev Minimal view of the OpenSea SignedZone (SIP-5 metadata).
 interface ISignedZone {

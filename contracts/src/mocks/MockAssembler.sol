@@ -2,9 +2,9 @@
 pragma solidity 0.8.28;
 
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
-import {IAssembler} from "./interfaces/IAssembler.sol";
-import {ICredits} from "./interfaces/ICredits.sol";
-import {MockStatement} from "./mocks/MockStatement.sol";
+import {IAssembler} from "../interfaces/IAssembler.sol";
+import {ICredits} from "../interfaces/ICredits.sol";
+import {MockStatement} from "./MockStatement.sol";
 
 /// @notice Testnet adapter for MockStatement. Models the worst case for the mainnet adapter: the
 ///         Statement contract insists that its caller owns the Credits, so the adapter pulls them from

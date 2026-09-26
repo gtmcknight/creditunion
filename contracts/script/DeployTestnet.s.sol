@@ -6,7 +6,7 @@ import {BatchFactory} from "../src/BatchFactory.sol";
 import {IRatings} from "../src/Batch.sol";
 import {Ratings} from "../src/Ratings.sol";
 import {RatingsDeploy} from "./DeployRatings.s.sol";
-import {MockAssembler} from "../src/MockAssembler.sol";
+import {MockAssembler} from "../src/mocks/MockAssembler.sol";
 import {Sweeper} from "../src/Sweeper.sol";
 import {IAssembler} from "../src/interfaces/IAssembler.sol";
 import {ICredits} from "../src/interfaces/ICredits.sol";

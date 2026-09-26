@@ -77,7 +77,7 @@ ETH accounting under mixed reverting/gas-burning receivers; reentrancy via refun
 | Track | What | Result |
 |---|---|---|
 | Static analysis | Slither 0.11.6 and Aderyn 0.6.8 on the core sources | Slither: 0 High, 3 Medium (the same intentional ones as round 1). Aderyn: 4 "High" flags, all false positives on inspection (packed init code, not a hash; refunds/claims exist; guarded book-then-move; storage array passed by copy). |
-| Adversarial review | Three fresh reviewers: fees + Ratings, Worker + site, full Batch lifecycle | 0 High, 2 Medium (Worker), 5 Low, 6 Info; all fixed below. 42 new tests in `test/Adversarial2.t.sol` and `test/Adversarial3.t.sol`. |
+| Adversarial review | Three fresh reviewers: fees + Ratings, Worker + site, full Batch lifecycle | 0 High, 2 Medium (Worker), 5 Low, 6 Info; all fixed below. 42 new tests in `test/audit/Adversarial2.t.sol` and `test/audit/Adversarial3.t.sol`. |
 | Fork rehearsal | `DeployMainnet` on a mainnet fork, then a real OpenSea quote and sweep through the site | 60.1 M gas / 14 txs; found the dead-listing quote failure (fixed) |
 | Verification | Sourcify on all four Sepolia contracts | Works without an Etherscan key |
 | Live Credits | Source fetched from Sourcify: OZ v5, `burn` → `_burn`, `ownerOf` reverts on a burned id | The post-assembly `CreditsNotBurned` check is correct for mainnet |
@@ -110,7 +110,7 @@ ETH accounting under mixed reverting/gas-burning receivers; reentrancy via refun
 
 ### Added after round 2: Early-bird split
 
-Per-batch `Split { Equal, Early }` fixed at `initialize`. Early: position i (0-based, deposit order) earns `237 − 2i` units of `net / 12,640` (= 80 × 158), i.e. 1.5 shares at the first slot down to 0.5 at the last; Equal is unchanged (`net / 80` per share, same dust rule). `unitsOf()` walks `_ids` at claim time (≤ 80 SLOAD pairs, ~460k gas worst case for a back-of-line depositor, early exit once all of a depositor's Credits are found). Early dust is < 12,640 wei (vs < 80 on Equal), all of it to the protocol fee. `payoutPerShare()` on Early is the average share (a position pays 0.5–1.5× it); `claimable()` is exact. A fourth reviewer pass (`test/Adversarial4.t.sol`, 15 tests: 80-depositor conservation, churn fuzz, exit-window churn, hook beneficiaries, `assembleOrdered` not moving payout positions, reentrant claim) found nothing exploitable; `settle()` does no extra work. Positions shift on withdraw exactly as `_ids` does, so leaving forfeits the slot and re-depositing joins at the back; `depositFor` (the Sweeper) takes the next slots for the buyer. `test/Split.t.sol`: weights, shifting, Sweeper positions, Equal unchanged, and a fuzz over any bid and any three-way division proving payouts + fee == bid exactly.
+Per-batch `Split { Equal, Early }` fixed at `initialize`. Early: position i (0-based, deposit order) earns `237 − 2i` units of `net / 12,640` (= 80 × 158), i.e. 1.5 shares at the first slot down to 0.5 at the last; Equal is unchanged (`net / 80` per share, same dust rule). `unitsOf()` walks `_ids` at claim time (≤ 80 SLOAD pairs, ~460k gas worst case for a back-of-line depositor, early exit once all of a depositor's Credits are found). Early dust is < 12,640 wei (vs < 80 on Equal), all of it to the protocol fee. `payoutPerShare()` on Early is the average share (a position pays 0.5–1.5× it); `claimable()` is exact. A fourth reviewer pass (`test/audit/Adversarial4.t.sol`, 15 tests: 80-depositor conservation, churn fuzz, exit-window churn, hook beneficiaries, `assembleOrdered` not moving payout positions, reentrant claim) found nothing exploitable; `settle()` does no extra work. Positions shift on withdraw exactly as `_ids` does, so leaving forfeits the slot and re-depositing joins at the back; `depositFor` (the Sweeper) takes the next slots for the buyer. `test/Split.t.sol`: weights, shifting, Sweeper positions, Equal unchanged, and a fuzz over any bid and any three-way division proving payouts + fee == bid exactly.
 
 ### Added after round 2: palette layouts
 
@@ -134,7 +134,7 @@ reversed range is `BadFilter`). The Creator arrangement is retired: `initialize`
 `assembleOrdered` and the creator's grace are gone, and Layout batches are burnable by anyone the moment they fill.
 
 **Method.** A line-by-line read of the diff, the full suite, and a separate adversarial pass with proof-of-concept
-tests (`test/AuditBranch.t.sol`).
+tests (`test/audit/AuditBranch.t.sol`).
 
 **Fixed (medium).**
 - *The lock could be spent before burning was possible.* With the lock counted only from the first fill, a batch
@@ -190,7 +190,7 @@ the one failure the pre-existing Ratings test above.
 ## Round 5: full re-read after layoutTrait (Sept 26)
 
 **Scope.** Every file in `src/` (Batch, BatchFactory, Sweeper, Ratings, MockAssembler, interfaces, mocks, vendored
-art) read in full; rounds 1–4 re-verified against the current code; proofs in `test/Audit5.t.sol`.
+art) read in full; rounds 1–4 re-verified against the current code; proofs in `test/audit/Audit5.t.sol`.
 
 **Re-verified, still holding.** B1 (assembler called, approval scoped, burn + Statement ownership checked), B2/B6
 (rescue refuses pooled Credits and the Statement, before and after sale; book-then-move), B3/R2-5 (hook beneficiary,
@@ -226,7 +226,7 @@ caller's Credits; Sweeper `spent ≤ msg.value` and self-paid consideration filt
 ## Round 6: independent adversarial re-read (Sept 26)
 
 **Scope.** Every file in `src/` read line by line (Batch, BatchFactory, Sweeper, Ratings, MockAssembler, interfaces,
-mocks, vendored CreditArt/CreditDrawing), with rounds 1 to 5 treated as unverified. Proofs in `test/Audit6.t.sol`.
+mocks, vendored CreditArt/CreditDrawing), with rounds 1 to 5 treated as unverified. Proofs in `test/audit/Audit6.t.sol`.
 
 **Round 5 fixes, re-verified.**
 - `ReserveTooLow` (`Batch.sol:266`): a fuzz over any reserve shows `create` succeeds exactly when the reserve is 0 or
@@ -292,5 +292,5 @@ withdraw veto; zero-bid Statements held until a 0.01 ETH bid; shares gifted to c
 Sweeper included) strand that ETH; plain-`transferFrom` strays go to the fee recipient via `rescue`; per-value
 edition supply in the painter.
 
-Tests: `test/Audit6.t.sol` 13 of 13 pass. Full suite: 194 of 195, the one failure the pre-existing
+Tests: `test/audit/Audit6.t.sol` 13 of 13 pass. Full suite: 194 of 195, the one failure the pre-existing
 `Adversarial2.test_ConstructorRejectsBadLengths`.

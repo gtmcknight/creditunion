@@ -527,12 +527,16 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
     const p = Array.isArray(params) ? params : [];
     let out: unknown[];
     if (method === 'eth_call') {
-      const call = (p[0] ?? {}) as { to?: string; data?: string };
+      const call = (p[0] ?? {}) as { to?: string; data?: string; from?: string; value?: string };
       const to = String(call.to ?? '').toLowerCase();
       const data = String(call.data ?? '0x');
       if (!/^0x[0-9a-f]{40}$/.test(to) || !/^0x([0-9a-fA-F]{2}){0,8192}$/.test(data)) return text('bad call', 400);
       if (!allowed.has(to) && !(await isBatch(env, url, to as Address))) return text('target not allowed', 403);
-      out = [{ to, data }, 'latest'];
+      // `from` rides along (only as an address): simulating a write needs the real sender, or msg.sender is 0x0.
+      const from = String(call.from ?? '').toLowerCase();
+      // and `value` (a hex quantity), so a bid simulates with the ETH it carries.
+      const value = String(call.value ?? '');
+      out = [{ to, data, ...(/^0x[0-9a-f]{40}$/.test(from) ? { from } : {}), ...(/^0x[0-9a-fA-F]{1,32}$/.test(value) ? { value } : {}) }, 'latest'];
     } else if (method === 'eth_getBlockByNumber') {
       const tag = p[0] === 'latest' || p[0] === 'pending' || p[0] === 'safe' || p[0] === 'finalized' ? p[0] : 'latest';
       out = [tag, false];

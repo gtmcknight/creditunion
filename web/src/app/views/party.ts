@@ -17,7 +17,7 @@ type Mine = Awaited<ReturnType<typeof me>> | null;
 
 let picks = new Set<string>();
 
-export async function batch(app: HTMLElement, address: Address, rerender: () => void) {
+export async function party(app: HTMLElement, address: Address, rerender: () => void) {
   let b: Ctx;
   try {
     // Only parties our factory made: any contract can answer summary() with a made-up party.

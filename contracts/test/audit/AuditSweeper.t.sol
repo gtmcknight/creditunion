@@ -2,14 +2,14 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {Batch, IRatings} from "../src/Batch.sol";
-import {BatchFactory} from "../src/BatchFactory.sol";
-import {Sweeper} from "../src/Sweeper.sol";
-import {MockAssembler} from "../src/MockAssembler.sol";
-import {ICredits} from "../src/interfaces/ICredits.sol";
-import {ISeaport} from "../src/interfaces/ISeaport.sol";
-import {MockCredits} from "../src/mocks/MockCredits.sol";
-import {MockStatement} from "../src/mocks/MockStatement.sol";
+import {Batch, IRatings} from "../../src/Batch.sol";
+import {BatchFactory} from "../../src/BatchFactory.sol";
+import {Sweeper} from "../../src/Sweeper.sol";
+import {MockAssembler} from "../../src/mocks/MockAssembler.sol";
+import {ICredits} from "../../src/interfaces/ICredits.sol";
+import {ISeaport} from "../../src/interfaces/ISeaport.sol";
+import {MockCredits} from "../../src/mocks/MockCredits.sol";
+import {MockStatement} from "../../src/mocks/MockStatement.sol";
 
 /// @notice Audit unit tests for BatchFactory.depositFor and Sweeper, on the mocks.
 contract AuditSweeperTest is Test {

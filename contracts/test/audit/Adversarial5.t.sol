@@ -3,12 +3,12 @@ pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import {Batch, IRatings} from "../src/Batch.sol";
-import {BatchFactory} from "../src/BatchFactory.sol";
-import {MockAssembler} from "../src/MockAssembler.sol";
-import {IAssembler} from "../src/interfaces/IAssembler.sol";
-import {ICredits, ICreditArt} from "../src/interfaces/ICredits.sol";
-import {MockStatement} from "../src/mocks/MockStatement.sol";
+import {Batch, IRatings} from "../../src/Batch.sol";
+import {BatchFactory} from "../../src/BatchFactory.sol";
+import {MockAssembler} from "../../src/mocks/MockAssembler.sol";
+import {IAssembler} from "../../src/interfaces/IAssembler.sol";
+import {ICredits, ICreditArt} from "../../src/interfaces/ICredits.sol";
+import {MockStatement} from "../../src/mocks/MockStatement.sol";
 
 /// @dev Art with the mainnet plate rule (paidAt % 15 + 1 is the CMYK mask, so all 15 palettes exist) plus one
 ///      case mainnet can never produce: paidAt == BLANK returns letters that map to no plate (mask 0).

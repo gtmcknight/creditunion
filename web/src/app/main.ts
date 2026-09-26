@@ -1,13 +1,13 @@
 import type { Address } from 'viem';
 import { chain, config, connect, explorer, loadConfig, onSession, restore, session, wallets } from './chain';
-import { batch } from './views/batch';
+import { party } from './views/party';
 import { create } from './views/create';
+import { lists } from './views/lists';
 import { home } from './views/home';
-import { docs } from './views/docs';
 import { invalidateFit } from './fit';
 import { hydrate, who } from './ens';
 import { mint } from './views/mint';
-import { og } from './views/og';
+import { previews } from './views/previews';
 import { profile } from './views/profile';
 import { esc, errText, toast } from './ui';
 
@@ -44,14 +44,14 @@ async function route() {
   );
   app.classList.remove('in');
   try {
-    if (page === '' || page === 'about') docs(app);
+    if (page === '' || page === 'about') home(app);
     else if (page === 'mint') await mint(app, route);
-    else if (page === 'og') await og(app);
+    else if (page === 'og') await previews(app);
     else if (page === 'me') await profile(app, route);
     else if (page === 'create') await create(app);
-    else if (page === 'party' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await batch(app, arg as Address, route);
-    else if (page === 'parties' || page === 'auctions') await home(app, page);
-    else docs(app);
+    else if (page === 'party' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await party(app, arg as Address, route);
+    else if (page === 'parties' || page === 'auctions') await lists(app, page);
+    else home(app);
   } catch (e) {
     if (run === seq) app.innerHTML = `<section class="prose"><h1>Something went wrong</h1><p class="error">${esc(errText(e))}</p></section>`;
   }

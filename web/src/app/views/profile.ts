@@ -6,7 +6,7 @@ import { listBatches, myCredits, type Listed } from '../data';
 import { hydrate, who } from '../ens';
 import { fillGhosts } from '../ghosts';
 import { art, errText, esc, eth, same, toast } from '../ui';
-import { card, mineIn } from './home';
+import { card, mineIn } from './lists';
 
 type Due = { b: Listed; claim: bigint; owed: bigint };
 

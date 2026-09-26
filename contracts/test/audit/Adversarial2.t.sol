@@ -2,16 +2,16 @@
 pragma solidity 0.8.28;
 
 import {Test, stdError} from "forge-std/Test.sol";
-import {Batch, IRatings} from "../src/Batch.sol";
-import {BatchFactory} from "../src/BatchFactory.sol";
-import {Sweeper} from "../src/Sweeper.sol";
-import {Ratings, DataStore} from "../src/Ratings.sol";
-import {RatingsDeploy} from "../script/DeployRatings.s.sol";
-import {MockAssembler} from "../src/MockAssembler.sol";
-import {ICredits} from "../src/interfaces/ICredits.sol";
-import {IAssembler} from "../src/interfaces/IAssembler.sol";
-import {MockCredits} from "../src/mocks/MockCredits.sol";
-import {MockStatement} from "../src/mocks/MockStatement.sol";
+import {Batch, IRatings} from "../../src/Batch.sol";
+import {BatchFactory} from "../../src/BatchFactory.sol";
+import {Sweeper} from "../../src/Sweeper.sol";
+import {Ratings, DataStore} from "../../src/Ratings.sol";
+import {RatingsDeploy} from "../../script/DeployRatings.s.sol";
+import {MockAssembler} from "../../src/mocks/MockAssembler.sol";
+import {ICredits} from "../../src/interfaces/ICredits.sol";
+import {IAssembler} from "../../src/interfaces/IAssembler.sol";
+import {MockCredits} from "../../src/mocks/MockCredits.sol";
+import {MockStatement} from "../../src/mocks/MockStatement.sol";
 import {
     AdvancedOrder,
     ConsiderationItem,
@@ -24,7 +24,7 @@ import {
     OrderParameters,
     OrderType,
     ReceivedItem
-} from "../src/interfaces/ISeaport.sol";
+} from "../../src/interfaces/ISeaport.sol";
 
 /// @dev Minimal Seaport stand-in: fills the first `fillCount` orders (ERC721 for ETH), skips the rest,
 ///      returns NATIVE executions for what it paid out and refunds the unspent msg.value to the caller.

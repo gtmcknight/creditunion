@@ -21,7 +21,7 @@ async function read(route: string): Promise<Card> {
 
 const host = location.hostname.replace(/^www\./, '');
 
-export async function og(app: HTMLElement) {
+export async function previews(app: HTMLElement) {
   app.innerHTML = `<section class="og-page"><h1>Link previews</h1><p class="muted">Each page’s card as X shows it, read from the tags the site serves for that page.</p><div class="og-grid" id="og-grid"><p class="muted">Reading the pages…</p></div></section>`;
   // Every real party gets its own card, drawn from the party itself.
   const parties = await listBatches()

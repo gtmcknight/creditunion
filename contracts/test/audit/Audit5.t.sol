@@ -2,14 +2,14 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {Batch, IRatings} from "../src/Batch.sol";
-import {BatchFactory} from "../src/BatchFactory.sol";
-import {MockAssembler} from "../src/MockAssembler.sol";
-import {IAssembler} from "../src/interfaces/IAssembler.sol";
-import {ICredits} from "../src/interfaces/ICredits.sol";
-import {MockCredits} from "../src/mocks/MockCredits.sol";
-import {MockStatement} from "../src/mocks/MockStatement.sol";
-import {TestCredits} from "../src/mocks/TestCredits.sol";
+import {Batch, IRatings} from "../../src/Batch.sol";
+import {BatchFactory} from "../../src/BatchFactory.sol";
+import {MockAssembler} from "../../src/mocks/MockAssembler.sol";
+import {IAssembler} from "../../src/interfaces/IAssembler.sol";
+import {ICredits} from "../../src/interfaces/ICredits.sol";
+import {MockCredits} from "../../src/mocks/MockCredits.sol";
+import {MockStatement} from "../../src/mocks/MockStatement.sol";
+import {TestCredits} from "../../src/mocks/TestCredits.sol";
 
 /// @notice Round 5 audit. Each test demonstrates a finding (R5-n) or re-verifies an earlier property
 ///         after the layoutTrait change. MockCredits: even ids print CMY (mask 7), odd ids K (mask 8);

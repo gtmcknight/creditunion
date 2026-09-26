@@ -3,13 +3,13 @@ pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
-import {Batch, IRatings} from "../src/Batch.sol";
-import {BatchFactory} from "../src/BatchFactory.sol";
-import {MockAssembler} from "../src/MockAssembler.sol";
-import {IAssembler} from "../src/interfaces/IAssembler.sol";
-import {ICredits} from "../src/interfaces/ICredits.sol";
-import {MockCredits} from "../src/mocks/MockCredits.sol";
-import {MockStatement} from "../src/mocks/MockStatement.sol";
+import {Batch, IRatings} from "../../src/Batch.sol";
+import {BatchFactory} from "../../src/BatchFactory.sol";
+import {MockAssembler} from "../../src/mocks/MockAssembler.sol";
+import {IAssembler} from "../../src/interfaces/IAssembler.sol";
+import {ICredits} from "../../src/interfaces/ICredits.sol";
+import {MockCredits} from "../../src/mocks/MockCredits.sol";
+import {MockStatement} from "../../src/mocks/MockStatement.sol";
 
 /// @dev An honest adapter with one innocent-looking storage variable. Under the old DELEGATECALL design
 ///      its slot 0 was Batch.factory; with a plain call its storage is its own.
