@@ -129,7 +129,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         s.state === 'Open' || s.state === 'Full' || s.state === 'Expired'
           ? `<div class="progress">
           <div class="slots" aria-hidden="true">${Array.from({ length: 80 }, (_, i) => `<i${i < s.count ? ' class="in"' : ''}></i>`).join('')}</div>
-          <div class="row small"><span class="num">${s.count} of 80 Credits in</span><span class="muted num">${s.state === 'Open' ? `${80 - s.count} to go` : s.state === 'Full' ? stage(s) : 'Expired'}</span></div>
+          <div class="row small"><span class="num">${s.count} of 80 Credits in${depositors ? ` · <button type="button" class="link" id="depositors-btn">${depositors} ${depositors === 1 ? 'depositor' : 'depositors'}</button>` : ''}</span><span class="muted num">${s.state === 'Open' ? `${80 - s.count} to go` : s.state === 'Full' ? stage(s) : 'Expired'}</span></div>
         </div>`
           : ''
       }
@@ -145,7 +145,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         <dl class="facts">
           ${fact('Layout', ARRANGEMENTS[s.arrangement] ?? 'Deposit order')}
           ${fact('Payout', payout(b, myIds))}
-          ${fact('Depositors', `<button type="button" class="link num" id="depositors-btn" title="Who is in">${depositors}</button>`)}
+          ${s.state === 'Auction' || s.state === 'Settled' ? fact('Depositors', `<button type="button" class="link num" id="depositors-btn">${depositors}</button>`) : ''}
           ${s.count ? fact('Rating', `<span id="rating" class="muted">…</span>`) : ''}
           ${s.reserve && (s.state === 'Open' || s.state === 'Full' || (s.state === 'Auction' && s.minBid === s.reserve && !s.highBid)) ? fact('Reserve', eth(s.reserve)) : ''}
           ${fact('Sale split', split(s))}
