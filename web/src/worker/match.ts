@@ -49,18 +49,64 @@ export type Rules = {
   minScore?: number; // score ×10, 0 = any
   maxScore?: number;
   list?: number[]; // explicit ids, empty = any
+  paidFrom?: number; // unix seconds, as Batch.Filter; 0 = unbounded
+  paidTo?: number;
+  bitsFrom?: number; // Jack's Bits (marks), 0 = unbounded
+  bitsTo?: number;
 };
+
+let marks: Promise<Uint16Array> | null = null;
+/// Each Credit's Bits (public/bits.bin, scripts/wall.ts).
+function loadBits(assets: Fetcher, origin: string) {
+  marks ??= assets
+    .fetch(new Request(`${origin}/bits.bin`))
+    .then(async (r) => {
+      if (!r.ok) throw new Error('bits.bin missing');
+      return new Uint16Array(await r.arrayBuffer());
+    })
+    .catch((e) => {
+      marks = null;
+      throw e;
+    });
+  return marks;
+}
+
+let times: Promise<Uint32Array> | null = null;
+/// When each Credit's payment landed (public/times.bin, scripts/wall.ts), for Payment Time windows in seconds.
+function loadTimes(assets: Fetcher, origin: string) {
+  times ??= assets
+    .fetch(new Request(`${origin}/times.bin`))
+    .then(async (r) => {
+      if (!r.ok) throw new Error('times.bin missing');
+      return new Uint32Array(await r.arrayBuffer());
+    })
+    .catch((e) => {
+      times = null;
+      throw e;
+    });
+  return times;
+}
 
 /// A test for one Credit against the rules, from the frozen edition (no chain reads).
 export async function predicate(assets: Fetcher, origin: string, r: Rules) {
   const t = await load(assets, origin);
   const sc = r.minScore || r.maxScore ? await loadScores(assets, origin) : null;
   const list = r.list?.length ? new Set(r.list) : null;
+  const paid = r.paidFrom || r.paidTo ? await loadTimes(assets, origin) : null;
+  const bits = r.bitsFrom || r.bitsTo ? await loadBits(assets, origin) : null;
   const lo = Math.max(1, r.idFrom || 1);
   const hi = Math.min(t.length, r.idTo || t.length);
   return (id: number) => {
     if (id < lo || id > hi) return false;
     if (list && !list.has(id)) return false;
+    if (paid) {
+      const at = paid[id - 1];
+      if (!at || (r.paidFrom && at < r.paidFrom) || (r.paidTo && at > r.paidTo)) return false;
+    }
+    if (bits) {
+      const b = bits[id - 1];
+      if ((r.bitsFrom && b < r.bitsFrom) || (r.bitsTo && b > r.bitsTo)) return false;
+    }
     const v = t[id - 1];
     if (!v) return false;
     if (r.palettes && !(r.palettes & (1 << (v & 15)))) return false;

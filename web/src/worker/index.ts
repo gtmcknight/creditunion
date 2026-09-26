@@ -11,6 +11,9 @@ import { batchAbi, creditsAbi, creditArtAbi, factoryAbi } from '../app/abi';
 import { quote, scan } from './opensea';
 import { ratings } from './ratings';
 import { match, predicate, type Rules } from './match';
+import { cardFor, partyCard, withCard } from './og';
+import { drawParty, sample, type PartyCard } from './card';
+import { stamp } from '../shared/stamp';
 
 interface RateLimit {
   limit(o: { key: string }): Promise<{ success: boolean }>;
@@ -137,7 +140,6 @@ function sameSite(req: Request) {
   const s = req.headers.get('sec-fetch-site');
   return s === null || s === 'same-origin' || s === 'none';
 }
-
 export default {
   async fetch(req, env, ctx): Promise<Response> {
     const url = new URL(req.url);
@@ -343,7 +345,63 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
   }
 
+  // Link cards drawn per party (and made-up ones for /og).
+  const drawn = url.pathname.match(/^\/og\/(party|sample)\/([0-9a-zA-Zx]+)\.png$/);
+  if (drawn) return linkCard(env, url, ctx, drawn[1], drawn[2]);
+
+  // Pages: the app shell with this route's link-preview tags; a party page describes that party.
+  let card = req.method === 'GET' ? cardFor(url.pathname) : null;
+  const party = url.pathname.match(/^\/(?:party|b)\/(0x[0-9a-fA-F]{40})$/)?.[1];
+  if (card && party) {
+    const p = await readParty(env, party as Address).catch(() => null);
+    if (p) card = partyCard(party, p.name, p.state, p.count, p.highBid > 0n ? ethText(p.highBid) : '', stamp(p.state, p.count, p.highBid));
+  }
+  if (card) {
+    const shell = await env.ASSETS.fetch(new Request(new URL('/', url), req));
+    if (shell.ok && (shell.headers.get('content-type') ?? '').includes('text/html')) return withCard(shell, card, url);
+    return shell;
+  }
+
   return env.ASSETS.fetch(req);
+}
+
+const STATE_NAMES = ['Open', 'Full', 'Expired', 'Auction', 'Settled'] as const;
+const ethText = (wei: bigint) => `${(Number(wei) / 1e18).toFixed(4).replace(/\.?0+$/, '')} ETH`;
+
+/// What a link card needs from a party: its summary and its Credits in sheet order.
+async function readParty(env: Env, batch: Address): Promise<PartyCard> {
+  const c = client(env);
+  const [s, slots] = await Promise.all([
+    c.readContract({ address: batch, abi: batchAbi, functionName: 'summary' }),
+    c.readContract({ address: batch, abi: batchAbi, functionName: 'slots' }),
+  ]);
+  const sum = s as unknown as { name: string; state: number; count: bigint; split: number; highBid: bigint; auctionEnd: bigint; canAssemble: boolean };
+  return {
+    name: sum.name,
+    state: STATE_NAMES[Number(sum.state)],
+    count: Number(sum.count),
+    ids: (slots[0] as readonly bigint[]).map(Number),
+    early: Number(sum.split) === 1,
+    highBid: sum.highBid,
+    auctionEnd: Number(sum.auctionEnd),
+    canBurn: sum.canAssemble,
+  };
+}
+
+/// /og/party/<address>.png and /og/sample/<kind>.png. Party cards are cached a minute: they change as it fills.
+async function linkCard(env: Env, url: URL, ctx: ExecutionContext, kind: string, key: string): Promise<Response> {
+  const cache = caches.default;
+  const hit = await cache.match(url.toString());
+  if (hit) return hit;
+  let p: PartyCard | null;
+  if (kind === 'sample') p = sample(key);
+  else if (/^0x[0-9a-fA-F]{40}$/.test(key)) p = await readParty(env, key as Address).catch(() => null);
+  else p = null;
+  if (!p) return env.ASSETS.fetch(new Request(new URL('/og/party.png', url)));
+  const body = await drawParty(env.ASSETS, url.origin, p);
+  const res = new Response(body, { headers: { 'content-type': 'image/png', 'cache-control': `public, max-age=${kind === 'sample' ? 3600 : 60}` } });
+  ctx.waitUntil(cache.put(url.toString(), res.clone()));
+  return res;
 }
 
 /// Read-only proxy. Only the methods the app uses, and eth_call only to our contracts, so the paid key
@@ -416,7 +474,7 @@ async function previewFitting(env: Env, url: URL, ctx: ExecutionContext, batch: 
   const key = new Request(`${url.origin}/opensea/preview/${batch}`);
   const hit = await cache.match(key);
   if (hit) return hit.json<Awaited<ReturnType<typeof scan>>>();
-  const s = (await client(env).readContract({ address: batch, abi: batchAbi, functionName: 'summary' })) as { filter: Record<string, bigint | number> };
+  const s = (await client(env).readContract({ address: batch, abi: batchAbi, functionName: 'summary' })) as { filter: Record<string, bigint | number>; allowlistSize: bigint };
   const f = s.filter;
   const layout = [BigInt(f.layout0), BigInt(f.layout1)];
   let palettes = Number(f.palettes);
@@ -433,14 +491,21 @@ async function previewFitting(env: Env, url: URL, ctx: ExecutionContext, batch: 
     idTo: Number(f.idTo),
     minScore: Number(f.minScore),
     maxScore: Number(f.maxScore),
+    paidFrom: Number(f.paidFrom),
+    paidTo: Number(f.paidTo),
+    bitsFrom: Number(f.bitsFrom ?? 0), // present once the contracts with the Bits rule are live
+    bitsTo: Number(f.bitsTo ?? 0),
   });
+  // A named list lives in the party itself; test Credit numbers are the edition's, so ask it directly.
+  const listed = Number(s.allowlistSize) > 0;
+  const inList = (id: bigint) => (listed ? client(env).readContract({ address: batch, abi: batchAbi, functionName: 'allowed', args: [id] }) : Promise.resolve(true));
   const main = createPublicClient({ transport: http(env.ENS_RPC || 'https://eth.drpc.org', { timeout: 8_000 }) });
   const listings = await scan({
     key: env.OPENSEA_API_KEY!,
     slug: env.OPENSEA_SLUG,
     credits: MAINNET_CREDITS,
     max: 40,
-    passes: (id) => Promise.resolve(ok(Number(id))),
+    passes: async (id) => ok(Number(id)) && (await inList(id)),
     live: (id, seller, operator) =>
       Promise.all([
         main.readContract({ address: MAINNET_CREDITS, abi: creditsAbi, functionName: 'ownerOf', args: [id] }),

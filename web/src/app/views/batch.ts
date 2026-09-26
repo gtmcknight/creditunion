@@ -6,6 +6,7 @@ import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../trai
 import { hydrate, pct, who } from '../ens';
 import { editionArt, examples, fillGhosts, registerFilter } from '../ghosts';
 import { $$, art, errText, esc, eth, same, sheet, short, toast, until } from '../ui';
+import { stamp } from '../../shared/stamp';
 
 const CHUNK = 40; // Credits per transaction; keeps each one well under the block gas limit
 const RATING_URL = 'https://jack.art/credits/rating';
@@ -64,7 +65,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
     <div class="batch-art">${artHtml}</div>
     <div class="batch-side">
       <header>
-        <span class="tag ${s.state.toLowerCase()}">${s.state}</span>
+        <div class="row"><span class="tag ${s.state.toLowerCase()}">${s.state}</span><button type="button" class="link small" id="share">Share</button></div>
         <h1>${esc(s.name || 'Untitled')}</h1>
         <div class="byline">${who(s.creator, 'lg')}${s.creatorFeeBps ? `<span class="fee">${pct(s.creatorFeeBps)} creator fee</span>` : ''}</div>
       </header>
@@ -95,6 +96,18 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
 
   hydrate(app);
   fillGhosts(app);
+  // Share a link stamped with where the party stands, so X, Telegram and the rest fetch a fresh card for it
+  // instead of showing the one they cached for an earlier state.
+  document.getElementById('share')?.addEventListener('click', async () => {
+    const url = `${location.origin}/party/${s.address}?s=${stamp(s.state, s.count, s.highBid)}`;
+    try {
+      if (navigator.share && matchMedia('(pointer: coarse)').matches) await navigator.share({ title: s.name || 'A party on Eighty', url });
+      else {
+        await navigator.clipboard.writeText(url);
+        toast('Link copied', 'ok', 2500);
+      }
+    } catch {}
+  });
   const art = app.querySelector<HTMLElement>('.batch-art');
   app.querySelectorAll<HTMLElement>('.rule-chip[data-slots]').forEach((row) => {
     row.addEventListener('pointerenter', () => {
@@ -250,10 +263,10 @@ const BUY_COUNTS = [1, 5, 10];
 function buyPane(connected: boolean) {
   // How many and the running total on one line; the Credits; then one button that carries the price.
   return `<div class="buy-head"><div class="seg sm" role="radiogroup" aria-label="How many">${BUY_COUNTS.map((n) => `<label><input type="radio" name="buy-n" value="${n}" ${n === 5 ? 'checked' : ''}><span>${n}</span></label>`).join('')}</div><span class="num" id="buy-sub"></span></div>
-    <div class="listings" id="listings"></div>
+    <div class="listings" id="listings">${'<span class="listing skel" aria-hidden="true"><span class="art"></span><span class="price"></span></span>'.repeat(5)}</div>
     <div id="buy-quote" class="quote small"></div>
     ${connected || !config.sweeper ? `<button class="btn primary block" id="buy-go" disabled>Buy</button>` : '<button class="btn primary block" data-connect>Connect to buy</button>'}
-    <p class="small muted" id="buy-line">Loading listings…</p>`;
+    <p class="small muted" id="buy-line">Finding the cheapest listings that fit…</p>`;
 }
 
 const minEth = (wei: bigint) => (Number(wei) / 1e18).toFixed(4).replace(/\.?0+$/, '');
@@ -384,13 +397,15 @@ async function drawPicker(
   if (mineCount) mineCount.textContent = fits.length ? String(fits.length) : '';
   // Nothing of yours fits: lead with buying.
   if (!fits.length) document.querySelector<HTMLButtonElement>('[data-add="buy"]:not([aria-selected="true"])')?.click();
-  if (!m.owned.length) {
-    if (line) line.textContent = 'You don’t hold any Credits.';
-    el.remove();
-    return;
-  }
   if (!fits.length) {
-    if (line) line.textContent = `None of your ${m.owned.length} Credits fit this party’s rules.`;
+    // Nothing to deposit: say so, and point at the other ways in.
+    if (line)
+      line.outerHTML = `<div class="empty-mine">
+        <p>${m.owned.length ? `None of your ${m.owned.length} Credits fit this party’s rules.` : 'You don’t hold any Credits yet.'}</p>
+        <button type="button" class="btn block" data-go-buy>Buy on OpenSea</button>
+        ${config.chainId !== 1 ? '<a class="small" href="/mint">Mint test Credits</a>' : ''}
+      </div>`;
+    document.querySelector('[data-go-buy]')?.addEventListener('click', () => document.querySelector<HTMLButtonElement>('[data-add="buy"]')?.click());
     el.remove();
     return;
   }

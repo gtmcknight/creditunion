@@ -21,7 +21,33 @@ export const batchAbi = [
   },
   {
     "type": "function",
+    "name": "CREATOR_ORDER_GRACE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "EXTENSION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "FILL_GRACE",
     "inputs": [],
     "outputs": [
       {
@@ -151,19 +177,6 @@ export const batchAbi = [
   },
   {
     "type": "function",
-    "name": "UNLOCK_AFTER",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "allowed",
     "inputs": [
       {
@@ -224,6 +237,19 @@ export const batchAbi = [
     "type": "function",
     "name": "assemble",
     "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "assembleOrdered",
+    "inputs": [
+      {
+        "name": "order",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -451,7 +477,7 @@ export const batchAbi = [
     "inputs": [],
     "outputs": [
       {
-        "name": "",
+        "name": "dl",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -553,16 +579,6 @@ export const batchAbi = [
             "name": "layout1",
             "type": "uint64",
             "internalType": "uint64"
-          },
-          {
-            "name": "bitsFrom",
-            "type": "uint16",
-            "internalType": "uint16"
-          },
-          {
-            "name": "bitsTo",
-            "type": "uint16",
-            "internalType": "uint16"
           }
         ]
       }
@@ -686,16 +702,6 @@ export const batchAbi = [
             "name": "layout1",
             "type": "uint64",
             "internalType": "uint64"
-          },
-          {
-            "name": "bitsFrom",
-            "type": "uint16",
-            "internalType": "uint16"
-          },
-          {
-            "name": "bitsTo",
-            "type": "uint16",
-            "internalType": "uint16"
           }
         ]
       },
@@ -1227,16 +1233,6 @@ export const batchAbi = [
                 "name": "layout1",
                 "type": "uint64",
                 "internalType": "uint64"
-              },
-              {
-                "name": "bitsFrom",
-                "type": "uint16",
-                "internalType": "uint16"
-              },
-              {
-                "name": "bitsTo",
-                "type": "uint16",
-                "internalType": "uint16"
               }
             ]
           },
@@ -1293,19 +1289,6 @@ export const batchAbi = [
     "outputs": [
       {
         "name": "units",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "unlocksAt",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -1437,7 +1420,7 @@ export const batchAbi = [
     "name": "Filled",
     "inputs": [
       {
-        "name": "unlocksAt",
+        "name": "deadline",
         "type": "uint64",
         "indexed": false,
         "internalType": "uint64"
@@ -1587,11 +1570,6 @@ export const batchAbi = [
   },
   {
     "type": "error",
-    "name": "ArrangementRetired",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "AssemblerNotReady",
     "inputs": []
   },
@@ -1629,6 +1607,11 @@ export const batchAbi = [
   {
     "type": "error",
     "name": "CreatorFeeTooHigh",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "CreatorsTurn",
     "inputs": []
   },
   {
@@ -1678,6 +1661,11 @@ export const batchAbi = [
         "internalType": "uint256"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "NotCreator",
+    "inputs": []
   },
   {
     "type": "error",
@@ -2027,16 +2015,6 @@ export const factoryAbi = [
             "name": "layout1",
             "type": "uint64",
             "internalType": "uint64"
-          },
-          {
-            "name": "bitsFrom",
-            "type": "uint16",
-            "internalType": "uint16"
-          },
-          {
-            "name": "bitsTo",
-            "type": "uint16",
-            "internalType": "uint16"
           }
         ]
       },

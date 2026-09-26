@@ -16,6 +16,7 @@
   },
   "include": [
     "src/worker",
-    "src/app/abi.ts"
+    "src/app/abi.ts",
+    "src/shared"
   ]
 }
