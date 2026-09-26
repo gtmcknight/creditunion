@@ -3613,7 +3613,16 @@ dialog.people header h3 {
   gap: 8px;
   min-width: 0;
 }
-.bid-when a {
-  color: inherit;
-  text-decoration: none;
+a.bid-when {
+  color: var(--muted);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 3px;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+}
+a.bid-when:hover {
+  color: var(--fg);
+  text-decoration-color: var(--fg);
 }
