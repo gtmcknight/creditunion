@@ -261,8 +261,9 @@ contract Adversarial3Test is Test {
         vm.prank(bob);
         vm.expectRevert(abi.encodeWithSelector(Batch.NotDepositor.selector, 60));
         b.withdraw(_one(60));
-        // empty withdraw is a no-op in any state
+        // empty withdraw reverts (R5-3: it used to reset filledAt from anyone during the exit window)
         vm.prank(bob);
+        vm.expectRevert(Batch.NothingToClaim.selector);
         b.withdraw(new uint256[](0));
         assertEq(b.count(), 10);
         assertEq(b.sharesOf(alice), 10);

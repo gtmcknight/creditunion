@@ -186,3 +186,111 @@ fill: Colors 15, Eights 9, Print 6, Weight 4, Plates 4), and a `layoutTrait` wit
 **Tests.** Plates and Eights layouts fill, refuse a Credit with no slot left, and burn in painted order;
 validation cases revert `BadFilter`. The mock art now varies Eights so these are testable. Full suite: 170 of 171,
 the one failure the pre-existing Ratings test above.
+
+## Round 5: full re-read after layoutTrait (Sept 26)
+
+**Scope.** Every file in `src/` (Batch, BatchFactory, Sweeper, Ratings, MockAssembler, interfaces, mocks, vendored
+art) read in full; rounds 1–4 re-verified against the current code; proofs in `test/Audit5.t.sol`.
+
+**Re-verified, still holding.** B1 (assembler called, approval scoped, burn + Statement ownership checked), B2/B6
+(rescue refuses pooled Credits and the Statement, before and after sale; book-then-move), B3/R2-5 (hook beneficiary,
+sink rule, mint hook refused), B4 (settle try/catch + `claimStatement`), S1/S3/S4/R2-3/R2-4 (Sweeper `spent` from
+executions, sink rule, no receiver hook, `maxFeeBps`, `expect*FeeBps`), round 3 (`unlocksAt` from
+`max(filledAt, assemblerActiveAt)`, exit-window leave clears `filledAt`), round 4 (trait range validation; `_keyOf`
+stays ≤ 15 for every trait against the real `CreditArt`, so `_have`/`_slots` can't go out of bounds). Clones can't be
+re-initialised; the implementation is locked. ETH conservation on a Plates layout lifecycle is exact.
+
+| # | Sev | Finding | Proof | Fix |
+|---|---|---|---|---|
+| R5-1 | Low | `minBid()` (`Batch.sol:611`) returns `reserve` whenever it is non-zero, so a reserve below `MIN_RAISE` *lowers* the floor: with reserve 1 wei a 1 wei bid starts the 24 h clock and, unanswered, buys the Statement. With reserve 0 the floor is 0.01 ETH. A creator typing a "small floor" makes the batch cheaper to snipe than no floor. | `test_R5_1_ReserveBelowFloorRejected` (positive: `test_R5_1_ValidReservesStillWork`) | **Fixed.** `initialize` reverts `ReserveTooLow` when `0 < reserve < MIN_RAISE`; 0 and 0.01 ETH and up still work. |
+| R5-2 | Low | Eights layouts accept slot values up to 9 (`_topKey`, `Batch.sol:478`), but the real edition tops out at 5 eights (1 Credit; 26 have 4; from `web/public/edition-traits.bin`). Values 7–9 can never fill, 6 at most once. The batch is accepted, takes deposits, and can never reach 80. No funds at risk (Open batches are always withdrawable) but depositors' Credits sit in a dead party. Round 4's "rejects a slot no Credit could fill" is true per trait range, not per edition. | `test_R5_2_EightsLayoutAboveEditionRejected` (positive: `test_R5_2_EightsLayoutValueSixAccepted`) | **Fixed.** `_topKey` returns 6 for Eights (0 to 5 eights); `web/src/shared/layout.ts` `TOP[1]` is 6 to match (the painter already offered only 0 to 5). The per-value supply cap in the painter is not done. |
+| R5-2b | Info | The layout isn't checked against the filter (`Batch.sol:264–276`): a painted value the filter excludes (K slot on a CMY-only batch; an Eights slot outside `eights`; Print/Weight likewise) makes the batch unfillable from creation. | `test_R5_2b_LayoutContradictingFilterRejected` (positive: `test_R5_2b_ConsistentLayoutAndFilterAccepted`) | **Fixed.** `initialize` builds the set of values the filter admits (`_filterKeys`: Colors on `palettes`, Eights/Print/Weight on bit `p - 1` of `eights`/`prints`/`weights`, Plates on the ink counts of the allowed palettes) and reverts `BadFilter` on any painted value outside it. |
+| R5-3 | Info | `withdraw([])` (`Batch.sol:388–395`) by anyone, depositor or not, during the exit window zeroes `filledAt` on every locked Full batch. Nothing moves and activation still re-locks from `assemblerActiveAt`, but `filledAt` reads 0 on a Full batch and, after unlock, the next leave-and-refill re-locks for 7 more days (normally a refill never re-locks). | `test_R5_3_StrangerEmptyWithdrawRejected` (control: `test_R5_3_ControlRefillWithoutResetStaysUnlocked`) | **Fixed.** `withdraw` reverts `NothingToClaim` on empty `ids`. `Adversarial3.test_WithdrawDuplicatesAndForeignIdsRevert` now expects that revert. |
+
+**Measured.** `create` with 40 Credits into a Layout batch with a trait filter on the real art (describe runs twice per
+Credit: `passes()` and `_keyOf()`): 11.3 M gas. The "~40 per call" guidance holds.
+
+**Still accepted (unchanged).** The setter/adapter is the trust boundary: a malicious adapter can burn a batch's 80,
+keep the real Statement and hand the batch a fake one (`statement()` is the adapter's own answer); the 30-minute exit
+window is the only defence. A Statement with no bid is held until someone bids 0.01 ETH. Unlocked batches can be
+vetoed by a withdraw front-run. A share gifted (hook `data`, `depositFor`) to a contract that can't take ETH, the
+Sweeper included, strands that share's ETH.
+
+**Checked and clean.** Refund/claim/owed accounting under reverting and gas-burning receivers; bid/settle boundary
+(`ts < auctionEnd` vs `ts >= auctionEnd`); anti-snipe arithmetic can't underflow; Early and Equal dust all to the
+protocol fee; rescue re-entry via a hostile token (only reaches the hook, which is an ordinary deposit); try/catch gas
+griefing in `settle` and the burn check (the 1/64 left over can't finish the call); `layoutOrder()` completeness with
+trait keys 10–15 (Eights ≥ 9) and Colors mask 0 always going to any slots; uint8 books (max 80); factory only moves the
+caller's Credits; Sweeper `spent ≤ msg.value` and self-paid consideration filtered by Seaport.
+
+## Round 6: independent adversarial re-read (Sept 26)
+
+**Scope.** Every file in `src/` read line by line (Batch, BatchFactory, Sweeper, Ratings, MockAssembler, interfaces,
+mocks, vendored CreditArt/CreditDrawing), with rounds 1 to 5 treated as unverified. Proofs in `test/Audit6.t.sol`.
+
+**Round 5 fixes, re-verified.**
+- `ReserveTooLow` (`Batch.sol:266`): a fuzz over any reserve shows `create` succeeds exactly when the reserve is 0 or
+  at least 0.01 ETH and stores it unchanged; for 0, 0.01 ETH and 3 ETH the opening floor after assembly is never
+  below 0.01 ETH and is exactly 0.01 ETH once the reserve window lapses. No legit path passes a small reserve: the
+  site sends 0 (`create.ts`), `SeedDemo` uses 0, 0.5 and 1 ETH, the factory has no default.
+  (`testFuzz_R6_ReserveRuleExact`, `test_R6_OpeningFloorNeverBelowMinRaise`)
+- `_topKey` Eights = 6 (`Batch.sol:483`): matches `web/src/shared/layout.ts` `TOP[1]`; values 7 and up are refused.
+- `_filterKeys` (`Batch.sol:490`): checked against an independent model for every trait, random trait rules, any
+  painted value (1 to 15) and any of the 80 slots, including `layout1`. Colors uses bit `p`, Eights/Print/Weight bit
+  `p - 1`, exactly as `passes()` tests them; no off-by-one. Plates maps each palette to its ink count, checked
+  exhaustively for all 15 single-palette filters; the real art's `colors` string is one letter per enabled plate,
+  so `bytes(colors).length` equals the popcount used here. In the other direction, on the real `CreditArt` with
+  random rules, every Credit that passes the filter has a value the check admits and deposits into its painted
+  slot, so the fix never refuses a fillable layout. The check is 15 iterations at most; no gas concern. It cannot be
+  bypassed: `initialize` is the only writer of `_filter` and runs once.
+  (`testFuzz_R6_FilterKeysMatchesModel`, `test_R6_PlatesMappingExhaustive`,
+  `testFuzz_R6_FilterKeysAdmitsEveryPassingCredit` and its non-vacuity check)
+- Empty `withdraw` (`Batch.sol:394`): reverts in Open as well as Full (harmless). A stranger passing a non-empty
+  list hits `NotDepositor` and the `filledAt` reset rolls back with it; only a real leave in the exit window resets
+  it. (`test_R6_FilledAtResetOnlyByARealLeave`)
+
+| # | Sev | Finding | Proof | Fix sketch |
+|---|---|---|---|---|
+| R6-1 | Info | The R5-2b check (`_filterKeys`, `Batch.sol:490`) looks only at the painted trait's own rule. The Bits range can still exclude a painted value outright: a Credit with n inks has at most 64n marks, so `bitsFrom = 65` rules out every 1-ink Credit (a C/M/Y/K Colors slot, a Plates 1 slot), and `bitsFrom = 137` rules out every "even" Credit (even needs marks at most 136/256 of capacity). Such layouts are accepted and can never fill. Same class and impact as R5-2b: nothing is lost, Credits sit in a dead party. Joint rules (e.g. a K slot plus a Print rule no K Credit has) are not decidable onchain and stay with the painter. | `test_R6_1_BitsRangeMakesPaintedValueImpossible` (real art, 200 Credits: accepted; no 1-ink or even Credit passes) | In `initialize`, for Colors/Plates layouts clear any painted value whose ink count n has `64n < bitsFrom`; for Weight, clear "even" when `bitsFrom > 136`, "lean" when `bitsFrom > 144`, "sparse" when `bitsFrom > 160`. Or leave it to the site and document. |
+| R6-2 | Info | `initialize` accepts filters that can never admit 80 Credits: an allowlist of 1 to 79 ids, an id range narrower than 80 (`idTo - idFrom < 79`), `bitsFrom > 256` (256 is the most marks a Credit has), or `palettes == 1` (only mask 0; every Credit has at least one ink). The batch opens, takes the creator's `minOpen` Credits and joiners, and can never burn. Open batches are always withdrawable, so nothing is lost. | `test_R6_2_FiltersThatCanNeverFill` (79-id allowlist fills to 79, the 80th is `Excluded`; the others accepted and, on the real art, nothing passes) | `BadFilter` when `allowlistSize != 0 && allowlistSize < SIZE`, `idTo != 0 && idTo - idFrom + 1 < SIZE`, `bitsFrom > 256`, or `palettes == 1`. One comparison each. |
+
+**Fixed.**
+- R6-1 Fixed: `_filterKeys` now also drops painted values the Bits range rules out (`_bitsKeys`): Colors/Plates with n inks when `64n < bitsFrom`, Weight per ink count against the exact CreditArt bands (even 30..136, lean 28..144, sparse 24..160, extreme 0..256, with the gaps between ink counts), so both `bitsFrom` and `bitsTo` count; exact against a brute-force model, and on the real art every passing Credit is still admitted. (`test_R6_1_BitsRangeMakesPaintedValueImpossible`, `test_R6_1_WeightBoundsExact`, `testFuzz_R6_1_BitsKeysMatchModel`, `testFuzz_R6_1_BitsNeverRefusesAPassingCredit`)
+- R6-2 Fixed: `initialize` reverts `BadFilter` for a deduped allowlist of 1 to 79, `idTo != 0 && idTo - idFrom + 1 < 80`, `bitsFrom > 256` and `palettes == 1`; exactly 80 listed ids or numbers still fills. The create page blocks both narrow cases before submit. (`test_R6_2_FiltersThatCanNeverFill`, `test_R6_2_BoundaryFiltersStillWork`)
+
+No Critical, High, Medium or Low findings.
+
+**Checked and sound.**
+- ETH conservation: `settle` books `per * units + creatorFee + fee == highBid` exactly (dust into `fee`); Early
+  weights `237 - 2i` sum to 12,640; `_ids`, `depositorOf` and `sharesOf` are frozen once a Statement exists (every
+  writer requires Open or Full), so the sum of `unitsOf` is the split's total at claim time. Owed refunds stay in
+  the balance until pulled; nothing reads `address(this).balance`.
+- Reentrancy: every mutating entry point is `nonReentrant` except `onERC721Received`, which only accepts Credits
+  (or anything while `_assembling`) and requires Open. Callbacks from refunds (50k gas), `claim`/`withdrawOwed`
+  (all gas), `rescue` of a hostile token, and the assembler all find either the guard or a closed state. Withdraw
+  and the factory's `_move` use plain `transferFrom` (no hook). Transient guard slots are per clone.
+- Griefing under limited gas: `bid` refunds can't be starved (the caller needs about 1.6 M gas left for the owed
+  write, which gives the callee the full 50k); `settle`'s try/catch and the burn check can't be pushed into their
+  catch branches with enough gas left to finish; `claim` reverts whole on a failed send.
+- State machine: at most 80 ids (every push is behind `_require(Open)`); a two-id deposit at 79 reverts whole;
+  `filledAt` is never 0 on a Full batch now; exit window exists only before any assembler is active, so it can't
+  race `assemble`; `exitWindowOpen` stays true after `pendingUntil` until someone activates (withdrawals stay open,
+  burning stays impossible); the setter can restart the window but each proposal gets the full 30 minutes.
+- Layout books: `overflow <= anySlots` plus 80 ids gives zero deficit, so `layoutOrder()` completes and hands the
+  adapter 80 distinct held ids; on an Open batch the view can't index out of bounds (unused ids always cover the
+  any slots seen so far). Keys stay at most 15, mask 0 and Eights 6+ go to any slots.
+- Factory and clones: `create` initialises in the same transaction; the implementation is locked (`factory = 1`)
+  and has no `selfdestruct`/`delegatecall`; fees are snapshotted and guarded by `expect*FeeBps`; `feeRecipient`,
+  `ratings`, `credits` are immutable; `depositFor` only moves the caller's Credits.
+- Sweeper: `spent` from Seaport's executions; duplicate listings for one Credit revert the whole fill; seller
+  callbacks that fill the batch make `depositFor` revert the purchase with it; ETH sent to the Sweeper outside a
+  sweep never enters `left`.
+- Ratings: little-endian decode and chunk bounds; out-of-range ids read 0.
+
+**Still accepted (unchanged).** The adapter/setter trust boundary and the 30-minute window; the post-unlock
+withdraw veto; zero-bid Statements held until a 0.01 ETH bid; shares gifted to contracts that can't take ETH (the
+Sweeper included) strand that ETH; plain-`transferFrom` strays go to the fee recipient via `rescue`; per-value
+edition supply in the painter.
+
+Tests: `test/Audit6.t.sol` 13 of 13 pass. Full suite: 194 of 195, the one failure the pre-existing
+`Adversarial2.test_ConstructorRejectsBadLengths`.

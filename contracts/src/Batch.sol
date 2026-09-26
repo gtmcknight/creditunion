@@ -113,7 +113,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         uint16 bitsFrom;
         uint16 bitsTo;
         // Which trait the layout paints (layout batches only; 0 otherwise). Each slot value is 1 + that trait's
-        // value, 0 = any: 0 Colors (the CMYK mask itself, 1–15), 1 Eights (eights + 1, 1–9), 2 Print (1–6,
+        // value, 0 = any: 0 Colors (the CMYK mask itself, 1–15), 1 Eights (eights + 1, 1–6), 2 Print (1–6,
         // Registered … Loose), 3 Weight (1–4, even … extreme), 4 Plates (number of inks, 1–4).
         uint8 layoutTrait;
     }
@@ -230,6 +230,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     error BadOrder();
     error NoSlot(uint256 id);
     error LayoutMismatch(uint256 slot);
+    error ReserveTooLow();
 
     // ---------------------------------------------------------------- setup
 
@@ -257,19 +258,28 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         if (filter_.idTo != 0 && filter_.idFrom > filter_.idTo) revert BadFilter();
         if (filter_.maxScore != 0 && filter_.minScore > filter_.maxScore) revert BadFilter();
         if (filter_.bitsTo != 0 && filter_.bitsFrom > filter_.bitsTo) revert BadFilter();
+        // Filters that can never admit 80: an id range narrower than 80 (inclusive; id 0 counted, so this
+        // never refuses a range some real Credits fill), more marks than any Credit has (4 inks × 64), or
+        // palettes = {mask 0} (every Credit has at least one ink). The allowlist is checked below, deduped.
+        if (filter_.idTo != 0 && filter_.idTo - filter_.idFrom + 1 < SIZE) revert BadFilter();
+        if (filter_.bitsFrom > 256 || filter_.palettes == 1) revert BadFilter();
         if ((filter_.minScore != 0 || filter_.maxScore != 0) && address(IBatchFactory(msg.sender).ratings()) == address(0)) {
             revert BadFilter();
         }
         if (arrangement_ == Arrangement.Creator) revert ArrangementRetired();
+        // A reserve under the 0.01 ETH floor would lower it (minBid returns the reserve while it stands).
+        if (reserve_ != 0 && reserve_ < MIN_RAISE) revert ReserveTooLow();
         bool hasLayout = filter_.layout0 != 0 || filter_.layout1 != 0;
         if (hasLayout != (arrangement_ == Arrangement.Layout)) revert BadFilter();
         if (!hasLayout && filter_.layoutTrait != 0) revert BadFilter();
         if (hasLayout) {
             Filter memory lf = filter_;
             uint256 top = _topKey(lf.layoutTrait); // reverts on an unknown trait
+            uint256 ok = _filterKeys(lf); // slot values the filter lets in
             for (uint256 i; i < SIZE; ++i) {
                 uint256 p = _slot(lf, i);
-                if (p > top) revert BadFilter(); // a value no Credit has: the slot could never fill
+                // A value no Credit has, or one the filter keeps out: the slot could never fill.
+                if (p > top || (p != 0 && (ok >> p) & 1 == 0)) revert BadFilter();
                 if (p == 0) ++anySlots;
                 else ++_slots[p];
             }
@@ -280,6 +290,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
                 ++allowlistSize;
             }
         }
+        if (allowlistSize != 0 && allowlistSize < SIZE) revert BadFilter();
         if (creatorFeeBps_ > MAX_CREATOR_FEE_BPS) revert CreatorFeeTooHigh();
         if (protocolFeeBps_ > MAX_PROTOCOL_FEE_BPS) revert ProtocolFeeTooHigh();
         factory = IBatchFactory(msg.sender);
@@ -386,6 +397,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     ///         (UNLOCK_AFTER since filling, not assembled), and from any unassembled batch while the factory's
     ///         exit window is open.
     function withdraw(uint256[] calldata ids) external nonReentrant {
+        if (ids.length == 0) revert NothingToClaim(); // an empty call would still reset filledAt below
         State s = state();
         bool lockLifted = s == State.Full && block.timestamp >= unlocksAt();
         bool unlocked = lockLifted || (s == State.Full && factory.exitWindowOpen());
@@ -474,10 +486,86 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     /// @dev The highest slot value a trait can take.
     function _topKey(uint8 trait) internal pure returns (uint256) {
         if (trait == 0) return 15;
-        if (trait == 1) return 9;
+        if (trait == 1) return 6; // the edition tops out at 5 eights
         if (trait == 2) return 6;
         if (trait == 3 || trait == 4) return 4;
         revert BadFilter();
+    }
+
+    /// @dev Bit `p` set = slot value `p` of the painted trait can pass the filter's trait rules and Bits range
+    ///      (see passes()).
+    function _filterKeys(Filter memory f) internal pure returns (uint256) {
+        return _traitKeys(f) & _bitsKeys(f);
+    }
+
+    function _traitKeys(Filter memory f) internal pure returns (uint256) {
+        uint8 t = f.layoutTrait;
+        if (t == 0) return f.palettes == 0 ? type(uint256).max : f.palettes;
+        if (t == 1) return f.eights == 0 ? type(uint256).max : uint256(f.eights) << 1;
+        if (t == 2) return f.prints == 0 ? type(uint256).max : uint256(f.prints) << 1;
+        if (t == 3) return f.weights == 0 ? type(uint256).max : uint256(f.weights) << 1;
+        // Plates: an ink count passes if some allowed palette has that many inks.
+        if (f.palettes == 0) return type(uint256).max;
+        uint256 ok;
+        for (uint256 m = 1; m < 16; ++m) {
+            if (f.palettes & (1 << m) != 0) ok |= 1 << _inks(m);
+        }
+        return ok;
+    }
+
+    /// @dev Slot values the Bits range leaves possible. CreditArt: n inks (1-4, every mask occurs) give
+    ///      capacity 64n and any mark count from 0 to 64n. A Colors mask or Plates count with n inks therefore
+    ///      spans 0..64n marks. Weight compares marks*256 with capacity in nested bands: even 30n..34n marks
+    ///      (120-136/256), lean 28n..36n (112-144), sparse 24n..40n (96-160), extreme 0..64n, each minus the band
+    ///      inside it. Over n = 1..4 that puts even at 30..136, lean 28..144, sparse 24..160, extreme 0..256, with
+    ///      gaps between inks (no lean Credit has 37..55 marks). A value is dropped only when no ink count leaves
+    ///      a mark count in [bitsFrom, bitsTo]; exact, so no fillable layout is refused. Eights and Print don't
+    ///      bound marks.
+    function _bitsKeys(Filter memory f) internal pure returns (uint256 ok) {
+        uint256 lo = f.bitsFrom;
+        uint256 hi = f.bitsTo == 0 ? 256 : f.bitsTo;
+        uint8 t = f.layoutTrait;
+        if (t == 1 || t == 2 || (lo == 0 && hi == 256)) return type(uint256).max;
+        if (t == 3) {
+            for (uint256 v = 1; v <= 4; ++v) {
+                for (uint256 n = 1; n <= 4; ++n) {
+                    (uint256 a, uint256 b) = _band(v, n);
+                    bool hit;
+                    if (v == 1) {
+                        hit = _meets(lo, hi, a, b);
+                    } else {
+                        (uint256 ia, uint256 ib) = _band(v - 1, n); // the lighter band inside, which wins
+                        hit = _meets(lo, hi, a, ia - 1) || _meets(lo, hi, ib + 1, b);
+                    }
+                    if (hit) {
+                        ok |= 1 << v;
+                        break;
+                    }
+                }
+            }
+            return ok;
+        }
+        // Colors (mask v) or Plates (v inks): marks 0..64n, so only the lower bound can rule a value out.
+        for (uint256 v = 1; v < 16; ++v) {
+            if (64 * (t == 0 ? _inks(v) : v) >= lo) ok |= 1 << v;
+        }
+    }
+
+    /// @dev Marks band of weight `v` (1 even .. 4 extreme) for `n` inks, before removing the inner bands.
+    function _band(uint256 v, uint256 n) internal pure returns (uint256, uint256) {
+        if (v == 1) return (30 * n, 34 * n);
+        if (v == 2) return (28 * n, 36 * n);
+        if (v == 3) return (24 * n, 40 * n);
+        return (0, 64 * n);
+    }
+
+    /// @dev [a, b] and [lo, hi] overlap.
+    function _meets(uint256 lo, uint256 hi, uint256 a, uint256 b) internal pure returns (bool) {
+        return a <= hi && b >= lo;
+    }
+
+    function _inks(uint256 m) internal pure returns (uint256) {
+        return (m & 1) + (m >> 1 & 1) + (m >> 2 & 1) + (m >> 3);
     }
 
     /// @dev Value wanted at layout slot `i` (0 = any).

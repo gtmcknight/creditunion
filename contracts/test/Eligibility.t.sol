@@ -97,25 +97,24 @@ contract EligibilityTest is Test {
     function test_NumberRange() public {
         Batch.Filter memory f;
         f.idFrom = 10;
-        f.idTo = 20;
+        f.idTo = 89; // exactly 80 numbers, the narrowest range allowed
         Batch b = _open(f, none, 15);
         assertTrue(b.passes(10));
-        assertTrue(b.passes(20));
+        assertTrue(b.passes(89));
         assertFalse(b.passes(9));
-        assertFalse(b.passes(21));
+        assertFalse(b.passes(90));
     }
 
     function test_Allowlist() public {
-        uint256[] memory list = new uint256[](3);
-        list[0] = 7;
-        list[1] = 9;
-        list[2] = 9; // duplicates are harmless
+        uint256[] memory list = new uint256[](81);
+        for (uint256 i; i < 80; ++i) list[i] = 7 + 2 * i; // 80 odd ids from 7
+        list[80] = 9; // duplicates are harmless
         Batch.Filter memory f;
         Batch b = _open(f, list, 7);
-        assertEq(b.allowlistSize(), 2);
+        assertEq(b.allowlistSize(), 80);
         assertTrue(b.passes(9));
         assertFalse(b.passes(8));
-        assertEq(b.summary().allowlistSize, 2);
+        assertEq(b.summary().allowlistSize, 80);
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Batch.Excluded.selector, 8));
         factory.deposit(address(b), _one(8));
@@ -124,9 +123,8 @@ contract EligibilityTest is Test {
     }
 
     function test_AllowlistCombinesWithOtherRules() public {
-        uint256[] memory list = new uint256[](2);
-        list[0] = 30;
-        list[1] = 40;
+        uint256[] memory list = new uint256[](80);
+        for (uint256 i; i < 80; ++i) list[i] = 1 + i; // 30 and 40 among them
         Batch.Filter memory f;
         f.paidTo = 35; // 40 is listed but paid too late
         Batch b = _open(f, list, 30);
