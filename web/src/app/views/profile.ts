@@ -74,7 +74,7 @@ export async function profile(app: HTMLElement, rerender: () => void) {
     <div class="grid">${
       mine.length
         ? mine.map((b) => card(b)).join('')
-        : `<div class="empty-state"><p>You're not in any party yet.</p><div class="actions"><a class="btn primary" href="/">Browse parties</a><a class="btn" href="/create">Open one</a></div></div>`
+        : `<div class="empty-state"><p>You're not in any party yet.</p><div class="actions"><a class="btn primary" href="/parties">Browse parties</a><a class="btn" href="/create">Open one</a></div></div>`
     }</div>
   </section>
 

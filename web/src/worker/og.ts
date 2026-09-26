@@ -6,6 +6,7 @@ export type Card = { title: string; description: string; image: string };
 const SITE = 'Eighty';
 const CARDS: Record<string, Card> = {
   home: { title: 'Eighty', description: 'Pool your Credits with 79 others into one Statement. Burn, auction, split.', image: '/og/home.png' },
+  parties: { title: 'Parties · Eighty', description: 'Parties pooling Credits toward a Statement. Join one, leave any time before it fills.', image: '/og/party.png' },
   auctions: { title: 'Auctions · Eighty', description: 'Statements at auction: 24 hours from the first bid, split between the 80 Credits that made them.', image: '/og/auctions.png' },
   create: { title: 'Start a party · Eighty', description: 'Pick who joins and how the 80 are laid out. Anyone can burn the moment it fills.', image: '/og/create.png' },
   about: { title: 'How Eighty works', description: 'One wallet nobody owns, rules nobody can change. Eighty Credits make a Statement.', image: '/og/about.png' },

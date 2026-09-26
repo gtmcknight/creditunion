@@ -64,7 +64,7 @@ export function sheet(
     }
     const mine = opts.mine?.has(id.toString()) ? ' mine' : '';
     const fresh = opts.fresh !== undefined && i >= opts.fresh ? ` new" style="--k:${i - opts.fresh}` : '';
-    return `<i class="cell${mine}${fresh}" data-id="${id}" title="Credit #${id}"><img src="${art(id)}" alt="" loading="lazy" decoding="async"></i>`;
+    return `<i class="cell${mine}${fresh}" data-id="${id}"><img src="${art(id)}" alt="" loading="lazy" decoding="async"></i>`;
   });
   const cls = ['sheet', opts.size ?? 'lg', opts.closed && 'closed', opts.closing && 'closing'].filter(Boolean).join(' ');
   return `<div class="${cls}"${opts.batch ? ` data-batch="${opts.batch}"` : ''}>${cells.join('')}</div>`;

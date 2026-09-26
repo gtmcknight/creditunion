@@ -563,6 +563,11 @@ export const batchAbi = [
             "name": "bitsTo",
             "type": "uint16",
             "internalType": "uint16"
+          },
+          {
+            "name": "layoutTrait",
+            "type": "uint8",
+            "internalType": "uint8"
           }
         ]
       }
@@ -696,6 +701,11 @@ export const batchAbi = [
             "name": "bitsTo",
             "type": "uint16",
             "internalType": "uint16"
+          },
+          {
+            "name": "layoutTrait",
+            "type": "uint8",
+            "internalType": "uint8"
           }
         ]
       },
@@ -737,6 +747,25 @@ export const batchAbi = [
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "keyOf",
+    "inputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -839,25 +868,6 @@ export const batchAbi = [
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "paletteOf",
-    "inputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint8",
-        "internalType": "uint8"
       }
     ],
     "stateMutability": "view"
@@ -1237,6 +1247,11 @@ export const batchAbi = [
                 "name": "bitsTo",
                 "type": "uint16",
                 "internalType": "uint16"
+              },
+              {
+                "name": "layoutTrait",
+                "type": "uint8",
+                "internalType": "uint8"
               }
             ]
           },
@@ -2037,6 +2052,11 @@ export const factoryAbi = [
             "name": "bitsTo",
             "type": "uint16",
             "internalType": "uint16"
+          },
+          {
+            "name": "layoutTrait",
+            "type": "uint8",
+            "internalType": "uint8"
           }
         ]
       },

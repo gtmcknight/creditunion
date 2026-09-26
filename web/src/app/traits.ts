@@ -1,3 +1,4 @@
+import { slotName } from '../shared/layout';
 import { keccak256, toBytes, type Hex } from 'viem';
 import type { Summary } from './data';
 
@@ -54,7 +55,9 @@ export function filterRules(f: Summary['filter'], allowlistSize: number, slotOf:
       const m = slotOf(i);
       if (m) by.set(m, [...(by.get(m) ?? []), i]);
     }
-    for (const [m, slots] of by) rows.push({ label: `${inkName(m)} slots`, value: String(slots.length), swatch: m, slots });
+    const t = f.layoutTrait ?? 0;
+    for (const [m, slots] of by)
+      rows.push(t === 0 ? { label: `${inkName(m)} slots`, value: String(slots.length), swatch: m, slots } : { label: `${slotName(t, m)} slots`, value: String(slots.length), slots });
     const open = Array.from({ length: 80 }, (_, i) => i).filter((i) => !slotOf(i));
     if (open.length) rows.push({ label: 'Open slots', value: String(open.length), slots: open });
   }

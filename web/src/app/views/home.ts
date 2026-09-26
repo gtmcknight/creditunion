@@ -2,7 +2,7 @@ import { session } from '../chain';
 import { ARRANGEMENTS, listBatches, type Listed, type Summary, hasLayout, layoutSlot } from '../data';
 import { hydrate, pct, who } from '../ens';
 import { fitByBatch } from '../fit';
-import { editionArt, examples, fillGhosts, registerFilter } from '../ghosts';
+import { editionArt, examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
 import type { Address } from 'viem';
 import { describeFilter } from '../traits';
 import { eth, esc, same, sheet, until } from '../ui';
@@ -25,8 +25,10 @@ function status(s: Summary) {
 }
 
 const SORTS = [
-  ['fullest', 'Fullest'],
+  ['fullest', 'Most complete'],
+  ['emptiest', 'Least complete'],
   ['new', 'Newest'],
+  ['old', 'Oldest'],
 ] as const;
 type SortKey = (typeof SORTS)[number][0];
 
@@ -46,7 +48,10 @@ function sortList(list: Listed[], k: SortKey) {
   list.sort(
     (a, b) =>
       STAGE[a.s.state] - STAGE[b.s.state] ||
-      (k === 'new' ? age.get(a.s.address)! - age.get(b.s.address)! : b.s.count - a.s.count),
+      (k === 'new' ? age.get(a.s.address)! - age.get(b.s.address)!
+      : k === 'old' ? age.get(b.s.address)! - age.get(a.s.address)!
+      : k === 'emptiest' ? a.s.count - b.s.count
+      : b.s.count - a.s.count),
   );
 }
 
@@ -64,6 +69,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[]) {
   const room = 80 - s.count;
   const canJoin = fit?.length ? Math.min(fit.length, room) : 0;
   registerFilter(s.address, s.filter);
+  registerDeposits(ids, depositors);
   return `<a class="card${canJoin ? ' can-join' : ''}" href="/party/${s.address}">
     ${sheet(ids, { size: 'sm', mine, batch: s.state === 'Open' ? s.address : undefined })}
     <div class="card-body">
@@ -79,15 +85,6 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[]) {
 const PARTY_STATES = new Set(['Open', 'Full', 'Expired']);
 export type HomeTab = 'parties' | 'auctions';
 
-/// Header counts: parties still pooling, and Statements at or past auction.
-export function drawCounts(all: Listed[]) {
-  const n = (id: string, v: number) => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = v ? String(v) : '';
-  };
-  n('n-parties', all.filter((b) => PARTY_STATES.has(b.s.state)).length);
-  n('n-auctions', all.filter((b) => !PARTY_STATES.has(b.s.state)).length);
-}
 
 /// Two tabs over one list: parties still pooling, and Statements at or past auction. Each leads with
 /// "For you" (what you're in, can join, or are bidding on), then everything else.
@@ -106,7 +103,6 @@ export async function home(app: HTMLElement, tab: HomeTab = 'parties') {
     if (!el) return; // navigated away
     const parties = all.filter((b) => PARTY_STATES.has(b.s.state));
     const auctions = all.filter((b) => !PARTY_STATES.has(b.s.state));
-    drawCounts(all);
     const list = tab === 'parties' ? parties : auctions;
     document.getElementById('sort-row')!.hidden = tab !== 'parties' || list.length < 4;
     let fit = new Map<Address, bigint[]>();
@@ -118,12 +114,16 @@ export async function home(app: HTMLElement, tab: HomeTab = 'parties') {
       sortList(list, tab === 'parties' ? sortKey() : 'new');
       const mine = list.filter(forYou);
       const rest = list.filter((b) => !forYou(b));
+      const titled = (title: string, items: Listed[]) => (items.length ? `<h2 class="group-title">${title} <span class="num">${items.length}</span></h2>${grid(items)}` : '');
+      const others =
+        tab === 'auctions'
+          ? titled('Live', rest.filter((b) => b.s.state !== 'Settled')) + titled('Completed', rest.filter((b) => b.s.state === 'Settled'))
+          : rest.length ? `${mine.length ? `<h2 class="group-title">All parties <span class="num">${rest.length}</span></h2>` : ''}${grid(rest)}` : '';
       el.innerHTML = !list.length
         ? tab === 'parties'
           ? `<div class="empty-state"><p>No parties yet.</p><a class="btn primary" href="/create">Make Statement Party</a></div>`
           : `<div class="grid"><div class="card placeholder" id="auction-placeholder">${sheet([], { size: 'sm' })}<div class="card-body"><strong>No auctions yet</strong><span class="muted small">When a party burns its 80, its Statement is auctioned here.</span></div></div></div>`
-        : (mine.length ? `<h2 class="group-title">For you <span class="num">${mine.length}</span></h2>${grid(mine)}` : '') +
-          (rest.length ? `${mine.length ? `<h2 class="group-title">All ${tab} <span class="num">${rest.length}</span></h2>` : ''}${grid(rest)}` : '');
+        : titled('For you', mine) + others;
       hydrate(el);
       fillGhosts(el);
       // Empty Auctions: a greyed Statement of real edition Credits stands in for the first one.

@@ -14,6 +14,7 @@ import { match, predicate, type Rules } from './match';
 import { cardFor, partyCard, withCard } from './og';
 import { drawParty, sample, type PartyCard } from './card';
 import { stamp } from '../shared/stamp';
+import { ruleFor } from '../shared/layout';
 
 interface RateLimit {
   limit(o: { key: string }): Promise<{ success: boolean }>;
@@ -326,6 +327,25 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
   }
 
+  // /owner/<id>: who holds a Credit of the real edition right now (for the About wall's hover card).
+  const owner = url.pathname.match(/^\/owner\/(\d{1,6})$/);
+  if (owner) {
+    const cache = caches.default;
+    const key = new Request(url.origin + url.pathname);
+    const hit = await cache.match(key);
+    if (hit) return hit;
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    const rpc = env.ENS_RPC || (env.CHAIN_ID === '1' ? rpcUrl(env) : 'https://eth.drpc.org');
+    const c = createPublicClient({ chain: mainnet, transport: http(rpc, { timeout: 5_000 }) });
+    let who: string | null = null;
+    try {
+      who = await c.readContract({ address: MAINNET_CREDITS, abi: creditsAbi, functionName: 'ownerOf', args: [BigInt(owner[1])] });
+    } catch {} // burned, or the RPC is down: say nothing rather than guess
+    const res = Response.json({ owner: who }, { headers: { 'cache-control': `public, max-age=${who ? 300 : 60}` } });
+    ctx.waitUntil(cache.put(key, res.clone()));
+    return res;
+  }
+
   const ens = url.pathname.match(/^\/ens\/(0x[0-9a-fA-F]{40})$/);
   if (ens) {
     const cache = caches.default;
@@ -523,15 +543,22 @@ async function previewFitting(env: Env, url: URL, ctx: ExecutionContext, batch: 
   const f = s.filter;
   const layout = [BigInt(f.layout0), BigInt(f.layout1)];
   let palettes = Number(f.palettes);
+  const narrowed = { eights: Number(f.eights), prints: Number(f.prints), weights: Number(f.weights) };
   if (layout[0] || layout[1]) {
+    // With no open slot, a Credit fits only if some painted slot takes its value of the painted trait.
     const slots = Array.from({ length: 80 }, (_, i) => Number((layout[i < 64 ? 0 : 1] >> BigInt(4 * (i < 64 ? i : i - 64))) & 15n));
-    if (!slots.includes(0)) palettes = slots.reduce((m, v) => m | (1 << v), 0);
+    if (!slots.includes(0)) {
+      const u: { palettes?: number; eights?: number; prints?: number; weights?: number } = {};
+      for (const v of new Set(slots)) for (const [k, bits] of Object.entries(ruleFor(Number(f.layoutTrait ?? 0), v))) u[k as keyof typeof u] = (u[k as keyof typeof u] ?? 0) | bits!;
+      if (u.palettes !== undefined) palettes = palettes ? palettes & u.palettes : u.palettes;
+      for (const k of ['eights', 'prints', 'weights'] as const) if (u[k] !== undefined) narrowed[k] = narrowed[k] ? narrowed[k] & u[k]! : u[k]!;
+    }
   }
   const ok = await predicate(env.ASSETS, url.origin, {
     palettes,
-    prints: Number(f.prints),
-    weights: Number(f.weights),
-    eights: Number(f.eights),
+    prints: narrowed.prints,
+    weights: narrowed.weights,
+    eights: narrowed.eights,
     idFrom: Number(f.idFrom),
     idTo: Number(f.idTo),
     minScore: Number(f.minScore),

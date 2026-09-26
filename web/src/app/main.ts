@@ -2,8 +2,7 @@ import type { Address } from 'viem';
 import { chain, config, connect, loadConfig, onSession, restore, session, wallets } from './chain';
 import { batch } from './views/batch';
 import { create } from './views/create';
-import { drawCounts, home } from './views/home';
-import { listBatches } from './data';
+import { home } from './views/home';
 import { docs } from './views/docs';
 import { invalidateFit } from './fit';
 import { hydrate, who } from './ens';
@@ -15,7 +14,7 @@ import { esc, errText, toast } from './ui';
 const app = document.getElementById('app')!;
 let seq = 0;
 
-/// Real paths: / (parties), /auctions, /create, /party/0x…, /about[/section], /mint, /me.
+/// Real paths: / (how it works; /about too), /parties, /auctions, /create, /party/0x…, /mint, /me.
 /// Old #/ links (and the old names /new, /b, /docs, /how) still land in the right place.
 const LEGACY: Record<string, string> = { new: 'create', b: 'party', docs: 'about', how: 'about' };
 function pagePath(): string[] {
@@ -38,20 +37,21 @@ export function go(path: string) {
 async function route() {
   const run = ++seq;
   const [page, arg] = pagePath();
-  const current = page === 'party' ? '' : page === 'docs' ? 'about' : page;
+  const current = page === 'party' ? 'parties' : page;
   document.querySelectorAll<HTMLAnchorElement>('[data-nav]').forEach((a) => a.toggleAttribute('aria-current', a.dataset.nav === current));
   document.querySelectorAll<HTMLAnchorElement>('#account [data-nav]').forEach((a) =>
     a.classList.toggle('current', page === 'me'),
   );
   app.classList.remove('in');
   try {
-    if (page === 'about' || page === 'docs') docs(app);
+    if (page === '' || page === 'about') docs(app);
     else if (page === 'mint') await mint(app, route);
     else if (page === 'og') await og(app);
     else if (page === 'me') await profile(app, route);
     else if (page === 'create') await create(app);
     else if (page === 'party' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await batch(app, arg as Address, route);
-    else await home(app, page === 'auctions' ? 'auctions' : 'parties');
+    else if (page === 'parties' || page === 'auctions') await home(app, page);
+    else docs(app);
   } catch (e) {
     if (run === seq) app.innerHTML = `<section class="prose"><h1>Something went wrong</h1><p class="error">${esc(errText(e))}</p></section>`;
   }
@@ -189,5 +189,4 @@ document.addEventListener('click', (e) => {
   await restore().catch(() => {});
   route();
   // Header counts. The Parties and Auctions pages fill them from their own read.
-  if (!['', 'auctions'].includes(pagePath()[0])) listBatches().then(drawCounts).catch(() => {});
 })();

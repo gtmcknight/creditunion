@@ -139,13 +139,15 @@ export async function match(assets: Fetcher, origin: string, r: Rules, samples =
   const stride = Math.max(1, Math.floor(count / samples));
   const sample: number[] = [];
   const palettes: number[] = [];
+  const traits: number[] = []; // packed edition traits per sample, so painted slots can be matched on any trait
   let seen = 0;
   for (let id = lo; id <= hi && sample.length < samples; id++) {
     if (!ok(id)) continue;
     if (seen++ % stride === 0) {
       sample.push(id);
       palettes.push(t[id - 1] & 15);
+      traits.push(t[id - 1]);
     }
   }
-  return { count, total: t.length, sample, palettes };
+  return { count, total: t.length, sample, palettes, traits };
 }

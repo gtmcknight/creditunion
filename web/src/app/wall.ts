@@ -97,14 +97,16 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
       <canvas aria-label="Every Credit"></canvas>
       ${label ? `<div class="wall-label">${label}</div>` : ''}
       <div class="wall-modes" role="radiogroup" aria-label="View">${MODES.map(([m, l], i) => `<button type="button" role="radio" data-mode="${m}" aria-checked="${m === start}" aria-label="${l}" data-tip="${l}"><svg viewBox="0 0 16 16" aria-hidden="true">${ICONS[m]}</svg></button>`).join('')}</div>
+      <figcaption class="wall-caption small"><span class="num wall-now">–</span> <span class="muted wall-about"></span></figcaption>
+      <div class="wall-card" hidden></div>
+      <div class="wall-hover" hidden></div>
       <div class="wall-tools">
         <button type="button" class="wall-zoom" data-zoom="-1" aria-label="Zoom out" data-tip="Zoom out"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg></button>
         <button type="button" class="wall-zoom" data-zoom="1" aria-label="Zoom in" data-tip="Zoom in"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9M8 3.5v9" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg></button>
         <button type="button" class="wall-pause" aria-label="Pause" data-tip="Pause">${PAUSE}</button>
-        <button type="button" class="wall-expand" aria-label="Expand to full screen" data-tip="Expand"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button type="button" class="wall-expand" aria-label="Explore every Credit, full screen"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Explore</span></button>
       </div>
     </div>
-    <figcaption class="small"><span class="num wall-now">–</span> <span class="muted wall-about"></span></figcaption>
   </figure>`;
   const cv = host.querySelector('canvas')!;
   const e = await load().catch(() => null);
@@ -196,6 +198,13 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
       if (xx >= 0 && xx < W) px![y * W + xx] = INK;
     }
   };
+  // Every Credit drawn this frame, as (index, x, y, size) in canvas pixels, so a paused wall can say what's under
+  // the pointer.
+  const drawn: number[] = [];
+  const put = (id: number, x: number, y: number, k: number) => {
+    tile(px!, W, H, e.cells, id, x, y, k);
+    if (x < W && y < H && x + 8 * k > 0 && y + 8 * k > 0) drawn.push(id, x, y, 8 * k);
+  };
   const scrubbable = () => mode === 'stream' || mode === 'one';
   let scrubbing = false;
   const scrubTo = (clientX: number) => {
@@ -229,7 +238,8 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
   let K = 2, T = 8 * K;
   let off = 0;
   const grid = () => {
-    const rows = Math.max(1, Math.floor(H / T));
+    // Always overfill: one more row than fits, centred and cut at both edges, so the wall bleeds to the frame.
+    const rows = Math.max(1, Math.ceil(H / T));
     const top = Math.floor((H - rows * T) / 2);
     const first = Math.floor(off), shift = Math.round((off - first) * T);
     const vis = Math.ceil(W / T) + 1;
@@ -243,7 +253,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
         const from = startOf(k), per = Math.max(0, startOf(k + 1) - from);
         for (let c = 0; c < vis; c++) for (let r = 0; r < per; r++) {
           const id = list[((first + c) * per + r) % list.length];
-          tile(px!, W, H, e.cells, id, c * T - shift, top + (from + r) * T, K);
+          put(id, c * T - shift, top + (from + r) * T, K);
         }
       });
       const per = Math.max(1, startOf(1));
@@ -256,7 +266,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
         for (let r = 0; r < rows; r++) {
           const s = col * rows + r;
           if (s >= e.n) break;
-          tile(px!, W, H, e.cells, order[s], c * T - shift, top + r * T, K);
+          put(order[s], c * T - shift, top + r * T, K);
         }
       }
       edge = order[Math.min(e.n - 1, (first % cols) * rows)];
@@ -283,7 +293,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
       const y = base - (stack + 1) * (ST + 2);
       stack++;
       if (y < -ST) continue;
-      tile(px!, W, H, e.cells, i, Math.round(anchor + (t - clock) * perSec), y, S);
+      put(i, Math.round(anchor + (t - clock) * perSec), y, S);
     }
     const i = Math.max(0, atOrAfter(Math.floor(clock)) - 1);
     strip(clock);
@@ -306,7 +316,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
     const y = Math.round((room - size) / 2);
     for (let d = -3; d <= 3; d++) {
       const id = (i + d + e.n) % e.n;
-      tile(px!, W, H, e.cells, id, cx + d * (size + gap), y, k);
+      put(id, cx + d * (size + gap), y, k);
     }
     const cur = t < 0.5 ? i % e.n : (i + 1) % e.n;
     strip(e.times[cur]);
@@ -316,6 +326,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
   const frame = () => {
     if (!px) return;
     px.fill(PAL32[0]);
+    drawn.length = 0;
     if (mode === 'stream') stream();
     else if (mode === 'one') one();
     else grid();
@@ -367,8 +378,8 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
       };
       removeEventListener('keydown', onKey);
       btn.innerHTML = EXPAND;
-      btn.setAttribute('aria-label', 'Expand to full screen');
-      btn.dataset.tip = 'Expand';
+      btn.setAttribute('aria-label', 'Explore every Credit, full screen');
+      delete btn.dataset.tip;
       if (reduce()) done();
       else {
         // Shrink back onto where the band sits in the page: measure it in place, then animate there.
@@ -405,6 +416,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
   const pauseBtn = host.querySelector<HTMLButtonElement>('.wall-pause')!;
   const setPlaying = (on: boolean) => {
     playing = on;
+    if (on) hide();
     pauseBtn.innerHTML = on ? PAUSE : PLAY;
     pauseBtn.dataset.tip = on ? 'Pause' : 'Play';
     pauseBtn.setAttribute('aria-label', pauseBtn.dataset.tip);
@@ -412,6 +424,61 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
   pauseBtn.addEventListener('click', () => setPlaying(!playing));
   // Pause only exists full screen; closing it lets the wall run again.
   new MutationObserver(() => !box.classList.contains('expanded') && !still && !playing && setPlaying(true)).observe(box, { attributes: true, attributeFilter: ['class'] });
+  // Paused in full screen, hovering a Credit shows what it is and who holds it now.
+  const card = host.querySelector<HTMLElement>('.wall-card')!;
+  const ring = host.querySelector<HTMLElement>('.wall-hover')!;
+  const owners = new Map<number, Promise<string>>();
+  const ownerOf = (i: number) => {
+    let p = owners.get(i);
+    if (!p) {
+      p = fetch(`/owner/${i + 1}`)
+        .then((r) => r.json() as Promise<{ owner: string | null }>)
+        .then(async ({ owner }) => {
+          if (!owner) return 'Burned';
+          const ens = await fetch(`/ens/${owner}`).then((r) => r.json() as Promise<{ name: string | null }>).catch(() => ({ name: null }));
+          return ens.name ?? `${owner.slice(0, 6)}…${owner.slice(-4)}`;
+        })
+        .catch(() => '');
+      owners.set(i, p);
+    }
+    return p;
+  };
+  let hovered = -1;
+  const hide = () => {
+    card.hidden = ring.hidden = true;
+    hovered = -1;
+  };
+  cv.addEventListener('pointerleave', hide);
+  cv.addEventListener('pointermove', (ev) => {
+    if (playing || scrubbing || !box.classList.contains('expanded')) return hide();
+    const r = cv.getBoundingClientRect();
+    const X = ((ev.clientX - r.left) / r.width) * W, Y = ((ev.clientY - r.top) / r.height) * H;
+    let hit = -1;
+    for (let j = drawn.length - 4; j >= 0; j -= 4) {
+      if (X >= drawn[j + 1] && X < drawn[j + 1] + drawn[j + 3] && Y >= drawn[j + 2] && Y < drawn[j + 2] + drawn[j + 3]) {
+        hit = j;
+        break;
+      }
+    }
+    if (hit < 0) return hide();
+    const i = drawn[hit], sx = r.width / W;
+    Object.assign(ring.style, { left: `${drawn[hit + 1] * sx}px`, top: `${drawn[hit + 2] * sx}px`, width: `${drawn[hit + 3] * sx}px`, height: `${drawn[hit + 3] * sx}px` });
+    ring.hidden = false;
+    // Beside the pointer, flipped to stay inside the frame.
+    const left = ev.clientX - r.left, top = ev.clientY - r.top;
+    card.style.left = `${left + 240 > r.width ? left - 232 : left + 16}px`;
+    card.style.top = `${Math.min(top + 16, r.height - 300)}px`;
+    card.hidden = false;
+    if (i === hovered) return;
+    hovered = i;
+    card.innerHTML = `<img src="/art/mainnet/${i + 1}.svg" alt="">
+      <strong>Credit #${(i + 1).toLocaleString()}</strong>
+      <dl><dt>Colors</dt><dd>${inks(e.palette[i]) || '—'}</dd><dt>Bits</dt><dd>${e.bits[i]}</dd><dt>Paid</dt><dd>${when(i, true)}</dd><dt>Owner</dt><dd class="owner">…</dd></dl>`;
+    ownerOf(i).then((who) => {
+      if (hovered === i) card.querySelector('.owner')!.textContent = who || 'Unknown';
+    });
+  });
+
   host.querySelectorAll<HTMLButtonElement>('.wall-zoom').forEach((b) =>
     b.addEventListener('click', () => {
       const k = Math.min(12, Math.max(1, K + Number(b.dataset.zoom)));

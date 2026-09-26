@@ -4,7 +4,7 @@ import { config, explorer, pub, send, session } from '../chain';
 import { ARRANGEMENTS, earlyWeight, eligible, getBatch, hasLayout, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { hydrate, pct, who } from '../ens';
-import { editionArt, examples, fillGhosts, registerFilter } from '../ghosts';
+import { editionArt, examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
 import { $$, art, errText, esc, eth, same, sheet, short, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
 
@@ -22,7 +22,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
   try {
     b = await getBatch(address);
   } catch {
-    app.innerHTML = `<section class="prose"><h1>Party not found</h1><p><a href="/">← Parties</a></p></section>`;
+    app.innerHTML = `<section class="prose"><h1>Party not found</h1><p><a href="/parties">← Parties</a></p></section>`;
     return;
   }
   const account = session.account;
@@ -47,20 +47,21 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
   if (slots && !burned && b.ids.length) {
     try {
       const pal = (await Promise.all(
-        b.ids.map((id) => pub.readContract({ address: s.address, abi: batchAbi, functionName: 'paletteOf', args: [id] })),
+        b.ids.map((id) => pub.readContract({ address: s.address, abi: batchAbi, functionName: 'keyOf', args: [id] })),
       )) as number[];
       const byId = new Map(b.ids.map((id, i) => [id.toString(), Number(pal[i])]));
       placed = placeOnLayout(slots, b.ids, (id) => byId.get(id.toString()) ?? 0);
     } catch {}
   }
   registerFilter(s.address, s.filter);
+  registerDeposits(b.ids, b.depositors);
   const artHtml = burned
     ? `<figure class="statement">${sheet(b.ids, { closed: true })}<figcaption class="legend muted small"><span>Statement #${s.statementId}</span></figcaption></figure>`
     : `${sheet(b.ids, { mine: myIds, fresh: placed ? undefined : seen < s.count ? seen : undefined, closing: s.state === 'Full', placed, batch: s.state === 'Open' ? s.address : undefined })}
        <div class="legend muted small">${myIds.size ? `<button type="button" class="spot" aria-pressed="false"><i class="dot mine"></i><span>Highlight yours</span><span class="num muted">${myIds.size}</span></button>` : ''}</div>`;
 
   app.innerHTML = `
-  <a class="back" href="/">← Parties</a>
+  
   <section class="batch">
     <div class="batch-art">${artHtml}</div>
     <div class="batch-side">
@@ -77,7 +78,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
         </div>`
           : ''
       }
-      <div class="takes"><span class="eyebrow">Takes</span><div class="rule-chips">${rules.length ? rules.map(rule).join('') : '<span class="rule-chip">Any Credit</span>'}</div></div>
+      <div class="takes"><span class="eyebrow">Who can join</span><div class="rule-chips">${rules.length ? rules.map(rule).join('') : '<span class="rule-chip">Any Credit</span>'}</div></div>
       <div id="panel">${panel(b, m, myIds)}</div>
       <div class="folds">
       ${s.state === 'Auction' || s.state === 'Settled' ? `<details class="more" id="bids" open>
@@ -87,7 +88,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
       <details class="more">
         <summary><span>Details</span><span class="muted small">${ARRANGEMENTS[s.arrangement]} · ${s.split === 1 ? 'Early bird' : 'Equal'} payout</span></summary>
         <dl class="facts">
-          ${fact('Order', ARRANGEMENTS[s.arrangement])}
+          ${fact('Burn order', ARRANGEMENTS[s.arrangement])}
           ${fact('Payout', payout(b, myIds))}
           ${fact('Depositors', `<button type="button" class="link num" id="depositors-btn" title="Who is in">${depositors}</button>`)}
           ${s.count ? fact('Rating', `<span id="rating" class="muted">…</span>`) : ''}
@@ -126,7 +127,10 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
       cells.forEach((c, i) => c.classList.toggle('lit', !on || on.has(i)));
       art?.classList.add('lighting');
     });
-    row.addEventListener('pointerleave', () => art?.classList.remove('lighting'));
+    row.addEventListener('pointerleave', () => {
+      art?.classList.remove('lighting');
+      art?.querySelectorAll('.cell.lit').forEach((c) => c.classList.remove('lit'));
+    });
   });
   bind(b, m, myIds, rerender);
 }

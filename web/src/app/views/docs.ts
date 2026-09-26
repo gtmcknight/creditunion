@@ -159,10 +159,10 @@ export function docs(app: HTMLElement) {
     },
     {
       id: 'order',
-      nav: 'Order',
-      title: 'And how the 80 are laid out',
+      nav: 'Burn order',
+      title: 'And the order they burn in',
       figure: FIG.order(),
-      body: `<p>Deposit order, mint time, Credit number, or a painted layout that only fills with the right Colors.</p>`,
+      body: `<p>Deposit order, mint time, Credit number, or a sheet you paint by Colors, Eights, Print, Weight or Plates. It’s the order the 80 go to Jack’s contract.</p>`,
     },
     {
       id: 'auction',
@@ -238,8 +238,9 @@ export function docs(app: HTMLElement) {
   );
 
   mountWall(document.getElementById('wall')!, {
-    label: `<h1>Eighty Credits make a Statement.</h1>
-    <p>${link('https://jack.art/credits', 'Credits')} by Jack Butcher burn 80 at a time into one Statement. Most people hold one. A party pools them: one wallet nobody owns, rules nobody can change.</p>`,
+    label: `<h1>Turn 80 Credits into a Statement.<br>Together.</h1>
+    <p>Join an Eighty Party, pool your Credits, and mint a Statement.<br>When it sells, the party splits the proceeds.</p>
+    <p class="wall-cta"><a class="btn primary" href="/parties">Join a party</a><a class="btn" href="/create">Start a party</a></p>`,
   });
 
   // Deep link: /about/<chapter>.

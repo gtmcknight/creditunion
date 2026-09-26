@@ -1,10 +1,14 @@
-import { config } from './chain';
+import type { Address } from 'viem';
+import { config, session } from './chain';
+import { hydrate, who } from './ens';
 import { hasLayout, layoutSlot, type Summary } from './data';
 import { describeFilter, inkName, maskInks } from './traits';
-import { art, esc } from './ui';
+import { art, esc, same } from './ui';
+import { ruleFor, slotName } from '../shared/layout';
 
 /// Empty slots show a faded real Credit from the edition, so every sheet reads as a Statement in progress.
-/// Hovering an empty slot opens a card: what the slot takes, how many Credits fit, and a few that do.
+/// Hovering a slot opens a card: an empty one says what it takes and how many Credits in the edition could fill
+/// it; a filled one says which Credit it is and who put it in.
 
 type Filter = Summary['filter'];
 
@@ -12,18 +16,23 @@ type Filter = Summary['filter'];
 export const editionArt = (id: bigint | number) => (config.chainId === 1 ? art(id) : `/art/mainnet/${id}.svg`);
 
 const filters = new Map<string, Filter>();
+/// Who deposited each Credit and in what order, per party, for the hover card on filled slots.
+const deposits = new Map<string, { by: Address; pos: number }>();
+export function registerDeposits(ids: readonly bigint[], by: readonly Address[]) {
+  ids.forEach((id, i) => deposits.set(id.toString(), { by: by[i], pos: i + 1 }));
+}
 /// Remember a batch's filter so `fillGhosts` can find it from the sheet's `data-batch`.
 export const registerFilter = (address: string, f: Filter) => filters.set(address.toLowerCase(), f);
 
 type Match = { count: number; sample: number[] };
 const cache = new Map<string, Promise<Match>>();
 /// How many edition Credits pass `f` (narrowed to `palettes`), and up to 80 of them spread across the edition.
-function match(f: Filter, palettes: number) {
+function match(f: Filter, palettes: number, extra: { eights?: number; prints?: number; weights?: number } = {}) {
   const body = JSON.stringify({
     palettes,
-    prints: f.prints,
-    weights: f.weights,
-    eights: f.eights,
+    prints: extra.prints ?? f.prints,
+    weights: extra.weights ?? f.weights,
+    eights: extra.eights ?? f.eights,
     idFrom: Number(f.idFrom),
     idTo: Number(f.idTo),
     minScore: f.minScore,
@@ -65,7 +74,13 @@ async function fillSheet(el: HTMLElement) {
   // The sheet shows a mix of whatever the batch accepts; each slot's own rule (a layout palette,
   // value v = set bit 1 << v) is fetched for the hover card.
   const keys = [...new Set([0, ...empties.map(([, i]) => want[i])])];
-  const fits = new Map(await Promise.all(keys.map(async (k) => [k, await match(f, k ? 1 << k : f.palettes)] as const)));
+  // A painted slot admits exactly the Credits with its value of the painted trait (on top of the party's rules).
+  const slotFit = (k: number) => {
+    if (!k) return match(f, f.palettes);
+    const r = ruleFor(f.layoutTrait ?? 0, k);
+    return match(f, r.palettes ?? f.palettes, r);
+  };
+  const fits = new Map(await Promise.all(keys.map(async (k) => [k, await slotFit(k)] as const)));
   const pool = fits.get(0)!.sample;
   if (!pool.length) return;
   // Different batches with the same rules shouldn't look identical: start each at its own offset.
@@ -89,16 +104,19 @@ function tip() {
   document.body.append(tipEl);
   let shown: Element | null = null;
   document.addEventListener('pointerover', (e) => {
-    const cell = (e.target as Element).closest?.('.cell.ghost');
+    const cell = (e.target as Element).closest?.('.cell.ghost, .cell[data-id]');
     const s = cell && slotOf.get(cell);
-    if (!s) {
+    const d = cell && !s ? deposits.get((cell as HTMLElement).dataset.id ?? '') : undefined;
+    if (!cell || (!s && !d)) {
       if (shown) tipEl!.classList.remove('in');
       shown = null;
       return;
     }
     if (cell === shown) return;
     shown = cell;
-    tipEl!.innerHTML = card(s);
+    tipEl!.innerHTML = s ? card(s) : filled((cell as HTMLElement).dataset.id!, d!);
+    tipEl!.classList.add('compact');
+    hydrate(tipEl!);
     place(cell.getBoundingClientRect());
     tipEl!.classList.add('in');
   });
@@ -108,19 +126,29 @@ function tip() {
   }, { passive: true });
 }
 
-function card({ i, want, f, fit }: Slot) {
+function card({ want, f, fit }: Slot) {
+  // Two lines: what goes here, and how many could.
   const rules = describeFilter({ ...f, layout0: 0n, layout1: 0n });
+  const trait = f.layoutTrait ?? 0;
   const takes = want
-    ? `<span class="swatches">${maskInks(want).map((c) => `<i style="background:${c}"></i>`).join('')}</span>${inkName(want)} only`
+    ? trait === 0
+      ? `<span class="swatches">${maskInks(want).map((c) => `<i style="background:${c}"></i>`).join('')}</span>${inkName(want)}${rules ? ` · ${esc(rules)}` : ''}`
+      : `${slotName(trait, want)}${rules ? ` · ${esc(rules)}` : ''}`
     : rules
-      ? 'Any Credit that fits'
+      ? esc(rules)
       : 'Any Credit';
-  const examples = fit.sample.filter((_, k) => k % Math.max(1, Math.floor(fit.sample.length / 4)) === 0).slice(0, 4);
-  return `<p class="eyebrow">Slot ${i + 1} · open</p>
-    <p class="takes">${takes}</p>
-    ${rules ? `<p class="muted small">${esc(rules)}</p>` : ''}
-    <p class="muted small"><span class="num">${fit.count.toLocaleString()}</span> in the edition</p>
-    ${examples.length ? `<div class="examples">${examples.map((id) => `<figure><span class="art"><img src="${editionArt(id)}" alt=""></span><figcaption class="num">#${id}</figcaption></figure>`).join('')}</div>` : ''}`;
+  return `<p class="takes">${takes}</p>
+    <p class="muted small"><span class="num">${fit.count.toLocaleString()}</span> can fill it</p>`;
+}
+
+const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
+
+function filled(id: string, d: { by: Address; pos: number }) {
+  // A small row: the Credit, then which one, whose, and where it sits in deposit order.
+  const you = same(d.by, session.account);
+  return `<div class="filled"><img src="${art(BigInt(id))}" alt="">
+    <div><p class="takes">#${Number(id).toLocaleString()} <span class="muted">· ${ordinal(d.pos)} in</span></p>
+    <p class="small">${you ? 'Yours' : who(d.by)}</p></div></div>`;
 }
 
 /// Beside the cell, flipping to the other side or below when it would leave the viewport.

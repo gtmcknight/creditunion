@@ -87,6 +87,7 @@ export type Summary = {
     layout1: bigint;
     bitsFrom: number; // Jack's Bits (marks) range, 0 = unbounded
     bitsTo: number;
+    layoutTrait: number; // which trait the layout paints (see shared/layout.ts)
   };
   allowlistSize: number;
   statement: Address;

@@ -220,21 +220,6 @@ main.in > *:nth-child(3) {
   letter-spacing: -0.02em;
   text-decoration: none;
 }
-.mark {
-  width: 18px;
-  height: 18px;
-  background:
-    linear-gradient(var(--fg) 0 0) 0 0 / 4px 4px,
-    linear-gradient(var(--fg) 0 0) 7px 0 / 4px 4px,
-    linear-gradient(var(--fg) 0 0) 14px 0 / 4px 4px,
-    linear-gradient(var(--fg) 0 0) 0 7px / 4px 4px,
-    linear-gradient(var(--fg) 0 0) 7px 7px / 4px 4px,
-    linear-gradient(var(--fg) 0 0) 14px 7px / 4px 4px,
-    linear-gradient(var(--fg) 0 0) 0 14px / 4px 4px,
-    linear-gradient(var(--fg) 0 0) 7px 14px / 4px 4px,
-    linear-gradient(var(--fg) 0 0) 14px 14px / 4px 4px;
-  background-repeat: no-repeat;
-}
 nav {
   display: flex;
   align-items: center;
@@ -316,10 +301,19 @@ nav a .num {
   margin-left: 4px;
   color: var(--muted);
 }
-/* Brand left, the three destinations centred, About · theme · wallet right. */
+/* Brand, Parties and Auctions left; How it works · Create · theme · wallet right. */
 .top {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: auto 1fr auto;
+}
+.main-nav {
+  justify-self: start;
+  margin-left: 16px;
+}
+@media (max-width: 480px) {
+  .main-nav {
+    margin-left: 4px;
+  }
 }
 .side-nav {
   justify-self: end;
@@ -332,10 +326,6 @@ nav a .num {
 @media (max-width: 480px) {
   .top {
     gap: 4px;
-  }
-  .logo {
-    font-size: 0;
-    gap: 0;
   }
   nav a {
     padding: 0 6px;
@@ -744,6 +734,7 @@ nav a .num {
   color: var(--fg);
 }
 .batch {
+  margin-top: 32px;
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
   gap: clamp(24px, 5vw, 64px);
@@ -964,7 +955,7 @@ nav a .num {
   max-width: 640px;
   display: grid;
   gap: 20px;
-  padding-top: 8px;
+  padding-top: 32px;
 }
 .form {
   display: grid;
@@ -2242,6 +2233,32 @@ input[type='datetime-local'] {
 .slot-tip p {
   margin: 0;
 }
+/* An empty slot: just what goes there and how many could. */
+.slot-tip.compact {
+  width: auto;
+  max-width: 220px;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+.slot-tip.compact .takes {
+  font-size: 13px;
+}
+.slot-tip .filled {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.slot-tip .filled > img {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  box-shadow: 0 0 0 1px var(--line);
+}
+.slot-tip .filled .who img {
+  width: 14px;
+  height: 14px;
+}
 .slot-tip .takes {
   display: flex;
   align-items: center;
@@ -2263,6 +2280,11 @@ input[type='datetime-local'] {
   gap: 6px;
   margin-top: 4px;
 }
+/* A filled slot: the Credit itself, whole, leading the card. */
+.slot-tip .examples.one {
+  grid-template-columns: 1fr;
+  margin: 0 0 4px;
+}
 .slot-tip figure {
   margin: 0;
   display: grid;
@@ -2276,7 +2298,7 @@ input[type='datetime-local'] {
   background: #fff;
   box-shadow: 0 0 0 1px var(--line);
 }
-.slot-tip img {
+.slot-tip .art img {
   display: block;
   width: 100%;
 }
@@ -2601,17 +2623,6 @@ input[type='datetime-local'] {
   color: var(--fg);
 }
 
-/* Palette tiles: one row per ink count, on a shared 6-column grid so tiles line up across rows. */
-.tiles.palettes {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 8px;
-}
-.tile-row {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 8px;
-}
 
 
 .rule-desc {
@@ -2675,13 +2686,30 @@ input[type='datetime-local'] {
   box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 .cell .paint {
+  /* the slot's paint: its brush icon, small, in the corner over the art */
   position: absolute;
-  left: 21.875%;
-  top: 21.875%;
-  width: 50%;
-  height: 50%;
-  display: flex;
-  opacity: 0.35;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 42%;
+  height: 42%;
+  border-radius: 3px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+  pointer-events: none;
+}
+.cell .paint > svg,
+.cell .paint > .ink,
+.cell .paint > .n {
+  width: 80%;
+  height: 80%;
+}
+.cell .paint > .n {
+  display: grid;
+  place-items: center;
+  font: 700 7px/1 var(--mono);
 }
 .cell .paint i {
   flex: 1;
@@ -2912,7 +2940,6 @@ input[type='datetime-local'] {
 
 /* Create page: title over the sheet, count under it, and the form starting level with the sheet's top edge. */
 .design-preview {
-  position: static;
   gap: 16px;
 }
 .preview-title {
@@ -2929,7 +2956,7 @@ input[type='datetime-local'] {
   margin: -4px 0 0;
 }
 .design-form {
-  padding-top: 56px; /* the title row (40) + the preview's gap (16) */
+  padding-top: 0; /* the title now sits above both columns, so the form starts level with the sheet */
 }
 .design-form > .form-title:first-child,
 .design-form .form-title:first-of-type {
@@ -2976,7 +3003,7 @@ input[type='datetime-local'] {
   left: 50%;
   top: 50%;
   translate: -50% -50%;
-  width: min(560px, calc(100% - 48px));
+  width: min(680px, calc(100% - 48px));
   padding: 32px 36px;
   background: #fff;
   color: #111;
@@ -2999,6 +3026,15 @@ input[type='datetime-local'] {
 }
 .wall-label a {
   color: inherit;
+}
+.wall-label .wall-cta {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 20px;
+}
+.wall-label .wall-cta .btn.primary {
+  color: #fff;
 }
 .wall-frame[data-mode='one'] .wall-label,
 .wall-frame.expanded .wall-label {
@@ -3562,10 +3598,13 @@ dialog.people header h3 {
 .facts .link.num:hover {
   text-decoration-color: var(--fg);
 }
-.cell.lit {
-  outline: 3px solid var(--fg);
-  outline-offset: -3px;
-  z-index: 1;
+/* Who's in: outline one depositor's Credits. Rule chips light slots by dimming the rest instead, so no outline
+   there (neighbouring outlines would run together into heavy borders). */
+.batch-art:not(.lighting) .cell.lit::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 0 2px var(--fg); /* drawn over the art, inside the cell */
 }
 
 /* ---------------------------------------------------------------- bid history */
@@ -3668,4 +3707,763 @@ a.who:hover .who-name {
   text-decoration: underline;
   text-decoration-color: var(--line);
   text-underline-offset: 3px;
+}
+/* The wall, paused full screen: what's under the pointer. */
+.wall-hover {
+  position: absolute;
+  z-index: 2;
+  box-shadow: 0 0 0 2px #0a0a0a, 0 0 0 4px #fff;
+  pointer-events: none;
+}
+.wall-card {
+  position: absolute;
+  z-index: 3;
+  width: 216px;
+  padding: 12px;
+  background: #fff;
+  color: #0a0a0a;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1), 0 16px 40px -16px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+.wall-card img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  margin-bottom: 10px;
+}
+.wall-card strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+.wall-card dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 12px;
+  margin: 0;
+  font-size: 12px;
+}
+.wall-card dt {
+  color: #6b6b6b;
+}
+.wall-card dd {
+  margin: 0;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Create: Colors can be picked (any of these) or painted onto the sheet; painting locks Order. */
+.seg.locked {
+  opacity: 0.45;
+  pointer-events: none;
+}
+#color-mode {
+  justify-self: start;
+}
+.paint-block {
+  display: grid;
+  gap: 8px;
+}
+.tiles.palettes[hidden],
+.paint-block[hidden] {
+  display: none;
+}
+
+/* Trait tiles: every rule's cards the same size, six to a line; labels stay on one line. */
+.design-form .tiles,
+.design-form .tiles.eights,
+.design-form .tiles.palettes {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+.design-form .tiles .tile {
+  aspect-ratio: 1 / 1.1;
+  min-width: 0;
+  align-content: center;
+}
+@media (max-width: 520px) {
+  .design-form .tiles,
+  .design-form .tiles.eights,
+  .design-form .tiles.palettes {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.tile span {
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+/* Who can join as tabs: text tabs on a hairline, the open one underlined in black, its editor directly below.
+   A dot marks a rule that's set. Scrolls sideways rather than wrapping. */
+.rule-tabs {
+  display: flex;
+  gap: 18px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  box-shadow: inset 0 -1px 0 var(--line-strong);
+}
+.rule-tabs::-webkit-scrollbar {
+  display: none;
+}
+.rule-tab {
+  position: relative;
+  flex: none;
+  height: 36px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font: 400 14px var(--sans);
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.rule-tab:hover {
+  color: var(--fg);
+}
+.design-form .rule-tab[aria-selected='true'] {
+  background: none;
+  color: var(--fg);
+  font-weight: 500;
+  box-shadow: inset 0 -2px 0 var(--fg);
+}
+/* The open rule's editor sits right under the tab line. */
+.design-form .who-bar ~ .rule[data-pane='who']:not(.who-bar) {
+  margin-top: 0;
+  padding-top: 6px;
+}
+.design-form .rule-head .rule-title {
+  display: none;
+}
+.rule-tab .dot {
+  position: absolute;
+  top: 8px;
+  right: -6px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* One selected look everywhere: solid black, white label. Pictures keep a white card so they stay readable. */
+.design-form .tile[aria-pressed='true'],
+.design-form .brush[aria-pressed='true'],
+.design-form .presets button[aria-pressed='true'] {
+  background: var(--fg);
+  color: var(--bg);
+  box-shadow: none;
+}
+.design-form .tile[aria-pressed='true'] > span:not(.pips) {
+  color: var(--bg);
+}
+/* Unselected cards are plain white with a hairline; the picture sits straight on the card. Selected cards go
+   solid black, and only then does the picture get a white square so it stays readable. */
+.design-form .tile {
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.design-form .tile:hover {
+  box-shadow: inset 0 0 0 1px var(--fg);
+}
+.design-form .tile svg,
+.design-form .tile .pips {
+  background: none;
+  border-radius: 6px;
+}
+.design-form .tile[aria-pressed='true'] svg,
+.design-form .tile[aria-pressed='true'] .pips,
+.design-form .brush svg,
+.design-form .brush .pips {
+  background: #fff;
+  border-radius: 6px;
+}
+
+/* Rule heading: name, one-line description, what's picked on the right. */
+.design-form .rule-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.design-form .rule-head .rule-desc.inline {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* What's set, under the editors. */
+.selected-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 0 0 4px;
+  padding: 10px 12px;
+  border-radius: var(--r);
+  background: var(--surface);
+  font-size: 13px;
+}
+.picked {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 10px;
+  border-radius: 999px;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.picked b {
+  font-weight: 600;
+}
+.picked button {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.picked button:hover {
+  background: var(--line);
+  color: var(--fg);
+}
+
+/* Painter: brushes grouped by the rules you set, one row per trait. */
+.design-form .brushes {
+  display: grid;
+  gap: 6px;
+}
+.brush-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.brush-group .eyebrow {
+  width: 56px;
+}
+.design-form .brush {
+  width: 32px;
+  height: 32px;
+  min-width: 0;
+  padding: 3px;
+  justify-content: center;
+}
+.design-form .brush svg,
+.design-form .brush .pips {
+  width: 24px;
+  height: 24px;
+}
+.design-form .brush .ink {
+  width: 22px;
+  height: 22px;
+}
+.design-form .brush .pips {
+  font-size: 7px;
+}
+.patterns {
+  display: flex;
+  gap: 4px;
+}
+.pattern {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 36px;
+  padding: 3px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  cursor: pointer;
+}
+.pattern svg {
+  width: 18px;
+  height: 24px;
+}
+.pattern:hover {
+  background: var(--surface);
+}
+.cell .paint em {
+  font: 600 9px/1 var(--mono);
+  font-style: normal;
+  color: #111;
+}
+.design-form .tile .ink,
+.design-form .brush .ink {
+  box-shadow: 0 0 0 2px #fff;
+}
+.design-form .brush .n {
+  font: 600 10px/1 var(--mono);
+}
+.design-form .tile .pips {
+  color: #111;
+}
+
+/* Who can join as a settings list: one row per rule with its value, the editor opening inside the row. */
+.rule-list {
+  display: grid;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.rrow + .rrow {
+  border-top: 1px solid var(--line);
+}
+.rrow-head {
+  display: flex;
+  align-items: center;
+}
+.rrow-toggle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 400 13px var(--sans);
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+.rrow-head:hover .rrow-name {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--line-strong);
+}
+.rrow-name {
+  flex: none;
+  font-weight: 500;
+}
+.rrow-value {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rrow.set .rrow-value {
+  color: var(--fg);
+}
+.rrow .chev {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+  transition: rotate 160ms var(--ease);
+}
+.rrow.open .chev {
+  rotate: 180deg;
+}
+.rrow-clear {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: 0 -6px 0 4px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  font-size: 16px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.rrow-clear[hidden] {
+  /* keep its place so every chevron lines up */
+  display: block !important;
+  visibility: hidden;
+}
+.rrow-clear:hover {
+  background: var(--line);
+  color: var(--fg);
+}
+/* The editor inside an open row: its one-line description, then the picker. The row already names the rule
+   and shows its value, so the editor's own title and value are hidden. */
+.design-form .rrow > .rule {
+  margin: 0;
+  padding: 0 0 14px;
+}
+.design-form .rrow .rule-head > span:not(.rule-desc) {
+  display: none;
+}
+/* Clicking a row leaves no ring; keyboard focus gets one drawn inside the row, clear of the list's border. */
+.rrow-toggle:focus:not(:focus-visible),
+.rrow-clear:focus:not(:focus-visible) {
+  outline: none;
+}
+.rrow-toggle:focus-visible,
+.rrow-clear:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: -2px;
+}
+
+/* An open row's description: a little air above, clear space before the cards. */
+.design-form .rrow .rule-head {
+  padding: 4px 0 6px;
+}
+.design-form .rrow > .rule {
+  gap: 10px;
+}
+
+/* Payment Time shortcuts: small, one line. */
+.win-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+.win-presets button {
+  height: 26px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  font: 400 12px var(--sans);
+  color: var(--fg);
+  cursor: pointer;
+}
+.win-presets button:hover {
+  box-shadow: inset 0 0 0 1px var(--fg);
+}
+.win-presets button[aria-pressed='true'] {
+  background: var(--fg);
+  color: var(--bg);
+  box-shadow: none;
+}
+
+#layout-presets[hidden] {
+  display: none;
+}
+
+/* Ready-made designs for an empty painter: tiny sheets in their colours. */
+.paint-designs {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 6px;
+}
+.paint-design {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 2px 4px;
+  border: 0;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  cursor: pointer;
+}
+.paint-design:hover {
+  box-shadow: inset 0 0 0 1px var(--fg);
+}
+.paint-design svg {
+  width: 28px;
+  height: 35px;
+}
+
+/* Brushes wear their paint's key colour as a ring; picked, the ring thickens. */
+
+
+.paint-design span {
+  font: 400 10px/1 var(--mono);
+  color: var(--muted);
+}
+.patterns {
+  flex-wrap: wrap;
+}
+
+/* Erase and Clear all say what they do. */
+.design-form .brush.erase {
+  width: auto;
+  padding: 0 10px;
+  font: 500 12px var(--sans);
+}
+.clear-all {
+  align-self: center;
+  margin-left: 6px;
+}
+
+.paint-design span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 560px) {
+  .paint-designs {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.design-form .brush.off {
+  opacity: 0.3;
+}
+
+/* Under the create sheet: the match count, and a quiet Rules · Credits switch. */
+.preview-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.view-toggle {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+}
+.view-toggle label {
+  position: relative;
+}
+.view-toggle input {
+  /* visually hidden, kept inside its label so it can't widen the page */
+  position: absolute;
+  inset: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.view-toggle span {
+  color: var(--muted);
+  cursor: pointer;
+}
+.view-toggle span:hover {
+  color: var(--fg);
+}
+.view-toggle input:checked + span {
+  color: var(--fg);
+  font-weight: 500;
+}
+.view-toggle input:focus-visible + span {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+.rules-sheet .rule-cell {
+  display: grid;
+  place-items: center;
+  background: #fafaf8;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.rules-sheet .rule-cell > svg,
+.rules-sheet .rule-cell > .ink {
+  width: 70%;
+  height: 70%;
+}
+.rules-sheet .rule-cell > .n {
+  font: 700 10px/1 var(--mono);
+}
+.rules-sheet .rule-cell > .ink {
+  border-radius: 4px;
+}
+
+/* Painter: choose the one category you paint with, then its brushes. */
+.paint-with {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+/* The rules in one sentence, under the list. */
+.rule-sentence {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+/* The party's rows: options as a short list, each with its one line; Name typed in the row itself. */
+.party-list {
+  margin-top: 4px;
+}
+.opt-list {
+  display: grid;
+  gap: 2px;
+}
+.opt {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: var(--r);
+  cursor: pointer;
+}
+.opt:hover {
+  background: var(--surface);
+}
+.opt input {
+  margin: 3px 0 0;
+  accent-color: var(--fg);
+}
+.opt-body {
+  display: grid;
+  gap: 2px;
+}
+.opt-body b {
+  font-weight: 500;
+  font-size: 13px;
+}
+.opt-body span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.name-row {
+  height: 36px;
+  gap: 12px;
+  cursor: text;
+}
+.design-form .name-row input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  text-align: right;
+  font: 400 13px var(--sans);
+}
+.design-form .name-row input:focus {
+  outline: none;
+}
+/* Options are radios, not text boxes: undo the form's input styling and draw a small dot. */
+.design-form .opt input[type='radio'] {
+  appearance: none;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: none;
+}
+.design-form .opt input[type='radio']:checked {
+  border: 4px solid var(--fg);
+}
+.design-form .opt:has(input:checked) {
+  background: var(--surface);
+}
+.name-row .rrow-name {
+  font-size: 13px;
+}
+
+/* Start party spans the form, the hint centred under it. */
+.design-form .submit {
+  display: grid;
+  gap: 8px;
+  padding-top: 16px;
+}
+.design-form .submit .hint {
+  text-align: center;
+}
+
+.create-lede {
+  margin: 0;
+  max-width: 60ch;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+
+/* Create page header: title and one line, spanning both columns. */
+.create-head {
+  display: grid;
+  gap: 6px;
+  margin-top: 32px;
+}
+.create-head h1 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+.create-head .create-lede {
+  max-width: none;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.create-head + .design {
+  margin-top: 24px;
+}
+
+/* Create: Start party sits close under the Credits; the picker's fade padding only matters when it scrolls. */
+.design-form .picker.lg {
+  padding-bottom: 8px;
+  mask-image: none;
+  -webkit-mask-image: none;
+}
+.design-form .picker.lg.scrolls {
+  padding-bottom: 24px;
+  mask-image: linear-gradient(#000 calc(100% - 32px), transparent);
+  -webkit-mask-image: linear-gradient(#000 calc(100% - 32px), transparent);
+}
+
+/* Phones: "Start a party" shortens to "Start" so the nav keeps one line. */
+@media (max-width: 420px) {
+  .nav-long {
+    display: none;
+  }
+}
+
+/* The wall's controls are a bonus: on the page only "Explore" shows; views, zoom and pause appear once expanded. */
+.wall-frame:not(.expanded) :is(.wall-modes, .wall-zoom, .wall-pause) {
+  display: none;
+}
+.wall-frame:not(.expanded) .wall-tools {
+  top: auto;
+  bottom: 12px;
+  right: 12px;
+}
+.wall-tools .wall-expand:has(span) {
+  width: auto;
+  gap: 6px;
+  padding: 0 12px 0 10px;
+  font: 500 13px/1 var(--sans);
+  display: flex;
+  align-items: center;
+}
+
+/* The wall's caption is part of exploring it: inside the frame, bottom left, only once expanded. */
+.wall-caption {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  translate: -50% 0;
+  width: max-content;
+  max-width: calc(100% - 480px);
+  text-align: center;
+  margin: 0;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #0a0a0a;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 4px 12px -6px rgba(0, 0, 0, 0.25);
+}
+.wall-caption .muted {
+  color: #6b6b6b;
+}
+.wall-frame:not(.expanded) .wall-caption {
+  display: none;
+}
+@media (max-width: 900px) {
+  .wall-caption {
+    top: 60px;
+    max-width: calc(100% - 32px);
+  }
 }
