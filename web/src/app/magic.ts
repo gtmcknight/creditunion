@@ -175,8 +175,8 @@ const statementDepth: Draw = (c, W, H) => {
 const SUBJECTS: [string, Draw & { src?: string }][] = [
   ['Opepen', opepen],
   ['Check', check],
+  ['Jack', picture('/magic/5.png', true)],
   ['Dolphins', dolphins],
-  ['Statement', statementDepth],
   ['Priced by Thirst', picture('/magic/6.png')],
 ];
 
