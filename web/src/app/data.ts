@@ -147,6 +147,9 @@ export async function listBatches(limit = 60): Promise<Listed[]> {
   );
 }
 
+/// Just the summary: a cheap read for spotting changes.
+export const getSummary = async (a: Address) => toSummary(a, (await pub.readContract({ address: a, abi: batchAbi, functionName: 'summary' })) as Record<string, unknown>);
+
 export async function getBatch(a: Address) {
   const [s, slots] = await Promise.all([
     pub.readContract({ address: a, abi: batchAbi, functionName: 'summary' }),

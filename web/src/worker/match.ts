@@ -20,7 +20,7 @@ async function loadScores(assets: Fetcher, origin: string) {
   return scores;
 }
 
-async function load(assets: Fetcher, origin: string) {
+export async function load(assets: Fetcher, origin: string) {
   if (!table) {
     table = assets
       .fetch(new Request(`${origin}/edition-traits.bin`))

@@ -121,14 +121,14 @@ export function home(app: HTMLElement) {
     {
       id: 'lifecycle',
       nav: 'How it runs',
-      title: 'Pool together',
+      title: 'Start a credit union',
       figure: FAMILY.story,
       body: `<p>Pool your Credits with other holders. At 80 they burn into a Statement, and everyone in shares the sale.</p>`,
     },
     {
       id: 'eligibility',
       nav: 'Who joins',
-      title: 'Membership',
+      title: 'Minimum deposit',
       figure: FAMILY.invited,
       body: `<p>Let any Credit holder join, or pick traits to make a special Statement.</p>`,
     },

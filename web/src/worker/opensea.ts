@@ -5,6 +5,7 @@ import type { Address } from 'viem';
 const API = 'https://api.opensea.io/api/v2';
 const PAGES = 5; // up to 500 listings scanned for filtered batches
 const CONCURRENCY = 4;
+const TAKE_CHUNK = 25; // listings per canTake call
 const SEAPORT = '0x0000000000000068f116a894984e2db1123eb395';
 /// OpenSea's conduit for its own conduit key; any other key is resolved through the ConduitController.
 const OS_CONDUIT_KEY = '0x0000007b02230091a7ed01230072f7006a004d60a8d4e71d599b8104250f0000';
@@ -65,7 +66,9 @@ export async function scan(o: {
   slug: string;
   credits: Address;
   max: number;
-  passes: (id: bigint) => Promise<boolean>;
+  /// The batch's canTake: which of `ids` it would accept, booked in order (rules and, on a painted sheet, a
+  /// free slot of each Credit's kind or an open one).
+  take: (ids: bigint[]) => Promise<readonly boolean[]>;
   live: (id: bigint, seller: Address, operator: Address) => Promise<boolean>;
   hasCode: (a: Address) => Promise<boolean>;
 }): Promise<Listing[]> {
@@ -83,10 +86,19 @@ export async function scan(o: {
     const fresh = ((r.listings ?? []) as Json[])
       .map((l) => usable(l, o.credits))
       .filter((c): c is NonNullable<typeof c> => !!c && !!c.operator && !seen.has(c.id) && !!seen.add(c.id));
+    // Ask the batch in small chunks, with what's already picked booked first, so a painted sheet's slots fill in
+    // price order and the scan keeps going past Credits it has no room for. Chunks keep each call's gas modest.
+    const fits: boolean[] = [];
+    for (let i = 0; i < fresh.length; i += TAKE_CHUNK) {
+      const chunk = fresh.slice(i, i + TAKE_CHUNK).map((c) => BigInt(c.id));
+      const lead = picked.map((l) => BigInt(l.id)).concat(fresh.slice(0, i).filter((_, j) => fits[j]).map((c) => BigInt(c.id)));
+      const ok = await o.take([...lead, ...chunk]).catch(() => null);
+      fits.push(...chunk.map((_, j) => !!ok?.[lead.length + j]));
+    }
     const ok = await Promise.all(
-      fresh.map(async (c) => {
-        // Cheapest first: most listings fail the batch's rules, so the liveness calls run only for those that fit.
-        if (!(await o.passes(BigInt(c.id)).catch(() => false))) return false;
+      fresh.map(async (c, i) => {
+        // Cheapest first: most listings don't fit, so the liveness calls run only for those that do.
+        if (!fits[i]) return false;
         const [live, contracts] = await Promise.all([
           o.live(BigInt(c.id), c.seller, c.operator!).catch(() => false),
           Promise.all(c.recipients.map(isContract)),

@@ -10,11 +10,11 @@ import { mainnet } from 'viem/chains';
 import { batchAbi, creditsAbi, creditArtAbi, factoryAbi } from '../app/abi';
 import { quote, scan } from './opensea';
 import { ratings } from './ratings';
-import { match, predicate, type Rules } from './match';
+import { load, match, predicate, type Rules } from './match';
 import { cardFor, partyCard, withCard } from './og';
 import { drawParty, sample, type PartyCard } from './card';
 import { stamp } from '../shared/stamp';
-import { ruleFor } from '../shared/layout';
+import { keyOf, ruleFor } from '../shared/layout';
 
 interface RateLimit {
   limit(o: { key: string }): Promise<{ success: boolean }>;
@@ -616,12 +616,51 @@ async function previewFitting(env: Env, url: URL, ctx: ExecutionContext, batch: 
   const listed = Number(s.allowlistSize) > 0;
   const inList = (id: bigint) => (listed ? client(env).readContract({ address: batch, abi: batchAbi, functionName: 'allowed', args: [id] }) : Promise.resolve(true));
   const main = createPublicClient({ transport: http(env.ENS_RPC || 'https://eth.drpc.org', { timeout: 8_000 }) });
+  // A painted sheet: book each listing against the slots still free, as Batch.canTake would, by the Credit's
+  // real (edition) value of the painted trait, since this testnet sheet can't read mainnet Credits.
+  let book: ((ids: bigint[]) => boolean[]) | null = null;
+  if (layout[0] || layout[1]) {
+    const trait = Number(f.layoutTrait ?? 0);
+    const slots = new Array(16).fill(0);
+    let any = 0;
+    for (let i = 0; i < 80; i++) {
+      const v = Number((layout[i < 64 ? 0 : 1] >> BigInt(4 * (i < 64 ? i : i - 64))) & 15n);
+      if (v) slots[v]++;
+      else any++;
+    }
+    const c = client(env);
+    const [ids] = (await c.readContract({ address: batch, abi: batchAbi, functionName: 'slots' })) as readonly [readonly bigint[], readonly Address[]];
+    const keys = (await Promise.all(ids.map((id) => c.readContract({ address: batch, abi: batchAbi, functionName: 'keyOf', args: [id] })))) as number[];
+    const have0 = new Array(16).fill(0);
+    for (const k of keys) have0[Number(k)]++;
+    const spill0 = have0.reduce((n, h, p) => n + Math.max(0, h - slots[p]), 0);
+    const table = await load(env.ASSETS, url.origin);
+    book = (xs) => {
+      const have = [...have0];
+      let spill = spill0;
+      return xs.map((id) => {
+        const p = keyOf(trait, table[Number(id) - 1] ?? 0);
+        if (have[p] >= slots[p]) {
+          if (spill >= any) return false;
+          spill++;
+        }
+        have[p]++;
+        return true;
+      });
+    };
+  }
   const listings = await scan({
     key: env.OPENSEA_API_KEY!,
     slug: env.OPENSEA_SLUG,
     credits: MAINNET_CREDITS,
     max: 40,
-    passes: async (id) => ok(Number(id)) && (await inList(id)),
+    take: async (ids) => {
+      const pass = await Promise.all(ids.map(async (id) => ok(Number(id)) && (await inList(id))));
+      if (!book) return pass;
+      const fit = book(ids.filter((_, i) => pass[i]));
+      let j = 0;
+      return pass.map((p) => p && fit[j++]);
+    },
     live: (id, seller, operator) =>
       Promise.all([
         main.readContract({ address: MAINNET_CREDITS, abi: creditsAbi, functionName: 'ownerOf', args: [id] }),
@@ -645,7 +684,7 @@ async function fitting(env: Env, url: URL, ctx: ExecutionContext, batch: Address
       slug: env.OPENSEA_SLUG,
       credits: env.CREDITS,
       max: 40,
-      passes: (id) => c.readContract({ address: batch, abi: batchAbi, functionName: 'passes', args: [id] }),
+      take: (ids) => c.readContract({ address: batch, abi: batchAbi, functionName: 'canTake', args: [ids] }),
       live: (id, seller, operator) =>
         Promise.all([
           c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'ownerOf', args: [id] }),

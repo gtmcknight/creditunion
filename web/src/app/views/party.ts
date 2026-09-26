@@ -1,10 +1,11 @@
 import { parseAbi, parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi } from '../abi';
 import { canBatch, config, explorer, pub, send, sendBatch, session } from '../chain';
-import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
+import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, getSummary, hasLayout, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { hydrate, pct, who } from '../ens';
 import { editionArt, examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
+import { keyOf as layoutKey } from '../../shared/layout';
 import { Room, books, depositedKeys, keysOf, noRoomReason, type Books } from '../slots';
 import { $$, art, clock, errText, esc, eth, same, sheet, short, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
@@ -69,6 +70,13 @@ type Mine = Awaited<ReturnType<typeof me>> | null;
 const shareUrl = (s: Ctx['s']) => `${location.origin}/union/${s.address}?s=${stamp(s.state, s.count, s.highBid)}`;
 
 let picks = new Set<string>();
+/// Which Add Credits tab is open, per credit union, so a live refresh doesn't flip it back.
+let addTab: { at: string; tab: string } | null = null;
+/// Transactions in flight on this page: live refreshes wait while one is.
+let busy = 0;
+/// The live-refresh timer for the credit union on screen (one at a time).
+let live: ReturnType<typeof setInterval> | null = null;
+const LIVE_MS = 12_000; // about one block
 
 export async function party(app: HTMLElement, address: Address, rerender: () => void) {
   let b: Ctx;
@@ -190,6 +198,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     });
   });
   bind(b, m, myIds, rerender, keyed);
+  watchLive(app, address, b.s, rerender);
   // Just made on the create page: congratulate once. The flag goes as soon as it's read, so a refresh won't reshow it.
   try {
     if (sessionStorage.getItem('eighty-created')?.toLowerCase() === address.toLowerCase()) {
@@ -203,6 +212,32 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       openCreated(b, placed, Number(n) || 1);
     }
   } catch {}
+}
+
+/// Keep the page current while someone sits on it: every block or so, read the summary and redraw when the
+/// credit union changed (someone deposited, withdrew, bid, or it locked). Waits while the tab is hidden, a
+/// transaction is in flight or a dialog is open. New Credits drop in with the usual animation.
+function watchLive(app: HTMLElement, address: Address, s: Ctx['s'], rerender: () => void) {
+  if (live) clearInterval(live);
+  const was = `${stamp(s.state, s.count, s.highBid)}:${s.lockAt}:${s.state}`;
+  const path = location.pathname;
+  live = setInterval(async () => {
+    if (location.pathname !== path || !app.isConnected) {
+      clearInterval(live!);
+      live = null;
+      return;
+    }
+    if (document.hidden || busy || document.querySelector('dialog[open]')) return;
+    try {
+      const n = await getSummary(address);
+      if (location.pathname !== path || busy) return;
+      if (`${stamp(n.state, n.count, n.highBid)}:${n.lockAt}:${n.state}` !== was) {
+        clearInterval(live!);
+        live = null;
+        await party(app, address, rerender);
+      }
+    } catch {}
+  }, LIVE_MS);
 }
 
 /// Remember a deposit that just landed, so the rerendered page opens the "You're in" card once.
@@ -326,7 +361,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
 
   if (s.state === 'Open') {
     // Two ways in, one box: your own Credits, or OpenSea listings that fit. Buy leads when you hold none.
-    const start = !m || !m.owned.length ? 'buy' : 'mine';
+    const start = addTab?.at === s.address ? addTab.tab : !m || !m.owned.length ? 'buy' : 'mine';
     return `<div class="box add">
       <div class="box-head"><h3>Add Credits</h3><span class="muted small num" id="pick-count"></span></div>
       <div class="subtabs" role="tablist">
@@ -448,11 +483,14 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
       btn.dataset.label = btn.textContent ?? '';
       btn.textContent = label;
     }
+    busy++;
     try {
       await fn();
+      busy--;
       if (ok) toast(ok, 'ok');
       rerender();
     } catch (e) {
+      busy--;
       toast(errText(e), 'err', 8000);
       if (btn) {
         btn.removeAttribute('disabled');
@@ -580,9 +618,10 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
       t.addEventListener('click', () => {
         document.querySelectorAll('[data-add]').forEach((x) => x.setAttribute('aria-selected', String(x === t)));
         document.querySelectorAll<HTMLElement>('[data-pane]').forEach((p) => (p.hidden = p.dataset.pane !== t.dataset.add));
+        addTab = { at: s.address, tab: t.dataset.add! };
       }),
     );
-    bindBuy(b, !!m, run, txNote);
+    bindBuy(b, !!m, run, txNote, keyed);
   }
 }
 
@@ -806,6 +845,7 @@ async function bindBuy(
   connected: boolean,
   run: (btn: HTMLElement | null, label: string, fn: () => Promise<unknown>, ok: string) => Promise<void>,
   txNote: (h: string) => void,
+  keyed: Map<string, number> | null,
 ) {
   const batch = b.s.address;
   const line = document.getElementById('buy-line');
@@ -850,7 +890,22 @@ async function bindBuy(
     timer = null;
   };
   const want = () => Math.min(Number((document.querySelector('input[name=buy-n]:checked') as HTMLInputElement | null)?.value ?? 5), room, 40);
-  const chosen = () => pool.filter((l) => !skipped.has(l.id)).slice(0, want());
+  // Testnet showing mainnet listings: the testnet sheet can't judge mainnet Credits, so book them against its
+  // free slots by their real traits (mainnet the worker already asks the batch's canTake).
+  let slotKey: ((id: string) => number) | null = null;
+  if (mainnetOnly && hasLayout(b.s.filter) && keyed) {
+    try {
+      const t = new Uint32Array(await (await fetch('/edition-traits.bin')).arrayBuffer());
+      const trait = b.s.filter.layoutTrait ?? 0;
+      slotKey = (id) => layoutKey(trait, t[Number(id) - 1] ?? 0);
+    } catch {}
+  }
+  const chosen = () => {
+    const free = pool.filter((l) => !skipped.has(l.id));
+    if (!slotKey) return free.slice(0, want());
+    const r = new Room(books(b.s.filter, keyed!.values()), Math.min(want(), room));
+    return free.filter((l) => r.take(slotKey!(l.id)));
+  };
   const draw = () => {
     stopTimer();
     q = null;
