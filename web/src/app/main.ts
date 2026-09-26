@@ -143,6 +143,7 @@ function drawTheme() {
   document.getElementById('theme')?.setAttribute('aria-label', `Switch to ${t === 'dark' ? 'light' : 'dark'} theme`);
   document.querySelector<HTMLMetaElement>('meta[name=theme-color]:not([media])')?.setAttribute('content', t === 'dark' ? '#0a0a0a' : '#ffffff');
 }
+document.getElementById('theme')?.addEventListener('pointerup', (e) => setTimeout(() => (e.currentTarget as HTMLElement | null)?.blur(), 0));
 document.getElementById('theme')?.addEventListener('click', () => {
   const next = currentTheme() === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', next);

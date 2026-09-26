@@ -2999,6 +2999,15 @@ input[type='datetime-local'] {
 }
 /* The About hero: the headline sits on a paper label over the living wall. */
 .wall-label {
+  /* The card is white in both themes, so everything inside uses the light tokens (buttons included). */
+  --bg: #fff;
+  --fg: #0a0a0a;
+  --muted: #6b6b6b;
+  --line: rgba(0, 0, 0, 0.08);
+  --line-strong: rgba(0, 0, 0, 0.16);
+  --surface: #f6f6f6;
+  --accent: #0a0a0a;
+  --on-accent: #fff;
   position: absolute;
   left: 50%;
   top: 50%;
@@ -3026,6 +3035,12 @@ input[type='datetime-local'] {
 }
 .wall-label a {
   color: inherit;
+}
+.wall-label .btn {
+  color: var(--fg); /* not the paragraph grey */
+}
+.wall-label .btn.primary {
+  color: var(--on-accent);
 }
 .wall-label .wall-cta {
   display: flex;
@@ -4611,4 +4626,8 @@ a.who:hover .who-name {
 }
 .card-meta .btn.cta {
   flex: none;
+
+/* Theme toggle: no lingering focus ring after a pointer click (keyboard focus still shows). */
+.theme:focus:not(:focus-visible) {
+  outline: 0;
 }
