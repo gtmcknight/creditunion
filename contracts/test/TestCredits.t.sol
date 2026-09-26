@@ -78,7 +78,7 @@ contract TestCreditsTest is Test {
             first[i] = i + 1;
             rest[i] = i + 41;
         }
-        Batch b = Batch(f.create("Test", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, first, 100, 0));
+        Batch b = Batch(f.create("Test", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, first, 100, 0));
         f.deposit(address(b), rest);
         vm.stopPrank();
         b.assemble();

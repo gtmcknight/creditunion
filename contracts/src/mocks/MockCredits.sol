@@ -75,6 +75,7 @@ contract MockArt {
 
     function describe(bytes21, uint64 paidAt) external pure returns (ICreditArt.Read memory r) {
         r.colors = paidAt % 2 == 0 ? "CMY" : "K";
+        r.eights = (paidAt / 2) % 3; // 0, 1 or 2, so Eights layouts are testable
         r.register = "Registered";
         r.weight = "even";
         r.eightsLabel = "0";

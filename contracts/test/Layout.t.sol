@@ -81,7 +81,7 @@ contract LayoutTest is Test {
     /// 40 CMY slots + 40 K slots: the 41st of either palette has no slot.
     function test_SlotsAreEnforced() public {
         Batch b = _open(_layout(_checkered()), _parity(2, 40, true)); // alice: 40 CMY
-        assertEq(b.paletteOf(2), 7);
+        assertEq(b.keyOf(2), 7);
         uint8[80] memory l = b.layout();
         assertEq(l[0], 7);
         assertEq(l[1], 8);
@@ -98,7 +98,7 @@ contract LayoutTest is Test {
         Batch b = _open(_layout(_checkered()), _parity(2, 40, true));
         vm.prank(alice);
         b.withdraw(_one(2));
-        assertEq(b.paletteOf(2), 0);
+        assertEq(b.keyOf(2), 0);
         vm.prank(bob);
         factory.deposit(address(b), _one(202)); // CMY slot is free again
         vm.prank(bob);
@@ -132,7 +132,7 @@ contract LayoutTest is Test {
         assertEq(order.length, 80);
         for (uint256 i; i < 79; ++i) {
             uint256 want = ((i / 8 + i % 8) % 2 == 0) ? CMY : K;
-            assertEq(b.paletteOf(order[i]), want, "slot palette");
+            assertEq(b.keyOf(order[i]), want, "slot palette");
         }
         assertEq(order[0], 202); // first CMY slot takes the earliest CMY deposit
         assertEq(order[1], 1); // first K slot takes the earliest K deposit
@@ -188,10 +188,70 @@ contract LayoutTest is Test {
         if (b.count() < 80) return; // fuzz did not fill it; fine
         uint256[] memory order = b.layoutOrder();
         for (uint256 i; i < 80; ++i) {
-            if (s[i] != 0) assertEq(b.paletteOf(order[i]), s[i]);
+            if (s[i] != 0) assertEq(b.keyOf(order[i]), s[i]);
         }
         skip(1 days);
         b.assemble();
         assertEq(statement.ownerOf(1), address(b));
+    }
+
+    // ---------------------------------------------------------------- layouts painted with other traits
+
+    /// Plates layout: CMY Credits (even ids) have 3 inks, K Credits (odd ids) 1.
+    function test_PlatesLayout() public {
+        uint8[80] memory s;
+        for (uint256 i; i < 80; ++i) s[i] = i < 40 ? 3 : 1;
+        Batch.Filter memory f = _layout(s);
+        f.layoutTrait = 4;
+        Batch b = _open(f, _parity(2, 40, true)); // 40 three-ink Credits fill the top half
+        assertEq(b.keyOf(2), 3);
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(Batch.NoSlot.selector, 202));
+        factory.deposit(address(b), _one(202)); // no three-ink slot left, no any slots
+        vm.prank(bob);
+        factory.deposit(address(b), _parity(201, 40, false));
+        assertEq(b.keyOf(201), 1);
+        uint256[] memory order = b.layoutOrder();
+        for (uint256 i; i < 80; ++i) assertEq(b.keyOf(order[i]), s[i], "slot value");
+        b.assemble();
+    }
+
+    /// Eights layout: the mock gives (id / 2) % 3 eights, so keys are 1, 2, 3.
+    function test_EightsLayout() public {
+        uint8[80] memory s;
+        for (uint256 i; i < 80; ++i) s[i] = i < 10 ? 3 : 0; // ten slots want two eights, the rest any
+        Batch.Filter memory f = _layout(s);
+        f.layoutTrait = 1;
+        uint256[] memory two = new uint256[](10);
+        uint256 k;
+        for (uint256 id = 1; k < 10; ++id) if ((id / 2) % 3 == 2) two[k++] = id;
+        Batch b = _open(f, two);
+        for (uint256 i; i < 10; ++i) assertEq(b.keyOf(two[i]), 3);
+        uint256[] memory order = b.layoutOrder();
+        for (uint256 i; i < 10; ++i) assertEq(b.keyOf(order[i]), 3);
+    }
+
+    function test_LayoutTraitValidated() public {
+        uint8[80] memory s;
+        s[0] = 7; // no Credit has 7 inks
+        Batch.Filter memory f = _layout(s);
+        f.layoutTrait = 4;
+        vm.prank(alice);
+        vm.expectRevert(Batch.BadFilter.selector);
+        factory.create("L", f, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, _one(2), 200, 0);
+
+        f.layoutTrait = 5; // no such trait
+        s[0] = 1;
+        Batch.Filter memory g = _layout(s);
+        g.layoutTrait = 5;
+        vm.prank(alice);
+        vm.expectRevert(Batch.BadFilter.selector);
+        factory.create("L", g, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, _one(2), 200, 0);
+
+        Batch.Filter memory h; // a trait with no layout
+        h.layoutTrait = 1;
+        vm.prank(alice);
+        vm.expectRevert(Batch.BadFilter.selector);
+        factory.create("L", h, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(2), 200, 0);
     }
 }

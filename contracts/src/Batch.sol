@@ -65,7 +65,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         MintTime,
         Number,
         Creator,
-        Layout // the sheet follows a palette layout painted when the batch was designed (Filter.layout0/1)
+        Layout // the sheet follows a layout painted when the batch was designed (Filter.layout0/1, layoutTrait)
     }
 
     /// @notice How the depositors' share of the sale is divided among the 80 positions (deposit order).
@@ -112,6 +112,10 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         // Jack's "Bits" trait: marks set across the Credit's active plates (0–256). 0 = unbounded on that side.
         uint16 bitsFrom;
         uint16 bitsTo;
+        // Which trait the layout paints (layout batches only; 0 otherwise). Each slot value is 1 + that trait's
+        // value, 0 = any: 0 Colors (the CMYK mask itself, 1–15), 1 Eights (eights + 1, 1–9), 2 Print (1–6,
+        // Registered … Loose), 3 Weight (1–4, even … extreme), 4 Plates (number of inks, 1–4).
+        uint8 layoutTrait;
     }
 
     struct Summary {
@@ -147,15 +151,15 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     address public creator;
     string public name;
     Filter internal _filter;
-    // Layout bookkeeping: how many slots want each palette mask, how many Credits of each are in, how many
+    // Layout bookkeeping: how many slots want each trait value, how many Credits of each are in, how many
     // "any" slots exist, and how many Credits are already spilling into them. The batch stays fillable as
     // long as overflow ≤ anySlots (then every painted slot can be matched and the rest take the any slots).
     uint8[16] internal _slots;
     uint8[16] internal _have;
     uint8 internal anySlots;
     uint8 internal overflow;
-    /// @notice The palette mask of a deposited Credit (layout batches only), C=1 M=2 Y=4 K=8.
-    mapping(uint256 => uint8) public paletteOf;
+    /// @notice A deposited Credit's value of the painted trait, as the slots encode it (layout batches only).
+    mapping(uint256 => uint8) public keyOf;
     /// @notice When non-empty, only these Credits may join.
     uint256 public allowlistSize;
     mapping(uint256 id => bool) public allowed;
@@ -259,10 +263,13 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         if (arrangement_ == Arrangement.Creator) revert ArrangementRetired();
         bool hasLayout = filter_.layout0 != 0 || filter_.layout1 != 0;
         if (hasLayout != (arrangement_ == Arrangement.Layout)) revert BadFilter();
+        if (!hasLayout && filter_.layoutTrait != 0) revert BadFilter();
         if (hasLayout) {
             Filter memory lf = filter_;
+            uint256 top = _topKey(lf.layoutTrait); // reverts on an unknown trait
             for (uint256 i; i < SIZE; ++i) {
                 uint256 p = _slot(lf, i);
+                if (p > top) revert BadFilter(); // a value no Credit has: the slot could never fill
                 if (p == 0) ++anySlots;
                 else ++_slots[p];
             }
@@ -355,13 +362,13 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         if (depositorOf[id] != address(0)) revert AlreadyDeposited(id);
         if (!passes(id)) revert Excluded(id);
         if (arrangement == Arrangement.Layout) {
-            uint256 p = _paletteOf(id);
+            uint256 p = _keyOf(id);
             if (_have[p] >= _slots[p]) {
-                if (overflow >= anySlots) revert NoSlot(id); // no painted slot left for this palette, no any slot free
+                if (overflow >= anySlots) revert NoSlot(id); // no painted slot left for this value, no any slot free
                 ++overflow;
             }
             ++_have[p];
-            paletteOf[id] = uint8(p);
+            keyOf[id] = uint8(p);
         }
         _ids.push(id);
         depositorOf[id] = from;
@@ -393,10 +400,10 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
             delete depositorOf[id];
             --sharesOf[msg.sender];
             if (arrangement == Arrangement.Layout) {
-                uint256 p = paletteOf[id];
+                uint256 p = keyOf[id];
                 if (_have[p] > _slots[p]) --overflow;
                 --_have[p];
-                delete paletteOf[id];
+                delete keyOf[id];
             }
             _remove(id);
             emit Withdrawn(msg.sender, id, _ids.length);
@@ -452,11 +459,28 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         }
     }
 
-    function _paletteOf(uint256 id) internal view returns (uint256) {
-        return _paletteMask(art.describe(credits.seedOf(id), credits.timestampOf(id)).colors);
+    /// @dev The painted trait's value for `id`, as slots encode it (see Filter.layoutTrait). Every Credit has
+    ///      exactly one value of each trait, which is what keeps the slot books simple and a batch completable.
+    function _keyOf(uint256 id) internal view returns (uint256) {
+        ICreditArt.Read memory r = art.describe(credits.seedOf(id), credits.timestampOf(id));
+        uint8 t = _filter.layoutTrait;
+        if (t == 0) return _paletteMask(r.colors);
+        if (t == 1) return r.eights < 14 ? r.eights + 1 : 15;
+        if (t == 2) return _index(r.register, PRINTS) + 1;
+        if (t == 3) return _index(r.weight, WEIGHTS) + 1;
+        return bytes(r.colors).length; // Plates: 1–4 inks
     }
 
-    /// @dev Palette wanted at layout slot `i` (0 = any).
+    /// @dev The highest slot value a trait can take.
+    function _topKey(uint8 trait) internal pure returns (uint256) {
+        if (trait == 0) return 15;
+        if (trait == 1) return 9;
+        if (trait == 2) return 6;
+        if (trait == 3 || trait == 4) return 4;
+        revert BadFilter();
+    }
+
+    /// @dev Value wanted at layout slot `i` (0 = any).
     function _slot(Filter memory f, uint256 i) internal pure returns (uint256) {
         return i < 64 ? (f.layout0 >> (4 * i)) & 15 : (f.layout1 >> (4 * (i - 64))) & 15;
     }
@@ -474,7 +498,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
                 ok[i] = true;
                 continue;
             }
-            uint256 p = _paletteOf(ids[i]);
+            uint256 p = _keyOf(ids[i]);
             if (have[p] >= _slots[p]) {
                 if (spill >= anySlots) continue;
                 ++spill;
@@ -484,14 +508,14 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         }
     }
 
-    /// @notice The layout as 80 palette masks (0 = any); all zero when the batch has none.
+    /// @notice The layout as 80 slot values of the painted trait (0 = any); all zero when the batch has none.
     function layout() external view returns (uint8[80] memory out) {
         Filter memory f = _filter;
         for (uint256 i; i < SIZE; ++i) out[i] = uint8(_slot(f, i));
     }
 
     /// @notice The order the sheet takes under the layout: each painted slot gets the earliest-deposited
-    ///         Credit of its palette, the any slots take what is left, in deposit order. Always completable
+    ///         Credit with its value, the any slots take what is left, in deposit order. Always completable
     ///         once Full (deposits keep overflow ≤ anySlots).
     function layoutOrder() public view returns (uint256[] memory out) {
         uint256 n = _ids.length;
@@ -502,7 +526,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
             uint256 want = _slot(f, i);
             if (want == 0) continue;
             for (uint256 j; j < n; ++j) {
-                if (!used[j] && paletteOf[_ids[j]] == want) {
+                if (!used[j] && keyOf[_ids[j]] == want) {
                     used[j] = true;
                     out[i] = _ids[j];
                     break;

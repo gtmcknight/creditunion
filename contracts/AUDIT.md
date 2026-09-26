@@ -170,3 +170,19 @@ to one implementation); a Sweeper buy into a batch that just filled reverts whol
 
 Tests: full suite green except the pre-existing `Adversarial2.test_ConstructorRejectsBadLengths` (Ratings reports
 `BadCount` before `BadChunk` for one case; unrelated to this branch).
+
+## Round 4: paint with any one trait (Sept 25)
+
+**What changed.** A layout can paint any one of Jack's traits, not only Colors: `Filter.layoutTrait` picks it
+(0 Colors, 1 Eights, 2 Print, 3 Weight, 4 Plates) and each 4-bit slot holds 1 + that trait's value, 0 = any.
+`paletteOf` is now `keyOf` (a deposited Credit's value of the painted trait). One trait per sheet, on purpose:
+every Credit has exactly one value of each of these traits, so the existing slot books (have / slots / overflow
+against the any slots) still guarantee a batch stays fillable and `layoutOrder()` always completes. Mixing traits
+per slot would make Credits fit several slots and need a matching step at deposit.
+
+**Validation.** `initialize` rejects an unknown trait, a slot value above the trait's range (a slot no Credit could
+fill: Colors 15, Eights 9, Print 6, Weight 4, Plates 4), and a `layoutTrait` without a layout.
+
+**Tests.** Plates and Eights layouts fill, refuse a Credit with no slot left, and burn in painted order;
+validation cases revert `BadFilter`. The mock art now varies Eights so these are testable. Full suite: 170 of 171,
+the one failure the pre-existing Ratings test above.

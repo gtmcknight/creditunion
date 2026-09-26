@@ -148,7 +148,7 @@ contract Adversarial5Test is Test {
         for (uint256 i; i < 80; ++i) {
             assertTrue(order[i] != 0, "zero id in order");
             assertTrue(b.depositorOf(order[i]) != address(0), "id not deposited");
-            if (s[i] != 0) assertEq(b.paletteOf(order[i]), s[i], "painted slot palette");
+            if (s[i] != 0) assertEq(b.keyOf(order[i]), s[i], "painted slot palette");
             for (uint256 j; j < i; ++j) assertTrue(order[i] != order[j], "duplicate in order");
         }
     }
@@ -206,7 +206,7 @@ contract Adversarial5Test is Test {
                     b.withdraw(_one(id));
                     if (have[p] > slots[p]) --overflow;
                     --have[p];
-                    assertEq(b.paletteOf(id), 0, "paletteOf not cleared");
+                    assertEq(b.keyOf(id), 0, "keyOf not cleared");
                 }
                 continue;
             }
@@ -216,7 +216,7 @@ contract Adversarial5Test is Test {
                 assertTrue(expect, "contract accepted what the model rejects");
                 if (have[p] >= slots[p]) ++overflow;
                 ++have[p];
-                assertEq(b.paletteOf(id), p, "paletteOf");
+                assertEq(b.keyOf(id), p, "keyOf");
             } catch (bytes memory err) {
                 assertFalse(expect, "contract rejected what the model accepts");
                 assertEq(bytes4(err), Batch.NoSlot.selector, "wrong revert");
@@ -269,7 +269,7 @@ contract Adversarial5Test is Test {
         b.withdraw(_range(1, 20));
         assertEq(b.count(), 0);
         assertEq(credits.ownerOf(1), alice);
-        assertEq(b.paletteOf(1), 0);
+        assertEq(b.keyOf(1), 0);
     }
 
     /// The ERC721 hook path (with a beneficiary) books the palette; a NoSlot in the hook unwinds the transfer.
@@ -283,7 +283,7 @@ contract Adversarial5Test is Test {
         vm.prank(alice);
         credits.safeTransferFrom(alice, address(b), 1, abi.encode(carol));
         assertEq(b.depositorOf(1), carol);
-        assertEq(b.paletteOf(1), K);
+        assertEq(b.keyOf(1), K);
         credits.mintAt(bob, 78, K_AT); // 4..81
         _deposit(factory, bob, b, _range(4, 40));
         _deposit(factory, bob, b, _range(44, 37)); // 77 more K: overflow 78 = anySlots, count 79
@@ -391,7 +391,7 @@ contract Adversarial5Test is Test {
         credits.mintAt(alice, 2, credits.art().BLANK()); // 1, 2
         credits.mintAt(bob, 79, K_AT); // 3..81
         Batch b = _open(factory, alice, _layout(s), _one(1));
-        assertEq(b.paletteOf(1), 0);
+        assertEq(b.keyOf(1), 0);
         _noSlot(factory, alice, b, 2); // the single any slot is taken
         _deposit(factory, bob, b, _range(3, 40));
         _deposit(factory, bob, b, _range(43, 39));
@@ -410,10 +410,10 @@ contract Adversarial5Test is Test {
         for (uint256 i; i < 15; ++i) s[i] = uint8(i + 1); // slots 0..14: masks 1..15; rest any (65)
         for (uint256 m = 1; m <= 15; ++m) credits.mintAt(alice, 2, uint64(m - 1)); // ids 2m-1, 2m have mask m
         Batch b = _open(factory, alice, _layout(s), _one(1));
-        assertEq(b.paletteOf(1), 1);
+        assertEq(b.keyOf(1), 1);
         for (uint256 m = 2; m <= 15; ++m) {
             _deposit(factory, alice, b, _one(2 * m - 1));
-            assertEq(b.paletteOf(2 * m - 1), m);
+            assertEq(b.keyOf(2 * m - 1), m);
         }
         // the second of each palette takes an any slot (65 of them), so all 15 fit
         for (uint256 m = 1; m <= 15; ++m) _deposit(factory, alice, b, _one(2 * m));
