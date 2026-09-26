@@ -128,7 +128,7 @@ export function home(app: HTMLElement) {
     {
       id: 'eligibility',
       nav: 'Who joins',
-      title: 'Minimum deposit',
+      title: 'Deposit',
       figure: FAMILY.invited,
       body: `<p>Let any Credit holder join, or pick traits to make a special Statement.</p>`,
     },
