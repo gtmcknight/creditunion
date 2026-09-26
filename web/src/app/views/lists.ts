@@ -25,7 +25,7 @@ function status(s: Summary) {
 /// A full party by where it stands in the lock cycle, read against the clock so a stale list still reads right.
 export function fullStatus(s: Summary) {
   const now = Date.now() / 1000;
-  if (s.phase === 'Waiting') return 'Full · waiting for Jack';
+  if (s.phase === 'Waiting') return 'Waiting for Jack to launch Statements';
   if (s.phase === 'Countdown' && now < s.lockAt) return `Locks in ${clock(s.lockAt)}`;
   if ((s.phase === 'Countdown' || s.phase === 'Burnable') && now < s.deadline) return 'Ready to burn';
   return 'Unlocked';

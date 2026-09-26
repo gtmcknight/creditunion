@@ -661,15 +661,19 @@ nav a .num {
   }
 }
 .cell.mine::after {
-  /* Heavy ink frame inside the cell. Credit art is always on white, so fixed ink reads in both themes. */
+  /* A short ink bar in the cell's empty bottom strip (the art stops above it), so neighbouring Credits of
+     yours never stack into double borders. Credit art is always on white, so fixed ink reads in both themes. */
   content: '';
   position: absolute;
-  inset: 0;
-  box-shadow: inset 0 0 0 3px #0a0a0a;
+  left: 22%;
+  right: 22%;
+  bottom: 4%;
+  height: 3px;
+  background: #0a0a0a;
   pointer-events: none;
 }
 .sheet.sm .cell.mine::after {
-  box-shadow: inset 0 0 0 2px #0a0a0a;
+  height: 2px;
 }
 .cell img {
   transition: opacity 200ms var(--ease);
@@ -5751,3 +5755,23 @@ dialog.eligible::backdrop {
 #picker .pick[aria-pressed='false']:hover {
   opacity: 1;
 }
+
+/* Picker hover card: same card as a sheet slot's, sized to its lines. */
+.pick-tip {
+  width: max-content;
+}
+.pick-tip .filled p {
+  white-space: nowrap;
+}
+
+/* "7 of your 18 Credits fit this party." with Select all / Clear at the far right. */
+#fit-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+/* Party sheet: your Credits get a short ink bar under them instead of a frame, so neighbours never stack into
+   double borders. "Highlight yours" still fades everyone else's. */
+

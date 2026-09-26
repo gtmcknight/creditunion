@@ -18,6 +18,48 @@ const directAbi = [
 const RATING_URL = 'https://jack.art/credits/rating';
 const fmtScore = (s: number) => (Math.floor(s * 100) / 100).toFixed(2);
 
+/// Hovering one of your Credits in the picker: its number, rating and rank, and its traits. Ratings are read once
+/// for the whole picker, the first time you hover.
+let pickTip: HTMLElement | null = null;
+function pickTips(el: HTMLElement, ids: bigint[]) {
+  let rated: Record<string, Rated> | null = null, n = 0, loading: Promise<void> | null = null;
+  const load = () => (loading ??= ratings(ids).then((r) => { rated = r.ratings; n = r.n; }).catch(() => {}));
+  const tip = (pickTip ??= Object.assign(document.createElement('div'), { className: 'slot-tip pick-tip' }));
+  if (!tip.isConnected) document.body.append(tip);
+  const body = (id: string) => {
+    const r = rated?.[id];
+    const traits = r ? [r.traits.palette, `${r.traits.eights} ${r.traits.eights === 1 ? 'eight' : 'eights'}`, r.traits.registration].filter(Boolean).join(' · ') : '';
+    return `<div class="filled"><img src="${art(BigInt(id))}" alt="">
+      <div><p class="takes">#${Number(id).toLocaleString()}${r ? ` <span class="muted">· rating ${fmtScore(r.score)}</span>` : ''}</p>
+      <p class="muted small">${r ? `Rank ${r.rank.toLocaleString()} of ${n.toLocaleString()}` : 'Loading rating…'}</p>
+      ${traits ? `<p class="small">${esc(traits)}</p>` : ''}</div></div>`;
+  };
+  let shown: string | null = null;
+  const place = (b: HTMLElement) => {
+    const r = b.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+    const x = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), innerWidth - w - 8);
+    const y = r.top - h - 10 > 8 ? r.top - h - 10 : r.bottom + 10;
+    tip.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+  };
+  el.addEventListener('pointerover', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('.pick');
+    if (!b || e.pointerType === 'touch') return;
+    shown = b.dataset.id!;
+    tip.innerHTML = body(shown);
+    tip.classList.add('in');
+    place(b);
+    void load().then(() => {
+      if (shown === b.dataset.id && tip.classList.contains('in')) { tip.innerHTML = body(shown); place(b); }
+    });
+  });
+  el.addEventListener('pointerout', (e) => {
+    const to = (e.relatedTarget as HTMLElement | null)?.closest('.pick');
+    if (to && el.contains(to)) return;
+    shown = null;
+    tip.classList.remove('in');
+  });
+}
+
 type Ctx = Awaited<ReturnType<typeof getBatch>>;
 type Mine = Awaited<ReturnType<typeof me>> | null;
 
@@ -228,7 +270,7 @@ function livePhase(s: Ctx['s']): PhaseName {
 function stage(s: Ctx['s']) {
   switch (livePhase(s)) {
     case 'Waiting':
-      return 'Waiting for Jack';
+      return 'Waiting for Jack to launch Statements';
     case 'Countdown':
       return `Locks in <span data-clock="${s.lockAt}">${clock(s.lockAt)}</span>`;
     case 'Burnable':
@@ -243,8 +285,13 @@ const plural = (n: number) => `${n} Credit${n === 1 ? '' : 's'}`;
 function panel(b: Ctx, m: Mine, myIds: Set<string>) {
   const s = b.s;
   const connect = `<button class="btn primary block" data-connect>Connect wallet</button>`;
+  // Your Credits in this party as tiles: pick some to withdraw just those, or leave none picked to take all.
   const withdraw = (primary = false) =>
-    myIds.size ? `<button class="btn block${primary ? ' primary' : ''}" id="withdraw">Withdraw ${plural(myIds.size)}</button>` : '';
+    myIds.size
+      ? `<div class="yours-in"><p class="small fit-row"><span>Yours in this party <span class="muted num">${myIds.size}</span></span><span id="w-actions"><button type="button" class="link small" id="w-clear" hidden>Clear</button></span></p>
+        <div class="picker" id="w-picker">${[...myIds].map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="false" aria-label="Credit #${id}"><img src="${art(BigInt(id))}" alt="" loading="lazy"></button>`).join('')}</div>
+        <button class="btn block${primary ? ' primary' : ''}" id="withdraw">Withdraw all ${plural(myIds.size)}</button></div>`
+      : '';
 
   if (s.state === 'Open') {
     // Two ways in, one box: your own Credits, or OpenSea listings that fit. Buy leads when you hold none.
@@ -276,7 +323,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
       case 'Waiting':
         return `<div class="box">
           <h3>Full</h3>
-          <p class="muted">Waiting for Jack’s contract. You can still leave anytime.</p>
+          <p class="muted">Waiting for Jack to launch Statements. You can still leave anytime.</p>
           ${myIds.size ? withdraw() : ''}
         </div>`;
       case 'Countdown':
@@ -386,9 +433,29 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void) {
     toast(u ? 'Submitted. Waiting for confirmation…' : 'Submitted…', 'info');
   };
 
+  const wPicker = document.getElementById('w-picker');
+  const wPicks = new Set<string>();
+  const wDraw = () => {
+    wPicker?.querySelectorAll<HTMLElement>('.pick').forEach((p) => p.setAttribute('aria-pressed', String(wPicks.has(p.dataset.id!))));
+    const btn = document.getElementById('withdraw');
+    if (btn && !btn.dataset.busy) btn.textContent = wPicks.size ? `Withdraw ${plural(wPicks.size)}` : `Withdraw all ${plural(myIds.size)}`;
+    const clr = document.getElementById('w-clear');
+    if (clr) clr.hidden = !wPicks.size;
+  };
+  if (wPicker) {
+    pickTips(wPicker, [...myIds].map(BigInt));
+    wPicker.addEventListener('click', (e) => {
+      const t = (e.target as HTMLElement).closest<HTMLElement>('.pick');
+      if (!t) return;
+      const id = t.dataset.id!;
+      wPicks.has(id) ? wPicks.delete(id) : wPicks.add(id);
+      wDraw();
+    });
+    document.getElementById('w-clear')?.addEventListener('click', () => { wPicks.clear(); wDraw(); });
+  }
   document.getElementById('withdraw')?.addEventListener('click', (e) =>
     run(e.currentTarget as HTMLElement, 'Withdrawing…', async () => {
-      const ids = [...myIds].map(BigInt);
+      const ids = [...(wPicks.size ? wPicks : myIds)].map(BigInt);
       for (let i = 0; i < ids.length; i += CHUNK)
         await send({ address: s.address, abi: batchAbi, functionName: 'withdraw', args: [ids.slice(i, i + CHUNK)] }, txNote);
     }, 'Credits returned to your wallet.'),
@@ -519,11 +586,12 @@ async function drawPicker(
     el.remove();
     return;
   }
-  if (line) line.innerHTML = `<strong class="num">${fits.length}</strong> of your ${m.owned.length} Credits fit this party.`;
+  if (line) line.innerHTML = `<span><strong class="num">${fits.length}</strong> of your ${m.owned.length} Credits fit this party.</span><span class="fit-actions" id="fit-actions"></span>`;
 
   el.innerHTML = fits
-    .map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="${picks.has(id.toString())}" title="Credit #${id}"><img src="${art(id)}" alt="Credit #${id}" loading="lazy"></button>`)
+    .map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="${picks.has(id.toString())}" aria-label="Credit #${id}"><img src="${art(id)}" alt="" loading="lazy"></button>`)
     .join('');
+  pickTips(el, fits);
 
   const actions = document.getElementById('deposit-actions')!;
   const count = document.getElementById('pick-count')!;
@@ -541,8 +609,10 @@ async function drawPicker(
     const txs = Math.ceil(n / CHUNK);
     // Which way a deposit goes: already approved, one Credit sent directly, or approve + deposit batched.
     const way = m.approved ? 'deposit' : n === 1 ? 'direct' : batchable ? 'batch' : null;
+    // Select all / Clear sit on the "N of your Credits fit" line, right-aligned; the button stands alone below.
+    const links = document.getElementById('fit-actions');
+    if (links) links.innerHTML = n ? '<button type="button" class="link small" id="pick-none">Clear</button>' : `<button type="button" class="link small" id="pick-all">Select ${Math.min(fits.length, room) === fits.length ? 'all' : Math.min(fits.length, room)}</button>`;
     actions.innerHTML = `
-      <div class="row small"><button type="button" class="link small" id="pick-all">Select ${Math.min(fits.length, room) === fits.length ? 'all' : Math.min(fits.length, room)}</button>${n ? '<button type="button" class="link small" id="pick-none">Clear</button>' : ''}</div>
       ${
         // Always one button: nothing picked yet says so; approval only shows when a pick needs it.
         !n
