@@ -100,7 +100,7 @@ async function deploy() {
 
 async function site(m) {
   const cfg = {
-    name: 'eighty-e2e',
+    name: 'creditunion-e2e',
     main: join(WEB, 'src', 'worker', 'index.ts'),
     compatibility_date: '2026-09-01',
     assets: { binding: 'ASSETS', not_found_handling: 'single-page-application', run_worker_first: JSON.parse(readFileSync(join(WEB, 'wrangler.jsonc'), 'utf8').replace(/^\s*\/\/.*$/gm, '')).assets.run_worker_first },
@@ -129,7 +129,7 @@ async function browser() {
     return r.text();
   });
   await ctx.addInitScript((me) => {
-    localStorage.setItem('eighty-wallet', 'injected');
+    localStorage.setItem('cu-wallet', 'injected');
     window.__toasts = [];
     let id = 0;
     window.ethereum = {

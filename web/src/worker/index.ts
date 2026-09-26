@@ -1,4 +1,4 @@
-/// Eighty's Worker. It holds no state and signs nothing. Its jobs:
+/// Credit Union's Worker. It holds no state and signs nothing. Its jobs:
 ///   /config.json   chain id and contract addresses for the app
 ///   /rpc           read-only JSON-RPC proxy to our contracts (and Credits' art) only (keeps the provider key private)
 ///   /art/...       a Credit's art, read from Jack's art contract and cached forever (art never changes)

@@ -5,11 +5,11 @@ export type Card = { title: string; description: string; image: string };
 
 const SITE = 'Credit Union';
 const CARDS: Record<string, Card> = {
-  home: { title: 'Credit Union', description: 'Pool your Credits with 79 others into one Statement. Burn, auction, split.', image: '/og/home.png' },
+  home: { title: 'Credit Union', description: 'Join a credit union to make a Statement together.', image: '/og/home.png' },
   parties: { title: 'Credit Unions', description: 'Credit unions pooling Credits toward a Statement. Join one, leave any time before it fills.', image: '/og/party.png' },
   auctions: { title: 'Auctions · Credit Union', description: 'Statements at auction: 24 hours from the first bid, split between the 80 Credits that made them.', image: '/og/auctions.png' },
   create: { title: 'Start a credit union', description: 'Pick who joins and how the 80 are laid out. Anyone can burn the moment it fills.', image: '/og/create.png' },
-  about: { title: 'How Credit Union works', description: 'One wallet nobody owns, rules nobody can change. Eighty Credits make a Statement.', image: '/og/about.png' },
+  about: { title: 'How Credit Union works', description: 'One wallet nobody owns, rules nobody can change. 80 Credits make a Statement.', image: '/og/about.png' },
   party: { title: 'Join this credit union', description: '80 Credits. One Statement. Split 80 ways. Leave any time before it fills.', image: '/og/party.png' },
   mint: { title: 'Mint test Credits · Credit Union', description: 'Real Credits art on testnet, to try a credit union end to end.', image: '/og/mint.png' },
   me: { title: 'Your credit unions', description: 'Your Credits in credit unions, and what they’re worth.', image: '/og/home.png' },

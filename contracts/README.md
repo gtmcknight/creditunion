@@ -1,4 +1,4 @@
-# Eighty contracts
+# Credit Union contracts
 
 See the [root README](../README.md).
 

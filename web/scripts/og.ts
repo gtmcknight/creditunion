@@ -1,9 +1,8 @@
 // Draws the link-preview cards (1200×630) into public/og/: the living wall of real Credits as the ground, with a
-// white label, like the About page's hero. Needs rsvg-convert (brew install librsvg) and the Geist font installed.
+// headline on black bars, like the home hero. Drawn in Chrome (playwright-core; CHROME= to point at it).
 //   node scripts/og.ts
 // The worker points each route's og:image at one of these (src/worker/og.ts); /og previews them all.
 import { deflateSync } from 'node:zlib';
-import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 const W = 1200, H = 630;
@@ -89,28 +88,37 @@ function png(px: Uint8Array) {
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
-/// One card: the wall, a white label with the headline and a line, the domain in the corner.
-function card(name: string, ground: Buffer, title: string[], line: string) {
-  const lh = 74, pad = 56;
-  const labelW = 760, labelH = pad * 2 + title.length * lh + 44;
-  const x = (W - labelW) / 2, y = (H - labelH) / 2;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
-  <image href="data:image/png;base64,${ground.toString('base64')}" width="${W}" height="${H}"/>
-  <rect x="${x}" y="${y}" width="${labelW}" height="${labelH}" fill="#fff"/>
-  ${title.map((t, i) => `<text x="${W / 2}" y="${y + pad + 58 + i * lh}" text-anchor="middle" font-family="Geist" font-weight="700" font-size="68" letter-spacing="-2" fill="#0a0a0a">${esc(t)}</text>`).join('')}
-  <text x="${W / 2}" y="${y + pad + title.length * lh + 30}" text-anchor="middle" font-family="Geist" font-size="28" fill="#555">${esc(line)}</text>
-  <rect x="${W - 240}" y="${H - 72}" width="208" height="40" fill="#fff"/>
-  <text x="${W - 136}" y="${H - 44}" text-anchor="middle" font-family="Geist" font-weight="700" font-size="22" fill="#0a0a0a">creditunion.fun</text>
-</svg>`;
-  const out = execFileSync('rsvg-convert', ['-w', String(W), '-h', String(H), '-f', 'png'], { input: svg, maxBuffer: 64 << 20 });
-  writeFileSync(pub(`og/${name}.png`), out);
-  console.log(`og/${name}.png`, out.length, 'bytes');
+/// One card, like the home hero: the wall edge to edge, the headline on black bars fitted to each line, a line
+/// under it on a white bar, the domain in the corner. Drawn by Chrome, which sizes each bar to its words.
+const cards: { name: string; ground: Buffer; title: string[]; line: string }[] = [];
+const card = (name: string, ground: Buffer, title: string[], line: string) => cards.push({ name, ground, title, line });
+
+async function draw() {
+  const { chromium } = await import('playwright-core');
+  const browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' });
+  const page = await browser.newPage({ viewport: { width: W, height: H } });
+  for (const c of cards) {
+    await page.setContent(`<html><head><link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600&display=swap" rel="stylesheet"><style>
+      body{margin:0;width:${W}px;height:${H}px;background:url(data:image/png;base64,${c.ground.toString('base64')}) 0 0/${W}px ${H}px;font-family:Geist,sans-serif;position:relative}
+      .t{position:absolute;left:64px;top:50%;translate:0 -50%}
+      .t span{display:block;width:fit-content;background:#0a0a0a;color:#fff;font-weight:600;font-size:64px;line-height:1;letter-spacing:-0.035em;padding:.16em .3em .2em}
+      .t p{display:inline-block;margin:16px 0 0;background:#fff;color:#0a0a0a;font-size:26px;padding:10px 18px}
+      .d{position:absolute;right:32px;bottom:32px;background:#fff;color:#0a0a0a;font-weight:600;font-size:22px;padding:8px 16px}
+    </style></head><body><div class="t">${c.title.map((t) => `<span>${esc(t)}</span>`).join('')}<p>${esc(c.line)}</p></div><div class="d">creditunion.fun</div></body></html>`);
+    await page.evaluate(() => document.fonts.ready);
+    const out = await page.screenshot({ type: 'png' });
+    writeFileSync(pub(`og/${c.name}.png`), out);
+    console.log(`og/${c.name}.png`, out.length, 'bytes');
+  }
+  await browser.close();
 }
 
 mkdirSync(pub('og'), { recursive: true });
-card('home', wall('time', 3), ['Eighty Credits', 'make a Statement.'], 'Pool your Credits with 79 others. Burn, auction, split.');
-card('about', wall('density', 3), ['How Credit Union works'], 'One wallet nobody owns. Rules nobody can change.');
+card('home', wall('time', 3), ['Join a credit union', 'to make a Statement together.'], 'Pool your Credits with other holders. At 80, burn, auction, split.');
+card('about', wall('density', 3), ['How it works'], 'One wallet nobody owns. Rules nobody can change.');
 card('auctions', wall('color', 3), ['Statements', 'at auction'], '24 hours from the first bid, split between the 80.');
 card('create', wall('time', 5, 40_000), ['Start a credit union'], 'Pick who joins and how the 80 are laid out.');
 card('party', wall('color', 5, 7), ['Join this credit union'], '80 Credits. One Statement. Split 80 ways.');
 card('mint', wall('density', 5, 90_000), ['Mint test Credits'], 'Real Credits art, on testnet.');
+
+await draw();

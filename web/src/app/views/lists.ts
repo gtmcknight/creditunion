@@ -41,7 +41,7 @@ type SortKey = (typeof SORTS)[number][0];
 
 function sortKey(): SortKey {
   try {
-    const v = localStorage.getItem('eighty-sort');
+    const v = localStorage.getItem('cu-sort');
     if (SORTS.some(([k]) => k === v)) return v as SortKey;
   } catch {}
   return 'fullest';
@@ -162,7 +162,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     document.querySelectorAll<HTMLInputElement>('input[name=sort]').forEach((r) =>
       r.addEventListener('change', () => {
         try {
-          localStorage.setItem('eighty-sort', r.value);
+          localStorage.setItem('cu-sort', r.value);
         } catch {}
         draw();
       }),

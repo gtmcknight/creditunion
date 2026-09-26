@@ -73,7 +73,7 @@ contract SeedDemo is Script {
         console.log("SECOND", b2);
 
         // 3. Full, ready to burn
-        address b3 = _open(f, keys[2], "Eighty Eights", none, 1 ether, _r(431, 40));
+        address b3 = _open(f, keys[2], "All Eights", none, 1 ether, _r(431, 40));
         _dep(f, keys[3], b3, _r(621, 40));
 
         // 4. Open, mostly filled, filtered (even ids only in the mock art)

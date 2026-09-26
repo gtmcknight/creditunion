@@ -21,7 +21,7 @@ interface IBatchFactory {
 }
 
 /// @title Batch
-/// @notice Eighty Credits pooled into one Statement.
+/// @notice 80 Credits pooled into one Statement: a credit union.
 ///
 ///         Open      Anyone deposits Credits that pass the batch's filter. Depositors withdraw theirs at any time.
 ///                   An open batch never expires: it stays open until it holds 80.

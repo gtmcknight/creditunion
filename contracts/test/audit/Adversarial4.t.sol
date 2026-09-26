@@ -123,7 +123,7 @@ contract Adversarial4Test is Test {
 
     /// 80 distinct depositors, one Credit each, half via the factory and half via the ERC721 hook.
     /// Conservation over all 80; claim gas for the last position (the worst case: walks all 80 slots).
-    function test_EightyDepositors_ConservationAndLastPositionGas() public {
+    function test_80Depositors_ConservationAndLastPositionGas() public {
         address[] memory ds = new address[](80);
         for (uint256 i; i < 80; ++i) {
             ds[i] = address(uint160(0xD000 + i));

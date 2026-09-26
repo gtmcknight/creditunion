@@ -98,7 +98,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   const depositors = new Set(b.depositors.map((d) => d.toLowerCase())).size;
 
   // Cells added since this browser last saw the batch drop in, in deposit order.
-  const seenKey = `eighty-seen-${address}`;
+  const seenKey = `cu-seen-${address}`;
   let seen = s.count;
   try {
     seen = Number(sessionStorage.getItem(seenKey) ?? s.count);
@@ -201,14 +201,14 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   watchLive(app, address, b.s, rerender);
   // Just made on the create page: congratulate once. The flag goes as soon as it's read, so a refresh won't reshow it.
   try {
-    if (sessionStorage.getItem('eighty-created')?.toLowerCase() === address.toLowerCase()) {
-      sessionStorage.removeItem('eighty-created');
+    if (sessionStorage.getItem('cu-created')?.toLowerCase() === address.toLowerCase()) {
+      sessionStorage.removeItem('cu-created');
       openCreated(b, placed);
     }
     // Just deposited here: the same card, as "You're in", with how many went in.
-    const [joinedAt, n] = (sessionStorage.getItem('eighty-joined') ?? '').split(':');
+    const [joinedAt, n] = (sessionStorage.getItem('cu-joined') ?? '').split(':');
     if (joinedAt?.toLowerCase() === address.toLowerCase()) {
-      sessionStorage.removeItem('eighty-joined');
+      sessionStorage.removeItem('cu-joined');
       openCreated(b, placed, Number(n) || 1);
     }
   } catch {}
@@ -243,7 +243,7 @@ function watchLive(app: HTMLElement, address: Address, s: Ctx['s'], rerender: ()
 /// Remember a deposit that just landed, so the rerendered page opens the "You're in" card once.
 function justJoined(address: string, n: number) {
   try {
-    sessionStorage.setItem('eighty-joined', `${address}:${n}`);
+    sessionStorage.setItem('cu-joined', `${address}:${n}`);
   } catch {}
 }
 

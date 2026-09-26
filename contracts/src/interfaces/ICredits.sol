@@ -3,7 +3,7 @@ pragma solidity 0.8.28;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 
-/// @notice The parts of Jack Butcher's Credits (0x9763…3043) that Eighty uses.
+/// @notice The parts of Jack Butcher's Credits (0x9763…3043) that Credit Union uses.
 interface ICredits is IERC721 {
     function art() external view returns (ICreditArt);
     function seedOf(uint256 id) external view returns (bytes21);

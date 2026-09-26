@@ -52,7 +52,7 @@ export async function connect(w?: Announced) {
   session.rdns = w?.info.rdns;
   session.wallet = createWalletClient({ account, chain, transport: custom(provider) });
   try {
-    localStorage.setItem('eighty-wallet', w?.info.rdns ?? 'injected');
+    localStorage.setItem('cu-wallet', w?.info.rdns ?? 'injected');
   } catch {}
   provider.on?.('accountsChanged', (accs: Address[]) => {
     session.account = accs[0];
@@ -65,6 +65,7 @@ export async function connect(w?: Announced) {
 export function disconnect() {
   session.account = session.wallet = session.provider = undefined;
   try {
+    localStorage.removeItem('cu-wallet');
     localStorage.removeItem('eighty-wallet');
   } catch {}
   emit();
@@ -74,7 +75,7 @@ export function disconnect() {
 export async function restore() {
   let saved: string | null = null;
   try {
-    saved = localStorage.getItem('eighty-wallet');
+    saved = localStorage.getItem('cu-wallet') ?? localStorage.getItem('eighty-wallet'); // the old key, from before the rename
   } catch {}
   if (!saved) return;
   await new Promise((r) => setTimeout(r, 50)); // let EIP-6963 wallets announce

@@ -149,7 +149,7 @@ document.getElementById('theme')?.addEventListener('click', () => {
   const next = currentTheme() === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', next);
   try {
-    localStorage.setItem('eighty-theme', next);
+    localStorage.setItem('cu-theme', next);
   } catch {}
   drawTheme();
 });

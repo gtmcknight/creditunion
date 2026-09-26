@@ -942,10 +942,10 @@ export async function create(app: HTMLElement) {
     refresh();
   });
   const presets = document.getElementById('win-presets')!;
-  const eighty = minutes.map((m, i) => [m, i] as const).filter(([m]) => m[1] === 80);
+  const full = minutes.map((m, i) => [m, i] as const).filter(([m]) => m[1] === 80);
   // Shortcuts to the minutes when exactly 80 Credits were paid for: one party's worth. Clearing is the row's ×.
-  presets.innerHTML = eighty.length
-    ? `<span class="muted small">80 paid in one minute:</span>${eighty
+  presets.innerHTML = full.length
+    ? `<span class="muted small">80 paid in one minute:</span>${full
         .map(([m, i]) => `<button type="button" data-i="${i}" title="Exactly 80 Credits were paid for in this minute">${fmtT.format(new Date(m[0] * 1000))}</button>`)
         .join('')}`
     : '';
@@ -1207,7 +1207,7 @@ export async function create(app: HTMLElement) {
       }
       // The party page picks this up and shows the congrats and share dialog, once.
       try {
-        sessionStorage.setItem('eighty-created', batch);
+        sessionStorage.setItem('cu-created', batch);
       } catch {}
       navigate(`/union/${batch}`);
     } catch (x) {
