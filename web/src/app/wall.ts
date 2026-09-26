@@ -237,7 +237,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
 
   // ---- grid modes: columns drift left; `off` counts columns scrolled
   // Zoom: device pixels per cell of a Credit in the grid views (Stream draws one step larger).
-  let K = 2, T = 8 * K;
+  let K = 6, T = 8 * K; // starts zoomed in: a Credit is 48 device pixels
   let off = 0;
   const grid = () => {
     // Always overfill: one more row than fits, centred and cut at both edges, so the wall bleeds to the frame.
@@ -277,7 +277,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
   };
 
   // ---- stream: x is time; a second's payments stack up from the baseline
-  let S = 3; // device pixels per cell, so a Credit is 24 device pixels
+  let S = K + 1; // device pixels per cell (Stream draws one step larger than the grid)
   let ST = 8 * S;
   let clock = 0; // unix seconds, fractional; set below
   const stream = () => {
@@ -427,7 +427,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
         clock += dt * 4; // four seconds of the mint per second
         if (clock > e.times[e.n - 1]) clock = MINT_START;
       } else if (mode === 'one') pos = (pos + dt * 0.8) % e.n;
-      else off += dt * 6; // columns per second
+      else off += dt * 1.2; // columns per second: a slow drift
       frame();
     }
     last = now;

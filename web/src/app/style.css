@@ -3301,7 +3301,7 @@ input[type='datetime-local'] {
 .chapter-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: var(--tile-gap);
 }
 .chapter-grid .chapter {
   display: flex;
@@ -5877,4 +5877,68 @@ dialog.eligible::backdrop {
     left: 8px;
     font-size: 11px;
   }
+}
+
+/* The mark: a bank drawn in Credit pixels, its columns the four inks. */
+.logo .mark {
+  flex: none;
+  margin-top: -2px;
+}
+/* Phones: the mark alone, so the nav keeps one line. */
+@media (max-width: 480px) {
+  .logo .logo-word {
+    display: none;
+  }
+}
+
+/* Home hero: the living wall runs the full width; each headline line sits on its own black bar, fitted to the
+   words, with square buttons under it that read the same in both themes. */
+:root { --tile-gap: 12px; }
+.hero {
+  position: relative;
+  margin-bottom: var(--tile-gap);
+}
+.hero .wall-band { margin-bottom: 0; }
+.hero .wall-frame { height: clamp(300px, 30vw, 400px); }
+.hero-text {
+  position: absolute;
+  left: clamp(20px, 3vw, 40px);
+  top: 50%;
+  translate: 0 -50%;
+  z-index: 1;
+}
+.hero-text h1 {
+  margin: 0;
+  font-size: clamp(26px, 3.4vw, 46px);
+  line-height: 1;
+  letter-spacing: -0.035em;
+}
+.hero-text h1 span {
+  display: block;
+  width: fit-content;
+  white-space: nowrap;
+  background: #0a0a0a;
+  color: #fff;
+  padding: 0.16em 0.3em 0.2em;
+}
+.hero-text .wall-cta {
+  display: flex;
+  gap: 8px;
+  margin: 16px 0 0;
+}
+.hero-text .wall-cta .btn {
+  border-radius: 0;
+  border: 0;
+  box-shadow: none;
+  height: 44px;
+  padding: 0 18px;
+}
+.hero-text .wall-cta .btn.primary { background: #0a0a0a; color: #fff; }
+.hero-text .wall-cta .btn:not(.primary) { background: #fff; color: #0a0a0a; }
+@media (max-width: 760px) {
+  .hero .wall-frame { height: 300px; }
+  .hero-text { left: 12px; right: 12px; }
+  .hero-text h1 { font-size: min(6vw, 30px); }
+  .hero-text .wall-cta { gap: 6px; }
+  .hero-text .wall-cta .btn { height: 40px; padding: 0 12px; font-size: 14px; }
 }

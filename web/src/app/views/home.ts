@@ -170,8 +170,10 @@ export function home(app: HTMLElement) {
       ${c.figure ?? ''}
     </section>`;
 
+  const headline = `<h1><span>Join a credit union</span> <span>to make a Statement together.</span></h1>`;
+  const cta = `<p class="wall-cta"><a class="btn primary" href="/unions">Browse credit unions</a><a class="btn" href="/create">Start your own</a></p>`;
   app.innerHTML = `
-  <div id="wall"></div>
+  <section class="hero"><div id="wall"></div><div class="hero-text">${headline}${cta}</div></section>
   <article class="about doc">
     <div class="chapter-grid">${panels.map(panel).join('')}</div>
     <section class="faq" id="faq"><h2>Questions</h2><div class="faq-cols"><div><details><summary>When can credit unions burn into Statements?</summary><p>Jack’s Statement contract is expected around October 1 (<a href="https://x.com/jackbutcher/status/2102910106451021935" target="_blank" rel="noopener">Jack’s announcement</a>). Until then full credit unions wait, and anyone can still leave. Once it’s live, a full credit union counts down 5 minutes, then locks for an hour so anyone can burn it.</p></details><details><summary>Is Credit Union official?</summary><p>No. It’s an independent project built on Jack Butcher’s Credits.</p></details><details><summary>What does it cost?</summary><p>Free to start or join. Credit Union takes 2% of the sale, only if it sells, and 2% on Credits you buy from OpenSea through Credit Union.</p></details><details><summary>What if a credit union never fills?</summary><p>Nothing. Take your Credits back whenever you want.</p></details></div><div><details><summary>What if nobody burns it?</summary><p>After the hour it unlocks. Leave, or restart the countdown for another try.</p></details><details><summary>What if nobody bids?</summary><p>The Statement stays in the credit union until someone bids at least 0.01 ETH. The 24 hours start with that bid.</p></details><details><summary>How is the money split?</summary><p>Equal pays every Credit the same. Early bird pays the first Credit in three times the last.</p></details><details><summary>How do I get paid?</summary><p>Claim your share on the credit union’s page once the auction settles.</p></details></div></div></section>
@@ -188,10 +190,7 @@ export function home(app: HTMLElement) {
     }),
   );
 
-  mountWall(document.getElementById('wall')!, {
-    label: `<h1>Turn 80 Credits into a Statement.<br>Together.</h1>
-    <p class="wall-cta"><a class="btn primary" href="/unions">Join a credit union</a><a class="btn" href="/create">Start a credit union</a></p>`,
-  });
+  mountWall(document.getElementById('wall')!);
 
   // Deep link: /about/<chapter>.
   const target = location.pathname.split('/')[2];
