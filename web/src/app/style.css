@@ -3501,3 +3501,69 @@ input[type='datetime-local'] {
     animation: none;
   }
 }
+
+/* ---------------------------------------------------------------- who's in */
+dialog.people {
+  width: min(440px, calc(100vw - 2 * var(--gutter)));
+  max-height: min(80vh, 720px);
+  overflow: auto;
+}
+dialog.people header h3 {
+  margin: 0;
+  font-size: 18px;
+}
+.people-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.person {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 10px; /* 16 dialog − 6 */
+  background: var(--surface);
+  transition-property: box-shadow;
+  transition-duration: 120ms;
+}
+.person:hover,
+.person:focus-within {
+  box-shadow: inset 0 0 0 1px var(--fg);
+}
+.person-art {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.person-art img {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  outline: 1px solid rgba(0, 0, 0, 0.1);
+}
+:root[data-theme='dark'] .person-art img {
+  outline-color: rgba(255, 255, 255, 0.1);
+}
+.facts .link.num {
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 3px;
+  min-height: 40px;
+  padding: 0 4px;
+  margin: 0 -4px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.facts .link.num:hover {
+  text-decoration-color: var(--fg);
+}
+.cell.lit {
+  outline: 3px solid var(--fg);
+  outline-offset: -3px;
+  z-index: 1;
+}

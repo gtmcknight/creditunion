@@ -84,7 +84,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
         <dl class="facts">
           ${fact('Order', ARRANGEMENTS[s.arrangement])}
           ${fact('Payout', payout(b, myIds))}
-          ${fact('Depositors', `<span class="num">${depositors}</span>`)}
+          ${fact('Depositors', `<button type="button" class="link num" id="depositors-btn" title="Who is in">${depositors}</button>`)}
           ${s.count ? fact('Rating', `<span id="rating" class="muted">…</span>`) : ''}
           ${s.reserve && (s.state === 'Open' || s.state === 'Full' || (s.state === 'Auction' && s.minBid === s.reserve && !s.highBid)) ? fact('Reserve', eth(s.reserve)) : ''}
           ${fact('Sale split', split(s))}
@@ -95,6 +95,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
   </section>`;
 
   hydrate(app);
+  document.getElementById('depositors-btn')?.addEventListener('click', () => openDepositors(b, account ?? null));
   fillGhosts(app);
   // Share a link stamped with where the party stands, so X, Telegram and the rest fetch a fresh card for it
   // instead of showing the one they cached for an earlier state.
@@ -664,4 +665,51 @@ async function loadRatings(
   });
 
   document.querySelector<HTMLElement>('.batch-art .sheet')?.classList.remove('closing');
+}
+
+
+/// Who is in: every depositor, most Credits first, with their share of the sale and a few of their Credits.
+/// Hovering a row lights their cells on the sheet.
+function openDepositors(b: Ctx, account: string | null) {
+  const s = b.s;
+  const rows = new Map<string, { addr: Address; ids: bigint[]; shares: number }>();
+  b.ids.forEach((id, i) => {
+    const addr = b.depositors[i];
+    const key = addr.toLowerCase();
+    const r = rows.get(key) ?? { addr, ids: [], shares: 0 };
+    r.ids.push(id);
+    r.shares += s.split === 1 ? earlyWeight(i) : 1;
+    rows.set(key, r);
+  });
+  const list = [...rows.values()].sort((x, y) => y.shares - x.shares || y.ids.length - x.ids.length);
+  const total = list.reduce((n, r) => n + r.shares, 0) || 1;
+  const d = document.createElement('dialog');
+  d.className = 'people';
+  d.innerHTML = `<form method="dialog">
+    <header class="row"><h3>Who’s in <span class="muted num">${list.length}</span></h3><button type="submit" class="btn sm" aria-label="Close">Close</button></header>
+    <ol class="people-list">${list
+      .map(
+        (r) => `<li class="person" data-owner="${esc(r.addr.toLowerCase())}">
+          <div class="row">${who(r.addr)}<span class="tags">${same(r.addr, s.creator) ? '<span class="tag">Creator</span>' : ''}${account && same(r.addr, account) ? '<span class="tag you">You</span>' : ''}</span></div>
+          <div class="row muted small"><span class="num">${r.ids.length} Credit${r.ids.length === 1 ? '' : 's'}</span><span class="num">${s.split === 1 ? `${r.shares.toFixed(2)} shares · ` : ''}${((r.shares / total) * 100).toFixed(1)}% of the sale</span></div>
+          <div class="person-art">${r.ids.slice(0, 8).map((id) => `<img src="${art(id)}" alt="" title="Credit #${id}" loading="lazy">`).join('')}${r.ids.length > 8 ? `<span class="muted small num">+${r.ids.length - 8}</span>` : ''}</div>
+        </li>`,
+      )
+      .join('')}</ol>
+  </form>`;
+  document.body.append(d);
+  hydrate(d);
+  const cells = [...document.querySelectorAll<HTMLElement>('.batch-art .cell[data-id]')];
+  const owner = new Map(b.ids.map((id, i) => [id.toString(), b.depositors[i].toLowerCase()]));
+  d.querySelectorAll<HTMLElement>('.person').forEach((li) => {
+    const lit = () => cells.forEach((c) => c.classList.toggle('lit', owner.get(c.dataset.id!) === li.dataset.owner));
+    li.addEventListener('pointerenter', lit);
+    li.addEventListener('focusin', lit);
+    li.addEventListener('pointerleave', () => cells.forEach((c) => c.classList.remove('lit')));
+  });
+  d.addEventListener('close', () => {
+    cells.forEach((c) => c.classList.remove('lit'));
+    d.remove();
+  });
+  d.showModal();
 }
