@@ -48,11 +48,11 @@ The fee recipient can change any of these within the ceilings. A batch copies th
 
 ## Launching before the Statement contract exists
 
-The factory can deploy with **no assembler**. Batches open, fill and lock as normal, but cannot burn: pooling only. When Jack's Statement contract ships and the adapter is written and reviewed, one address (the *setter*, ideally a multisig) **proposes** it. That opens a **3-day exit window** in which anyone can withdraw from any batch, full ones included. After 3 days anyone can **activate** it, permanently; the setter then has no powers at all. Full batches never expire while waiting: after their 7-day lock, depositors may leave or stay for the burn. The setter can replace a pending proposal (which restarts the window) but can do nothing else, ever.
+The factory can deploy with **no assembler**. Batches open, fill and lock as normal, but cannot burn: pooling only. When Jack's Statement contract ships and the adapter is written and reviewed, one address (the *setter*, ideally a multisig) **proposes** it. That opens a **30-minute exit window** in which anyone can withdraw from any batch, full ones included. After 30 minutes anyone can **activate** it, permanently; the setter then has no powers at all. Full batches never expire while waiting: after their 7-day lock, depositors may leave or stay for the burn. The setter can replace a pending proposal (which restarts the window) but can do nothing else, ever.
 
 ## Trust model
 
-- No owner, admin, pause, or upgrade. Every parameter is fixed at deploy, except the assembler when launched in pooling mode: one setter key, one proposal at a time, always behind a 3-day exit window, gone once active.
+- No owner, admin, pause, or upgrade. Every parameter is fixed at deploy, except the assembler when launched in pooling mode: one setter key, one proposal at a time, always behind a 30-minute exit window, gone once active.
 - The factory only moves Credits **from its caller** into **its own** batches.
 - The Statement mint goes through an immutable `IAssembler`, **called** (never delegatecalled) with an operator approval that exists only for the duration of the call. The batch verifies the result: the adapter's `statement()` matches, none of the 80 still exist, and it owns the Statement. Adapter storage cannot reach the batch.
 - The auction follows the Nouns/Zora pattern. Refunds are gas-capped and never copy return data. A failed refund becomes `owed` (pull), so a hostile bidder can't block the auction.
@@ -101,7 +101,7 @@ Secrets: `wrangler secret put RPC_URL` and `wrangler secret put OPENSEA_API_KEY`
 
 **Mainnet, stage 2 (after Jack publishes the Statement contract, ~Oct 1 2026):**
 1. Read the Statement contract. Write `JackAssembler` implementing `IAssembler` (called by the batch with a scoped operator approval; must finish with the batch owning the Statement). Test it on a mainnet fork against the real Credits.
-2. Get it and the core contracts reviewed. Then from the setter: `proposeAssembler(adapter)`; 3 days later anyone calls `activateAssembler()`.
+2. Get it and the core contracts reviewed. Then from the setter: `proposeAssembler(adapter)`; 30 minutes later anyone calls `activateAssembler()`.
 3. `ASSEMBLER=… FEE_RECIPIENT=… [PROTOCOL_FEE_BPS=100 SWEEP_FEE_BPS=100] forge script script/DeployMainnet.s.sol --broadcast` deploys the factory and the Sweeper.
 4. Set `CHAIN_ID=1`, `CREDITS=0x97630aA70AB14ed9883B41dAfccBc11349723043`, `FACTORY=…` and `SWEEPER=…` in `wrangler.jsonc`, then deploy.
 

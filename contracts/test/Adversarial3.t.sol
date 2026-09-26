@@ -300,7 +300,7 @@ contract Adversarial3Test is Test {
         assertEq(b3.depositorOf(101), carol);
     }
 
-    function test_ExitWindowWithdrawThenRefillKeepsFirstFill() public {
+    function test_ExitWindowWithdrawThenRefillLocksAgain() public {
         BatchFactory f = new BatchFactory(
             ICredits(address(credits)), IRatings(address(0)), IAssembler(address(0)), setter, fee, 100, 0, 10
         );
@@ -322,8 +322,11 @@ contract Adversarial3Test is Test {
         vm.prank(carol);
         f.deposit(address(b), _one(101));
         assertEq(uint256(b.state()), uint256(Batch.State.Full));
-        assertEq(b.filledAt(), filled); // the lock runs from the first fill, never re-armed
-        assertEq(b.unlocksAt(), filled + b.UNLOCK_AFTER());
+        // Leaving a still-locked batch (only possible in the exit window) gave the lock back, so the real fill
+        // locks again. Harmless: while the window is open anyone may leave regardless of the lock.
+        assertEq(b.filledAt(), block.timestamp);
+        assertGt(b.filledAt(), filled);
+        assertEq(b.unlocksAt(), block.timestamp + b.UNLOCK_AFTER());
         assertEq(b.ids().length, 80);
         assertEq(b.ids()[79], 101);
     }

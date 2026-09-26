@@ -132,14 +132,14 @@ contract StagedTest is Test {
     function test_ReplacingProposalRestartsWindow() public {
         vm.prank(setter);
         factory.proposeAssembler(IAssembler(address(0xBAD)));
-        skip(2 days);
+        skip(20 minutes);
         vm.prank(setter);
         factory.proposeAssembler(asm);
-        assertEq(factory.pendingUntil(), block.timestamp + 3 days);
-        skip(2 days);
+        assertEq(factory.pendingUntil(), block.timestamp + factory.ASSEMBLER_DELAY());
+        skip(20 minutes);
         vm.expectRevert(BatchFactory.TooEarly.selector);
         factory.activateAssembler();
-        skip(1 days);
+        skip(10 minutes);
         factory.activateAssembler();
         assertEq(address(factory.assembler()), address(asm));
     }

@@ -125,7 +125,7 @@ const FIG = {
       svg(300, 300,
         r(50, 40, 24, 24, K) + r(56, 76, 12, 136, Y) + r(50, 224, 24, 24, '#009400') +
         t(96, 50, 'Proposed', { weight: 600, size: 15, anchor: 'start' }) + t(96, 67, 'the burn adapter', { size: 12, fill: '#666', anchor: 'start' }) +
-        t(96, 140, '3 days', { weight: 600, size: 15, anchor: 'start' }) + t(96, 157, 'anyone can leave any party', { size: 12, fill: '#666', anchor: 'start' }) +
+        t(96, 140, '30 minutes', { weight: 600, size: 15, anchor: 'start' }) + t(96, 157, 'anyone can leave any party', { size: 12, fill: '#666', anchor: 'start' }) +
         t(96, 234, 'Switched on', { weight: 600, size: 15, anchor: 'start' }) + t(96, 251, 'for good', { size: 12, fill: '#666', anchor: 'start' })),
     ),
 
@@ -148,7 +148,7 @@ export function docs(app: HTMLElement) {
       nav: 'Leaving',
       title: 'You can always leave',
       figure: FIG.exit(),
-      body: `<p>Take your Credits back any time before the party fills. A full party locks for 7 days to be burned. Not burned by then? It unlocks for good.</p>`,
+      body: `<p>Take your Credits back any time before the party fills. A full party locks for 7 days so it can be burned. Not burned by then? Anyone can leave.</p>`,
     },
     {
       id: 'eligibility',
@@ -190,7 +190,7 @@ export function docs(app: HTMLElement) {
       nav: 'Before launch',
       title: 'Filling now, burning soon',
       figure: FIG.launch(),
-      body: `<p>Jack’s Statement contract isn’t out yet. When it ships, everyone gets 3 days to leave before burning switches on for good.</p>`,
+      body: `<p>Jack’s Statement contract isn’t out yet. When it ships, we plug in the piece that burns through it. You get 30 minutes’ notice to leave first.</p>`,
     },
     {
       id: 'contracts',

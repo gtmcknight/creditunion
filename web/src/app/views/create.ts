@@ -791,6 +791,8 @@ export async function create(app: HTMLElement) {
       maxScore: rules.maxScore,
       layout0: layout.slice(0, 64).reduce((acc, m, i) => acc | (BigInt(m) << BigInt(4 * i)), 0n),
       layout1: layout.slice(64).reduce((acc, m, i) => acc | (BigInt(m) << BigInt(4 * i)), 0n),
+      bitsFrom: 0, // Bits rule: supported by the contract, not offered here yet
+      bitsTo: 0,
     };
     go.disabled = true;
     try {

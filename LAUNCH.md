@@ -1,7 +1,7 @@
 # Launch runbook — mainnet stage 1 (pooling)
 
 Batches open, fill and lock on mainnet. Burning waits for Jack's Statement contract (stage 2).
-Everything deployed here is immutable except the one-time adapter activation (setter → 3-day exit window → anyone activates).
+Everything deployed here is immutable except the one-time adapter activation (setter → 30-minute exit window → anyone activates).
 
 ## To-do
 
@@ -22,14 +22,14 @@ Everything deployed here is immutable except the one-time adapter activation (se
 - [ ] Commit the addresses (README + docs) and tag `v1-mainnet-stage1`.
 
 **Announce**
-- [ ] Say clearly: pooling only until Jack's contract ships; withdraw any time before 80; the 3-day exit window before any adapter goes live.
+- [ ] Say clearly: pooling only until Jack's contract ships; withdraw any time before 80; the 30-minute exit window before any adapter goes live.
 - [ ] Link Docs → Contracts so people can verify addresses themselves.
 
 **After launch**
 - [ ] Rotate the Cloudflare token, Alchemy key and OpenSea key used during development; move them out of `web/.env` if the machine is shared.
 - [ ] Watch Cloudflare logs for rate-limit hits and Worker errors the first day.
 - [ ] Sepolia: activate the test adapter after its window (Sept 27) so the full burn → auction → split flow can be demoed.
-- [ ] When Jack's Statement contract is published: read it, write `JackAssembler`, fork-test, propose from `SETTER`, activate after 3 days (§ 6). Before that, an independent audit of `Batch`, `BatchFactory`, `Sweeper` and the adapter.
+- [ ] When Jack's Statement contract is published: read it, write `JackAssembler`, fork-test, propose from `SETTER`, activate after 30 minutes (§ 6). Before that, an independent audit of `Batch`, `BatchFactory`, `Sweeper` and the adapter.
 
 ## Inputs (decide before deploying)
 
@@ -111,8 +111,8 @@ The testnet banner and Mint page disappear automatically on chain 1.
 ## 6. Stage 2, when Jack's Statement contract ships
 
 1. Read it; write `JackAssembler` (`IAssembler`: `statement()`, `assemble(ids, arrangement)`), fork-test against real Credits.
-2. From the setter: `cast send $FACTORY "proposeAssembler(address)" $ADAPTER` → 3-day exit window (site shows it on every batch).
-3. After 3 days, anyone: `cast send $FACTORY "activateAssembler()"`. Full batches get 7 days to burn.
+2. From the setter: `cast send $FACTORY "proposeAssembler(address)" $ADAPTER` → 30-minute exit window (site shows it on every batch).
+3. After 30 minutes, anyone: `cast send $FACTORY "activateAssembler()"`. Full batches get 7 days to burn.
 
 ## Changing fees later
 

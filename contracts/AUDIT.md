@@ -123,18 +123,50 @@ Per-batch `Split { Equal, Early }` fixed at `initialize`. Early: position i (0-b
 3. Deploy with `PROTOCOL_FEE_BPS`/`SWEEP_FEE_BPS` decided; verify sources on Etherscan/Sourcify.
 
 
-## Change: unlock after fill (branch `unlock-after-fill`, not yet reviewed)
+## Round 3: unlock after fill, Bits, Creator order retired (branch `unlock-after-fill`, Sept 25)
 
-Replaces the deadline/Expired model. Open batches no longer expire (`duration` is still validated and stored but
-not enforced, so the factory interface is unchanged). The 80th deposit sets `filledAt`; `unlocksAt() = filledAt +
-UNLOCK_AFTER` (7 days). `withdraw` is allowed while Open, from Full once `block.timestamp >= unlocksAt()`, and in
-the exit window as before. An unlocked Full batch can still be assembled while all 80 remain; a withdrawal drops it
-to Open. The lock runs once, from the first fill: a refill never re-locks (otherwise a depositor could leave and
-rejoin in one transaction to keep everyone else locked indefinitely). `State.Expired` is never returned (kept so enum values don't shift).
-`effectiveDeadline()` now returns `unlocksAt()`, and `summary().deadline` carries it. `FILL_GRACE` and the
-activation extension are gone: a batch that filled before activation simply waits (unlocked) and is burnable the
-moment the assembler is active. Tests updated: Batch, Adversarial3/4/5, Staged, Audit; five new unit tests
-(open never expires, fill starts lock, unlock lets depositors leave, unlocked batch still assembles, refill
-does not relock). To review: the creator's-order grace (1 day from max(fill, activation)) can now overlap an unlocked
-batch, where a depositor may leave before the creator burns. The creator's grace
-also keys off the first fill.
+**What changed.** The deadline/Expired model is replaced. Open batches never expire (`duration` is still validated
+and stored so the factory interface is unchanged, but nothing reads it). A full batch is locked until `unlocksAt()`,
+then any depositor may withdraw (dropping it back to Open); while all 80 remain it can still be assembled.
+`State.Expired` is never returned (kept so enum values don't shift). `effectiveDeadline()` and `summary().deadline`
+carry `unlocksAt()`. The filter gains a Bits range (`bitsFrom`/`bitsTo` against Jack's `marks`; 0 = unbounded; a
+reversed range is `BadFilter`). The Creator arrangement is retired: `initialize` reverts `ArrangementRetired`,
+`assembleOrdered` and the creator's grace are gone, and Layout batches are burnable by anyone the moment they fill.
+
+**Method.** A line-by-line read of the diff, the full suite, and a separate adversarial pass with proof-of-concept
+tests (`test/AuditBranch.t.sol`).
+
+**Fixed (medium).**
+- *The lock could be spent before burning was possible.* With the lock counted only from the first fill, a batch
+  that filled during the staged launch and waited more than 7 days for the assembler was already unlocked when it
+  first became burnable, so any one depositor could veto the burn by withdrawing ahead of `assemble()`. Now
+  `unlocksAt() = max(filledAt, assemblerActiveAt) + UNLOCK_AFTER`: every batch gets one full lock in which it can
+  actually be burned. Activation happens once, so this can't re-lock twice. (`test_LockRunsFromActivation`)
+- *Fill-and-leave during the exit window spent the lock.* The exit window lets a Full batch be withdrawn from, so an
+  outsider could deposit the 80th Credit and withdraw it in one block, setting `filledAt`; the real fill weeks later
+  would already be unlocked. Leaving a batch whose lock has not lifted (only possible in the exit window) now clears
+  `filledAt`, so the next real fill locks. Harmless as a re-lock: while the window is open anyone may leave
+  regardless. (`test_ExitWindowFillAndLeaveKeepsLock`; `Adversarial3.test_ExitWindowWithdrawThenRefillLocksAgain`)
+
+**Changed by decision: the exit window is 30 minutes (was 3 days).** `ASSEMBLER_DELAY` is now 30 minutes so burning
+can start the day Jack's contract ships. The window is still the only defence against a bad or stolen-key adapter
+(a malicious adapter could burn real Credits and hand the batch a fake Statement), so it now leans on the setter
+being a multisig and on people watching for the proposal. The re-lock at activation still gives every full batch
+7 days to burn.
+
+**Accepted.**
+- Once the lock has lifted, a single depositor can keep front-running `assemble()` with a withdrawal and rejoin,
+  and a refill never re-locks (by design, so nobody can re-lock others). Milder than the old Expired state, which
+  ended the batch; a private relay defeats it. Refill after unlock keeps the original `unlocksAt()`
+  (`test_RefillAfterUnlockDoesNotRelock`).
+- Bits: 0/0 means no filter, so `marks == 0` exactly can't be targeted; `bitsTo` alone admits 0. `bitsTo > 256` is
+  accepted and harmless.
+- `Filled` re-emits the original unlock time on a refill after unlock.
+
+**Checked and clean.** Withdraw during assembly (`nonReentrant`, `_assembling`); assemble when not full; unlock and
+assemble in the same block (first transaction wins cleanly); layout counts on withdraw after unlock; Early-bird
+weights recomputed from the final order; storage (`bitsFrom`/`bitsTo` pack into `layout1`'s slot, clones are fixed
+to one implementation); a Sweeper buy into a batch that just filled reverts whole, Seaport purchase included.
+
+Tests: full suite green except the pre-existing `Adversarial2.test_ConstructorRejectsBadLengths` (Ratings reports
+`BadCount` before `BadChunk` for one case; unrelated to this branch).

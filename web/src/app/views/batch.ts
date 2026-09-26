@@ -176,10 +176,10 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
       ? `<p class="muted small">Unlocked: take your Credits back, or stay for the burn.</p>${withdraw()}`
       : `<p class="muted small">Locked until ${on}. If it isn’t burned by then, anyone can take their Credits back.</p>`;
     if (s.exitWindow) {
-      const until = new Date(s.exitWindowUntil * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric' });
+      const until = new Date(s.exitWindowUntil * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
       return `<div class="box">
-        <h3>Exit window</h3>
-        <p class="muted">A Statement adapter was proposed. Anyone can withdraw until ${until}.</p>
+        <h3>Burning switches on at ${until}</h3>
+        <p class="muted">Until then anyone can take their Credits out of any party, even a full one.</p>
         ${m ? withdraw(true) || '<p class="small muted">You have no Credits here.</p>' : connect}
       </div>`;
     }

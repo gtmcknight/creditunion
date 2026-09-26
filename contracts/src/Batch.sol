@@ -296,9 +296,13 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         return _ids.length == SIZE ? State.Full : State.Open;
     }
 
-    /// @notice When a full batch's lock lifts (first fill + UNLOCK_AFTER); 0 while it is not full.
+    /// @notice When a full batch's lock lifts; 0 while it is not full. The lock runs UNLOCK_AFTER from the first
+    ///         fill, or from the assembler's activation if that came later: a batch always gets one full lock in
+    ///         which it can actually be burned. Activation happens once, so this can't be used to re-lock.
     function unlocksAt() public view returns (uint256) {
-        return _ids.length == SIZE ? uint256(filledAt) + UNLOCK_AFTER : 0;
+        if (_ids.length != SIZE) return 0;
+        uint256 active = factory.assemblerActiveAt();
+        return (active > filledAt ? active : filledAt) + UNLOCK_AFTER;
     }
 
     /// @notice Kept for clients of the old interface: the same as unlocksAt().
@@ -376,8 +380,12 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     ///         exit window is open.
     function withdraw(uint256[] calldata ids) external nonReentrant {
         State s = state();
-        bool unlocked = s == State.Full && (block.timestamp >= unlocksAt() || factory.exitWindowOpen());
+        bool lockLifted = s == State.Full && block.timestamp >= unlocksAt();
+        bool unlocked = lockLifted || (s == State.Full && factory.exitWindowOpen());
         if (s != State.Open && !unlocked) revert WrongState(s);
+        // Leaving a still-locked batch (only possible through the exit window) gives the lock back: otherwise
+        // filling and leaving in one block would spend the batch's only lock before it ever really fills.
+        if (s == State.Full && !lockLifted) filledAt = 0;
         // Book everything first, then move tokens.
         for (uint256 i; i < ids.length; ++i) {
             uint256 id = ids[i];

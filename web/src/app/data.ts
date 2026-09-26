@@ -85,6 +85,8 @@ export type Summary = {
     maxScore: number;
     layout0: bigint; // 4 bits per sheet slot, 0 = any palette, 1–15 = CMYK mask (see Batch.Filter)
     layout1: bigint;
+    bitsFrom: number; // Jack's Bits (marks) range, 0 = unbounded
+    bitsTo: number;
   };
   allowlistSize: number;
   statement: Address;

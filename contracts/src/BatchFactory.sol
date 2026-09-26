@@ -23,7 +23,7 @@ contract BatchFactory {
     uint256 public constant MAX_DURATION = 90 days;
     uint256 public constant MAX_PROTOCOL_FEE_BPS = 500; // hard ceiling, deploy or later: 5%
     uint256 public constant MAX_CREATOR_FEE_BPS = 1000; // 10%
-    uint256 public constant ASSEMBLER_DELAY = 3 days;
+    uint256 public constant ASSEMBLER_DELAY = 30 minutes; // notice before a new assembler goes live; anyone may leave meanwhile
 
     ICredits public immutable credits;
     /// @notice The frozen official score table, or zero if rating rules are unavailable on this deployment.
