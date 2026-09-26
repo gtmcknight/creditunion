@@ -43,37 +43,34 @@ contract SeedDemo is Script {
         }
         Batch.Filter memory none;
 
-        // 1. Settled: 80 → burned → sold
+        // 1. Fills now; burns in burnFirst() once the 5-minute countdown has passed (script/seed-local.sh).
         address b1 = _open(f, keys[0], "First Light", none, 0.5 ether, _r(1, 40));
         _dep(f, keys[1], b1, _r(201, 40));
-        vm.warp(Batch(b1).lockAt()); // simulation only: on anvil, advance 5 minutes first (see note below)
-        vm.broadcast(keys[2]);
-        Batch(b1).assemble();
-        vm.broadcast(keys[4]);
-        Batch(b1).bid{value: 3.2 ether}();
         console.log("CREDITS", address(credits));
         console.log("FACTORY", address(f));
         console.log("RATINGS", address(ratings));
-        console.log("SETTLE_ME", b1);
+        console.log("FIRST", b1);
     }
 
-    /// @dev Run after advancing time 1 day and settling SETTLE_ME.
+    /// @dev After LOCK_DELAY: burn the first party and open its auction. Settle it a day later.
+    function burnFirst(Batch b1) external {
+        vm.broadcast(keys[2]);
+        b1.assemble();
+        vm.broadcast(keys[4]);
+        b1.bid{value: 3.2 ether}();
+    }
+
+    /// @dev Run after FIRST is settled.
     function later(BatchFactory f) external {
         Batch.Filter memory none;
         Batch.Filter memory cyan;
         cyan.palettes = 1 << 7; // CMY
 
-        // 2. Auction running with bids
+        // 2. Fills now; burnSecond() after the countdown makes it an auction with two bids
         address b2 = _open(f, keys[1], "Registered", none, 0, _r(241, 30));
         _dep(f, keys[2], b2, _r(401, 30));
         _dep(f, keys[3], b2, _r(601, 20));
-        vm.warp(Batch(b2).lockAt()); // simulation only, as above
-        vm.broadcast(keys[3]);
-        Batch(b2).assemble();
-        vm.broadcast(keys[4]);
-        Batch(b2).bid{value: 2.4 ether}();
-        vm.broadcast(keys[0]);
-        Batch(b2).bid{value: 2.75 ether}();
+        console.log("SECOND", b2);
 
         // 3. Full, ready to burn
         address b3 = _open(f, keys[2], "Eighty Eights", none, 1 ether, _r(431, 40));
@@ -99,7 +96,7 @@ contract SeedDemo is Script {
         vm.broadcast(keys[0]);
         address b6 = f.create("By Number", none, new uint256[](0), 0, Batch.Arrangement.Number, Batch.Split.Equal, 30 days, _r(101, 40), 200, 0);
         _dep(f, keys[2], b6, _r(481, 40));
-        console.log("BURN_ME", b6);
+        console.log("BURN_ME", b6); // Burnable for an hour once its countdown passes
 
         // 7. Open, time window + number range: the eligibility line on cards
         Batch.Filter memory win;
@@ -108,6 +105,16 @@ contract SeedDemo is Script {
         win.idFrom = 700;
         vm.broadcast(keys[3]);
         f.create("Minute Seven", win, new uint256[](0), 0, Batch.Arrangement.Number, Batch.Split.Equal, 30 days, _r(701, 12), 200, 0);
+    }
+
+    /// @dev After LOCK_DELAY: burn the second party and place two bids.
+    function burnSecond(Batch b2) external {
+        vm.broadcast(keys[3]);
+        b2.assemble();
+        vm.broadcast(keys[4]);
+        b2.bid{value: 2.4 ether}();
+        vm.broadcast(keys[0]);
+        b2.bid{value: 2.75 ether}();
     }
 
     /// A checkered CMY/K layout (mock art: even ids CMY, odd ids K), seeded with a few of each.

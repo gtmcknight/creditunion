@@ -103,7 +103,7 @@ Local chain for UI work:
 
 ```sh
 anvil --gas-limit 60000000
-forge script script/SeedDemo.s.sol --rpc-url http://127.0.0.1:8545 --broadcast --slow
+bash script/seed-local.sh   # parties in every state; advances anvil's clock through the lock phases
 ```
 
 </details>
