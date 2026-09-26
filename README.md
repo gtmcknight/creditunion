@@ -8,15 +8,15 @@ Eighty lets holders of Jack Butcher's [Credits](https://jack.art/credits) pool 8
 
 <table>
 <tr><td width="33%" valign="top"><img src="docs/lifecycle.svg" alt="Party together"><br><b>Party together</b><br>Pool your Credits with other holders. At 80 they burn into a Statement, and everyone in shares the sale.</td><td width="33%" valign="top"><img src="docs/eligibility.svg" alt="Guest list"><br><b>Guest list</b><br>Let any Credit holder join, or pick traits to make a special Statement.</td><td width="33%" valign="top"><img src="docs/order.svg" alt="Custom seating"><br><b>Custom seating</b><br>Set the order they burn in: deposit order, original mint time, or a custom design.</td></tr>
-<tr><td width="33%" valign="top"><img src="docs/buying.svg" alt="Buy refreshments"><br><b>Buy refreshments</b><br>Buy the cheapest Credits that fit from OpenSea, straight into any party.</td><td width="33%" valign="top"><img src="docs/exit.svg" alt="Exit plan"><br><b>Exit plan</b><br>Withdraw anytime before the party fills. If a full party isn’t burned within 7 days, anyone can leave.</td><td width="33%" valign="top"><img src="docs/auction.svg" alt="Afterparty"><br><b>Afterparty</b><br>The Statement goes to auction, and the proceeds are split across everyone in the party.</td></tr>
+<tr><td width="33%" valign="top"><img src="docs/buying.svg" alt="Buy refreshments"><br><b>Buy refreshments</b><br>Buy the cheapest Credits that fit from OpenSea, straight into any party.</td><td width="33%" valign="top"><img src="docs/exit.svg" alt="Exit plan"><br><b>Exit plan</b><br>Leave anytime until a full party locks. If nobody burns it within the hour, it unlocks again.</td><td width="33%" valign="top"><img src="docs/auction.svg" alt="Afterparty"><br><b>Afterparty</b><br>The Statement goes to auction, and the proceeds are split across everyone in the party.</td></tr>
 </table>
 
 ## How a party works
 
 1. **Open.** Anyone with a Credit opens a party and sets its rules: who can join, the burn order, and the split (Equal or Early bird).
 2. **Join.** Holders deposit Credits. Every deposit is checked onchain against the party's rules. No Credit? The Sweeper buys the cheapest fitting OpenSea listings and deposits them in one transaction.
-3. **Leave.** Anyone can withdraw before the party fills. The 80th Credit locks it for 7 days so it can be burned. Not burned by then, depositors may leave or stay.
-4. **Burn.** Anyone calls `assemble()`. The 80 Credits go to Jack's contract in the party's order and the party must end up holding the Statement, or the call reverts.
+3. **Leave.** Anyone can withdraw until the party locks. A full party never locks before Jack's contract and the burn adapter are live. Once they are, a full party counts down 5 minutes (leaving drops it to 79 and stops the clock), then locks for 1 hour, during which nobody can leave and anyone can burn. If nobody burns it, it unlocks: depositors can leave again, and anyone can call `restartCountdown()` for a fresh 5 minutes and hour.
+4. **Burn.** During the locked hour, anyone calls `assemble()`. The 80 Credits go to Jack's contract in the party's order and the party must end up holding the Statement, or the call reverts.
 5. **Auction.** 24 hours from the first bid. Each bid beats the last by 5% (minimum 0.01 ETH). Bids in the last 15 minutes extend it by 15 minutes. Outbid ETH is refunded in the same transaction. The site opens parties with no reserve.
 6. **Split.** Anyone settles. The Statement goes to the winner. A 2% protocol fee comes off the top, only if it sells. The rest goes to the 80 positions: 1/80 each (Equal), or a straight line from 1.5 shares for the first deposit to 0.5 for the last (Early bird). Payouts are pulled with `claim`, callable by anyone for anyone.
 
@@ -60,7 +60,7 @@ There is no database or indexer. Parties, slots and bids are read from the contr
 | `Ratings` | Jack's official rating for all 122,154 Credits, stored as data contracts and read by eligibility rules. |
 | `IAssembler` | The adapter a party calls (never delegatecalls) to burn 80 Credits into a Statement. `MockAssembler` is the testnet version; the mainnet adapter gets written once Jack's Statement contract is published. |
 
-The factory can deploy with no assembler. Parties fill and lock but cannot burn. When the adapter is ready, the setter address proposes it once, which opens a 30-minute window in which anyone can withdraw from any party. After that anyone activates it and the setter has no further powers.
+The factory can deploy with no assembler. Parties fill but never lock, so anyone can always leave. When the adapter is ready, the setter address proposes it once; 30 minutes later anyone activates it and the setter has no further powers. Only then do full parties start their 5-minute countdowns.
 
 Fees are set at deploy and capped in code: protocol 2% (max 5%), creator 0% (max 10%), sweep 2% (max 5%). The fee recipient can change them within the caps; a party keeps the fees it opened with.
 

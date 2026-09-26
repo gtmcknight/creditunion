@@ -5,16 +5,14 @@ import { fitByBatch } from '../fit';
 import { editionArt, examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
 import type { Address } from 'viem';
 import { describeFilter } from '../traits';
-import { eth, esc, same, sheet, until } from '../ui';
+import { clock, eth, esc, same, sheet, until } from '../ui';
 
 function status(s: Summary) {
   switch (s.state) {
     case 'Open':
       return `${80 - s.count} to go`;
     case 'Full':
-      if (s.exitWindow) return 'Full · exit window open';
-      if (Date.now() / 1000 >= s.deadline) return 'Full · unlocked';
-      return s.canAssemble ? 'Full · ready to burn' : 'Full · waiting for Jack';
+      return fullStatus(s);
     case 'Expired':
       return 'Expired · Credits returnable';
     case 'Auction':
@@ -22,6 +20,15 @@ function status(s: Summary) {
     case 'Settled':
       return `Sold ${eth(s.highBid)}`;
   }
+}
+
+/// A full party by where it stands in the lock cycle, read against the clock so a stale list still reads right.
+export function fullStatus(s: Summary) {
+  const now = Date.now() / 1000;
+  if (s.phase === 'Waiting') return 'Full · waiting for Jack';
+  if (s.phase === 'Countdown' && now < s.lockAt) return `Locks in ${clock(s.lockAt)}`;
+  if ((s.phase === 'Countdown' || s.phase === 'Burnable') && now < s.deadline) return 'Ready to burn';
+  return 'Unlocked';
 }
 
 const SORTS = [

@@ -21,7 +21,33 @@ export const batchAbi = [
   },
   {
     "type": "function",
+    "name": "BURN_WINDOW",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "EXTENSION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "LOCK_DELAY",
     "inputs": [],
     "outputs": [
       {
@@ -151,19 +177,6 @@ export const batchAbi = [
   },
   {
     "type": "function",
-    "name": "UNLOCK_AFTER",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "allowed",
     "inputs": [
       {
@@ -259,6 +272,32 @@ export const batchAbi = [
     "inputs": [],
     "outputs": [],
     "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "burnDeadline",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "burnOrder",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "out",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -441,19 +480,6 @@ export const batchAbi = [
         "name": "",
         "type": "address",
         "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "effectiveDeadline",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -795,6 +821,19 @@ export const batchAbi = [
   },
   {
     "type": "function",
+    "name": "lockAt",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "minBid",
     "inputs": [],
     "outputs": [
@@ -919,6 +958,19 @@ export const batchAbi = [
   },
   {
     "type": "function",
+    "name": "phase",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint8",
+        "internalType": "enum Batch.Phase"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "protocolFeeBps",
     "inputs": [],
     "outputs": [
@@ -960,6 +1012,13 @@ export const batchAbi = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "restartCountdown",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -1109,12 +1168,12 @@ export const batchAbi = [
             "internalType": "bool"
           },
           {
-            "name": "exitWindow",
-            "type": "bool",
-            "internalType": "bool"
+            "name": "phase",
+            "type": "uint8",
+            "internalType": "enum Batch.Phase"
           },
           {
-            "name": "exitWindowUntil",
+            "name": "lockAt",
             "type": "uint64",
             "internalType": "uint64"
           },
@@ -1316,19 +1375,6 @@ export const batchAbi = [
   },
   {
     "type": "function",
-    "name": "unlocksAt",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "withdraw",
     "inputs": [
       {
@@ -1452,7 +1498,7 @@ export const batchAbi = [
     "name": "Filled",
     "inputs": [
       {
-        "name": "unlocksAt",
+        "name": "lockAt",
         "type": "uint64",
         "indexed": false,
         "internalType": "uint64"
@@ -1607,11 +1653,6 @@ export const batchAbi = [
   },
   {
     "type": "error",
-    "name": "AssemblerNotReady",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "AuctionOver",
     "inputs": []
   },
@@ -1760,6 +1801,17 @@ export const batchAbi = [
     "type": "error",
     "name": "StatementNotReceived",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "WrongPhase",
+    "inputs": [
+      {
+        "name": "phase",
+        "type": "uint8",
+        "internalType": "enum Batch.Phase"
+      }
+    ]
   },
   {
     "type": "error",
@@ -2181,19 +2233,6 @@ export const factoryAbi = [
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "exitWindowOpen",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
   },
   {
     "type": "function",

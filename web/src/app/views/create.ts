@@ -1,21 +1,31 @@
 import { go as navigate } from '../main';
 import { decodeEventLog, parseEther } from 'viem';
 import { creditsAbi, factoryAbi } from '../abi';
-import { config, send, session } from '../chain';
+import { canBatch, config, send, sendBatch, session } from '../chain';
 import { INK, maskInks, maskLabel } from '../traits';
-import { ARRANGEMENTS, SPLITS, creatorFeeBps, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Rated } from '../data';
+import { SPLITS, creatorFeeBps, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Rated } from '../data';
 import { paletteBit, TRAITS } from '../traits';
-import { $$, art, errText, sheet, toast } from '../ui';
+import { $$, art, errText, esc, sheet, toast } from '../ui';
 import { LAYOUT_TRAITS, keyOf, ruleFor, slotMark, slotName, type LayoutTrait } from '../../shared/layout';
+import { editionArt } from '../ghosts';
 
 const CHUNK = 40;
-const ARR_HINTS = [
-  'In the order they were deposited.',
-  'Earliest mint first.',
-  'Lowest number first.',
-  '',
-  'You paint the sheet; the 80 go to Jack’s contract slot by slot.',
+/// The layouts a new party can pick, by the contract's burn-order number (1 Mint time and 3 Creator's order are retired).
+const ARR_OPTS: [number, string, string][] = [
+  [0, 'Deposit', 'In the order they were deposited.'],
+  [2, 'Number ↑', 'By Credit number (token ID), lowest to highest.'],
+  [5, 'Number ↓', 'By Credit number (token ID), highest to lowest.'],
+  [4, 'Painted', 'You paint the sheet; each Credit goes to its slot.'],
 ];
+/// A 4×5 thumbnail per layout: shade steps show the order the sheet fills in.
+const arrIcon = (v: number) => {
+  const cells = Array.from({ length: 20 }, (_, i) => {
+    const k = v === 2 ? i : v === 5 ? 19 - i : v === 0 ? [3, 11, 7, 15, 0, 18, 9, 5, 13, 1, 16, 6, 10, 2, 19, 8, 14, 4, 17, 12][i] : -1;
+    const fill = v === 4 ? ([0, 3, 5, 6, 9, 10, 13, 14, 16, 19].includes(i) ? '#00b5e2' : '#e4007c') : `rgba(17,17,17,${(0.12 + (0.88 * (19 - k)) / 19).toFixed(2)})`;
+    return `<rect x="${(i % 4) * 7}" y="${((i / 4) | 0) * 7}" width="6" height="6" fill="${fill}"/>`;
+  }).join('');
+  return `<svg viewBox="0 0 27 34" aria-hidden="true">${cells}</svg>`;
+};
 /// Layout presets: which slots take brush A, brush B, or stay open (any palette).
 /// A shape drawn on the 8×10 sheet, row by row: # takes brush A, . takes brush B.
 const bitmap = (rows: string) => {
@@ -146,6 +156,11 @@ const weightGlyph = (name: string) =>
     .map((k) => `<rect x="${3 + (k % 6) * 3}" y="${3 + Math.floor(k / 6) * 3}" width="3" height="3" fill="#111"/>`)
     .join('')}<rect x="3" y="3" width="18" height="18" fill="none" stroke="#111" stroke-opacity=".25" stroke-width=".6"/></svg>`;
 
+/// The eights tile in miniature: a die face with one dot per 8, laid out like the tile's pips.
+const DICE: Record<number, [number, number][]> = { 0: [], 1: [[1, 1]], 2: [[0, 0], [2, 2]], 3: [[0, 0], [1, 1], [2, 2]], 4: [[0, 0], [2, 0], [0, 2], [2, 2]], 5: [[0, 0], [2, 0], [1, 1], [0, 2], [2, 2]] };
+const dice = (n: number) =>
+  `<svg viewBox="0 0 24 24" aria-hidden="true">${(DICE[n] ?? []).map(([x, y]) => `<circle cx="${6 + x * 6}" cy="${6 + y * 6}" r="2.2" fill="#111"/>`).join('')}</svg>`;
+
 /// Plates as a stack of offset inks: 1 is cyan alone, 4 is cyan, magenta, yellow and black overprinted.
 const platesGlyph = (n: number) => {
   const inks = ['#00B5E2', '#E4007C', '#FFD100', '#111111'].slice(0, n);
@@ -234,13 +249,13 @@ export async function create(app: HTMLElement) {
     <div class="design-preview">
       <div id="preview">${sheet([])}</div>
       <div class="preview-foot">
-        <p class="muted small preview-count">Possible matches: <span class="num" id="st-edition">–</span></p>
-        <div class="view-toggle" role="radiogroup" aria-label="Show"><label><input type="radio" name="view" value="rules"><span>Rules</span></label><label><input type="radio" name="view" value="credits" checked><span>Credits</span></label></div>
+        <div class="view-toggle" role="radiogroup" aria-label="Show" hidden><label><input type="radio" name="view" value="rules"><span>Rules</span></label><label><input type="radio" name="view" value="credits" checked><span>Credits</span></label></div>
+        <span class="muted small num" id="layout-pick"></span>
       </div>
     </div>
 
     <form id="create" class="design-form" novalidate>
-      <h2 class="form-title">Who can join</h2>
+      <h2 class="form-title">Who can join <button type="button" class="link small join-count" id="see-eligible"><span class="num" id="st-edition">–</span> <span id="st-edition-label">eligible</span></button></h2>
       <section class="rule who-bar" data-pane="who">
         <p class="rule-sentence" id="rule-sentence"></p>
         <div class="rule-list" id="add-rule"></div>
@@ -295,6 +310,20 @@ export async function create(app: HTMLElement) {
 
 
 
+      <h2 class="form-title">Layout</h2>
+      <section class="rule layout-opts" data-tab="order" data-pane="order">
+        <div class="arr-tiles" role="radiogroup" aria-label="Layout">${ARR_OPTS.map(([v, l, h]) => `<label class="arr-tile" title="${h}"><input type="radio" name="arr" value="${v}" ${v === 0 ? 'checked' : ''}>${arrIcon(v)}<b>${l}</b></label>`).join('')}</div>
+        <p class="term-desc muted" id="arr-hint">${ARR_OPTS[0][2]}</p>
+        <div class="paint-block" id="paint-block" hidden>
+          <div class="brushes" id="brushes"></div>
+          <div class="paint-bar">
+            <p class="term-desc muted" id="paint-hint">Pick a color, then click or drag on the sheet.</p>
+          </div>
+          <div id="designs"></div>
+          <div class="lgrid" id="lgrid" hidden>${Array.from({ length: 80 }, (_, i) => `<button type="button" class="lcell" data-i="${i}" aria-label="Slot ${i + 1}"></button>`).join('')}</div>
+        </div>
+      </section>
+
       <h2 class="form-title">Settings</h2>
       <div class="rule-list party-list">
         <div class="rrow">
@@ -306,33 +335,22 @@ export async function create(app: HTMLElement) {
             <div class="opt-list">${SPLITS.map((l, i) => `<label class="opt"><input type="radio" name="split" value="${i}" ${i === 0 ? 'checked' : ''}><span class="opt-body"><b>${l}</b><span>${PAYOUT_HINTS[i]}</span></span></label>`).join('')}</div>
           </section>
         </div>
-        <div class="rrow" data-prow="order">
-          <div class="rrow-head"><button type="button" class="rrow-toggle" data-party-btn="order" aria-expanded="false"><span class="rrow-name">Burn order</span><span class="rrow-value" id="order-value">Deposit order</span><svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button></div>
-      <section class="rule" data-tab="order" data-pane="order" hidden>
-        <div class="opt-list">${[0, 1, 2, 4].map((i) => `<label class="opt"><input type="radio" name="arr" value="${i}" ${i === 0 ? 'checked' : ''}><span class="opt-body"><b>${i === 4 ? 'Painted' : ARRANGEMENTS[i]}</b><span>${ARR_HINTS[i]}</span></span></label>`).join('')}</div>
-        <div class="paint-block" id="paint-block" hidden>
-          <div class="brushes" id="brushes"></div>
-          <div class="patterns" id="layout-presets">${['Clear']
-          .map((k) => (k === 'Clear' ? `<button type="button" class="link small clear-all" data-layout="Clear">Clear all</button>` : `<button type="button" class="pattern" data-layout="${k}" title="Fill as ${k}" aria-label="${k}">${patternIcon(k)}</button>`))
-          .join('')}</div>
-          <p class="term-desc muted" id="layout-pick"></p>
-          <div class="lgrid" id="lgrid" hidden>${Array.from({ length: 80 }, (_, i) => `<button type="button" class="lcell" data-i="${i}" aria-label="Slot ${i + 1}"></button>`).join('')}</div>
-        </div>
-      </section>
-        </div>
       </div>
 
-      <h2 class="form-title">Your Credits <span class="muted num" id="n">Min ${min}</span><button type="button" class="link small" id="all">Select all that fit</button></h2>
+      <h2 class="form-title">Deposit Credits <span class="muted num" id="n">Min ${min}</span><button type="button" class="link small" id="all">Select all that fit</button></h2>
       <section class="rule" data-tab="credits" data-pane="always">
         <div class="picker lg" id="picker">${
           owned.length
             ? owned.map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="false" title="Credit #${id}"><img src="${art(id)}" alt="Credit #${id}" loading="lazy"></button>`).join('')
             : `<p class="muted">You don’t hold any Credits.${config.chainId !== 1 ? ' <a href="/mint">Mint test Credits →</a>' : ''}</p>`
         }</div>
+        <p class="muted small" id="picker-none" hidden>None of your Credits fit these rules.</p>
+        <details class="picker-off" id="picker-off-wrap" hidden><summary class="muted small" id="picker-off-sum"></summary><div class="picker lg" id="picker-off"></div></details>
       </section>
 
 
       <div class="submit">
+        <p class="gate-warn" id="warn" hidden></p>
         <button class="btn primary block" id="go" disabled>Start party</button>
         <p class="hint" id="why"></p>
       </div>
@@ -378,8 +396,10 @@ export async function create(app: HTMLElement) {
   const go = document.getElementById('go') as HTMLButtonElement;
   const why = document.getElementById('why')!;
   let isOk = approved;
+  if (!approved) void canBatch(); // ask early, so Start doesn't wait on the wallet
   let editionTimer = 0;
   let editionSeq = 0;
+  let eligible = -1; // how many edition Credits pass the rules; under 80 the party can never fill
 
   const describe = () => {
     const parts: string[] = [];
@@ -407,11 +427,25 @@ export async function create(app: HTMLElement) {
     const fit = owned.filter(qualifies);
     for (const id of [...picks]) if (!fit.some((f) => f.toString() === id)) picks.delete(id);
     drawPreview(fit);
-    $$<HTMLButtonElement>('.pick', app).forEach((p) => {
-      const ok = fit.some((f) => f.toString() === p.dataset.id);
+    // Credits that fit the rules stay in the picker; the rest fold away underneath, in the same order.
+    const on = document.getElementById('picker')!, offBox = document.getElementById('picker-off')!;
+    const fitSet = new Set(fit.map(String));
+    let offCount = 0;
+    for (const id of owned) {
+      const p = app.querySelector<HTMLButtonElement>(`.pick[data-id="${id}"]`);
+      if (!p) continue;
+      const ok = fitSet.has(id.toString());
+      if (!ok) offCount++;
       p.classList.toggle('off', !ok);
       p.setAttribute('aria-pressed', String(picks.has(p.dataset.id!)));
-    });
+      (ok ? on : offBox).append(p);
+    }
+    if (owned.length) {
+      document.getElementById('picker-none')!.hidden = fit.length > 0;
+      const wrap = document.getElementById('picker-off-wrap')!;
+      wrap.hidden = offCount === 0;
+      document.getElementById('picker-off-sum')!.textContent = `You also have ${offCount} ${offCount === 1 ? 'Credit' : 'Credits'} that don’t fit these rules`;
+    }
     document.getElementById('n')!.textContent = picks.size ? `${picks.size} selected` : `Min ${min}`;
     document.getElementById('all')!.hidden = !fit.length;
     const n = picks.size;
@@ -419,9 +453,14 @@ export async function create(app: HTMLElement) {
     // The contract refuses rules that can never admit 80.
     const tooNarrow = rules.list.length && rules.list.length < 80 ? 'A named list needs at least 80 Credits.'
       : rules.idTo && rules.idTo - rules.idFrom + 1 < 80 ? 'A number range needs at least 80 numbers.' : '';
-    const reason = tooNarrow || (n < min ? `Select at least ${min} of your qualifying Credits.` : n > 80 ? 'At most 80.' : over ? overText(over) : '');
+    const short = eligible >= 0 && eligible < 80 ? `Only ${eligible} ${eligible === 1 ? 'Credit' : 'Credits'} can ever join, and a party needs 80. Widen the rules.` : '';
+    const reason = tooNarrow || short || (n < min ? `Select at least ${min} of your qualifying Credits.` : n > 80 ? 'At most 80.' : over ? overText(over) : '');
     // One line under the button: what blocks it, else how it plays out.
-    why.innerHTML = reason || `${n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions. ` : ''}Free to start. Take your Credits back anytime before it fills.<br>${Number(protocolBps) / 100}% protocol fee, only if it sells. Unofficial and experimental.`;
+    // What blocks Start sits above it as a warning; the line under it always says how it plays out.
+    const warn = document.getElementById('warn')!;
+    warn.textContent = reason;
+    warn.hidden = !reason;
+    why.innerHTML = `${n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions. ` : ''}Free to create a party. Withdraw your Credits anytime until the party fills and locks.<br>${Number(protocolBps) / 100}% protocol fee, only if it sells. Unofficial and experimental.`;
     go.disabled = !!reason;
     if (!go.dataset.busy) go.textContent = startLabel();
     drawSummary();
@@ -448,9 +487,19 @@ export async function create(app: HTMLElement) {
             list: rules.list.slice(0, 200),
           }),
         });
-        const d = (await r.json()) as { count?: number; sample?: number[]; palettes?: number[]; traits?: number[] };
+        const d = (await r.json()) as { total?: number; count?: number; sample?: number[]; palettes?: number[]; traits?: number[] };
         if (seq !== editionSeq) return;
-        if (typeof d.count === 'number') el.textContent = d.count.toLocaleString();
+        if (typeof d.count === 'number') {
+          el.textContent = d.count.toLocaleString();
+          el.closest('.join-count')!.classList.toggle('short', d.count < 80);
+          // Re-run the checks when the count changes (the next fetch returns the same count, so this settles).
+          if (eligible !== d.count) {
+            eligible = d.count;
+            refresh();
+          }
+          // With no rules it's the whole edition; with rules, how many Credits pass them.
+          document.getElementById('st-edition-label')!.textContent = d.count === d.total ? 'Credits, all eligible' : d.count === 1 ? 'eligible Credit' : 'eligible Credits';
+        }
         ghosts = (d.sample ?? []).map((id, i) => ({ id: BigInt(id), palette: d.palettes?.[i] ?? 0, t: d.traits?.[i] ?? 0 }));
         // A painted sheet needs samples of each painted value, not just whatever the overall sample holds: ask for
         // each value on its own (the party's rules narrowed to that value), so every painted slot has a Credit.
@@ -488,7 +537,8 @@ export async function create(app: HTMLElement) {
   /// Your qualifying Credits solid, then real matching Credits from the edition, faded, up to 80.
   /// The checkered design alternates the two palettes so the pattern is visible before anyone joins.
   function drawPreview(fit: bigint[]) {
-    const mineIds = fit.slice(0, 80);
+    // Only the Credits you've selected go in solid; the rest of yours read like any other possible match.
+    const mineIds = fit.filter((id) => picks.has(id.toString())).slice(0, 80);
     const mineSet = new Set(mineIds.map(String));
     let rest = ghosts.filter((g) => !mineSet.has(g.id.toString()));
     const painted = layout.some(Boolean);
@@ -609,6 +659,7 @@ export async function create(app: HTMLElement) {
     if (cell && view === 'rules') (cell as HTMLElement).innerHTML = layout[i] ? glyphFor(layoutTrait, layout[i]) : '';
   };
   let brush = brushA;
+  let designAdded = 0; // Colors a design put on Who can join (not ones you picked yourself)
   let capWarned = false; // one toast per stroke
   let picked = 0; // Colors chosen on the tiles (palette bits)
 
@@ -654,7 +705,7 @@ export async function create(app: HTMLElement) {
   const gallery = (colours: (a: number, b: number) => [string, string]) =>
     `<div class="paint-designs">${DESIGNS.map(([n, a, b], i) => {
       const [ca, cb] = colours(a, b);
-      return `<button type="button" class="paint-design" data-design="${i}" aria-label="${n}">${designIcon(n, ca, cb)}<span>${n}</span></button>`;
+      return `<button type="button" class="paint-design" data-design="${i}" aria-label="${n}" title="${n}">${designIcon(n, ca, cb)}</button>`;
     }).join('')}</div>`;
   /// Once a sheet has paint, it's that trait's sheet: the other traits' brushes wait until it's cleared.
   const locked = (t: number) => t !== layoutTrait && layout.some(Boolean);
@@ -671,16 +722,16 @@ export async function create(app: HTMLElement) {
       }
     });
     if (!gs.length) {
-      document.getElementById('brushes')!.innerHTML = `<p class="term-desc">Pick Colors, Eights, Print, Weight or Plates above to paint with them, or start from a design.</p>
+      document.getElementById('brushes')!.innerHTML = `<p class="term-desc">Pick Colors, Eights, Print or Weight above to paint with them, or start from a design.</p>
         ${gallery((a, b) => [MIX_HEX[a], MIX_HEX[b]])}`;
-      app.querySelector<HTMLElement>('#layout-presets')!.hidden = true;
+      app.querySelector<HTMLElement>('.paint-bar')!.hidden = true;
+      document.getElementById('designs')!.innerHTML = '';
       if (wiped) syncLayout();
       return;
     }
-    app.querySelector<HTMLElement>('#layout-presets')!.hidden = false;
+    app.querySelector<HTMLElement>('.paint-bar')!.hidden = false;
     if (!gs.some(([, t]) => t === layoutTrait)) layoutTrait = gs[0][1];
     if (brush && !valuesOf(layoutTrait).includes(brush)) brush = valuesOf(layoutTrait)[0] ?? 0;
-    const erase = `<button type="button" class="brush erase" data-trait="${layoutTrait}" data-v="0" title="Paint slots back to any Credit" aria-pressed="${brush === 0}">Erase</button>`;
     // One row per trait you picked; erase leads the first row.
     // One category at a time: pick it, then its brushes. A sheet paints with one trait, so the choice is explicit.
     const withSeg = gs.length > 1
@@ -688,10 +739,11 @@ export async function create(app: HTMLElement) {
       : `<div class="paint-with"><span class="eyebrow">Paint with ${LAYOUT_TRAITS[gs[0][1]]}</span></div>`;
     document.getElementById('brushes')!.innerHTML =
       withSeg +
-      `<span class="brush-group">${valuesOf(layoutTrait)
+      `<div class="paint-swatches"><span class="brush-group">${valuesOf(layoutTrait)
         .map((v) => `<button type="button" class="brush" data-trait="${layoutTrait}" data-v="${v}" title="${slotName(layoutTrait, v)}" aria-label="${slotName(layoutTrait, v)}" aria-pressed="${v === brush}">${glyphFor(layoutTrait, v)}</button>`)
-        .join('')}</span>` +
-      gallery(() => { const [A, B] = pair(); return [paintHex(A), B ? paintHex(B) : '']; }) + `<div class="paint-tools">${erase}</div>`;
+        .join('')}</span><button type="button" class="link small clear-all" data-layout="Clear">Clear all</button></div>`;
+    document.getElementById('designs')!.innerHTML =
+      `<span class="eyebrow">Or start from a design</span>` + gallery(() => { const [A, B] = pair(); return [paintHex(A), B ? paintHex(B) : '']; });
     if (wiped) syncLayout();
   }
   let painting = false;
@@ -731,7 +783,7 @@ export async function create(app: HTMLElement) {
     drawBrushes();
     syncLayout();
   });
-  document.getElementById('brushes')!.addEventListener('click', (e) => {
+  document.getElementById('paint-block')!.addEventListener('click', (e) => {
     const d = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-design]');
     if (d) {
       // A design paints the sheet in two Colors and adds them to Who can join, so their brushes appear.
@@ -740,6 +792,7 @@ export async function create(app: HTMLElement) {
       if (groups().length) [A, B] = pair(); // fill with what you picked
       else {
         layoutTrait = 0;
+        designAdded |= ((1 << A) | (1 << B)) & ~picked; // remembered so Clear all can take them back off
         picked |= (1 << A) | (1 << B);
         rules.palettes = picked;
       }
@@ -769,9 +822,21 @@ export async function create(app: HTMLElement) {
     drawBrushes();
     syncLayout();
   });
-  document.getElementById('layout-presets')!.addEventListener('click', (e) => {
+  document.getElementById('paint-block')!.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-layout]');
     if (!b) return;
+    // Clear all also takes off the Colors a design added, so you're back to the starting designs.
+    if (b.dataset.layout === 'Clear' && designAdded) {
+      picked &= ~designAdded;
+      rules.palettes = picked;
+      designAdded = 0;
+      layout.fill(0);
+      for (let i = 0; i < 80; i++) paintCell(i);
+      drawBrushes();
+      syncLayout();
+      applyPanes();
+      return;
+    }
     const fn = LAYOUTS[b.dataset.layout!];
     const A = brush || brushA;
     const B = brushB && brushB !== A ? brushB : layoutTrait === 0 && A !== 8 ? 8 : 0;
@@ -789,6 +854,7 @@ export async function create(app: HTMLElement) {
       if (!btn) return;
       if (key === 'palettes') {
         picked ^= 1 << Number(btn.dataset.bit);
+        designAdded &= ~(1 << Number(btn.dataset.bit)); // touched by hand: yours now
         rules.palettes = picked;
       } else rules[key] ^= 1 << Number(btn.dataset.bit); // tap to add, tap again to remove
       pattern = 'none';
@@ -977,25 +1043,28 @@ export async function create(app: HTMLElement) {
   // Name, order, payout and deadline changes update the recap and the step marks.
   document.getElementById('create')!.addEventListener('input', drawSummary);
   document.getElementById('create')!.addEventListener('change', drawSummary);
-  // Painted is a burn order: picking it opens the painter (brushes from your rules, paint on the sheet itself);
+  // Painted is a layout: picking it opens the painter (brushes from your rules, paint on the sheet itself);
   // leaving it clears the paint.
   const paintBlock = document.getElementById('paint-block')!;
   const preview = document.getElementById('preview')!;
   const syncOrder = () => {
-    const on = arrRadios.find((r) => r.checked)?.value === '4';
+    const v = arrRadios.find((r) => r.checked)?.value;
+    document.getElementById('arr-hint')!.textContent = ARR_OPTS.find(([x]) => String(x) === v)?.[2] ?? '';
+    const on = v === '4';
     paintBlock.hidden = !on;
+    // Rules only mean something slot by slot on a painted sheet; otherwise every slot takes the same Credits.
+    app.querySelector<HTMLElement>('.view-toggle')!.hidden = !on;
     preview.classList.toggle('paintable', on);
     setView(on ? 'rules' : 'credits');
     if (on) drawBrushes();
-    else if (layout.some(Boolean)) app.querySelector<HTMLButtonElement>('[data-layout="Clear"]')?.click();
+    else if (layout.some(Boolean)) {
+      layout.fill(0);
+      for (let i = 0; i < 80; i++) paintCell(i);
+      syncLayout();
+    }
   };
   app.querySelectorAll<HTMLInputElement>('input[name=view]').forEach((r) => r.addEventListener('change', () => setView(r.value as 'rules' | 'credits')));
-  app.querySelectorAll<HTMLInputElement>('input[name=arr]').forEach((r) =>
-    r.addEventListener('change', () => {
-      document.getElementById('order-value')!.textContent = r.value === '4' ? 'Painted' : ARRANGEMENTS[Number(r.value)];
-      syncOrder();
-    }),
-  );
+  arrRadios.forEach((r) => r.addEventListener('change', syncOrder));
   // Paint straight onto the preview sheet: tap or drag across its slots.
   const slotAt = (x: number, y: number) => {
     const c = document.elementFromPoint(x, y)?.closest<HTMLElement>('#preview .cell');
@@ -1046,7 +1115,7 @@ export async function create(app: HTMLElement) {
     if (rules.list.length > 200) return toast('At most 200 listed Credits.', 'err');
     const nameEl = document.getElementById('name') as HTMLInputElement;
     const name = nameEl.value.trim() || nameEl.placeholder; // left blank: take the suggested name
-    const days = 90; // required by the factory, no longer enforced: open parties don't expire, full ones unlock after 7 days
+    const days = 90; // required by the factory, no longer enforced: open parties don't expire, full ones follow the countdown and burn hour
     const chosen = Number((app.querySelector('input[name=arr]:checked') as HTMLInputElement).value);
     const arr = chosen === 4 && !layout.some(Boolean) ? 0 : chosen; // Painted with nothing painted burns in deposit order
     const split = Number((app.querySelector('input[name=split]:checked') as HTMLInputElement).value);
@@ -1071,26 +1140,37 @@ export async function create(app: HTMLElement) {
     go.disabled = true;
     go.dataset.busy = '1'; // progress labels below own the button until this finishes
     try {
-      // First party from this wallet: the factory needs permission to move your Credits, once.
-      if (!isOk) {
-        go.textContent = 'Allow Eighty to move your Credits…';
-        await send({ address: config.credits, abi: creditsAbi, functionName: 'setApprovalForAll', args: [config.factory, true] });
-        isOk = true;
-      }
-      go.textContent = 'Opening…';
-      const receipt = await send({
+      const open = {
         address: config.factory,
         abi: factoryAbi,
         functionName: 'create',
         // The fees shown on this page go along: the open reverts if they changed underneath you.
         args: [name, f, rules.list.map(BigInt), reserve, arr, split, BigInt(days * 86400), ids.slice(0, CHUNK), BigInt(protocolBps), BigInt(creatorBps)],
-      });
+      };
+      const approve = { address: config.credits, abi: creditsAbi, functionName: 'setApprovalForAll', args: [config.factory, true] };
+      let logs: { address: string; data: `0x${string}`; topics: readonly `0x${string}`[] }[];
+      if (!isOk && (await canBatch())) {
+        // First party from this wallet, and the wallet batches: approve and open in one step.
+        go.textContent = 'Opening…';
+        const receipts = await sendBatch([approve, open]);
+        isOk = true;
+        logs = receipts.flatMap((r) => r.logs);
+      } else {
+        // First party from this wallet: the factory needs permission to move your Credits, once.
+        if (!isOk) {
+          go.textContent = 'Allow Eighty to move your Credits…';
+          await send(approve);
+          isOk = true;
+        }
+        go.textContent = 'Opening…';
+        logs = (await send(open)).logs;
+      }
       // Only the factory's own logs: any contract the call touched could emit a look-alike BatchCreated.
-      const ev = receipt.logs
+      const ev = logs
         .filter((l) => l.address.toLowerCase() === config.factory.toLowerCase())
         .map((l) => {
           try {
-            return decodeEventLog({ abi: factoryAbi, ...l });
+            return decodeEventLog({ abi: factoryAbi, data: l.data, topics: l.topics as [`0x${string}`, ...`0x${string}`[]] });
           } catch {
             return null;
           }
@@ -1101,7 +1181,10 @@ export async function create(app: HTMLElement) {
         go.textContent = `Depositing ${i}–${Math.min(i + CHUNK, ids.length)}…`;
         await send({ address: config.factory, abi: factoryAbi, functionName: 'deposit', args: [batch, ids.slice(i, i + CHUNK)] });
       }
-      toast('Party opened.', 'ok');
+      // The party page picks this up and shows the congrats and share dialog, once.
+      try {
+        sessionStorage.setItem('eighty-created', batch);
+      } catch {}
       navigate(`/party/${batch}`);
     } catch (x) {
       toast(errText(x), 'err', 8000);
@@ -1111,7 +1194,7 @@ export async function create(app: HTMLElement) {
     }
   });
 
-  // Sections: who can join, order, terms. Rules start hidden; you add the ones you want, and each
+  // Sections: who can join, layout, settings. Rules start hidden; you add the ones you want, and each
   // added rule can be removed (which also clears it).
   const RULES: Record<string, string> = { eights: 'Eights', weight: 'Weight', print: 'Print', palette: 'Colors', time: 'Time', rating: 'Rating', numbers: 'Token' };
   const sections = [...app.querySelectorAll<HTMLElement>('.rule[data-pane]')];
@@ -1130,14 +1213,28 @@ export async function create(app: HTMLElement) {
     const row = document.createElement('div');
     row.className = 'rrow';
     row.dataset.row = k;
-    row.innerHTML = `<div class="rrow-head"><button type="button" class="rrow-toggle" data-tab-btn="${k}" aria-expanded="false"><span class="rrow-name">${l}</span><span class="rrow-value"></span><svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button><button type="button" class="rrow-clear" data-clear-rule="${k}" aria-label="Clear ${l}" hidden>×</button></div>`;
+    row.innerHTML = `<div class="rrow-head"><button type="button" class="rrow-toggle" data-tab-btn="${k}" aria-expanded="false"><span class="rrow-name">${l}</span><span class="rrow-value"></span><svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button></div>`;
     const sec = sections.find((x) => x.dataset.tab === k && x.dataset.pane === 'who');
-    if (sec) row.append(sec);
+    if (sec) {
+      // Clearing lives inside the open editor, on the description line, away from the row's chevron.
+      const desc = sec.querySelector('.rule-desc');
+      desc?.insertAdjacentHTML('afterend', `<button type="button" class="link small rule-clear" data-clear-rule="${k}" hidden>Clear</button>`);
+      if (desc) {
+        const line = document.createElement('div');
+        line.className = 'rule-descline';
+        desc.before(line);
+        line.append(desc, sec.querySelector('.rule-clear')!);
+      }
+      row.append(sec);
+    }
     list.append(row);
   }
   /// The rules as one plain sentence: any of the picks within a rule (or), every rule at once (and).
   const INK_WORD: Record<string, string> = { C: 'cyan', M: 'magenta', Y: 'yellow', K: 'black' };
-  const or = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} or ${xs[xs.length - 1]}`);
+  // The sentence is HTML so OR and AND can stand out; every value in it is escaped.
+  const OR = ' <b class="conj">OR</b> ', AND = ', <b class="conj">AND</b> it ';
+  const or = (xs: string[]) => { const e = xs.map((x) => `<span class="v">${esc(x)}</span>`); return e.length < 2 ? e.join('') : `${e.slice(0, -1).join(', ')}${OR}${e[e.length - 1]}`; };
+  const txt = (id: string) => `<span class="v">${esc(document.getElementById(id)?.textContent ?? '')}</span>`;
   const bitsOf = (m: number, n: number) => Array.from({ length: n }, (_, i) => i).filter((i) => m & (1 << i));
   const sentence = () => {
     const parts: string[] = [];
@@ -1145,13 +1242,55 @@ export async function create(app: HTMLElement) {
     if (rules.eights) parts.push(`has ${or(bitsOf(rules.eights, 9).map(String))} eights`);
     if (rules.weights) parts.push(`has ${or(bitsOf(rules.weights, 4).map((i) => WEIGHTS[i]))} weight`);
     if (rules.prints) parts.push(`has a ${or(bitsOf(rules.prints, 6).map((i) => PRINTS[i]))} print`);
-    if (rules.minuteFrom >= 0 || rules.minuteTo >= 0) parts.push(`was paid ${document.getElementById('win-text')?.textContent ?? ''}`);
-    if (rules.minScore || rules.maxScore) parts.push(`is rated ${document.getElementById('score-text')?.textContent ?? ''}`);
-    if (rules.idFrom || rules.idTo || rules.list.length) parts.push(`is ${document.getElementById('id-hint')?.textContent ?? ''}`);
-    return parts.length ? `A Credit can join if it ${parts.join(', and it ')}.` : 'Any Credit can join.';
+    if (rules.minuteFrom >= 0 || rules.minuteTo >= 0) parts.push(`was paid ${txt('win-text')}`);
+    if (rules.minScore || rules.maxScore) parts.push(`is rated ${txt('score-text')}`);
+    if (rules.idFrom || rules.idTo || rules.list.length) parts.push(`is ${txt('id-hint')}`);
+    return parts.length ? `A Credit can join if it ${parts.join(AND)}.` : 'Any Credit can join.';
+  };
+  /// The eligible Credits, 120 at a time, in Credit order: a quiet grid in a dialog, with Show more at the bottom.
+  const openEligible = async () => {
+    const total = document.getElementById('st-edition')!.textContent;
+    const d = document.createElement('dialog');
+    d.className = 'eligible';
+    d.innerHTML = `<div class="eligible-head"><div><h3>${esc(total ?? '')} eligible</h3><p class="rule-sentence">${sentence()}</p></div><button type="button" class="btn sm" data-close>Close</button></div><div class="eligible-grid"></div><button type="button" class="btn block" data-more hidden>Show more</button>`;
+    document.body.append(d);
+    d.showModal();
+    const grid = d.querySelector<HTMLElement>('.eligible-grid')!, more = d.querySelector<HTMLButtonElement>('[data-more]')!;
+    let page = 0, shown = 0;
+    const load = async () => {
+      more.disabled = true;
+      const body = { palettes: pal(), prints: rules.prints, weights: rules.weights, eights: rules.eights, minuteFrom: rules.minuteFrom, minuteTo: rules.minuteTo, idFrom: rules.idFrom, idTo: rules.idTo, minScore: rules.minScore, maxScore: rules.maxScore, list: rules.list.slice(0, 200), page };
+      const r = (await (await fetch('/edition/match', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).json()) as { count?: number; sample?: number[] };
+      const ids = r.sample ?? [];
+      grid.insertAdjacentHTML('beforeend', ids.map((id) => `<figure title="Credit #${id}"><img src="${editionArt(id)}" alt="" loading="lazy" decoding="async"><figcaption class="num">#${id.toLocaleString()}</figcaption></figure>`).join(''));
+      shown += ids.length;
+      page++;
+      more.hidden = shown >= (r.count ?? 0) || ids.length === 0;
+      more.textContent = `Show more (${((r.count ?? 0) - shown).toLocaleString()} left)`;
+      more.disabled = false;
+    };
+    const close = () => { d.close(); d.remove(); };
+    d.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      if (t === d || t.closest('[data-close]')) close();
+      else if (t.closest('[data-more]')) load();
+    });
+    d.addEventListener('cancel', (e) => { e.preventDefault(); close(); });
+    await load();
+  };
+  document.getElementById('see-eligible')!.addEventListener('click', (e) => { e.preventDefault(); openEligible(); });
+  /// The picked values as small chips, each with the same glyph its tile uses; null for rules without glyphs.
+  const chips = (k: string): string | null => {
+    const bits = (m: number, n: number) => Array.from({ length: n }, (_, i) => i).filter((i) => m & (1 << i));
+    const chip = (g: string, l: string) => `<span class="vchip">${g}<span>${esc(l)}</span></span>`;
+    if (k === 'palette') return bits(pal(), 16).map((m) => chip(swatch(slotName(0, m)), slotName(0, m))).join('');
+    if (k === 'print') return bits(rules.prints, PRINTS.length).map((i) => chip(printGlyph(PRINTS[i]), PRINTS[i])).join('');
+    if (k === 'weight') return bits(rules.weights, WEIGHTS.length).map((i) => chip(weightGlyph(WEIGHTS[i]), WEIGHTS[i])).join('');
+    if (k === 'eights') return bits(rules.eights, EIGHTS_MAX + 1).map((n) => chip(dice(n), `${n}×8`)).join('');
+    return null;
   };
   const applyPanes = () => {
-    document.getElementById('rule-sentence')!.textContent = sentence();
+    document.getElementById('rule-sentence')!.innerHTML = sentence();
     const set = isSet();
     for (const row of list.querySelectorAll<HTMLElement>('.rrow')) {
       const k = row.dataset.row!;
@@ -1161,8 +1300,9 @@ export async function create(app: HTMLElement) {
       row.classList.toggle('open', open);
       row.classList.toggle('set', !!set[k]);
       row.querySelector('.rrow-toggle')!.setAttribute('aria-expanded', String(open));
-      row.querySelector('.rrow-value')!.textContent = set[k] ? (document.getElementById(PICK[k])?.textContent ?? '') : 'Any';
-      row.querySelector<HTMLElement>('.rrow-clear')!.hidden = !set[k];
+      row.querySelector('.rrow-value')!.innerHTML = set[k] ? (chips(k) ?? esc(document.getElementById(PICK[k])?.textContent ?? '')) : 'Any';
+      const clr = row.querySelector<HTMLElement>('.rule-clear');
+      if (clr) clr.hidden = !set[k];
     }
   };
   const clearRule = (k: string) => {

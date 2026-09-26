@@ -5,7 +5,13 @@ import { config, pub } from './chain';
 export const STATES = ['Open', 'Full', 'Expired', 'Auction', 'Settled'] as const;
 export type StateName = (typeof STATES)[number];
 
-export const ARRANGEMENTS = ['Deposit order', 'Mint time', 'Credit number', 'Creator’s order', 'Painted'] as const;
+/// Batch.Phase, the lock cycle. Waiting: 80 in, no burn adapter yet. Countdown: 5 minutes to lockAt, leaving
+/// still allowed. Burnable: locked for an hour, anyone can burn. Expired: nobody burned, open to leave again.
+export const PHASES = ['Open', 'Waiting', 'Countdown', 'Burnable', 'Expired', 'Assembled'] as const;
+export type PhaseName = (typeof PHASES)[number];
+
+/// Indexed by the contract's burn order. Mint time (1) and Creator's order (3) are retired: only old parties show them.
+export const ARRANGEMENTS = ['Deposit order', 'Mint time', 'Credit number, low to high', 'Creator’s order', 'Painted', 'Credit number, high to low'] as const;
 /// Palette wanted at layout slot i (0 = any), from the packed Filter fields.
 export const layoutSlot = (f: { layout0: bigint; layout1: bigint }, i: number) =>
   Number(i < 64 ? (f.layout0 >> BigInt(4 * i)) & 15n : (f.layout1 >> BigInt(4 * (i - 64))) & 15n);
@@ -62,12 +68,12 @@ export type Summary = {
   arrangement: number;
   split: number;
   canAssemble: boolean;
-  exitWindow: boolean;
-  exitWindowUntil: number;
+  phase: PhaseName;
+  lockAt: number; // when a full party locks and becomes burnable; 0 unless the adapter is live and it has 80
   name: string;
   creator: Address;
   count: number;
-  deadline: number;
+  deadline: number; // when the burn window closes and it unlocks: lockAt + 1 hour, 0 when lockAt is 0
   filledAt: number;
   assembledAt: number;
   auctionEnd: number;
@@ -105,12 +111,13 @@ function toSummary(address: Address, s: Record<string, unknown>): Summary {
     ...(s as unknown as Summary),
     address,
     state: STATES[Number(s.state)],
+    phase: PHASES[Number(s.phase)],
+    lockAt: Number(s.lockAt),
     count: Number(s.count),
     deadline: Number(s.deadline),
     filledAt: Number(s.filledAt),
     assembledAt: Number(s.assembledAt),
     auctionEnd: Number(s.auctionEnd),
-    exitWindowUntil: Number(s.exitWindowUntil),
     arrangement: Number(s.arrangement),
     split: Number(s.split),
     allowlistSize: Number(s.allowlistSize),

@@ -85,7 +85,7 @@ export async function restore() {
   if (accs.length) await connect(w);
 }
 
-async function ensureChain() {
+export async function ensureChain() {
   const p = session.provider!;
   const current = Number(await p.request({ method: 'eth_chainId' }));
   if (current === chain.id) return;
@@ -110,6 +110,51 @@ export async function send(
   const receipt = await pub.waitForTransactionReceipt({ hash });
   if (receipt.status !== 'success') throw new Error('Transaction reverted.');
   return receipt;
+}
+
+/// Can the wallet run several calls as one atomic step on this chain (EIP-5792)? False on any doubt: an error,
+/// no answer within a few seconds, or no atomic capability. Cached per account and chain.
+const batchable = new Map<string, Promise<boolean>>();
+export function canBatch(): Promise<boolean> {
+  const { wallet, account } = session;
+  if (!wallet || !account) return Promise.resolve(false);
+  const key = `${account.toLowerCase()}:${chain.id}`;
+  let p = batchable.get(key);
+  if (!p) {
+    p = Promise.race([
+      wallet.getCapabilities({ account }).then((caps) => {
+        const all = caps as Record<number, { atomic?: { status?: string }; atomicBatch?: { supported?: boolean } } | undefined>;
+        const c = all[chain.id] ?? all[0];
+        const s = c?.atomic?.status;
+        return s === 'supported' || s === 'ready' || c?.atomicBatch?.supported === true;
+      }),
+      new Promise<boolean>((r) => setTimeout(() => r(false), 4000)),
+    ]).catch(() => false);
+    batchable.set(key, p);
+  }
+  return p;
+}
+
+type Call = { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[] };
+
+/// Several calls as one wallet step, all or nothing (EIP-5792 `wallet_sendCalls`), then wait for them to land.
+/// Only the first call is simulated: the rest depend on it (an approval, then what it allows), and the RPC
+/// proxy doesn't run multi-call simulations. The wallet estimates the batch itself before you sign.
+export async function sendBatch(calls: Call[], onSubmit?: (id: string) => void) {
+  if (!session.wallet || !session.account) throw new Error('Connect a wallet first.');
+  await ensureChain();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await pub.simulateContract({ ...(calls[0] as any), account: session.account });
+  const { id } = await session.wallet.sendCalls({
+    account: session.account,
+    chain,
+    forceAtomic: true,
+    calls: calls.map((c) => ({ to: c.address, abi: c.abi, functionName: c.functionName, args: c.args })) as never,
+  });
+  onSubmit?.(id);
+  const res = await session.wallet.waitForCallsStatus({ id, timeout: 15 * 60_000 });
+  if (res.status !== 'success' || res.receipts?.some((r) => r.status !== 'success')) throw new Error('Transaction reverted.');
+  return res.receipts ?? [];
 }
 
 export const explorer = (kind: 'tx' | 'address', v: string) =>

@@ -128,7 +128,8 @@ export async function predicate(assets: Fetcher, origin: string, r: Rules) {
   };
 }
 
-export async function match(assets: Fetcher, origin: string, r: Rules, samples = 80) {
+/// `page`: instead of an even sample, the matches in Credit order, PAGE at a time (for browsing them all).
+export async function match(assets: Fetcher, origin: string, r: Rules, samples = 80, page = -1) {
   const t = await load(assets, origin);
   const ok = await predicate(assets, origin, r);
   const lo = Math.max(1, r.idFrom || 1);
@@ -136,14 +137,16 @@ export async function match(assets: Fetcher, origin: string, r: Rules, samples =
   // Two passes: count, then take matches evenly spaced across the edition (all of them when few).
   let count = 0;
   for (let id = lo; id <= hi; id++) if (ok(id)) count++;
-  const stride = Math.max(1, Math.floor(count / samples));
+  const stride = page >= 0 ? 1 : Math.max(1, Math.floor(count / samples));
+  const skip = page >= 0 ? page * samples : 0;
   const sample: number[] = [];
   const palettes: number[] = [];
   const traits: number[] = []; // packed edition traits per sample, so painted slots can be matched on any trait
   let seen = 0;
   for (let id = lo; id <= hi && sample.length < samples; id++) {
     if (!ok(id)) continue;
-    if (seen++ % stride === 0) {
+    if (seen++ < skip) continue;
+    if ((seen - 1 - skip) % stride === 0) {
       sample.push(id);
       palettes.push(t[id - 1] & 15);
       traits.push(t[id - 1]);

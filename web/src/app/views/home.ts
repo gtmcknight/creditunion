@@ -48,8 +48,8 @@ export const FIG = {
       svg(300, 300,
         r(50, 30, 30, 120, C) + r(50, 150, 30, 60, K) + r(50, 210, 30, 60, Y) +
         t(100, 86, 'Filling', { weight: 600, size: 15, anchor: 'start' }) + t(100, 104, 'leave any time', { size: 12, fill: '#666', anchor: 'start' }) +
-        t(100, 176, 'Full', { weight: 600, size: 15, anchor: 'start' }) + t(100, 194, 'locked for 7 days', { size: 12, fill: '#666', anchor: 'start' }) +
-        t(100, 236, 'Not burned', { weight: 600, size: 15, anchor: 'start' }) + t(100, 254, 'anyone can leave', { size: 12, fill: '#666', anchor: 'start' })),
+        t(100, 176, 'Full', { weight: 600, size: 15, anchor: 'start' }) + t(100, 194, 'locked an hour to burn', { size: 12, fill: '#666', anchor: 'start' }) +
+        t(100, 236, 'Not burned', { weight: 600, size: 15, anchor: 'start' }) + t(100, 254, 'unlocks, anyone can leave', { size: 12, fill: '#666', anchor: 'start' })),
     ),
 
   // The paired figures are square, drawn on a 300-unit grid.
@@ -70,7 +70,7 @@ export const FIG = {
     const sorted = sheet(x0[1], 96, (i) => MIXES[INKS[Math.min(INKS.length - 1, ((i / 80) * INKS.length) | 0)]], 7, 2);
     const layout = sheet(x0[2], 96, (_, c, row) => (c === 0 || row === 0 || c === 7 || row === 9 ? K : (c + row) % 2 ? C : Y), 7, 2);
     return fig(
-      svg(300, 300, deposit + sorted + layout + ['Deposit', 'Mint time', 'Layout'].map((l, i) => t(x0[i] + 35, 214, l, { size: 12, fill: '#666' })).join(''))
+      svg(300, 300, deposit + sorted + layout + ['Deposit', 'Number', 'Painted'].map((l, i) => t(x0[i] + 35, 214, l, { size: 12, fill: '#666' })).join(''))
     );
   },
 
@@ -112,15 +112,6 @@ export const FIG = {
         sheet(150, 76, (i) => (i < 58 ? '#9a9a9a' : i < 63 ? C : PAPER_GREY), 12, 3)),
     ),
 
-  launch: () =>
-    fig(
-      svg(300, 300,
-        r(50, 40, 24, 24, K) + r(56, 76, 12, 136, Y) + r(50, 224, 24, 24, '#009400') +
-        t(96, 50, 'Proposed', { weight: 600, size: 15, anchor: 'start' }) + t(96, 67, 'the burn adapter', { size: 12, fill: '#666', anchor: 'start' }) +
-        t(96, 140, '30 minutes', { weight: 600, size: 15, anchor: 'start' }) + t(96, 157, 'anyone can leave any party', { size: 12, fill: '#666', anchor: 'start' }) +
-        t(96, 234, 'Switched on', { weight: 600, size: 15, anchor: 'start' }) + t(96, 251, 'for good', { size: 12, fill: '#666', anchor: 'start' })),
-    ),
-
 };
 
 type Chapter = { id: string; nav: string; title: string; figure?: string; body: string };
@@ -143,10 +134,10 @@ export function home(app: HTMLElement) {
     },
     {
       id: 'order',
-      nav: 'Burn order',
+      nav: 'Layout',
       title: 'Custom seating',
       figure: FAMILY.painted,
-      body: `<p>Set the order they burn in: deposit order, original mint time, or a custom design.</p>`,
+      body: `<p>Set the order they burn in: deposit order, Credit number either way, or a custom design.</p>`,
     },
     {
       id: 'buying',
@@ -160,7 +151,7 @@ export function home(app: HTMLElement) {
       nav: 'Leaving',
       title: 'Exit plan',
       figure: FAMILY.door,
-      body: `<p>Withdraw anytime before the party fills. If a full party isn’t burned within 7 days, anyone can leave.</p>`,
+      body: `<p>Leave anytime until a full party locks. If nobody burns it within the hour, it unlocks again.</p>`,
     },
     {
       id: 'auction',
@@ -183,7 +174,7 @@ export function home(app: HTMLElement) {
   <div id="wall"></div>
   <article class="about doc">
     <div class="chapter-grid">${panels.map(panel).join('')}</div>
-    <section class="faq"><h2>Questions</h2><div class="faq-cols"><div><details><summary>Is Eighty official?</summary><p>No. It’s an independent project built on Jack Butcher’s Credits.</p></details><details><summary>What does it cost?</summary><p>Free to start or join. Eighty takes 2% of the sale, only if it sells, and 2% on Credits you buy from OpenSea through Eighty.</p></details><details><summary>What if a party never fills?</summary><p>Nothing. Take your Credits back whenever you want.</p></details><details><summary>Jack’s Statement contract isn’t out yet. Now what?</summary><p>Parties fill now and wait. When it ships, you get 30 minutes’ notice to leave before burning switches on. Then a full party has 7 days to burn, or anyone can take their Credits back.</p></details></div><div><details><summary>What if nobody bids?</summary><p>The Statement stays in the party until someone bids at least 0.01 ETH. The 24 hours start with that bid.</p></details><details><summary>How is the money split?</summary><p>Equal pays every Credit the same. Early bird pays the first Credit in three times the last.</p></details><details><summary>How do I get paid?</summary><p>Claim your share on the party page once the auction settles.</p></details></div></div></section>
+    <section class="faq" id="faq"><h2>Questions</h2><div class="faq-cols"><div><details><summary>When can parties burn into Statements?</summary><p>Jack’s Statement contract is expected around October 1 (<a href="https://x.com/jackbutcher/status/2102910106451021935" target="_blank" rel="noopener">Jack’s announcement</a>). Until then full parties wait, and anyone can still leave. Once it’s live, a full party counts down 5 minutes, then locks for an hour so anyone can burn it.</p></details><details><summary>Is Eighty official?</summary><p>No. It’s an independent project built on Jack Butcher’s Credits.</p></details><details><summary>What does it cost?</summary><p>Free to start or join. Eighty takes 2% of the sale, only if it sells, and 2% on Credits you buy from OpenSea through Eighty.</p></details><details><summary>What if a party never fills?</summary><p>Nothing. Take your Credits back whenever you want.</p></details></div><div><details><summary>What if nobody burns it?</summary><p>After the hour it unlocks. Leave, or restart the countdown for another try.</p></details><details><summary>What if nobody bids?</summary><p>The Statement stays in the party until someone bids at least 0.01 ETH. The 24 hours start with that bid.</p></details><details><summary>How is the money split?</summary><p>Equal pays every Credit the same. Early bird pays the first Credit in three times the last.</p></details><details><summary>How do I get paid?</summary><p>Claim your share on the party page once the auction settles.</p></details></div></div></section>
   </article>`;
 
   // In-page links scroll; the router never sees them.

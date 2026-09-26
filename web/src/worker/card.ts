@@ -181,7 +181,7 @@ export async function drawParty(fetcher: Fetcher, origin: string, p: PartyCard):
     const w = c.text(BIG, String(p.count), x0, statY, INK);
     c.text(BIG, '/80', x0 + w + 4, statY, FAINT);
     const sub =
-      p.state === 'Full' ? (p.canBurn ? 'Full. Ready to burn into a Statement.' : 'Full. Burns when Jack’s contract is live.')
+      p.state === 'Full' ? (p.canBurn ? 'Full. Ready to burn into a Statement.' : 'Full. Waiting to burn into a Statement.')
       : `${80 - p.count} to go · ${p.early ? 'early bird' : 'equal'} payout`;
     c.text(BODY, sub, x0, statY + 50, MUTED);
     c.rect(x0, statY + 78, colW, 10, TRACK);

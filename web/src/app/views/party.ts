@@ -1,19 +1,29 @@
-import { parseEther, type Address } from 'viem';
+import { parseAbi, parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi } from '../abi';
-import { config, explorer, pub, send, session } from '../chain';
-import { ARRANGEMENTS, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
+import { canBatch, config, explorer, pub, send, sendBatch, session } from '../chain';
+import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { hydrate, pct, who } from '../ens';
 import { editionArt, examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
-import { $$, art, errText, esc, eth, same, sheet, short, toast, until } from '../ui';
+import { $$, art, clock, errText, esc, eth, same, sheet, short, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
 
 const CHUNK = 40; // Credits per transaction; keeps each one well under the block gas limit
+// One Credit sent straight to the party: the Batch records the sender as depositor, no approval needed.
+// The Batch errors ride along so a revert in its receive hook reads plainly.
+const directAbi = [
+  ...parseAbi(['function safeTransferFrom(address from, address to, uint256 tokenId)']),
+  ...batchAbi.filter((x) => x.type === 'error'),
+] as const;
 const RATING_URL = 'https://jack.art/credits/rating';
 const fmtScore = (s: number) => (Math.floor(s * 100) / 100).toFixed(2);
 
 type Ctx = Awaited<ReturnType<typeof getBatch>>;
 type Mine = Awaited<ReturnType<typeof me>> | null;
+
+/// The party's link, stamped with where it stands, so X, Telegram and the rest fetch a fresh card for it
+/// instead of showing the one they cached for an earlier state.
+const shareUrl = (s: Ctx['s']) => `${location.origin}/party/${s.address}?s=${stamp(s.state, s.count, s.highBid)}`;
 
 let picks = new Set<string>();
 
@@ -76,7 +86,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       ${
         s.state === 'Open' || s.state === 'Full' || s.state === 'Expired'
           ? `<div class="progress">
-          <div class="row"><span class="num"><strong>${s.count}</strong>/80</span><span class="muted small num">${s.state === 'Open' ? `${80 - s.count} to go` : s.state === 'Full' ? (Date.now() / 1000 >= s.deadline ? 'Unlocked' : `Unlocks in ${until(s.deadline)}`) : 'Expired'}</span></div>
+          <div class="row"><span class="num"><strong>${s.count}</strong>/80</span><span class="muted small num">${s.state === 'Open' ? `${80 - s.count} to go` : s.state === 'Full' ? stage(s) : 'Expired'}</span></div>
           <div class="bar"><i style="width:${(s.count / 80) * 100}%"></i></div>
         </div>`
           : ''
@@ -89,9 +99,9 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         <ol class="bid-list" id="bid-list"><li class="muted small">Loading…</li></ol>
       </details>` : ''}
       <details class="more">
-        <summary><span>Details</span><span class="muted small">${ARRANGEMENTS[s.arrangement]} · ${s.split === 1 ? 'Early bird' : 'Equal'} payout</span></summary>
+        <summary><span>Details</span><span class="muted small">${ARRANGEMENTS[s.arrangement] ?? 'Deposit order'} · ${s.split === 1 ? 'Early bird' : 'Equal'} payout</span></summary>
         <dl class="facts">
-          ${fact('Burn order', ARRANGEMENTS[s.arrangement])}
+          ${fact('Layout', ARRANGEMENTS[s.arrangement] ?? 'Deposit order')}
           ${fact('Payout', payout(b, myIds))}
           ${fact('Depositors', `<button type="button" class="link num" id="depositors-btn" title="Who is in">${depositors}</button>`)}
           ${s.count ? fact('Rating', `<span id="rating" class="muted">…</span>`) : ''}
@@ -110,10 +120,8 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   // Chrome keeps a focus ring on <summary> after a mouse click; drop it for pointer use only.
   app.querySelectorAll<HTMLElement>('.more summary').forEach((el) => el.addEventListener('pointerup', () => setTimeout(() => el.blur(), 0)));
   fillGhosts(app);
-  // Share a link stamped with where the party stands, so X, Telegram and the rest fetch a fresh card for it
-  // instead of showing the one they cached for an earlier state.
   document.getElementById('share')?.addEventListener('click', async () => {
-    const url = `${location.origin}/party/${s.address}?s=${stamp(s.state, s.count, s.highBid)}`;
+    const url = shareUrl(s);
     try {
       if (navigator.share && matchMedia('(pointer: coarse)').matches) await navigator.share({ title: s.name || 'A party on Eighty', url });
       else {
@@ -136,6 +144,49 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     });
   });
   bind(b, m, myIds, rerender);
+  // Just made on the create page: congratulate once. The flag goes as soon as it's read, so a refresh won't reshow it.
+  try {
+    if (sessionStorage.getItem('eighty-created')?.toLowerCase() === address.toLowerCase()) {
+      sessionStorage.removeItem('eighty-created');
+      openCreated(b, placed);
+    }
+  } catch {}
+}
+
+/// Congrats on a new party, with its link and ways to pass it on.
+function openCreated(b: Ctx, placed?: (bigint | null)[]) {
+  const s = b.s;
+  const url = shareUrl(s);
+  const name = s.name || 'Untitled';
+  const text = `Join my Eighty party: ${name}. 80 Credits make a Statement.`;
+  const x = `https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
+  const d = document.createElement('dialog');
+  d.className = 'created';
+  d.innerHTML = `<form method="dialog">
+    <div class="created-art">${sheet(b.ids, { size: 'sm', placed })}</div>
+    <div class="created-head"><h3>Your party is live</h3><p class="muted">${esc(name)}</p></div>
+    <input class="created-link" type="text" readonly value="${esc(url)}" aria-label="Party link">
+    <div class="created-actions">
+      <a class="btn primary" href="${esc(x)}" target="_blank" rel="noopener">Share on X</a>
+      <button type="button" class="btn" id="created-copy">Copy link</button>
+    </div>
+    <button type="submit" class="btn block created-done">Done</button>
+  </form>`;
+  document.body.append(d);
+  const link = d.querySelector<HTMLInputElement>('.created-link')!;
+  link.addEventListener('focus', () => link.select());
+  d.querySelector('#created-copy')!.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast('Link copied', 'ok', 2500);
+    } catch {
+      link.select();
+    }
+  });
+  d.addEventListener('close', () => d.remove());
+  d.showModal();
+  // Focus Done, not the link (focusing it selects the text), and without a ring: nobody tabbed here.
+  (d.querySelector('.created-done') as HTMLElement).focus({ focusVisible: false } as FocusOptions);
 }
 
 /// "Early bird · 1st 1.88% → 80th 0.63%" of the depositors' payout, plus the connected wallet's own positions and what they add up to.
@@ -165,6 +216,28 @@ const link = (a: string) => {
   const u = explorer('address', a);
   return u ? `<a href="${u}" target="_blank" rel="noopener" class="mono">${short(a)} ↗</a>` : `<span class="mono">${short(a)}</span>`;
 };
+/// Where a full party stands right now: the summary's phase, moved on by the clock, since it reads the chain only on load.
+function livePhase(s: Ctx['s']): PhaseName {
+  const now = Date.now() / 1000;
+  if ((s.phase === 'Countdown' || s.phase === 'Burnable') && now >= s.deadline) return 'Expired';
+  if (s.phase === 'Countdown' && now >= s.lockAt) return 'Burnable';
+  return s.phase;
+}
+
+/// The progress row's note for a full party.
+function stage(s: Ctx['s']) {
+  switch (livePhase(s)) {
+    case 'Waiting':
+      return 'Waiting for Jack';
+    case 'Countdown':
+      return `Locks in <span data-clock="${s.lockAt}">${clock(s.lockAt)}</span>`;
+    case 'Burnable':
+      return `Locked · <span data-clock="${s.deadline}">${clock(s.deadline)}</span>`;
+    default:
+      return 'Unlocked';
+  }
+}
+
 const plural = (n: number) => `${n} Credit${n === 1 ? '' : 's'}`;
 
 function panel(b: Ctx, m: Mine, myIds: Set<string>) {
@@ -193,39 +266,40 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
         }
       </div>
       <div data-pane="buy"${start === 'buy' ? '' : ' hidden'}>${buyPane(!!m)}</div>
-      <p class="muted small pane-note"><span id="buy-line">Finding the cheapest listings that fit… </span>Withdraw anytime until the party fills. Eighty is unofficial and experimental, so use it at your own risk.</p>
+      <p class="muted small pane-note"><span id="buy-line">Finding the cheapest listings that fit… </span>Leave anytime until it locks. Eighty is unofficial and experimental, so use it at your own risk. <a href="/about/faq">Questions?</a></p>
     </div>`;
   }
 
   if (s.state === 'Full') {
-    // A full party is locked for 7 days after filling (summary.deadline = when it unlocks). Unburned by then,
-    // anyone may take their Credits back; whoever stays keeps it burnable.
-    const unlocked = Date.now() / 1000 >= s.deadline;
-    const on = new Date(s.deadline * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric' });
-    const lock = unlocked
-      ? `<p class="muted small">Unlocked: take your Credits back, or stay for the burn.</p>${withdraw()}`
-      : `<p class="muted small">Locked until ${on}. If it isn’t burned by then, anyone can take their Credits back.</p>`;
-    if (s.exitWindow) {
-      const until = new Date(s.exitWindowUntil * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-      return `<div class="box">
-        <h3>Burning switches on at ${until}</h3>
-        <p class="muted">Until then anyone can take their Credits out of any party, even a full one.</p>
-        ${m ? withdraw(true) || '<p class="small muted">You have no Credits here.</p>' : connect}
-      </div>`;
+    const mine = m ? withdraw(true) || '<p class="small muted">You have no Credits here.</p>' : connect;
+    switch (livePhase(s)) {
+      case 'Waiting':
+        return `<div class="box">
+          <h3>Full</h3>
+          <p class="muted">Waiting for Jack’s contract. You can still leave anytime.</p>
+          ${myIds.size ? withdraw() : ''}
+        </div>`;
+      case 'Countdown':
+        return `<div class="box">
+          <h3>Locks in <span class="num" data-clock="${s.lockAt}">${clock(s.lockAt)}</span></h3>
+          <p class="muted">Last chance to leave. After that it’s locked for an hour so anyone can burn it.</p>
+          ${mine}
+        </div>`;
+      case 'Burnable':
+        return `<div class="box">
+          <h3>Ready to burn</h3>
+          <p class="muted">Burn within <span class="num" data-clock="${s.deadline}">${clock(s.deadline)}</span> or it unlocks.</p>
+          ${m ? `<button class="btn primary block" id="assemble">Make Statement</button>` : connect}
+          <p class="small muted">Anyone can press it and pays the gas. Nobody can leave during this hour.</p>
+        </div>`;
+      default:
+        return `<div class="box">
+          <h3>Unlocked</h3>
+          <p class="muted">Nobody burned in time. Leave, or restart the countdown.</p>
+          ${myIds.size ? withdraw(true) : ''}
+          ${m ? `<button class="btn block" id="restart">Restart countdown</button>` : connect}
+        </div>`;
     }
-    if (!s.canAssemble) {
-      return `<div class="box">
-        <h3>Full</h3>
-        <p class="muted">Burning opens when Jack’s Statement contract ships.</p>
-        ${lock}
-      </div>`;
-    }
-    return `<div class="box">
-      <h3>${unlocked ? 'Full' : 'Locked'}</h3>
-      <p class="muted">Anyone can burn it.</p>
-      ${m ? `<button class="btn primary block" id="assemble">Burn 80 → Statement</button>` : connect}
-      ${lock}
-    </div>`;
   }
 
   if (s.state === 'Expired') {
@@ -371,6 +445,26 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void) {
   const closing = document.querySelector('.sheet.closing');
   if (closing) requestAnimationFrame(() => requestAnimationFrame(() => closing.classList.add('closed')));
 
+  document.getElementById('restart')?.addEventListener('click', (e) =>
+    run(e.currentTarget as HTMLElement, 'Restarting…', () =>
+      send({ address: s.address, abi: batchAbi, functionName: 'restartCountdown' }, txNote),
+    'Countdown restarted. Five minutes to leave.'),
+  );
+
+  // Lock countdowns tick in place. When one runs out the phase has moved on: read the party again, a few
+  // seconds late so the chain has a block past the boundary.
+  const clocks = $$('[data-clock]');
+  if (clocks.length) {
+    const t = setInterval(() => {
+      if (!clocks[0].isConnected) return clearInterval(t);
+      for (const el of clocks) el.textContent = clock(Number(el.dataset.clock));
+      if (clocks.some((el) => Date.now() / 1000 >= Number(el.dataset.clock) + 3)) {
+        clearInterval(t);
+        rerender();
+      }
+    }, 1000);
+  }
+
   // Live countdown
   const cd = document.querySelector<HTMLElement>('[data-countdown]');
   if (cd) {
@@ -433,18 +527,27 @@ async function drawPicker(
 
   const actions = document.getElementById('deposit-actions')!;
   const count = document.getElementById('pick-count')!;
+  // Not approved yet: a wallet that batches runs approve + deposit as one step, so no separate Approve.
+  let batchable = false;
+  if (!m.approved)
+    void canBatch().then((ok) => {
+      batchable = ok;
+      if (ok && actions.isConnected) draw();
+    });
   const draw = () => {
     const n = picks.size;
     count.textContent = n ? `${n} of ${room}` : `${room} open`;
     const over = n > room;
     const txs = Math.ceil(n / CHUNK);
+    // Which way a deposit goes: already approved, one Credit sent directly, or approve + deposit batched.
+    const way = m.approved ? 'deposit' : n === 1 ? 'direct' : batchable ? 'batch' : null;
     actions.innerHTML = `
       <div class="row small"><button type="button" class="link small" id="pick-all">Select ${Math.min(fits.length, room) === fits.length ? 'all' : Math.min(fits.length, room)}</button>${n ? '<button type="button" class="link small" id="pick-none">Clear</button>' : ''}</div>
       ${
-        !m.approved
+        !way
           ? `<button class="btn primary block" id="approve">Approve Eighty · once</button>`
           : n
-            ? `<button class="btn primary block" id="deposit" ${over ? 'disabled' : ''}>${over ? `Only ${room} open` : `Deposit ${plural(n)}${txs > 1 ? ` · ${txs} transactions` : ''}`}</button>`
+            ? `<button class="btn primary block" id="deposit" ${over ? 'disabled' : ''}>${over ? `Only ${room} open` : `Deposit ${plural(n)}${way === 'deposit' && txs > 1 ? ` · ${txs} transactions` : ''}`}</button>`
             : ''
       }`;
     document.getElementById('pick-all')?.addEventListener('click', () => {
@@ -463,8 +566,16 @@ async function drawPicker(
     document.getElementById('deposit')?.addEventListener('click', (e) =>
       run(e.currentTarget as HTMLElement, 'Depositing…', async () => {
         const ids = [...picks].map(BigInt);
-        for (let i = 0; i < ids.length; i += CHUNK)
-          await send({ address: config.factory, abi: factoryAbi, functionName: 'deposit', args: [s.address, ids.slice(i, i + CHUNK)] }, txNote);
+        const chunks = Array.from({ length: Math.ceil(ids.length / CHUNK) }, (_, i) => ids.slice(i * CHUNK, (i + 1) * CHUNK));
+        const deposit = (chunk: bigint[]) => ({ address: config.factory, abi: factoryAbi, functionName: 'deposit', args: [s.address, chunk] });
+        if (way === 'direct')
+          await send({ address: config.credits, abi: directAbi, functionName: 'safeTransferFrom', args: [session.account!, s.address, ids[0]] }, txNote);
+        else if (way === 'batch')
+          await sendBatch(
+            [{ address: config.credits, abi: creditsAbi, functionName: 'setApprovalForAll', args: [config.factory, true] }, ...chunks.map(deposit)],
+            () => toast('Submitted. Waiting for confirmation…', 'info'),
+          );
+        else for (const chunk of chunks) await send(deposit(chunk), txNote);
         picks.clear();
       }, 'Deposited.'),
     );

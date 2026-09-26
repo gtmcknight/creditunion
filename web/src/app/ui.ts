@@ -31,6 +31,13 @@ export function until(ts: number) {
   return `${m}m ${String(s).padStart(2, '0')}s`;
 }
 
+/// "4:12" to a timestamp; hours when it's that far out.
+export function clock(ts: number) {
+  const left = Math.max(0, Math.ceil(ts - Date.now() / 1000));
+  const h = Math.floor(left / 3600), m = Math.floor((left % 3600) / 60), sec = String(left % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+}
+
 /// Art URL includes the Credits contract, so a new contract (testnets) never shows a browser-cached image.
 export const art = (id: bigint | number) => `/art/${config.credits.toLowerCase()}/${id}.svg`;
 
@@ -101,6 +108,7 @@ export function errText(e: unknown): string {
 const ERRORS: Record<string, string> = {
   TooFewToOpen: 'Not enough Credits to open a party.',
   WrongState: 'The party is not in the right state for that.',
+  WrongPhase: 'Not right now. Burning works only in the hour after the 5-minute countdown, and Credits can’t be withdrawn during that hour.',
   NotDepositor: 'Only the depositor can withdraw that Credit.',
   Excluded: "That Credit doesn't match this party's filter.",
   BidTooLow: 'Bid is below the minimum.',
@@ -114,7 +122,6 @@ const ERRORS: Record<string, string> = {
   TooFewBought: 'Fewer listings were available than expected. Get a new price.',
   FeeNotCovered: 'Not enough ETH sent to cover the fee.',
   NotStray: 'That token is part of the party.',
-  AssemblerNotReady: 'Burning opens once Jack’s Statement contract ships and the adapter is activated.',
 };
 
 export type { Address };

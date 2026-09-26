@@ -194,6 +194,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   // Design-time counts: how many Credits in the edition satisfy a rule set.
   if (url.pathname === '/edition/match') {
     if (req.method !== 'POST' || !sameSite(req)) return text('forbidden', 403);
+    let page = -1;
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
     let rules: Rules;
     try {
@@ -221,11 +222,12 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         maxScore: int('maxScore', 0, 8000, 0),
         list: list as number[],
       };
+      page = int('page', -1, 2000, -1);
     } catch {
       return text('bad request', 400);
     }
     try {
-      return Response.json(await match(env.ASSETS, url.origin, rules), { headers: { 'cache-control': 'no-store' } });
+      return Response.json(await match(env.ASSETS, url.origin, rules, page >= 0 ? 120 : 80, page), { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502 });
     }
@@ -460,7 +462,7 @@ async function readParty(env: Env, batch: Address): Promise<PartyCard> {
     c.readContract({ address: batch, abi: batchAbi, functionName: 'summary' }),
     c.readContract({ address: batch, abi: batchAbi, functionName: 'slots' }),
   ]);
-  const sum = s as unknown as { name: string; state: number; count: bigint; split: number; highBid: bigint; auctionEnd: bigint; canAssemble: boolean };
+  const sum = s as unknown as { name: string; state: number; count: bigint; split: number; highBid: bigint; auctionEnd: bigint; phase: number };
   return {
     name: [...sum.name].slice(0, 64).join(''), // names are the creator's; cards and tags show at most 64 characters
     state: STATE_NAMES[Number(sum.state)],
@@ -469,7 +471,7 @@ async function readParty(env: Env, batch: Address): Promise<PartyCard> {
     early: Number(sum.split) === 1,
     highBid: sum.highBid,
     auctionEnd: Number(sum.auctionEnd),
-    canBurn: sum.canAssemble,
+    canBurn: Number(sum.phase) === 3, // Batch.Phase.Burnable: locked, anyone can burn now
   };
 }
 

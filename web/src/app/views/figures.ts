@@ -207,7 +207,7 @@ export const FAMILY = {
     ));
   })(),
 
-  // 5G · three doors: open while filling, shut for 7 days, open to all after.
+  // 5G · three doors: open while filling, shut for the burn hour, open to all after.
   doors: (() => {
     // Three sheets side by side can't use the standard sheet; 4×5 at a smaller cell, same stroke and rules.
     const c = 7, g = 3, w = 4 * c + 3 * g, h = 5 * c + 4 * g, pad = 6, fw = w + 2 * pad, fh = h + 2 * pad;
@@ -219,7 +219,7 @@ export const FAMILY = {
     const X = (k: number) => x0 + k * step;
     return fig(svg(
       mini(X(0), (i) => (i < 11 && i !== 9 ? inks[i] : EMPTY)) + doorFrame(X(0), fy, fw, fh, true, 14) + run(X(0) + fw + 14 + 22, fy + fh - 16, inks[9]) +
-        mini(X(1), (i) => inks[i]) + doorFrame(X(1), fy, fw, fh, false) + label(X(1) + fw / 2, fy - 12, '7 days') +
+        mini(X(1), (i) => inks[i]) + doorFrame(X(1), fy, fw, fh, false) + label(X(1) + fw / 2, fy - 12, '1 hour') +
         mini(X(2), (i) => ([6, 13].includes(i) ? EMPTY : inks[i])) + doorFrame(X(2), fy, fw, fh, true, 14) +
         run(X(2) + fw + 14 + 22, fy + fh - 16, inks[13]) + run(X(2) + fw + 14 + 22, fy + fh - 34, inks[6]),
     ));

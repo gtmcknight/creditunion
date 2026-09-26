@@ -4127,8 +4127,9 @@ a.who:hover .who-name {
 }
 .rrow-toggle:focus-visible,
 .rrow-clear:focus-visible {
-  outline: 2px solid var(--fg);
-  outline-offset: -2px;
+  outline: none;
+  border-radius: 6px;
+  background: var(--surface);
 }
 
 /* An open row's description: a little air above, clear space before the cards. */
@@ -5353,4 +5354,400 @@ a.who:hover .who-name {
 }
 .wall-frame.expanded .wall-menu .wall-zoomrow {
   right: 120px;
+}
+
+/* ---------------------------------------------------------------- party created */
+dialog.created {
+  width: min(380px, calc(100vw - 2 * var(--gutter)));
+  padding: 24px;
+}
+dialog.created form {
+  gap: 14px;
+}
+.created-art {
+  width: 120px;
+  margin: 0 auto 4px;
+}
+.created-head {
+  text-align: center;
+}
+.created-head h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.created-head p {
+  margin: 4px 0 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+dialog.created .created-link {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px; /* 16 dialog − 6 */
+  background: var(--surface);
+  color: var(--muted);
+  font: 400 12px var(--mono);
+  text-overflow: ellipsis;
+}
+dialog.created .created-link:focus {
+  outline: none;
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.created-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+dialog.created .created-done {
+  margin-top: -6px;
+  background: none;
+  box-shadow: none;
+  color: var(--muted);
+}
+dialog.created .created-done:hover {
+  color: var(--fg);
+}
+dialog.created[open] {
+  animation: created-in 260ms var(--ease) both;
+}
+@keyframes created-in {
+  from {
+    opacity: 0;
+    scale: 0.96;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  dialog.created[open] {
+    animation: none;
+  }
+}
+
+/* Layout: four square tiles, each a small picture of the order; the chosen one's line underneath. */
+.arr-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.arr-tile {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 10px;
+  aspect-ratio: 1;
+  padding: 10px;
+  border-radius: var(--r);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  cursor: pointer;
+  text-align: center;
+  transition: box-shadow 150ms var(--ease);
+}
+.arr-tile:hover {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.arr-tile input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.arr-tile svg {
+  width: 38%;
+  height: auto;
+  padding: 6px;
+  background: #fff;
+  border-radius: 3px;
+}
+.arr-tile b {
+  font: 500 13px/1.2 var(--sans);
+}
+.arr-tile:has(input:checked) {
+  box-shadow: inset 0 0 0 2px var(--fg);
+}
+.arr-tile:has(input:focus-visible) {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+#arr-hint {
+  margin-top: 8px;
+}
+
+/* A set rule's summary: its values as small chips with the same glyphs as the tiles. */
+.rrow-value:has(.vchip) {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px 12px;
+}
+.vchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.vchip span:empty {
+  display: none;
+}
+.vchip .ink,
+.vchip svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+.vchip svg {
+  background: #fff;
+}
+.vchip .ink {
+  display: inline-block;
+}
+.vchip b.n {
+  font: 500 12px var(--mono);
+}
+@media (max-width: 560px) {
+  .arr-tile svg {
+    width: 50%;
+  }
+}
+
+/* Eights pips sit on a white card like every other trait glyph, so they read on dark tiles too. */
+.design-form .tile .pips {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 0 0 2px #fff;
+  color: #111;
+}
+
+/* The joining rule: OR and AND stand out from the values between them. */
+.rule-sentence .conj {
+  font: 600 11px var(--mono);
+  letter-spacing: 0.06em;
+  color: var(--fg);
+}
+/* Values read bright, the prose between them stays quiet; OR and AND a step dimmer than the values. */
+.rule-sentence .v {
+  color: var(--fg);
+}
+.rule-sentence .conj {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+/* Who can join: the eligible count sits at the right of the heading. */
+.form-title .join-count {
+  margin-left: auto;
+  font-weight: 400;
+}
+
+/* An open rule: its description, and on the same line at the right, Clear (only once something is picked). */
+.rule-descline {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+.rule-descline .rule-clear {
+  flex: none;
+}
+.design-form .rrow .rule:has(.rule-descline) > .rule-head {
+  display: none;
+}
+.design-form .rrow .rule-descline {
+  padding-top: 2px;
+  margin-bottom: 10px;
+}
+
+/* Eligible Credits: a quiet grid in a dialog, a page at a time. */
+dialog.eligible {
+  width: min(880px, calc(100vw - 32px));
+  max-height: min(86vh, 900px);
+  padding: 20px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: 0 0 0 1px var(--line-strong), 0 24px 60px -20px rgba(0, 0, 0, 0.5);
+}
+dialog.eligible::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+.eligible-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.eligible-head h3 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+.eligible-head .rule-sentence {
+  margin: 0;
+}
+.eligible-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.eligible-grid figure {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+.eligible-grid img {
+  width: 100%;
+  aspect-ratio: 1;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--line);
+}
+.eligible-grid figcaption {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+}
+.form-title .join-count {
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+
+/* Fewer than 80 can ever join: the count turns red, and a warning sits above Start. */
+.form-title .join-count.short {
+  color: var(--err);
+  text-decoration-color: currentColor;
+}
+.gate-warn {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: var(--r);
+  background: color-mix(in srgb, var(--err) 12%, transparent);
+  color: var(--err);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.form-title .join-count:focus-visible {
+  outline: none;
+  background: var(--surface);
+  border-radius: 4px;
+}
+.view-toggle[hidden] {
+  display: none;
+}
+/* Layout tiles: about as tall as the trait tiles above, so the form keeps one rhythm. */
+.arr-tile {
+  aspect-ratio: 4 / 3;
+  gap: 8px;
+}
+.arr-tile svg {
+  width: 40%;
+}
+.arr-tile b {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.arr-tile:has(input:checked) b {
+  color: var(--fg);
+}
+@media (max-width: 560px) {
+  .arr-tile {
+    aspect-ratio: 1;
+  }
+  .arr-tile svg {
+    width: 44%;
+  }
+}
+
+/* Painter: the swatches, then one bar with how to paint, the counts and Clear all; designs underneath. */
+.paint-bar {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 8px 0 18px;
+}
+.paint-bar #paint-hint {
+  margin: 0;
+  flex: 1;
+}
+.paint-bar #layout-pick {
+  margin: 0;
+}
+.paint-bar .patterns {
+  margin: 0;
+}
+#designs .eyebrow {
+  display: block;
+  margin-bottom: 8px;
+}
+/* A painted sheet's counts sit under it, at the right. */
+.preview-foot #layout-pick {
+  margin-left: auto;
+}
+.paint-swatches {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.paint-swatches #layout-presets {
+  margin: 0;
+}
+.paint-bar {
+  margin-top: 6px;
+}
+.paint-bar[hidden] {
+  display: none;
+}
+
+/* Create preview: your selected Credits are the solid ones (the rest are faded), so no frame is needed,
+   and neighbouring picks don't stack into double borders. */
+.design-preview .cell.mine::after {
+  display: none;
+}
+
+/* Your Credits that don't fit the rules, folded under the picker. */
+.picker-off {
+  margin-top: 12px;
+}
+.picker-off summary {
+  cursor: pointer;
+  list-style: none;
+}
+.picker-off summary::-webkit-details-marker {
+  display: none;
+}
+.picker-off summary::after {
+  content: ' +';
+}
+.picker-off[open] summary::after {
+  content: ' −';
+}
+.picker-off .picker {
+  margin-top: 10px;
+}
+.picker-off[hidden],
+#picker-none[hidden] {
+  display: none;
+}
+/* Every Credit left in the picker fits, so unselected ones stay bright; the selected ones carry the check. */
+#picker:has([aria-pressed='true']) .pick[aria-pressed='false'] {
+  opacity: 1;
+}
+#picker .pick {
+  background: #fff;
+}
+#picker .pick[aria-pressed='false']:hover {
+  opacity: 1;
 }
