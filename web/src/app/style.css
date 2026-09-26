@@ -3644,3 +3644,11 @@ a.bid-when:hover {
 .bid-now .sub a {
   color: inherit;
 }
+
+/* Bid form: breathe above the input, keep its hint close. */
+.bid-now + .bid-form {
+  margin-top: 8px;
+}
+.bid-form + p {
+  margin-top: -8px;
+}
