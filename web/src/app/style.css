@@ -3658,3 +3658,14 @@ a.bid-when:hover {
 .bid-form + p {
   margin-top: -8px;
 }
+
+/* An address chip that links out: same look, underline on hover only. */
+a.who {
+  color: inherit;
+  text-decoration: none;
+}
+a.who:hover .who-name {
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 3px;
+}

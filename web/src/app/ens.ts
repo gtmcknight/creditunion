@@ -1,4 +1,5 @@
 import { keccak256, type Address } from 'viem';
+import { explorer } from './chain';
 import { esc, short } from './ui';
 
 type Ens = { name: string | null; avatar: string | null };
@@ -30,9 +31,15 @@ export function identicon(a: string) {
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
-/// Creator chip; names and avatars fill in by `hydrate`.
-export const who = (a: Address, size: 'sm' | 'lg' = 'sm') =>
-  `<span class="who ${size}" data-ens="${esc(a)}"><img src="${identicon(a)}" alt=""><span class="who-name mono">${short(a)}</span></span>`;
+/// Creator chip; names and avatars fill in by `hydrate`. `link` makes it open the address on the explorer
+/// (not inside cards, which are already links).
+export const who = (a: Address, size: 'sm' | 'lg' = 'sm', link = false) => {
+  const inner = `<img src="${identicon(a)}" alt=""><span class="who-name mono">${short(a)}</span>`;
+  const url = link ? explorer('address', a) : null;
+  return url
+    ? `<a class="who ${size}" data-ens="${esc(a)}" href="${url}" target="_blank" rel="noopener" title="View on the explorer">${inner}</a>`
+    : `<span class="who ${size}" data-ens="${esc(a)}">${inner}</span>`;
+};
 
 export function hydrate(root: ParentNode = document) {
   root.querySelectorAll<HTMLElement>('[data-ens]').forEach(async (el) => {

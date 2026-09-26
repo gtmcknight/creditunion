@@ -67,7 +67,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
       <header>
         <div class="row"><span class="tag ${s.state.toLowerCase()}">${s.state}</span><button type="button" class="link small" id="share">Share</button></div>
         <h1>${esc(s.name || 'Untitled')}</h1>
-        <div class="byline">${who(s.creator, 'lg')}${s.creatorFeeBps ? `<span class="fee">${pct(s.creatorFeeBps)} creator fee</span>` : ''}</div>
+        <div class="byline">${who(s.creator, 'lg', true)}${s.creatorFeeBps ? `<span class="fee">${pct(s.creatorFeeBps)} creator fee</span>` : ''}</div>
       </header>
       ${
         s.state === 'Open' || s.state === 'Full' || s.state === 'Expired'
@@ -251,7 +251,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
   const net = (s.highBid * 99n) / 100n / 80n;
   return `<div class="box">
     <div class="bid-now">
-      <div><span>${s.highBid ? 'Current bid' : hasMin ? 'Reserve' : 'Opening bid'}</span><strong class="num">${s.highBid ? eth(s.highBid) : hasMin ? eth(s.minBid) : 'Any'}</strong><em class="sub">${s.highBid ? `by ${who(s.highBidder)}` : 'The clock starts at the first bid.'}</em></div>
+      <div><span>${s.highBid ? 'Current bid' : hasMin ? 'Reserve' : 'Opening bid'}</span><strong class="num">${s.highBid ? eth(s.highBid) : hasMin ? eth(s.minBid) : 'Any'}</strong><em class="sub">${s.highBid ? `by ${who(s.highBidder, 'sm', true)}` : 'The clock starts at the first bid.'}</em></div>
       <div><span>${ended ? 'Ended' : 'Ends in'}</span><strong class="num"${s.highBid && !ended ? ` data-countdown="${s.auctionEnd}"` : ''}>${!s.highBid ? '24h' : ended ? '—' : until(s.auctionEnd)}</strong>${!ended ? '<em class="sub">Late bids add 15 min</em>' : ''}</div>
     </div>
     ${
@@ -698,7 +698,7 @@ function openDepositors(b: Ctx, account: string | null) {
     <ol class="people-list">${list
       .map(
         (r) => `<li class="person" data-owner="${esc(r.addr.toLowerCase())}">
-          <div class="row">${who(r.addr)}<span class="tags">${same(r.addr, s.creator) ? '<span class="tag">Creator</span>' : ''}${account && same(r.addr, account) ? '<span class="tag you">You</span>' : ''}</span></div>
+          <div class="row">${who(r.addr, 'sm', true)}<span class="tags">${same(r.addr, s.creator) ? '<span class="tag">Creator</span>' : ''}${account && same(r.addr, account) ? '<span class="tag you">You</span>' : ''}</span></div>
           <div class="row muted small"><span class="num">${r.ids.length} Credit${r.ids.length === 1 ? '' : 's'}</span><span class="num">${s.split === 1 ? `${r.shares.toFixed(2)} shares · ` : ''}${((r.shares / total) * 100).toFixed(1)}% of the sale</span></div>
           <div class="person-art">${r.ids.slice(0, 8).map((id) => `<img src="${art(id)}" alt="" title="Credit #${id}" loading="lazy">`).join('')}${r.ids.length > 8 ? `<span class="muted small num">+${r.ids.length - 8}</span>` : ''}</div>
         </li>`,
@@ -750,7 +750,7 @@ async function loadBids(address: Address, account: string | null) {
         .map(
           (r, i) => `<li class="bid${i === 0 ? ' high' : ''}">
             <span class="num bid-amt">${eth(BigInt(r.amount))}</span>
-            <span class="bid-who">${who(r.bidder)}${account && same(r.bidder, account) ? '<span class="tag you">You</span>' : ''}</span>
+            <span class="bid-who">${who(r.bidder, 'sm', true)}${account && same(r.bidder, account) ? '<span class="tag you">You</span>' : ''}</span>
             ${explorer('tx', r.tx)
               ? `<a class="muted small num bid-when" href="${explorer('tx', r.tx)}" target="_blank" rel="noopener" title="View transaction">${r.time ? ago(r.time) : 'tx'} ↗</a>`
               : `<span class="muted small num bid-when">${r.time ? ago(r.time) : ''}</span>`}
