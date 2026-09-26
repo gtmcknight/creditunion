@@ -56,6 +56,8 @@ const MAX_RPC_BATCH = 50;
 const SUPPLY = 122_154;
 const inSupply = (id: number) => Number.isInteger(id) && id >= 1 && id <= SUPPLY;
 
+/// The site's home. eighty.fun and eighty.rhps.fun redirect here.
+const SITE_HOST = 'creditunion.party';
 const rpcUrl = (env: Env) => env.RPC_URL || env.FALLBACK_RPC;
 /// Listing scans in progress, per batch, so a burst of quotes costs one scan.
 const inflight = new Map<string, Promise<Awaited<ReturnType<typeof scan>>>>();
@@ -162,6 +164,9 @@ function sameSite(req: Request) {
 export default {
   async fetch(req, env, ctx): Promise<Response> {
     const url = new URL(req.url);
+    // The old domains send pages to the new one (same path), so shared links keep working.
+    if (url.hostname === 'eighty.fun' || url.hostname === 'www.eighty.fun' || url.hostname === 'eighty.rhps.fun')
+      return Response.redirect(`https://${SITE_HOST}${url.pathname}${url.search}`, 301);
     let res: Response;
     try {
       res = await handle(req, env, ctx, url);

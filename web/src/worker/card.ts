@@ -197,7 +197,7 @@ export async function drawParty(fetcher: Fetcher, origin: string, p: PartyCard):
     c.text(BODY, sub, x0, statY + 50, MUTED);
   }
 
-  c.text(LABEL, 'eighty.fun', x0, H - 44, INK);
+  c.text(LABEL, 'creditunion.party', x0, H - 44, INK);
   return png(c.px);
 }
 

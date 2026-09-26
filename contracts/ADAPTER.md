@@ -72,7 +72,7 @@ wait on a stranger. **Guess:** only 1,526 Statements can ever exist, so there ma
 2. **Adversarial cases:**
    - An adapter that doesn't burn, keeps the Statement, returns a wrong id or reenters: every one must revert.
    - These already exist for the mock adapter in `contracts/test/` and get rerun against the real one.
-3. **Sepolia:** if Jack deploys a test version of his contract, we repeat the full flow on eighty.fun's
+3. **Sepolia:** if Jack deploys a test version of his contract, we repeat the full flow on the site's
    testnet. If he doesn't, we run a Sepolia stand-in with the same interface.
 4. **Review:** the adapter goes through the same internal audit process as the rest (`AUDIT.md`), with the
    findings and fixes written up before proposing.
