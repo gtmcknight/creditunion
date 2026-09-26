@@ -3581,7 +3581,17 @@ dialog.people header h3 {
   align-items: center;
   gap: 12px;
   min-height: 44px;
+  padding: 0; /* a generic list-item rule adds 48px; rows run the full width of the fold */
+  margin: 0;
+  max-width: none;
   border-top: 1px solid var(--line);
+}
+/* A pointer click on a fold should not leave the keyboard focus ring behind. */
+.more summary:focus:not(:focus-visible) {
+  outline: 0;
+}
+.more summary:focus-visible {
+  outline-offset: -2px;
 }
 .bid-amt {
   font-weight: 600;

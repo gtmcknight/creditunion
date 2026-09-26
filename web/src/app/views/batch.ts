@@ -101,6 +101,8 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
   hydrate(app);
   document.getElementById('depositors-btn')?.addEventListener('click', () => openDepositors(b, account ?? null));
   loadBids(s.address, account ?? null);
+  // Chrome keeps a focus ring on <summary> after a mouse click; drop it for pointer use only.
+  app.querySelectorAll<HTMLElement>('.more summary').forEach((el) => el.addEventListener('pointerup', () => setTimeout(() => el.blur(), 0)));
   fillGhosts(app);
   // Share a link stamped with where the party stands, so X, Telegram and the rest fetch a fresh card for it
   // instead of showing the one they cached for an earlier state.
