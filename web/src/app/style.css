@@ -820,7 +820,7 @@ nav a .num {
 .box {
   display: grid;
   gap: 16px;
-  padding-top: 20px;
+  padding-top: 24px; /* same 24 as every other block boundary in the column */
   border-top: 1px solid var(--fg);
 }
 .center {
@@ -3635,14 +3635,20 @@ a.bid-when:hover {
 
 /* Under each auction figure: who holds it / the anti-snipe note, tight to the number. */
 .bid-now .sub {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin-top: 2px;
-  font: 13px/1.3 var(--sans);
+  font: 13px/1.55 var(--sans); /* the same line box as the label above the figure */
   font-style: normal;
   color: var(--muted);
 }
-.bid-now .sub a {
-  color: inherit;
+.bid-now .sub .who {
+  font-size: 13px;
+}
+.bid-now .sub .who img {
+  width: 18px;
+  height: 18px;
 }
 
 /* Bid form: breathe above the input, keep its hint close. */

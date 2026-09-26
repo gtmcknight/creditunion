@@ -251,7 +251,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
   const net = (s.highBid * 99n) / 100n / 80n;
   return `<div class="box">
     <div class="bid-now">
-      <div><span>${s.highBid ? 'Current bid' : hasMin ? 'Reserve' : 'Opening bid'}</span><strong class="num">${s.highBid ? eth(s.highBid) : hasMin ? eth(s.minBid) : 'Any'}</strong><em class="sub">${s.highBid ? `by ${link(s.highBidder)}` : 'The clock starts at the first bid.'}</em></div>
+      <div><span>${s.highBid ? 'Current bid' : hasMin ? 'Reserve' : 'Opening bid'}</span><strong class="num">${s.highBid ? eth(s.highBid) : hasMin ? eth(s.minBid) : 'Any'}</strong><em class="sub">${s.highBid ? `by ${who(s.highBidder)}` : 'The clock starts at the first bid.'}</em></div>
       <div><span>${ended ? 'Ended' : 'Ends in'}</span><strong class="num"${s.highBid && !ended ? ` data-countdown="${s.auctionEnd}"` : ''}>${!s.highBid ? '24h' : ended ? '—' : until(s.auctionEnd)}</strong>${!ended ? '<em class="sub">Late bids add 15 min</em>' : ''}</div>
     </div>
     ${
