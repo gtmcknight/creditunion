@@ -34,7 +34,7 @@ export async function mint(app: HTMLElement, rerender: () => void) {
               .reverse()
               .map((id) => `<span class="pick" title="Credit #${id}"><img src="${art(id)}" alt="Credit #${id}" loading="lazy"></span>`)
               .join('')}</div>
-             <div class="actions"><a class="btn primary" href="/parties">Join a party</a><a class="btn" href="/create">Make Statement Party</a></div>`
+             <div class="actions"><a class="btn primary" href="/unions">Join a credit union</a><a class="btn" href="/create">Start a credit union</a></div>`
           : '<p class="muted">None yet.</p>'
       }
     </div>`

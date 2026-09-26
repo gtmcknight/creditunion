@@ -14,7 +14,7 @@ type Due = { b: Listed; claim: bigint; owed: bigint };
 export async function profile(app: HTMLElement, rerender: () => void) {
   const account = session.account;
   if (!account) {
-    app.innerHTML = `<section class="narrow"><h1>Your Eighty</h1><p class="lede">Connect to see your Credits and parties.</p><button class="btn primary" data-connect>Connect wallet</button></section>`;
+    app.innerHTML = `<section class="narrow"><h1>Your Credits</h1><p class="lede">Connect to see your Credits and credit unions.</p><button class="btn primary" data-connect>Connect wallet</button></section>`;
     return;
   }
 
@@ -47,7 +47,7 @@ export async function profile(app: HTMLElement, rerender: () => void) {
     </header>
     <dl class="stats">
       <div><dt>In your wallet</dt><dd class="num">${owned.length}</dd></div>
-      <div><dt>In parties</dt><dd class="num">${deposited}</dd></div>
+      <div><dt>In credit unions</dt><dd class="num">${deposited}</dd></div>
       <div><dt>To collect</dt><dd class="num">${total ? eth(total) : '0'}</dd></div>
     </dl>
   </section>
@@ -59,7 +59,7 @@ export async function profile(app: HTMLElement, rerender: () => void) {
     <div class="dues">${dues
       .map(
         (d) => `<div class="due">
-        <a href="/party/${d.b.s.address}">${esc(d.b.s.name || 'Untitled')}</a>
+        <a href="/union/${d.b.s.address}">${esc(d.b.s.name || 'Untitled')}</a>
         <span class="num muted">${d.claim ? `${eth(d.claim)} share` : ''}${d.claim && d.owed ? ' · ' : ''}${d.owed ? `${eth(d.owed)} refund` : ''}</span>
         <button class="btn sm primary" data-collect="${d.b.s.address}" data-claim="${d.claim > 0n}" data-owed="${d.owed > 0n}">Collect</button>
       </div>`,
@@ -70,11 +70,11 @@ export async function profile(app: HTMLElement, rerender: () => void) {
   }
 
   <section>
-    <div class="section-head"><h2>Your parties</h2><span class="muted">${mine.length || ''}</span></div>
+    <div class="section-head"><h2>Your credit unions</h2><span class="muted">${mine.length || ''}</span></div>
     <div class="grid">${
       mine.length
         ? mine.map((b) => card(b)).join('')
-        : `<div class="empty-state"><p>You're not in any party yet.</p><div class="actions"><a class="btn primary" href="/parties">Browse parties</a><a class="btn" href="/create">Open one</a></div></div>`
+        : `<div class="empty-state"><p>You're not in any credit union yet.</p><div class="actions"><a class="btn primary" href="/unions">Browse credit unions</a><a class="btn" href="/create">Start one</a></div></div>`
     }</div>
   </section>
 

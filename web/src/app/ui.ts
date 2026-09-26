@@ -106,22 +106,23 @@ export function errText(e: unknown): string {
 }
 
 const ERRORS: Record<string, string> = {
-  TooFewToOpen: 'Not enough Credits to open a party.',
-  WrongState: 'The party is not in the right state for that.',
+  TooFewToOpen: 'Not enough Credits to open a credit union.',
+  WrongState: 'The credit union is not in the right state for that.',
   WrongPhase: 'Not right now. Burning works only in the hour after the 5-minute countdown, and Credits can’t be withdrawn during that hour.',
-  NotDepositor: 'Only the depositor can withdraw that Credit.',
-  Excluded: "That Credit doesn't match this party's filter.",
+  NotDepositor: 'Only the member who deposited it can withdraw that Credit.',
+  Excluded: "That Credit doesn't match this credit union's rules.",
   BidTooLow: 'Bid is below the minimum.',
   AuctionOver: 'The auction has ended.',
   AuctionRunning: 'The auction is still running.',
   NothingToClaim: 'Nothing to claim.',
+  NoSlot: 'This painted sheet has no slot left for one of those Credits. Pick fewer of that kind.',
   ReserveTooLow: 'Reserve must be 0 or at least 0.01 ETH.',
   NameTooLong: 'Name is too long (64 bytes max).',
   BadDuration: 'Duration must be 3–90 days.',
   NoSpecifiedOrdersAvailable: 'None of those listings are available any more. Get a new price.',
   TooFewBought: 'Fewer listings were available than expected. Get a new price.',
   FeeNotCovered: 'Not enough ETH sent to cover the fee.',
-  NotStray: 'That token is part of the party.',
+  NotStray: 'That token is part of the credit union.',
 };
 
 export type { Address };

@@ -3,24 +3,25 @@
 
 export type Card = { title: string; description: string; image: string };
 
-const SITE = 'Eighty';
+const SITE = 'Credit Union';
 const CARDS: Record<string, Card> = {
-  home: { title: 'Eighty', description: 'Pool your Credits with 79 others into one Statement. Burn, auction, split.', image: '/og/home.png' },
-  parties: { title: 'Parties · Eighty', description: 'Parties pooling Credits toward a Statement. Join one, leave any time before it fills.', image: '/og/party.png' },
-  auctions: { title: 'Auctions · Eighty', description: 'Statements at auction: 24 hours from the first bid, split between the 80 Credits that made them.', image: '/og/auctions.png' },
-  create: { title: 'Start a party · Eighty', description: 'Pick who joins and how the 80 are laid out. Anyone can burn the moment it fills.', image: '/og/create.png' },
-  about: { title: 'How Eighty works', description: 'One wallet nobody owns, rules nobody can change. Eighty Credits make a Statement.', image: '/og/about.png' },
-  party: { title: 'Join this party · Eighty', description: '80 Credits. One Statement. Split 80 ways. Leave any time before it fills.', image: '/og/party.png' },
-  mint: { title: 'Mint test Credits · Eighty', description: 'Real Credits art on testnet, to try a party end to end.', image: '/og/mint.png' },
-  me: { title: 'Your parties · Eighty', description: 'Your Credits in parties, and what they’re worth.', image: '/og/home.png' },
-  og: { title: 'Link previews · Eighty', description: 'Every page’s link card.', image: '/og/home.png' },
+  home: { title: 'Credit Union', description: 'Pool your Credits with 79 others into one Statement. Burn, auction, split.', image: '/og/home.png' },
+  parties: { title: 'Credit Unions', description: 'Credit unions pooling Credits toward a Statement. Join one, leave any time before it fills.', image: '/og/party.png' },
+  auctions: { title: 'Auctions · Credit Union', description: 'Statements at auction: 24 hours from the first bid, split between the 80 Credits that made them.', image: '/og/auctions.png' },
+  create: { title: 'Start a credit union', description: 'Pick who joins and how the 80 are laid out. Anyone can burn the moment it fills.', image: '/og/create.png' },
+  about: { title: 'How Credit Union works', description: 'One wallet nobody owns, rules nobody can change. Eighty Credits make a Statement.', image: '/og/about.png' },
+  party: { title: 'Join this credit union', description: '80 Credits. One Statement. Split 80 ways. Leave any time before it fills.', image: '/og/party.png' },
+  mint: { title: 'Mint test Credits · Credit Union', description: 'Real Credits art on testnet, to try a credit union end to end.', image: '/og/mint.png' },
+  me: { title: 'Your credit unions', description: 'Your Credits in credit unions, and what they’re worth.', image: '/og/home.png' },
+  og: { title: 'Link previews · Credit Union', description: 'Every page’s link card.', image: '/og/home.png' },
 };
 
 /// The card for a path, or null for paths that aren't pages.
 export function cardFor(path: string): Card | null {
   const first = path.split('/')[1] ?? '';
   if (first === '') return CARDS.home;
-  if (first === 'b' || first === 'party') return CARDS.party;
+  if (first === 'b' || first === 'party' || first === 'union') return CARDS.party;
+  if (first === 'unions') return CARDS.parties;
   if (first === 'docs' || first === 'how') return CARDS.about;
   if (first === 'new') return CARDS.create;
   return CARDS[first] ?? null;
@@ -60,11 +61,11 @@ export function withCard(html: Response, card: Card, url: URL): Response {
 
 /// A party page's card, from the party itself: its name and where it stands, and its own drawn image.
 export function partyCard(address: string, name: string, state: string, count: number, highBid: string, stamp: string): Card {
-  const n = name || 'A party';
+  const n = name || 'A credit union';
   const where =
     state === 'Settled' ? `Sold for ${highBid}.`
     : state === 'Auction' ? (highBid ? `At auction, high bid ${highBid}.` : 'At auction. The clock starts with the first bid.')
     : state === 'Full' ? 'Full: 80 Credits, ready to become a Statement.'
     : `${count} of 80 Credits in. Join with yours, leave any time before it fills.`;
-  return { title: `${n} · Eighty`, description: where, image: `/og/party/${address.toLowerCase()}.png?s=${stamp}` };
+  return { title: `${n} · Credit Union`, description: where, image: `/og/party/${address.toLowerCase()}.png?s=${stamp}` };
 }

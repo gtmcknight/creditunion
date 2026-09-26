@@ -1,6 +1,6 @@
 /// Eighty's Worker. It holds no state and signs nothing. Its jobs:
 ///   /config.json   chain id and contract addresses for the app
-///   /rpc           read-only JSON-RPC proxy to our contracts only (keeps the provider key private)
+///   /rpc           read-only JSON-RPC proxy to our contracts (and Credits' art) only (keeps the provider key private)
 ///   /art/...       a Credit's art, read from Jack's art contract and cached forever (art never changes)
 ///   /opensea/quote cheapest OpenSea listings that fit a batch, as signed Seaport orders for the Sweeper
 ///   /ens/:address  primary ENS name (always from mainnet), cached a day
@@ -443,7 +443,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
 
   // Pages: the app shell with this route's link-preview tags; a party page describes that party.
   let card = req.method === 'GET' ? cardFor(url.pathname) : null;
-  const party = url.pathname.match(/^\/(?:party|b)\/(0x[0-9a-fA-F]{40})$/)?.[1];
+  const party = url.pathname.match(/^\/(?:union|party|b)\/(0x[0-9a-fA-F]{40})$/)?.[1];
   // Each party page costs RPC reads, so it is rate limited; over the limit, or not one of ours, it gets the generic card.
   if (card && party && !(await limited(env.RL_MISC, req)) && (await isBatch(env, url, party.toLowerCase() as Address))) {
     const p = await readParty(env, party as Address).catch(() => null);
@@ -539,7 +539,7 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
       const to = String(call.to ?? '').toLowerCase();
       const data = String(call.data ?? '0x');
       if (!/^0x[0-9a-f]{40}$/.test(to) || !/^0x([0-9a-fA-F]{2}){0,8192}$/.test(data)) return text('bad call', 400);
-      if (!allowed.has(to) && !(await isBatch(env, url, to as Address))) return text('target not allowed', 403);
+      if (!allowed.has(to) && to !== (await artOf(env)) && !(await isBatch(env, url, to as Address))) return text('target not allowed', 403);
       // `from` rides along (only as an address): simulating a write needs the real sender, or msg.sender is 0x0.
       const from = String(call.from ?? '').toLowerCase();
       // and `value` (a hex quantity), so a bid simulates with the ETH it carries.
@@ -673,6 +673,28 @@ async function fitting(env: Env, url: URL, ctx: ExecutionContext, batch: Address
     } catch {}
   }
   return listings;
+}
+
+/// Credits' art contract, as Credits itself names it (`art()`), so the app can ask it for a Credit's traits
+/// (describe) the way a batch does. Read once per isolate; only a well-formed nonzero address is ever allowed.
+let artAddr: { credits: string; at: Promise<string | null> } | null = null;
+function artOf(env: Env): Promise<string | null> {
+  const credits = env.CREDITS.toLowerCase();
+  if (!artAddr || artAddr.credits !== credits) {
+    const at = client(env)
+      .readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'art' })
+      .then((a) => {
+        const v = String(a).toLowerCase();
+        return /^0x[0-9a-f]{40}$/.test(v) && !/^0x0+$/.test(v) ? v : null;
+      })
+      .catch(() => null);
+    // A failed read is retried on the next call rather than remembered.
+    artAddr = { credits, at };
+    void at.then((v) => {
+      if (v === null && artAddr?.at === at) artAddr = null;
+    });
+  }
+  return artAddr.at;
 }
 
 /// Whether an address is one of our factory's batches. Positives are cached forever (a batch is one for good).

@@ -8,6 +8,7 @@ import { paletteBit, TRAITS } from '../traits';
 import { $$, art, errText, esc, sheet, toast } from '../ui';
 import { LAYOUT_TRAITS, keyOf, ruleFor, slotMark, slotName, type LayoutTrait } from '../../shared/layout';
 import { editionArt } from '../ghosts';
+import { Room, booksOf, noRoomReason } from '../slots';
 
 const CHUNK = 40;
 /// The layouts a new party can pick, by the contract's burn-order number (1 Mint time and 3 Creator's order are retired).
@@ -203,7 +204,7 @@ function markPaint(cell: HTMLElement, icon: string) {
 export async function create(app: HTMLElement) {
   if (!session.account) {
     app.innerHTML = `
-    <section class="narrow"><h1>Make Statement Party</h1><p class="lede">Set the rules, add your Credits, invite everyone. At 80 they burn into a Statement and everyone in splits the sale.</p>
+    <section class="narrow"><h1>Start a credit union</h1><p class="lede">Set the rules, add your Credits, invite everyone. At 80 they burn into a Statement and everyone in splits the sale.</p>
     <button class="btn primary" data-connect>Connect wallet</button></section>`;
     return;
   }
@@ -244,7 +245,7 @@ export async function create(app: HTMLElement) {
 
   // Title and one line across the top; under them the sheet (match count below it) and the form start level.
   app.innerHTML = `
-  <header class="create-head"><h1>Make Statement Party</h1><p class="create-lede">Set the rules, add your Credits, invite everyone. At 80 they burn into a Statement and everyone in splits the sale. <a href="/">How it works →</a></p></header>
+  <header class="create-head"><h1>Start a credit union</h1><p class="create-lede">Set the rules, add your Credits, invite everyone. At 80 they burn into a Statement and everyone in splits the sale. <a href="/">How it works →</a></p></header>
   <section class="design">
     <div class="design-preview">
       <div id="preview">${sheet([])}</div>
@@ -327,7 +328,7 @@ export async function create(app: HTMLElement) {
       <h2 class="form-title">Settings</h2>
       <div class="rule-list party-list">
         <div class="rrow">
-          <label class="rrow-head name-row"><span class="rrow-name">Party name</span><input id="name" type="text" maxlength="64" placeholder="e.g. Cyan Minute" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"></label>
+          <label class="rrow-head name-row"><span class="rrow-name">Name</span><input id="name" type="text" maxlength="64" placeholder="e.g. Cyan Minute" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"></label>
         </div>
         <div class="rrow" data-prow="terms">
           <div class="rrow-head"><button type="button" class="rrow-toggle" data-party-btn="terms" aria-expanded="false"><span class="rrow-name">Payout</span><span class="rrow-value" id="split-value">Equal</span><svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button></div>
@@ -351,7 +352,7 @@ export async function create(app: HTMLElement) {
 
       <div class="submit">
         <p class="gate-warn" id="warn" hidden></p>
-        <button class="btn primary block" id="go" disabled>Start party</button>
+        <button class="btn primary block" id="go" disabled>Start credit union</button>
         <p class="hint" id="why"></p>
       </div>
     </form>
@@ -392,6 +393,21 @@ export async function create(app: HTMLElement) {
     return true;
   };
 
+  /// A Credit's value of the painted trait, as Batch._keyOf reads it (0 while its traits are unknown).
+  const keyOfMine = (id: string) => {
+    const r = mine.get(id);
+    if (!r) return 0;
+    if (layoutTrait === 0) return paletteBit(r.traits.palette);
+    if (layoutTrait === 1) return Math.min(14, r.traits.eights) + 1;
+    if (layoutTrait === 2) return PRINTS.indexOf(r.traits.registration as (typeof PRINTS)[number]) + 1;
+    if (layoutTrait === 3) return WEIGHTS.indexOf(weightOf(r) as (typeof WEIGHTS)[number]) + 1;
+    return r.traits.palette.length;
+  };
+  /// Room on the sheet for your opening Credits: 80, and on a painted sheet only so many of each value (plus the
+  /// open slots), as the batch books them. Picking past that reverts the open with NoSlot.
+  const sheetBooks = () => (layout.some(Boolean) ? booksOf(layoutTrait, layout) : null);
+  const capacity = () => new Room(sheetBooks(), 80);
+
   // ---------------------------------------------------------------- live preview + counts
   const go = document.getElementById('go') as HTMLButtonElement;
   const why = document.getElementById('why')!;
@@ -421,11 +437,15 @@ export async function create(app: HTMLElement) {
   }
 
   /// The button says what it does: how many of your Credits go in.
-  const startLabel = () => (picks.size ? `Start party with ${picks.size} ${picks.size === 1 ? 'Credit' : 'Credits'}` : 'Start party');
+  const startLabel = () => (picks.size ? `Start credit union with ${picks.size} ${picks.size === 1 ? 'Credit' : 'Credits'}` : 'Start credit union');
   function refresh() {
     if (panesReady) applyPanes();
     const fit = owned.filter(qualifies);
     for (const id of [...picks]) if (!fit.some((f) => f.toString() === id)) picks.delete(id);
+    // Keep the picks the sheet has room for, in the order picked; the rest of a value grey out once it's full.
+    const room = capacity();
+    for (const id of [...picks]) if (!room.take(keyOfMine(id))) picks.delete(id);
+    const bk = sheetBooks();
     drawPreview(fit);
     // Credits that fit the rules stay in the picker; the rest fold away underneath, in the same order.
     const on = document.getElementById('picker')!, offBox = document.getElementById('picker-off')!;
@@ -437,6 +457,9 @@ export async function create(app: HTMLElement) {
       const ok = fitSet.has(id.toString());
       if (!ok) offCount++;
       p.classList.toggle('off', !ok);
+      const full = ok && !picks.has(id.toString()) && !room.fits(keyOfMine(id.toString()));
+      p.classList.toggle('full', full);
+      p.title = full ? (room.n >= 80 ? 'A credit union holds 80' : bk ? noRoomReason(bk, keyOfMine(id.toString()), true) : '') : `Credit #${id}`;
       p.setAttribute('aria-pressed', String(picks.has(p.dataset.id!)));
       (ok ? on : offBox).append(p);
     }
@@ -453,14 +476,14 @@ export async function create(app: HTMLElement) {
     // The contract refuses rules that can never admit 80.
     const tooNarrow = rules.list.length && rules.list.length < 80 ? 'A named list needs at least 80 Credits.'
       : rules.idTo && rules.idTo - rules.idFrom + 1 < 80 ? 'A number range needs at least 80 numbers.' : '';
-    const short = eligible >= 0 && eligible < 80 ? `Only ${eligible} ${eligible === 1 ? 'Credit' : 'Credits'} can ever join, and a party needs 80. Widen the rules.` : '';
+    const short = eligible >= 0 && eligible < 80 ? `Only ${eligible} ${eligible === 1 ? 'Credit' : 'Credits'} can ever join, and a credit union needs 80. Widen the rules.` : '';
     const reason = tooNarrow || short || (n < min ? `Select at least ${min} of your qualifying Credits.` : n > 80 ? 'At most 80.' : over ? overText(over) : '');
     // One line under the button: what blocks it, else how it plays out.
     // What blocks Start sits above it as a warning; the line under it always says how it plays out.
     const warn = document.getElementById('warn')!;
     warn.textContent = reason;
     warn.hidden = !reason;
-    why.innerHTML = `${n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions. ` : ''}Free to create a party. Withdraw your Credits anytime until the party fills and locks.<br>${Number(protocolBps) / 100}% protocol fee, only if it sells. Unofficial and experimental.`;
+    why.innerHTML = `${n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions. ` : ''}Free to start a credit union. Withdraw your Credits anytime until it fills and locks.<br>${Number(protocolBps) / 100}% protocol fee, only if it sells. Unofficial and experimental.`;
     go.disabled = !!reason;
     if (!go.dataset.busy) go.textContent = startLabel();
     drawSummary();
@@ -1028,13 +1051,14 @@ export async function create(app: HTMLElement) {
   pickerEl.classList.toggle('scrolls', pickerEl.scrollHeight > pickerEl.clientHeight + 24);
   pickerEl.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.pick');
-    if (!b || b.classList.contains('off')) return;
+    if (!b || b.classList.contains('off') || b.classList.contains('full')) return;
     picks.has(b.dataset.id!) ? picks.delete(b.dataset.id!) : picks.add(b.dataset.id!);
     refresh();
   });
   document.getElementById('all')!.addEventListener('click', () => {
     picks.clear();
-    owned.filter(qualifies).slice(0, 80).forEach((id) => picks.add(id.toString()));
+    const room = capacity();
+    for (const id of owned.filter(qualifies)) if (room.take(keyOfMine(id.toString()))) picks.add(id.toString());
     refresh();
   });
   app.querySelectorAll<HTMLInputElement>('input[name=split]').forEach((r) =>
@@ -1158,7 +1182,7 @@ export async function create(app: HTMLElement) {
       } else {
         // First party from this wallet: the factory needs permission to move your Credits, once.
         if (!isOk) {
-          go.textContent = 'Allow Eighty to move your Credits…';
+          go.textContent = 'Allow Credit Union to move your Credits…';
           await send(approve);
           isOk = true;
         }
@@ -1185,7 +1209,7 @@ export async function create(app: HTMLElement) {
       try {
         sessionStorage.setItem('eighty-created', batch);
       } catch {}
-      navigate(`/party/${batch}`);
+      navigate(`/union/${batch}`);
     } catch (x) {
       toast(errText(x), 'err', 8000);
       delete go.dataset.busy;

@@ -92,6 +92,7 @@ Copy `contracts/.env.example` to `contracts/.env`, fill it in, and load it with 
 | `DeployRatings.s.sol` | The rating table on its own | none |
 | `CheckRatings.s.sol` | Read-only: the deployed table matches `data/scores.bin` byte for byte | args `$RATINGS $CREDITS` |
 | `SeedDemo.s.sol` | Local anvil: mocks plus parties in every state | none (anvil default keys) |
+| `Matrix.s.sol` | Local anvil: the end-to-end test matrix (every filter, combinations, arrangements, painted layouts per trait) | run by `web/scripts/e2e-matrix.mjs` |
 
 ```sh
 forge script script/DeployTestnet.s.sol --rpc-url "$SEPOLIA_RPC" --private-key "$PRIVATE_KEY" --broadcast --slow
@@ -135,6 +136,14 @@ Worker endpoints:
 | `/og/...` | link-preview cards |
 
 Rate limits are per IP (`unsafe.bindings` in `wrangler.jsonc`).
+
+End-to-end matrix: deploys a fresh anvil (port 8546) with `contracts/script/Matrix.s.sol`, runs a second copy of the site on port 5191, and drives it in Chrome with a mock wallet. Every party's picker is checked against `Batch.canTake`, every offered Credit must deposit and every folded one revert, then Select all, Deposit and a partial Withdraw go through the page; the create page runs a few configs too. Needs foundry and Chrome.
+
+```sh
+cd web
+node scripts/e2e-matrix.mjs                 # all parties + create page, prints a results table
+ONLY='^L nearly' node scripts/e2e-matrix.mjs   # a subset; also HEADED=1, KEEP=1, SKIP_CREATE=1 (see the script header)
+```
 
 #### Deploy
 

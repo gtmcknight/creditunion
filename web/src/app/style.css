@@ -5759,6 +5759,20 @@ dialog.eligible::backdrop {
 #picker .pick[aria-pressed='false']:hover {
   opacity: 1;
 }
+/* Party picker: a Credit the sheet has no slot left for (after your picks), and the fold of ones that don't fit. */
+#picker .pick.off,
+#picker .pick.off:hover,
+#picker .pick.full,
+#picker .pick.full:hover {
+  opacity: 0.22;
+  cursor: not-allowed;
+}
+.picker-off .off-why {
+  margin: 12px 0 0;
+}
+.picker-off .off-why + .picker {
+  margin-top: 6px;
+}
 
 /* Picker hover card: same card as a sheet slot's, sized to its lines. */
 .pick-tip {
@@ -5782,8 +5796,11 @@ dialog.eligible::backdrop {
 
 /* Party page: 80 slots as 80 small squares, one per Credit, filled as they arrive. */
 .progress .slots {
+  /* Fills column by column, top then bottom, so it rises evenly left to right like a thermometer. */
   display: grid;
-  grid-template-columns: repeat(40, minmax(0, 1fr));
+  grid-template-rows: repeat(2, auto);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   gap: 3px;
 }
 .progress .slots i {

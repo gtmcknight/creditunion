@@ -82,7 +82,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[]) {
   const state = s.state === 'Open' ? '' : `<span class="tag state ${s.state.toLowerCase()}">${s.state}</span>`;
   registerFilter(s.address, s.filter);
   registerDeposits(ids, depositors, s.split === 1);
-  return `<a class="card${canJoin ? ' can-join' : ''}" href="/party/${s.address}">
+  return `<a class="card${canJoin ? ' can-join' : ''}" href="/union/${s.address}">
     <div class="card-art">${sheet(ids, { size: 'sm', mine, batch: s.state === 'Open' ? s.address : undefined })}<span class="count num">${s.count}/80</span>${state}</div>
     <div class="card-meta">
       <div class="meta-text">
@@ -105,8 +105,8 @@ export type HomeTab = 'parties' | 'auctions';
 export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
   const head =
     tab === 'parties'
-      ? ['Parties', 'Each party pools Credits toward 80. Join with ones that fit, and leave anytime before it fills.']
-      : ['Auctions', 'Every Statement a party makes is sold here. 24 hours from the first bid, split among the party.'];
+      ? ['Credit Unions', 'Each credit union pools Credits toward 80. Join with ones that fit, and leave anytime before it fills.']
+      : ['Auctions', 'Every Statement a credit union makes is sold here. 24 hours from the first bid, split among its members.'];
   app.innerHTML = `
   <header class="create-head"><h1>${head[0]}</h1><p class="create-lede">${head[1]}</p></header>
   <section class="home">
@@ -137,11 +137,11 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       const others =
         tab === 'auctions'
           ? titled('Live', rest.filter((b) => b.s.state !== 'Settled')) + titled('Completed', rest.filter((b) => b.s.state === 'Settled'))
-          : rest.length ? `${mine.length ? `<h2 class="group-title">All parties <span class="num">${rest.length}</span></h2>` : ''}${grid(rest)}` : '';
+          : rest.length ? `${mine.length ? `<h2 class="group-title">All credit unions <span class="num">${rest.length}</span></h2>` : ''}${grid(rest)}` : '';
       el.innerHTML = !list.length
         ? tab === 'parties'
-          ? `<div class="empty-state"><p>No parties yet.</p><a class="btn primary" href="/create">Make Statement Party</a></div>`
-          : `<div class="grid"><div class="card placeholder" id="auction-placeholder">${sheet([], { size: 'sm' })}<div class="card-body"><strong>No auctions yet</strong><span class="muted small">When a party burns its 80, its Statement is auctioned here.</span></div></div></div>`
+          ? `<div class="empty-state"><p>No credit unions yet.</p><a class="btn primary" href="/create">Start a credit union</a></div>`
+          : `<div class="grid"><div class="card placeholder" id="auction-placeholder">${sheet([], { size: 'sm' })}<div class="card-body"><strong>No auctions yet</strong><span class="muted small">When a credit union burns its 80, its Statement is auctioned here.</span></div></div></div>`
         : titled('For you', mine) + others;
       hydrate(el);
       fillGhosts(el);
@@ -169,6 +169,6 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     );
   } catch (e) {
     const el = document.getElementById('batches');
-    if (el) el.innerHTML = `<p class="error">Couldn't read parties from chain. ${esc((e as Error).message)}</p>`;
+    if (el) el.innerHTML = `<p class="error">Couldn't read credit unions from chain. ${esc((e as Error).message)}</p>`;
   }
 }

@@ -109,8 +109,8 @@ function card(name: string, ground: Buffer, title: string[], line: string) {
 
 mkdirSync(pub('og'), { recursive: true });
 card('home', wall('time', 3), ['Eighty Credits', 'make a Statement.'], 'Pool your Credits with 79 others. Burn, auction, split.');
-card('about', wall('density', 3), ['How Eighty works'], 'One wallet nobody owns. Rules nobody can change.');
+card('about', wall('density', 3), ['How Credit Union works'], 'One wallet nobody owns. Rules nobody can change.');
 card('auctions', wall('color', 3), ['Statements', 'at auction'], '24 hours from the first bid, split between the 80.');
-card('create', wall('time', 5, 40_000), ['Start a party'], 'Pick who joins and how the 80 are laid out.');
-card('party', wall('color', 5, 7), ['Join this party'], '80 Credits. One Statement. Split 80 ways.');
+card('create', wall('time', 5, 40_000), ['Start a credit union'], 'Pick who joins and how the 80 are laid out.');
+card('party', wall('color', 5, 7), ['Join this credit union'], '80 Credits. One Statement. Split 80 ways.');
 card('mint', wall('density', 5, 90_000), ['Mint test Credits'], 'Real Credits art, on testnet.');

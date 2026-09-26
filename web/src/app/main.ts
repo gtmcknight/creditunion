@@ -14,9 +14,9 @@ import { esc, errText, toast } from './ui';
 const app = document.getElementById('app')!;
 let seq = 0;
 
-/// Real paths: / (how it works; /about too), /parties, /auctions, /create, /party/0x…, /mint, /me.
-/// Old #/ links (and the old names /new, /b, /docs, /how) still land in the right place.
-const LEGACY: Record<string, string> = { new: 'create', b: 'party', docs: 'about', how: 'about' };
+/// Real paths: / (how it works; /about too), /unions, /auctions, /create, /union/0x…, /mint, /me. Pages keep their old
+/// internal names (party, parties). Old #/ links and old paths (/party, /parties, /new, /b, /docs, /how) still land.
+const LEGACY: Record<string, string> = { union: 'party', unions: 'parties', new: 'create', b: 'party', docs: 'about', how: 'about' };
 function pagePath(): string[] {
   const parts = location.pathname.replace(/^\/+|\/+$/g, '').split('/');
   parts[0] = LEGACY[parts[0]] ?? parts[0];
@@ -76,7 +76,7 @@ function mobileWalletLinks() {
     ['Trust Wallet', `https://link.trustwallet.com/open_url?coin_id=60&url=${encodeURIComponent(here)}`],
   ];
   return `<h3>Open in your wallet</h3>
-    <p class="muted small">This browser has no wallet built in. Open Eighty inside your wallet app’s browser, or paste the link there.</p>
+    <p class="muted small">This browser has no wallet built in. Open Credit Union inside your wallet app’s browser, or paste the link there.</p>
     <div class="wallet-list">${links.map(([n, u]) => `<a class="wallet" href="${esc(u)}" rel="noopener"><span>${n}</span><span class="muted">↗</span></a>`).join('')}</div>
     <button class="btn block" id="copy-link" value="">Copy link</button>`;
 }

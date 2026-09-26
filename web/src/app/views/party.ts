@@ -5,6 +5,7 @@ import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligib
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { hydrate, pct, who } from '../ens';
 import { editionArt, examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
+import { Room, books, depositedKeys, keysOf, noRoomReason, type Books } from '../slots';
 import { $$, art, clock, errText, esc, eth, same, sheet, short, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
 
@@ -65,7 +66,7 @@ type Mine = Awaited<ReturnType<typeof me>> | null;
 
 /// The party's link, stamped with where it stands, so X, Telegram and the rest fetch a fresh card for it
 /// instead of showing the one they cached for an earlier state.
-const shareUrl = (s: Ctx['s']) => `${location.origin}/party/${s.address}?s=${stamp(s.state, s.count, s.highBid)}`;
+const shareUrl = (s: Ctx['s']) => `${location.origin}/union/${s.address}?s=${stamp(s.state, s.count, s.highBid)}`;
 
 let picks = new Set<string>();
 
@@ -77,7 +78,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     if (!ours) throw 0;
     b = got;
   } catch {
-    app.innerHTML = `<section class="prose"><h1>Party not found</h1><p><a href="/parties">← Parties</a></p></section>`;
+    app.innerHTML = `<section class="prose"><h1>Credit union not found</h1><p><a href="/unions">← Credit Unions</a></p></section>`;
     return;
   }
   const account = session.account;
@@ -99,13 +100,13 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   // On a layout batch the sheet shows every Credit in the slot it will burn into, not in deposit order.
   const slots = hasLayout(s.filter) ? Array.from({ length: 80 }, (_, i) => layoutSlot(s.filter, i)) : null;
   let placed: (bigint | null)[] | undefined;
-  if (slots && !burned && b.ids.length) {
+  // The value of the painted trait each Credit in was booked under (Batch.keyOf): places them, and tells the
+  // picker what room is left. Null when unread (the picker then falls back to the rules alone).
+  let keyed: Map<string, number> | null = null;
+  if (slots && !burned) {
     try {
-      const pal = (await Promise.all(
-        b.ids.map((id) => pub.readContract({ address: s.address, abi: batchAbi, functionName: 'keyOf', args: [id] })),
-      )) as number[];
-      const byId = new Map(b.ids.map((id, i) => [id.toString(), Number(pal[i])]));
-      placed = placeOnLayout(slots, b.ids, (id) => byId.get(id.toString()) ?? 0);
+      keyed = await depositedKeys(s.address, b.ids);
+      placed = b.ids.length ? placeOnLayout(slots, b.ids, (id) => keyed!.get(id.toString()) ?? 0) : undefined;
     } catch {}
   }
   registerFilter(s.address, s.filter);
@@ -129,7 +130,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         s.state === 'Open' || s.state === 'Full' || s.state === 'Expired'
           ? `<div class="progress">
           <div class="slots" aria-hidden="true">${Array.from({ length: 80 }, (_, i) => `<i${i < s.count ? ' class="in"' : ''}></i>`).join('')}</div>
-          <div class="row small"><span class="num">${s.count} of 80 Credits in${depositors ? ` · <button type="button" class="link" id="depositors-btn">${depositors} ${depositors === 1 ? 'depositor' : 'depositors'}</button>` : ''}</span><span class="muted num">${s.state === 'Open' ? `${80 - s.count} to go` : s.state === 'Full' ? stage(s) : 'Expired'}</span></div>
+          <div class="row small"><span class="num">${s.count} of 80 Credits in${depositors ? ` · <button type="button" class="link" id="depositors-btn">${depositors} ${depositors === 1 ? 'member' : 'members'}</button>` : ''}</span><span class="muted num">${s.state === 'Open' ? `${80 - s.count} to go` : s.state === 'Full' ? stage(s) : 'Expired'}</span></div>
         </div>`
           : ''
       }
@@ -145,7 +146,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         <dl class="facts">
           ${fact('Layout', ARRANGEMENTS[s.arrangement] ?? 'Deposit order')}
           ${fact('Payout', payout(b, myIds))}
-          ${s.state === 'Auction' || s.state === 'Settled' ? fact('Depositors', `<button type="button" class="link num" id="depositors-btn">${depositors}</button>`) : ''}
+          ${s.state === 'Auction' || s.state === 'Settled' ? fact('Members', `<button type="button" class="link num" id="depositors-btn">${depositors}</button>`) : ''}
           ${s.count ? fact('Rating', `<span id="rating" class="muted">…</span>`) : ''}
           ${s.reserve && (s.state === 'Open' || s.state === 'Full' || (s.state === 'Auction' && s.minBid === s.reserve && !s.highBid)) ? fact('Reserve', eth(s.reserve)) : ''}
           ${fact('Sale split', split(s))}
@@ -165,7 +166,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   document.getElementById('share')?.addEventListener('click', async () => {
     const url = shareUrl(s);
     try {
-      if (navigator.share && matchMedia('(pointer: coarse)').matches) await navigator.share({ title: s.name || 'A party on Eighty', url });
+      if (navigator.share && matchMedia('(pointer: coarse)').matches) await navigator.share({ title: s.name || 'A credit union on creditunion.fun', url });
       else {
         await navigator.clipboard.writeText(url);
         toast('Link copied', 'ok', 2500);
@@ -185,7 +186,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       art?.querySelectorAll('.cell.lit').forEach((c) => c.classList.remove('lit'));
     });
   });
-  bind(b, m, myIds, rerender);
+  bind(b, m, myIds, rerender, keyed);
   // Just made on the create page: congratulate once. The flag goes as soon as it's read, so a refresh won't reshow it.
   try {
     if (sessionStorage.getItem('eighty-created')?.toLowerCase() === address.toLowerCase()) {
@@ -200,14 +201,14 @@ function openCreated(b: Ctx, placed?: (bigint | null)[]) {
   const s = b.s;
   const url = shareUrl(s);
   const name = s.name || 'Untitled';
-  const text = `Join my Eighty party: ${name}. 80 Credits make a Statement.`;
+  const text = `Join my credit union: ${name}. 80 Credits make a Statement.`;
   const x = `https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
   const d = document.createElement('dialog');
   d.className = 'created';
   d.innerHTML = `<form method="dialog">
     <div class="created-art">${sheet(b.ids, { size: 'sm', placed })}</div>
-    <div class="created-head"><h3>Your party is live</h3><p class="muted">${esc(name)}</p></div>
-    <input class="created-link" type="text" readonly value="${esc(url)}" aria-label="Party link">
+    <div class="created-head"><h3>Your credit union is live</h3><p class="muted">${esc(name)}</p></div>
+    <input class="created-link" type="text" readonly value="${esc(url)}" aria-label="Credit union link">
     <div class="created-actions">
       <a class="btn primary" href="${esc(x)}" target="_blank" rel="noopener">Share on X</a>
       <button type="button" class="btn" id="created-copy">Copy link</button>
@@ -245,7 +246,7 @@ function payout(b: Ctx, myIds: Set<string>) {
 /// "1% protocol · 5% creator · 94% to depositors"
 function split(s: Ctx['s']) {
   const rest = 10_000 - s.protocolFeeBps - s.creatorFeeBps;
-  return [`${pct(s.protocolFeeBps)} protocol`, s.creatorFeeBps ? `${pct(s.creatorFeeBps)} creator` : '', `${pct(rest)} depositors`]
+  return [`${pct(s.protocolFeeBps)} protocol`, s.creatorFeeBps ? `${pct(s.creatorFeeBps)} creator` : '', `${pct(rest)} members`]
     .filter(Boolean)
     .join(' · ');
 }
@@ -280,6 +281,16 @@ function stage(s: Ctx['s']) {
   }
 }
 
+/// Factory deposits revert with the batch's own errors (Excluded, NoSlot…); include them so they decode.
+const depositAbi = [...factoryAbi, ...batchAbi.filter((x) => x.type === 'error')];
+/// The Credit a NoSlot revert names, or null for any other error.
+function noSlotId(err: unknown): bigint | null {
+  for (let c = err as { data?: { errorName?: string; args?: readonly unknown[] }; cause?: unknown } | undefined; c; c = c.cause as typeof c) {
+    if (c.data?.errorName === 'NoSlot') return BigInt(String(c.data.args?.[0]));
+  }
+  return null;
+}
+
 const plural = (n: number) => `${n} Credit${n === 1 ? '' : 's'}`;
 
 function panel(b: Ctx, m: Mine, myIds: Set<string>) {
@@ -288,7 +299,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
   // Your Credits in this party as tiles: pick some to withdraw just those, or leave none picked to take all.
   const withdraw = (primary = false) =>
     myIds.size
-      ? `<div class="yours-in"><p class="small fit-row"><span>Yours in this party <span class="muted num">${myIds.size}</span></span><span id="w-actions"><button type="button" class="link small" id="w-clear" hidden>Clear</button></span></p>
+      ? `<div class="yours-in"><p class="small fit-row"><span>Yours in this credit union <span class="muted num">${myIds.size}</span></span><span id="w-actions"><button type="button" class="link small" id="w-clear" hidden>Clear</button></span></p>
         <div class="picker" id="w-picker">${[...myIds].map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="false" aria-label="Credit #${id}"><img src="${art(BigInt(id))}" alt="" loading="lazy"></button>`).join('')}</div>
         <button class="btn block${primary ? ' primary' : ''}" id="withdraw">Withdraw all ${plural(myIds.size)}</button></div>`
       : '';
@@ -300,7 +311,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
       <div class="box-head"><h3>Add Credits</h3><span class="muted small num" id="pick-count"></span></div>
       <div class="subtabs" role="tablist">
         <button type="button" role="tab" data-add="mine" aria-selected="${start === 'mine'}">Your Credits <span class="num" id="n-mine"></span></button>
-        <button type="button" role="tab" data-add="buy" aria-selected="${start === 'buy'}">Buy on OpenSea</button>
+        <button type="button" role="tab" data-add="buy" aria-selected="${start === 'buy'}">Buy Credits</button>
       </div>
       <div data-pane="mine"${start === 'mine' ? '' : ' hidden'}>
         ${
@@ -313,7 +324,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
         }
       </div>
       <div data-pane="buy"${start === 'buy' ? '' : ' hidden'}>${buyPane(!!m)}</div>
-      <p class="muted small pane-note"><span id="buy-line">Finding the cheapest listings that fit… </span>Leave anytime until it locks. Eighty is unofficial and experimental, so use it at your own risk. <a href="/about/faq">Questions?</a></p>
+      <p class="muted small pane-note"><span id="buy-line">Finding the cheapest listings that fit… </span>Leave anytime until it locks. Credit Union is unofficial and experimental, so use it at your own risk. <a href="/about/faq">Questions?</a></p>
     </div>`;
   }
 
@@ -387,7 +398,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
         ? `<button class="btn primary block" id="settle">Settle</button>`
         : m
           ? `<form class="bid-form" id="bid-form"><label class="field"><input id="bid" inputmode="decimal" autocomplete="off" placeholder="${hasMin ? minEth(s.minBid) : '0.1'}" aria-label="Bid in ETH"><span>ETH</span></label><button class="btn primary">Bid</button></form>
-             <p class="small muted">${hasMin ? `Min ${minEth(s.minBid)}. ` : ''}Outbid ETH returns instantly. Eighty is unofficial and experimental, so use it at your own risk.</p>`
+             <p class="small muted">${hasMin ? `Min ${minEth(s.minBid)}. ` : ''}Outbid ETH returns instantly. Credit Union is unofficial and experimental, so use it at your own risk.</p>`
           : connect
     }
     ${m?.shares ? `<p class="small">Your share <strong class="num">${m.shares}/80</strong>${s.highBid ? ` · <span class="num">≈${eth(net * BigInt(m.shares))}</span> now` : ''}</p>` : ''}
@@ -403,12 +414,13 @@ function buyPane(connected: boolean) {
     <div class="listings" id="listings">${'<span class="listing skel" aria-hidden="true"><span class="art"></span><span class="price"></span></span>'.repeat(5)}</div>
     <div id="buy-quote" class="quote small"></div>
     ${connected || !config.sweeper ? `<button class="btn primary block" id="buy-go" disabled>Buy</button>` : '<button class="btn primary block" data-connect>Connect to buy</button>'}
+    <p class="muted small buy-source">The cheapest listings on OpenSea that fit, bought and deposited in one transaction.</p>
 `;
 }
 
 const minEth = (wei: bigint) => (Number(wei) / 1e18).toFixed(4).replace(/\.?0+$/, '');
 
-function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void) {
+function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: Map<string, number> | null) {
   const s = b.s;
   const run = async (btn: HTMLElement | null, label: string, fn: () => Promise<unknown>, ok: string) => {
     if (btn) {
@@ -470,7 +482,7 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void) {
   document.getElementById('settle')?.addEventListener('click', (e) =>
     run(e.currentTarget as HTMLElement, 'Settling…', () =>
       send({ address: s.address, abi: batchAbi, functionName: 'settle' }, txNote),
-    'Settled. Depositors can claim.'),
+    'Settled. Members can claim.'),
   );
 
   document.getElementById('claim')?.addEventListener('click', (e) =>
@@ -541,7 +553,7 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void) {
     }, 1000);
   }
 
-  if (s.state === 'Open' && m) drawPicker(b, m, rerender, run, txNote);
+  if (s.state === 'Open' && m) drawPicker(b, m, keyed, run, txNote);
   if (b.ids.length) loadRatings(b, run, txNote);
   if (s.state === 'Open') {
     document.querySelectorAll<HTMLButtonElement>('[data-add]').forEach((t) =>
@@ -557,7 +569,7 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void) {
 async function drawPicker(
   b: Ctx,
   m: NonNullable<Mine>,
-  rerender: () => void,
+  keyed: Map<string, number> | null,
   run: (btn: HTMLElement | null, label: string, fn: () => Promise<unknown>, ok: string) => Promise<void>,
   txNote: (h: string) => void,
 ) {
@@ -565,33 +577,77 @@ async function drawPicker(
   const el = document.getElementById('picker');
   if (!el) return;
   const room = 80 - s.count;
-  const fits = await eligible(s.address, m.owned);
+  const passing = await eligible(s.address, m.owned);
+  // A painted sheet takes a Credit only while a slot of its value (or an open slot) is free: read each Credit's
+  // value as the batch will (Batch._keyOf) and the slot books as they stand. Unreadable: the rules alone, and
+  // the deposit's test run below still drops any Credit without a slot.
+  let bk: Books | null = null;
+  let keys = new Map<string, number>();
+  if (hasLayout(s.filter) && keyed) {
+    try {
+      keys = await keysOf(s.filter.layoutTrait ?? 0, passing);
+      bk = books(s.filter, keyed.values());
+    } catch {}
+  }
   if (!el.isConnected) return;
-  picks = new Set([...picks].filter((p) => fits.some((f) => f.toString() === p)));
+  const keyOf = (id: bigint | string) => keys.get(String(id)) ?? 0;
+  // Fits: passes the rules and has room as the sheet stands. Most: how many go in together; filling greedily
+  // gets there, since a Credit only spills into an open slot once its own value's slots are taken.
+  const base = new Room(bk, room);
+  const fits = passing.filter((id) => base.fits(keyOf(id)));
+  const most = (() => {
+    const r = new Room(bk, room);
+    return fits.filter((id) => r.take(keyOf(id)));
+  })();
+  {
+    // Picks carried over from before a redraw: keep the ones that still land, in the order they were picked.
+    const r = new Room(bk, room);
+    picks = new Set([...picks].filter((p) => fits.some((f) => f.toString() === p) && r.take(keyOf(p))));
+  }
+
+  // The rest of your Credits, folded underneath with why they don't fit.
+  const inRules = new Set(passing.map(String));
+  const off = new Map<string, bigint[]>();
+  for (const id of passing) if (!base.fits(keyOf(id))) {
+    const why = bk ? noRoomReason(bk, keyOf(id)) : 'No room left';
+    off.set(why, [...(off.get(why) ?? []), id]);
+  }
+  const outside = m.owned.filter((id) => !inRules.has(id.toString()));
+  if (outside.length) off.set('Outside this credit union’s rules', outside);
+  const offCount = [...off.values()].reduce((n, x) => n + x.length, 0);
+  const offTile = (id: bigint) => `<button type="button" class="pick off" data-id="${id}" aria-disabled="true" aria-label="Credit #${id}"><img src="${art(id)}" alt="" loading="lazy"></button>`;
+  const fold = offCount
+    ? `<details class="picker-off" id="picker-off-wrap"><summary class="muted small">${offCount} of yours ${offCount === 1 ? 'doesn’t' : 'don’t'} fit</summary>${[...off]
+        .map(([why, ids]) => `<p class="small off-why" data-why>${esc(why)} <span class="muted num">${ids.length}</span></p><div class="picker" data-off>${ids.map(offTile).join('')}</div>`)
+        .join('')}</details>`
+    : '';
 
   const line = document.getElementById('fit-line');
   const mineCount = document.getElementById('n-mine');
-  if (mineCount) mineCount.textContent = fits.length ? String(fits.length) : '';
+  if (mineCount) mineCount.textContent = most.length ? String(most.length) : '';
   // Nothing of yours fits: lead with buying.
   if (!fits.length) document.querySelector<HTMLButtonElement>('[data-add="buy"]:not([aria-selected="true"])')?.click();
   if (!fits.length) {
     // Nothing to deposit: say so, and point at the other ways in.
     if (line)
       line.outerHTML = `<div class="empty-mine">
-        <p>${m.owned.length ? `None of your ${m.owned.length} Credits fit this party’s rules.` : 'You don’t hold any Credits yet.'}</p>
-        <button type="button" class="btn block" data-go-buy>Buy on OpenSea</button>
+        <p>${!m.owned.length ? 'You don’t hold any Credits yet.' : passing.length ? `None of your ${m.owned.length} Credits fit: the sheet has no slot left for them.` : `None of your ${m.owned.length} Credits fit this credit union’s rules.`}</p>
+        <button type="button" class="btn block" data-go-buy>Buy Credits</button>
         ${config.chainId !== 1 ? '<a class="small" href="/mint">Mint test Credits</a>' : ''}
-      </div>`;
+      </div>${fold}`;
     document.querySelector('[data-go-buy]')?.addEventListener('click', () => document.querySelector<HTMLButtonElement>('[data-add="buy"]')?.click());
     el.remove();
     return;
   }
-  if (line) line.innerHTML = `<span><strong class="num">${fits.length}</strong> of your ${m.owned.length} Credits fit this party.</span><span class="fit-actions" id="fit-actions"></span>`;
+  if (line) line.innerHTML = `<span><strong class="num">${most.length}</strong> of your ${m.owned.length} Credits fit this credit union.</span><span class="fit-actions" id="fit-actions"></span>`;
 
   el.innerHTML = fits
     .map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="${picks.has(id.toString())}" aria-label="Credit #${id}"><img src="${art(id)}" alt="" loading="lazy"></button>`)
     .join('');
+  if (fold) el.insertAdjacentHTML('afterend', fold);
   pickTips(el, fits);
+  const foldEl = document.getElementById('picker-off-wrap');
+  if (foldEl) pickTips(foldEl, [...off.values()].flat());
 
   const actions = document.getElementById('deposit-actions')!;
   const count = document.getElementById('pick-count')!;
@@ -611,18 +667,18 @@ async function drawPicker(
     const way = m.approved ? 'deposit' : n === 1 ? 'direct' : batchable ? 'batch' : null;
     // Select all / Clear sit on the "N of your Credits fit" line, right-aligned; the button stands alone below.
     const links = document.getElementById('fit-actions');
-    if (links) links.innerHTML = n ? '<button type="button" class="link small" id="pick-none">Clear</button>' : `<button type="button" class="link small" id="pick-all">Select ${Math.min(fits.length, room) === fits.length ? 'all' : Math.min(fits.length, room)}</button>`;
+    if (links) links.innerHTML = n ? '<button type="button" class="link small" id="pick-none">Clear</button>' : `<button type="button" class="link small" id="pick-all">Select ${most.length === fits.length ? 'all' : most.length}</button>`;
     actions.innerHTML = `
       ${
         // Always one button: nothing picked yet says so; approval only shows when a pick needs it.
         !n
           ? `<button class="btn primary block" disabled>Select Credits to deposit</button>`
           : !way
-            ? `<button class="btn primary block" id="approve">Approve Eighty · once</button>`
+            ? `<button class="btn primary block" id="approve">Approve Credit Union · once</button>`
             : `<button class="btn primary block" id="deposit" ${over ? 'disabled' : ''}>${over ? `Only ${room} open` : `Deposit ${plural(n)}${way === 'deposit' && txs > 1 ? ` · ${txs} transactions` : ''}`}</button>`
       }`;
     document.getElementById('pick-all')?.addEventListener('click', () => {
-      picks = new Set(fits.slice(0, room).map(String));
+      picks = new Set(most.map(String));
       sync();
     });
     document.getElementById('pick-none')?.addEventListener('click', () => {
@@ -638,7 +694,27 @@ async function drawPicker(
       run(e.currentTarget as HTMLElement, 'Depositing…', async () => {
         const ids = [...picks].map(BigInt);
         const chunks = Array.from({ length: Math.ceil(ids.length / CHUNK) }, (_, i) => ids.slice(i * CHUNK, (i + 1) * CHUNK));
-        const deposit = (chunk: bigint[]) => ({ address: config.factory, abi: factoryAbi, functionName: 'deposit', args: [s.address, chunk] });
+        const deposit = (chunk: bigint[]) => ({ address: config.factory, abi: depositAbi, functionName: 'deposit', args: [s.address, chunk] });
+        // A painted sheet takes each Credit only while a slot of its kind (or an open slot) is free, which the
+        // plain rule check can't see. When already approved, test-run the deposit and drop any Credit the sheet
+        // has no room for, so the rest still go in.
+        if (way === 'deposit' && hasLayout(s.filter)) {
+          const skipped: bigint[] = [];
+          for (let tries = 0; tries < ids.length; tries++) {
+            try {
+              await pub.simulateContract({ ...(deposit(ids) as object), account: session.account! } as never);
+              break;
+            } catch (err) {
+              const id = noSlotId(err);
+              if (id === null) throw err;
+              skipped.push(id);
+              ids.splice(ids.findIndex((x) => x === id), 1);
+              if (!ids.length) throw new Error(`No room left on this sheet for ${skipped.length === 1 ? `#${skipped[0]}` : 'those Credits'}: their slots are full.`);
+            }
+          }
+          if (skipped.length && ids.length) toast(`Skipping ${skipped.map((x) => `#${x}`).join(', ')}: no slot left on this sheet for ${skipped.length === 1 ? 'it' : 'them'}.`, 'info', 5000);
+          chunks.splice(0, chunks.length, ...Array.from({ length: Math.ceil(ids.length / CHUNK) }, (_, i) => ids.slice(i * CHUNK, (i + 1) * CHUNK)));
+        }
         if (way === 'direct')
           await send({ address: config.credits, abi: directAbi, functionName: 'safeTransferFrom', args: [session.account!, s.address, ids[0]] }, txNote);
         else if (way === 'batch')
@@ -651,19 +727,30 @@ async function drawPicker(
       }, 'Deposited.'),
     );
   };
+  // Each pick uses up a slot for its value (or an open one): once none is left, the rest of that value grey out.
   const sync = () => {
-    $$<HTMLButtonElement>('.pick', el).forEach((p) => p.setAttribute('aria-pressed', String(picks.has(p.dataset.id!))));
+    const r = new Room(bk, room);
+    for (const p of picks) r.take(keyOf(p));
+    $$<HTMLButtonElement>('.pick', el).forEach((p) => {
+      const id = p.dataset.id!;
+      const on = picks.has(id);
+      const blocked = !on && !r.fits(keyOf(id));
+      p.setAttribute('aria-pressed', String(on));
+      p.classList.toggle('off', blocked);
+      if (blocked) p.setAttribute('aria-disabled', 'true');
+      else p.removeAttribute('aria-disabled');
+      p.title = blocked ? (r.n >= room ? `All ${room} open places are picked` : bk ? noRoomReason(bk, keyOf(id), true) : '') : '';
+    });
     draw();
   };
   el.addEventListener('click', (e) => {
     const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.pick');
-    if (!btn) return;
+    if (!btn || btn.classList.contains('off')) return;
     const id = btn.dataset.id!;
     picks.has(id) ? picks.delete(id) : picks.add(id);
     sync();
   });
-  draw();
-  void rerender;
+  sync();
 }
 
 type Quote = { orders: unknown[]; ids: string[]; prices: string[]; total: string; expires?: number | null; error?: string };
@@ -809,7 +896,7 @@ async function bindBuy(
           pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'feeBps' }),
         ])) as [bigint, bigint];
         out.innerHTML = `<div class="quote-row"><span>${plural(q.ids.length)}</span><span class="num">${eth(total)}</span></div>
-          <div class="quote-row"><span>Eighty fee</span><span class="num">${eth(value - total)}</span></div>
+          <div class="quote-row"><span>Credit Union fee</span><span class="num">${eth(value - total)}</span></div>
           <div class="quote-row total"><span>Total</span><span class="num">${eth(value)}</span></div>
           ${chosen().length > q.ids.length ? `<p>${chosen().length - q.ids.length} no longer available.</p>` : ''}
           ${q.expires ? '<p class="muted small num" id="buy-expiry"></p>' : ''}`;
@@ -883,7 +970,7 @@ function openDepositors(b: Ctx, account: string | null) {
   const d = document.createElement('dialog');
   d.className = 'people';
   d.innerHTML = `<form method="dialog">
-    <header class="row"><h3>Who’s in <span class="muted num">${list.length}</span></h3><button type="submit" class="btn sm" aria-label="Close">Close</button></header>
+    <header class="row"><h3>Members <span class="muted num">${list.length}</span></h3><button type="submit" class="btn sm" aria-label="Close">Close</button></header>
     <ol class="people-list">${list
       .map(
         (r) => `<li class="person" data-owner="${esc(r.addr.toLowerCase())}">

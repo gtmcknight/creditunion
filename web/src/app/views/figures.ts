@@ -138,7 +138,7 @@ export const FAMILY = {
     const y1 = 150 - (2 * G4H + 2 * 30 + 22) / 2, y2 = y1 + G4H + 30 + 22;
     const sW = 64, sInset = (G4W - sW) / 2, sY = (y: number) => y + (G4H - statementH(sW)) / 2;
     const frames: [number, number, string, string][] = [
-      [row1[0], y1, 'Party', grid4(row1[0], y1, (i) => (i === 0 ? C : EMPTY))],
+      [row1[0], y1, 'Union', grid4(row1[0], y1, (i) => (i === 0 ? C : EMPTY))],
       [row1[1], y1, 'Credits', grid4(row1[1], y1, (i) => inks[i])],
       [row1[2], y1, 'Statement', statement(row1[2] + sInset, sY(y1), sW, 'none')],
       [row2[0], y2, 'Auction', statement(row2[0] + sInset + 2, sY(y2), sW - 4, 'gallery')],

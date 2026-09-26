@@ -25,9 +25,9 @@ export async function previews(app: HTMLElement) {
   app.innerHTML = `<section class="og-page"><h1>Link previews</h1><p class="muted">Each page’s card as X shows it, read from the tags the site serves for that page.</p><div class="og-grid" id="og-grid"><p class="muted">Reading the pages…</p></div></section>`;
   // Every real party gets its own card, drawn from the party itself.
   const parties = await listBatches()
-    .then((all) => all.map((b) => `/party/${b.s.address}`))
+    .then((all) => all.map((b) => `/union/${b.s.address}`))
     .catch(() => [] as string[]);
-  const routes = ['/', '/parties', '/auctions', '/create', '/about', ...(parties.length ? parties : ['/party/0x0000000000000000000000000000000000000000']), '/mint', '/me'];
+  const routes = ['/', '/unions', '/auctions', '/create', '/about', ...(parties.length ? parties : ['/union/0x0000000000000000000000000000000000000000']), '/mint', '/me'];
   const cards = await Promise.all(routes.map(read));
   const grid = document.getElementById('og-grid');
   if (!grid) return;
@@ -38,7 +38,7 @@ export async function previews(app: HTMLElement) {
       <div class="og-tweet">
         <span class="og-avatar" aria-hidden="true"></span>
         <div class="og-body">
-          <div class="og-who"><b>Eighty</b><span>@eighty · 1h</span></div>
+          <div class="og-who"><b>Credit Union</b><span>@creditunion · 1h</span></div>
           <p>${esc(`${host}${c.route === '/' ? '' : c.route}`)}</p>
           <a class="og-card" href="${esc(c.route)}">
             <span class="og-media">${c.image ? `<img src="${esc(new URL(c.image).pathname)}" alt="" loading="lazy">` : '<span class="og-none">No image</span>'}<span class="og-overlay">${esc(c.ogTitle)}</span></span>
@@ -61,7 +61,7 @@ export async function previews(app: HTMLElement) {
   document.getElementById('og-samples')?.remove();
   grid.insertAdjacentHTML(
     'afterend',
-    `<div id="og-samples"><h2 class="og-h">Party cards, every state</h2><div class="og-grid">${SAMPLES.map(
+    `<div id="og-samples"><h2 class="og-h">Credit union cards, every state</h2><div class="og-grid">${SAMPLES.map(
       ([k, l]) => `<figure class="og-sample"><img src="/og/sample/${k}.png" alt="" loading="lazy"><figcaption>${l}</figcaption></figure>`,
     ).join('')}</div></div>`,
   );

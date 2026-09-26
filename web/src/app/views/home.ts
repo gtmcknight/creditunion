@@ -121,44 +121,44 @@ export function home(app: HTMLElement) {
     {
       id: 'lifecycle',
       nav: 'How it runs',
-      title: 'Party together',
+      title: 'Pool together',
       figure: FAMILY.story,
       body: `<p>Pool your Credits with other holders. At 80 they burn into a Statement, and everyone in shares the sale.</p>`,
     },
     {
       id: 'eligibility',
       nav: 'Who joins',
-      title: 'Guest list',
+      title: 'Membership',
       figure: FAMILY.invited,
       body: `<p>Let any Credit holder join, or pick traits to make a special Statement.</p>`,
     },
     {
       id: 'order',
       nav: 'Layout',
-      title: 'Custom seating',
+      title: 'Burn order',
       figure: FAMILY.painted,
       body: `<p>Set the order they burn in: deposit order, Credit number either way, or a custom design.</p>`,
     },
     {
       id: 'buying',
       nav: 'Buying in',
-      title: 'Buy refreshments',
+      title: 'Buy in',
       figure: FAMILY.buy,
-      body: `<p>Buy Credits right here, through OpenSea, to help fill any party.</p>`,
+      body: `<p>Buy Credits right here, through OpenSea, to help fill any credit union.</p>`,
     },
     {
       id: 'exit',
       nav: 'Leaving',
-      title: 'Exit plan',
+      title: 'Withdrawals',
       figure: FAMILY.door,
-      body: `<p>Leave anytime until a full party locks. If nobody burns it within the hour, it unlocks again.</p>`,
+      body: `<p>Withdraw anytime until a full credit union locks. If nobody burns it within the hour, it unlocks again.</p>`,
     },
     {
       id: 'auction',
       nav: 'Auction',
-      title: 'Afterparty',
+      title: 'Dividends',
       figure: FAMILY.paddles,
-      body: `<p>The Statement goes to auction, and the proceeds are split across everyone in the party.</p>`,
+      body: `<p>The Statement goes to auction, and the proceeds are split across its members.</p>`,
     },
   ];
 
@@ -174,7 +174,7 @@ export function home(app: HTMLElement) {
   <div id="wall"></div>
   <article class="about doc">
     <div class="chapter-grid">${panels.map(panel).join('')}</div>
-    <section class="faq" id="faq"><h2>Questions</h2><div class="faq-cols"><div><details><summary>When can parties burn into Statements?</summary><p>Jack’s Statement contract is expected around October 1 (<a href="https://x.com/jackbutcher/status/2102910106451021935" target="_blank" rel="noopener">Jack’s announcement</a>). Until then full parties wait, and anyone can still leave. Once it’s live, a full party counts down 5 minutes, then locks for an hour so anyone can burn it.</p></details><details><summary>Is Eighty official?</summary><p>No. It’s an independent project built on Jack Butcher’s Credits.</p></details><details><summary>What does it cost?</summary><p>Free to start or join. Eighty takes 2% of the sale, only if it sells, and 2% on Credits you buy from OpenSea through Eighty.</p></details><details><summary>What if a party never fills?</summary><p>Nothing. Take your Credits back whenever you want.</p></details></div><div><details><summary>What if nobody burns it?</summary><p>After the hour it unlocks. Leave, or restart the countdown for another try.</p></details><details><summary>What if nobody bids?</summary><p>The Statement stays in the party until someone bids at least 0.01 ETH. The 24 hours start with that bid.</p></details><details><summary>How is the money split?</summary><p>Equal pays every Credit the same. Early bird pays the first Credit in three times the last.</p></details><details><summary>How do I get paid?</summary><p>Claim your share on the party page once the auction settles.</p></details></div></div></section>
+    <section class="faq" id="faq"><h2>Questions</h2><div class="faq-cols"><div><details><summary>When can credit unions burn into Statements?</summary><p>Jack’s Statement contract is expected around October 1 (<a href="https://x.com/jackbutcher/status/2102910106451021935" target="_blank" rel="noopener">Jack’s announcement</a>). Until then full credit unions wait, and anyone can still leave. Once it’s live, a full credit union counts down 5 minutes, then locks for an hour so anyone can burn it.</p></details><details><summary>Is Credit Union official?</summary><p>No. It’s an independent project built on Jack Butcher’s Credits.</p></details><details><summary>What does it cost?</summary><p>Free to start or join. Credit Union takes 2% of the sale, only if it sells, and 2% on Credits you buy from OpenSea through Credit Union.</p></details><details><summary>What if a credit union never fills?</summary><p>Nothing. Take your Credits back whenever you want.</p></details></div><div><details><summary>What if nobody burns it?</summary><p>After the hour it unlocks. Leave, or restart the countdown for another try.</p></details><details><summary>What if nobody bids?</summary><p>The Statement stays in the credit union until someone bids at least 0.01 ETH. The 24 hours start with that bid.</p></details><details><summary>How is the money split?</summary><p>Equal pays every Credit the same. Early bird pays the first Credit in three times the last.</p></details><details><summary>How do I get paid?</summary><p>Claim your share on the credit union’s page once the auction settles.</p></details></div></div></section>
   </article>`;
 
   // In-page links scroll; the router never sees them.
@@ -190,7 +190,7 @@ export function home(app: HTMLElement) {
 
   mountWall(document.getElementById('wall')!, {
     label: `<h1>Turn 80 Credits into a Statement.<br>Together.</h1>
-    <p class="wall-cta"><a class="btn primary" href="/parties">Join a party</a><a class="btn" href="/create">Start a party</a></p>`,
+    <p class="wall-cta"><a class="btn primary" href="/unions">Join a credit union</a><a class="btn" href="/create">Start a credit union</a></p>`,
   });
 
   // Deep link: /about/<chapter>.

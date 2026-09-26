@@ -169,8 +169,8 @@ export async function drawParty(fetcher: Fetcher, origin: string, p: PartyCard):
   const label =
     p.state === 'Settled' ? 'Sold'
     : p.state === 'Auction' ? (p.highBid > 0n ? (live ? 'At auction' : 'Auction ended') : 'At auction')
-    : p.state === 'Full' ? 'Full party'
-    : 'Party';
+    : p.state === 'Full' ? 'Full credit union'
+    : 'Credit union';
   c.text(LABEL, label, x0, 92, MUTED);
 
   const name = c.wrap(TITLE, p.name || 'Untitled', colW, 2);
