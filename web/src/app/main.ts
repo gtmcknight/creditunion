@@ -1,9 +1,10 @@
 import type { Address } from 'viem';
-import { chain, config, connect, loadConfig, onSession, restore, session, wallets } from './chain';
+import { chain, config, connect, explorer, loadConfig, onSession, restore, session, wallets } from './chain';
 import { batch } from './views/batch';
 import { create } from './views/create';
 import { home } from './views/home';
 import { docs } from './views/docs';
+import { lab } from './views/lab';
 import { invalidateFit } from './fit';
 import { hydrate, who } from './ens';
 import { mint } from './views/mint';
@@ -47,6 +48,7 @@ async function route() {
     if (page === '' || page === 'about') docs(app);
     else if (page === 'mint') await mint(app, route);
     else if (page === 'og') await og(app);
+    else if (page === 'lab') lab(app);
     else if (page === 'me') await profile(app, route);
     else if (page === 'create') await create(app);
     else if (page === 'party' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await batch(app, arg as Address, route);
@@ -187,6 +189,9 @@ document.addEventListener('click', (e) => {
     return;
   }
   drawTestnet();
+  document.getElementById('magic-eye')?.addEventListener('click', () => import('./magic').then((m) => m.openMagic()));
+  const factoryUrl = explorer('address', config.factory);
+  if (factoryUrl) document.getElementById('foot-contract')?.setAttribute('href', factoryUrl);
   await restore().catch(() => {});
   route();
   // Header counts. The Parties and Auctions pages fill them from their own read.

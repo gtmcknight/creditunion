@@ -1,7 +1,7 @@
 import { parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi } from '../abi';
 import { config, explorer, pub, send, session } from '../chain';
-import { ARRANGEMENTS, earlyWeight, eligible, getBatch, hasLayout, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
+import { ARRANGEMENTS, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { hydrate, pct, who } from '../ens';
 import { editionArt, examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
@@ -54,7 +54,7 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
     } catch {}
   }
   registerFilter(s.address, s.filter);
-  registerDeposits(b.ids, b.depositors);
+  registerDeposits(b.ids, b.depositors, b.s.split === 1);
   const artHtml = burned
     ? `<figure class="statement">${sheet(b.ids, { closed: true })}<figcaption class="legend muted small"><span>Statement #${s.statementId}</span></figcaption></figure>`
     : `${sheet(b.ids, { mine: myIds, fresh: placed ? undefined : seen < s.count ? seen : undefined, closing: s.state === 'Full', placed, batch: s.state === 'Open' ? s.address : undefined })}
@@ -135,15 +135,15 @@ export async function batch(app: HTMLElement, address: Address, rerender: () => 
   bind(b, m, myIds, rerender);
 }
 
-/// "Early bird · 1.5× → 0.5×", plus the connected wallet's own positions and what they add up to.
+/// "Early bird · 1st 1.88% → 80th 0.63%" of the depositors' payout, plus the connected wallet's own positions and what they add up to.
 function payout(b: Ctx, myIds: Set<string>) {
   if (b.s.split !== 1) return 'Equal · 1/80 each';
   const mine = b.ids.map((id, i) => [String(id), i] as const).filter(([id]) => myIds.has(id));
-  const shares = mine.reduce((n, [, i]) => n + earlyWeight(i), 0);
+  const shares = mine.reduce((n, [, i]) => n + earlyShare(i), 0);
   const yours = mine.length
-    ? ` <span class="muted">· yours ${mine.map(([, i]) => `#${i + 1}`).slice(0, 4).join(' ')}${mine.length > 4 ? '…' : ''} = ${shares.toFixed(2)} shares</span>`
+    ? ` <span class="muted">· yours ${mine.map(([, i]) => `#${i + 1}`).slice(0, 4).join(' ')}${mine.length > 4 ? '…' : ''} = ${sharePct(shares)}</span>`
     : '';
-  return `Early bird · <span class="num">1.5× → 0.5×</span>${yours}`;
+  return `Early bird · <span class="num">1st ${sharePct(earlyShare(0))} → 80th ${sharePct(earlyShare(79))}</span>${yours}`;
 }
 
 /// "1% protocol · 5% creator · 94% to depositors"
@@ -190,7 +190,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
         }
       </div>
       <div data-pane="buy"${start === 'buy' ? '' : ' hidden'}>${buyPane(!!m)}</div>
-      <p class="muted small">Withdraw anytime until the party fills.</p>
+      <p class="muted small pane-note"><span id="buy-line">Finding the cheapest listings that fit… </span>Withdraw anytime until the party fills. Eighty is unofficial and experimental, so use it at your own risk.</p>
     </div>`;
   }
 
@@ -263,7 +263,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
         ? `<button class="btn primary block" id="settle">Settle</button>`
         : m
           ? `<form class="bid-form" id="bid-form"><label class="field"><input id="bid" inputmode="decimal" autocomplete="off" placeholder="${hasMin ? minEth(s.minBid) : '0.1'}" aria-label="Bid in ETH"><span>ETH</span></label><button class="btn primary">Bid</button></form>
-             <p class="small muted">${hasMin ? `Min ${minEth(s.minBid)}. ` : ''}Outbid ETH returns instantly.</p>`
+             <p class="small muted">${hasMin ? `Min ${minEth(s.minBid)}. ` : ''}Outbid ETH returns instantly. Eighty is unofficial and experimental, so use it at your own risk.</p>`
           : connect
     }
     ${m?.shares ? `<p class="small">Your share <strong class="num">${m.shares}/80</strong>${s.highBid ? ` · <span class="num">≈${eth(net * BigInt(m.shares))}</span> now` : ''}</p>` : ''}
@@ -279,7 +279,7 @@ function buyPane(connected: boolean) {
     <div class="listings" id="listings">${'<span class="listing skel" aria-hidden="true"><span class="art"></span><span class="price"></span></span>'.repeat(5)}</div>
     <div id="buy-quote" class="quote small"></div>
     ${connected || !config.sweeper ? `<button class="btn primary block" id="buy-go" disabled>Buy</button>` : '<button class="btn primary block" data-connect>Connect to buy</button>'}
-    <p class="small muted" id="buy-line">Finding the cheapest listings that fit…</p>`;
+`;
 }
 
 const minEth = (wei: bigint) => (Number(wei) / 1e18).toFixed(4).replace(/\.?0+$/, '');
@@ -539,7 +539,7 @@ async function bindBuy(
       mainnetOnly = !!d.preview;
     }
   } catch (e) {
-    line.textContent = errText(e);
+    line.textContent = "Couldn’t load OpenSea listings right now. "; console.warn("[buy] listings", e);
     return;
   }
   if (!grid.isConnected) return;
@@ -567,14 +567,14 @@ async function bindBuy(
     const sub = pick.reduce((a, l) => a + (l.price ? BigInt(l.price) : 0n), 0n);
     const subEl = document.getElementById('buy-sub');
     if (subEl) subEl.textContent = pick.length && !preview ? eth(sub) : '';
-    line.textContent = preview || mainnetOnly
-      ? 'Buying opens on mainnet.'
+    line.textContent = (preview || mainnetOnly
+      ? '' // testnet: the banner already says it's a preview
       : !pool.length
         ? 'No listings fit right now.'
         : pick.length < want()
           ? `Only ${pick.length} listed that fit.`
-          : '';
-    line.hidden = !line.textContent;
+          : '') + ' ';
+    line.hidden = !line.textContent.trim();
     out.innerHTML = '';
     if (go) {
       go.disabled = preview || mainnetOnly || !pick.length || !connected;
@@ -673,7 +673,7 @@ async function loadRatings(
   }
   document.querySelectorAll<HTMLElement>('.batch-art .cell[data-id]').forEach((c) => {
     const r = rated[c.dataset.id!];
-    if (r) c.title = `Credit #${c.dataset.id} · ${fmtScore(r.score)} · rank ${r.rank.toLocaleString()} · ${r.traits.palette} · ${r.traits.eights} eights · ${r.traits.registration}`;
+    if (r) c.dataset.rating = fmtScore(r.score); // shown in the slot tooltip (no native title: it would cover the tooltip)
   });
 
   document.querySelector<HTMLElement>('.batch-art .sheet')?.classList.remove('closing');

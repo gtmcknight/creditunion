@@ -9,7 +9,7 @@ const WEIGHTS = ['even', 'lean', 'sparse', 'extreme'];
 const INK = ['#00b5e2', '#e4007c', '#ffd100', '#111111'];
 
 /// Highest slot value each trait can take.
-export const TOP: Record<LayoutTrait, number> = { 0: 15, 1: 9, 2: 6, 3: 4, 4: 4 };
+export const TOP: Record<LayoutTrait, number> = { 0: 15, 1: 6, 2: 6, 3: 4, 4: 4 };
 
 /// The slot value a Credit has for `trait`, from its packed edition traits (edition-traits.bin:
 /// palette = v & 15, print = (v >> 4) & 7, weight = (v >> 7) & 3, eights = (v >> 9) & 31).

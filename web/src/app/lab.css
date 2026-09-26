@@ -1,0 +1,91 @@
+/* Figure lab (local only): each chapter's current figure beside three alternatives. */
+.lab {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 32px 24px 80px;
+  color: var(--fg);
+}
+.lab-head h1 {
+  margin: 0 0 4px;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.lab-head p {
+  margin: 0;
+  color: var(--muted);
+}
+.lab-chapter {
+  margin-top: 56px;
+}
+.lab-chapter h2 {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.lab-chapter h2 span {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.lab-chapter > p {
+  margin: 0 0 16px;
+  max-width: 72ch;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.45;
+}
+.lab-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.lab-panel {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 28px 28px;
+  background: #f5f5f3;
+  color: #111;
+}
+.lab-tag {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #777;
+}
+.lab-panel .fig {
+  width: 100%;
+  max-width: 280px;
+  margin: 0;
+}
+.lab-panel .fig .viz {
+  padding: 0;
+  background: none;
+}
+.lab-panel svg {
+  font-family: var(--sans);
+}
+@media (max-width: 1100px) {
+  .lab-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 600px) {
+  .lab-row {
+    grid-template-columns: 1fr;
+  }
+}
+.lab-panel .fig figcaption {
+  font-size: 12px;
+  color: #777;
+  text-align: center;
+}

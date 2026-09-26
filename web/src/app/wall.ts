@@ -96,15 +96,17 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
     <div class="wall-frame" data-mode="${start}">
       <canvas aria-label="Every Credit"></canvas>
       ${label ? `<div class="wall-label">${label}</div>` : ''}
-      <div class="wall-modes" role="radiogroup" aria-label="View">${MODES.map(([m, l], i) => `<button type="button" role="radio" data-mode="${m}" aria-checked="${m === start}" aria-label="${l}" data-tip="${l}"><svg viewBox="0 0 16 16" aria-hidden="true">${ICONS[m]}</svg></button>`).join('')}</div>
       <figcaption class="wall-caption small"><span class="num wall-now">–</span> <span class="muted wall-about"></span></figcaption>
       <div class="wall-card" hidden></div>
       <div class="wall-hover" hidden></div>
+      <div class="wall-menu">
+      <div class="wall-modes" role="radiogroup" aria-label="View">${MODES.map(([m, l], i) => `<button type="button" role="radio" data-mode="${m}" aria-checked="${m === start}" aria-label="${l}"><svg viewBox="0 0 16 16" aria-hidden="true">${ICONS[m]}</svg><span>${l}</span></button>`).join('')}<button type="button" role="radio" data-magic aria-checked="false" aria-label="Magic eye"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg><span>Magic eye</span></button></div>
       <div class="wall-tools">
-        <button type="button" class="wall-zoom" data-zoom="-1" aria-label="Zoom out" data-tip="Zoom out"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg></button>
-        <button type="button" class="wall-zoom" data-zoom="1" aria-label="Zoom in" data-tip="Zoom in"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9M8 3.5v9" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg></button>
-        <button type="button" class="wall-pause" aria-label="Pause" data-tip="Pause">${PAUSE}</button>
-        <button type="button" class="wall-expand" aria-label="Explore every Credit, full screen"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Explore</span></button>
+        <div class="wall-zoomrow"><span>Zoom</span><button type="button" class="wall-zoom" data-zoom="-1" aria-label="Zoom out"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg></button>
+        <button type="button" class="wall-zoom" data-zoom="1" aria-label="Zoom in"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h9M8 3.5v9" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg></button></div>
+        <button type="button" class="wall-pause" aria-label="Pause">${PAUSE}<span>Pause</span></button>
+        <button type="button" class="wall-expand" aria-label="Explore every Credit, full screen"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Play</span></button>
+      </div>
       </div>
     </div>
   </figure>`;
@@ -343,18 +345,33 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
     pos = atOrAfter(clock);
   };
   host.querySelector('.wall-modes')!.addEventListener('click', (ev) => {
+    const eye = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-magic]');
+    if (eye) {
+      // The magic eye isn't a wall view: it lays its own stereogram over the frame.
+      host.querySelectorAll('[data-mode], [data-magic]').forEach((x) => x.setAttribute('aria-checked', String(x === eye)));
+      frameEl.dataset.eye = '';
+      if (!unmagic) import('./magic').then((m) => (unmagic ??= m.mountMagic(frameEl)));
+      return;
+    }
     const b = (ev.target as HTMLElement).closest<HTMLButtonElement>('[data-mode]');
     if (!b) return;
+    endMagic();
     setMode(b.dataset.mode as Mode);
-    host.querySelectorAll('[data-mode]').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+    host.querySelectorAll('[data-mode], [data-magic]').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
     frame();
   });
   // Expand grows the live band itself to the window, so whatever view is on keeps running, just bigger.
   const frameEl = host.querySelector<HTMLElement>('.wall-frame')!;
+  let unmagic: (() => void) | null = null;
+  const endMagic = () => {
+    unmagic?.();
+    unmagic = null;
+    delete frameEl.dataset.eye;
+  };
   const figure = host.querySelector<HTMLElement>('.wall-band')!;
   const btn = host.querySelector<HTMLButtonElement>('.wall-expand')!;
   const EXPAND = btn.innerHTML;
-  const COLLAPSE = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 6.5h-4v-4M2.5 9.5h4v4M9.5 6.5 14 2M6.5 9.5 2 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const COLLAPSE = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 6.5h-4v-4M2.5 9.5h4v4M9.5 6.5 14 2M6.5 9.5 2 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Exit</span>';
   const clip = (r: DOMRect) => `inset(${r.top}px ${innerWidth - r.right}px ${innerHeight - r.bottom}px ${r.left}px round 0px)`;
   const reduce = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
   let open = false;
@@ -368,10 +385,14 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
       if (!reduce()) frameEl.animate([{ clipPath: clip(r) }, { clipPath: 'inset(0px 0px 0px 0px round 0px)' }], { duration: 420, easing: 'cubic-bezier(0.32, 0.72, 0, 1)' });
       btn.innerHTML = COLLAPSE;
       btn.setAttribute('aria-label', 'Back to the page');
-      btn.dataset.tip = 'Close';
+
       addEventListener('keydown', onKey);
     } else {
       const done = () => {
+        if (unmagic) {
+          endMagic();
+          host.querySelectorAll<HTMLElement>('[data-mode], [data-magic]').forEach((x) => x.setAttribute('aria-checked', String(x.dataset.mode === mode)));
+        }
         frameEl.classList.remove('expanded');
         figure.style.minHeight = '';
         document.body.style.overflow = '';
@@ -379,7 +400,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
       removeEventListener('keydown', onKey);
       btn.innerHTML = EXPAND;
       btn.setAttribute('aria-label', 'Explore every Credit, full screen');
-      delete btn.dataset.tip;
+
       if (reduce()) done();
       else {
         // Shrink back onto where the band sits in the page: measure it in place, then animate there.
@@ -417,9 +438,8 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
   const setPlaying = (on: boolean) => {
     playing = on;
     if (on) hide();
-    pauseBtn.innerHTML = on ? PAUSE : PLAY;
-    pauseBtn.dataset.tip = on ? 'Pause' : 'Play';
-    pauseBtn.setAttribute('aria-label', pauseBtn.dataset.tip);
+    pauseBtn.innerHTML = (on ? PAUSE : PLAY) + `<span>${on ? 'Pause' : 'Resume'}</span>`;
+    pauseBtn.setAttribute('aria-label', on ? 'Pause' : 'Resume');
   };
   pauseBtn.addEventListener('click', () => setPlaying(!playing));
   // Pause only exists full screen; closing it lets the wall run again.

@@ -206,6 +206,19 @@ export async function create(app: HTMLElement) {
   let ghosts: { id: bigint; palette: number; t: number }[] = [];
   let view: 'rules' | 'credits' = 'credits'; // what the sheet shows (see drawPreview)
   let keyGhosts = new Map<number, typeof ghosts>(); // samples per painted value, for the painted preview
+  let keySupply = new Map<number, number>(); // how many Credits in the edition fit each painted value under the rules
+  /// A painted value asked for in more slots than there are Credits to fill them: the sheet could never fill.
+  const overPainted = () => {
+    const n = new Map<number, number>();
+    for (const m of layout) if (m) n.set(m, (n.get(m) ?? 0) + 1);
+    for (const [m, c] of n) {
+      const have = keySupply.get(m);
+      if (have !== undefined && c > have) return { m, c, have };
+    }
+    return null;
+  };
+  const overText = (o: { m: number; c: number; have: number }) =>
+    `Only ${o.have.toLocaleString()} ${o.have === 1 ? 'Credit fits' : 'Credits fit'} ${slotName(layoutTrait, o.m)}, but ${o.c} slots ask for it.`;
   let pattern: 'none' | 'checkered' = 'none';
   const layout: number[] = new Array(80).fill(0); // slot values of the painted trait, 0 = any
   let panesReady = false; // the rule tabs exist (refresh() redraws them once they do)
@@ -402,9 +415,13 @@ export async function create(app: HTMLElement) {
     document.getElementById('n')!.textContent = picks.size ? `${picks.size} selected` : `Min ${min}`;
     document.getElementById('all')!.hidden = !fit.length;
     const n = picks.size;
-    const reason = n < min ? `Select at least ${min} of your qualifying Credits.` : n > 80 ? 'At most 80.' : '';
+    const over = overPainted();
+    // The contract refuses rules that can never admit 80.
+    const tooNarrow = rules.list.length && rules.list.length < 80 ? 'A named list needs at least 80 Credits.'
+      : rules.idTo && rules.idTo - rules.idFrom + 1 < 80 ? 'A number range needs at least 80 numbers.' : '';
+    const reason = tooNarrow || (n < min ? `Select at least ${min} of your qualifying Credits.` : n > 80 ? 'At most 80.' : over ? overText(over) : '');
     // One line under the button: what blocks it, else how it plays out.
-    why.innerHTML = reason || `${n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions. ` : ''}Free to start. Take your Credits back anytime before it fills.<br>${Number(protocolBps) / 100}% protocol fee, only if it sells.`;
+    why.innerHTML = reason || `${n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions. ` : ''}Free to start. Take your Credits back anytime before it fills.<br>${Number(protocolBps) / 100}% protocol fee, only if it sells. Unofficial and experimental.`;
     go.disabled = !!reason;
     if (!go.dataset.busy) go.textContent = startLabel();
     drawSummary();
@@ -438,6 +455,7 @@ export async function create(app: HTMLElement) {
         // A painted sheet needs samples of each painted value, not just whatever the overall sample holds: ask for
         // each value on its own (the party's rules narrowed to that value), so every painted slot has a Credit.
         keyGhosts = new Map();
+        keySupply = new Map();
         const keys = [...new Set(layout.filter(Boolean))];
         if (keys.length) {
           const base = { palettes: pal(), prints: rules.prints, weights: rules.weights, eights: rules.eights, minuteFrom: rules.minuteFrom, minuteTo: rules.minuteTo, idFrom: rules.idFrom, idTo: rules.idTo, minScore: rules.minScore, maxScore: rules.maxScore, list: rules.list.slice(0, 200) };
@@ -447,11 +465,17 @@ export async function create(app: HTMLElement) {
               const both = (a: number, b?: number) => (b === undefined ? a : a ? a & b : b);
               const body = { ...base, palettes: both(base.palettes, narrow.palettes), eights: both(base.eights, narrow.eights), prints: both(base.prints, narrow.prints), weights: both(base.weights, narrow.weights) };
               const res = await fetch('/edition/match', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-              const e = (await res.json()) as { sample?: number[]; palettes?: number[]; traits?: number[] };
+              const e = (await res.json()) as { count?: number; sample?: number[]; palettes?: number[]; traits?: number[] };
+              if (typeof e.count === 'number') keySupply.set(k, e.count);
               keyGhosts.set(k, (e.sample ?? []).map((id, i) => ({ id: BigInt(id), palette: e.palettes?.[i] ?? 0, t: e.traits?.[i] ?? 0 })));
             }),
           ).catch(() => {});
           if (seq !== editionSeq) return;
+          const o = overPainted();
+          if (o) {
+            why.textContent = overText(o);
+            go.disabled = true;
+          }
         }
         drawPreview(owned.filter(qualifies));
       } catch {
@@ -569,6 +593,12 @@ export async function create(app: HTMLElement) {
   };
   const paint = (i: number, m: number) => {
     if (layout[i] === m) return;
+    const have = m ? keySupply.get(m) : undefined;
+    if (have !== undefined && layout.filter((x) => x === m).length >= have) {
+      if (!capWarned) toast(`Only ${have.toLocaleString()} ${have === 1 ? 'Credit fits' : 'Credits fit'} ${slotName(layoutTrait, m)}.`, 'info', 3000);
+      capWarned = true;
+      return;
+    }
     layout[i] = m;
     paintCell(i);
   };
@@ -579,6 +609,7 @@ export async function create(app: HTMLElement) {
     if (cell && view === 'rules') (cell as HTMLElement).innerHTML = layout[i] ? glyphFor(layoutTrait, layout[i]) : '';
   };
   let brush = brushA;
+  let capWarned = false; // one toast per stroke
   let picked = 0; // Colors chosen on the tiles (palette bits)
 
   // Brushes come from the rules you added: each paintable rule is a group of its picked values (all of them when
@@ -665,6 +696,7 @@ export async function create(app: HTMLElement) {
   }
   let painting = false;
   lgrid.addEventListener('pointerdown', (e) => {
+    capWarned = false;
     const c = (e.target as HTMLElement).closest<HTMLButtonElement>('.lcell');
     if (!c) return;
     painting = true;
@@ -982,6 +1014,7 @@ export async function create(app: HTMLElement) {
     lastSlot = i;
   };
   preview.addEventListener('pointerdown', (e) => {
+    capWarned = false;
     if (!preview.classList.contains('paintable')) return;
     const i = slotAt(e.clientX, e.clientY);
     if (i < 0) return;

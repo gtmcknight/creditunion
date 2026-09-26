@@ -37,6 +37,9 @@ export function placeOnLayout(slots: number[], ids: readonly bigint[], paletteOf
 export const SPLITS = ['Equal', 'Early bird'] as const;
 /// Early-bird weight of a 0-based position, in shares (1.5 at the first slot, 0.5 at the last).
 export const earlyWeight = (i: number) => (237 - 2 * i) / 158;
+/// Early bird: the share of the depositors' payout the Credit at deposit position i (0-based) gets. Weights 237 down to 79, total 12,640.
+export const earlyShare = (i: number) => (237 - 2 * i) / 12640;
+export const sharePct = (x: number) => `${(x * 100).toFixed(2).replace(/0$/, '')}%`;
 
 export type Rated = {
   id: string;

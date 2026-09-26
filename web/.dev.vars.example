@@ -1,0 +1,9 @@
+# Copy to web/.dev.vars for local dev. Never commit the real file.
+# In production set each with: wrangler secret put <NAME>
+
+# Upstream for /rpc. Falls back to FALLBACK_RPC in wrangler.jsonc when unset.
+RPC_URL=https://eth-sepolia.example/your-key
+# Enables /opensea/listings and /opensea/quote. Without it, buy-in is hidden.
+OPENSEA_API_KEY=your-opensea-api-key
+# Optional. Mainnet RPC for ENS names when CHAIN_ID is not 1 (defaults to a public node).
+ENS_RPC=https://eth-mainnet.example/your-key

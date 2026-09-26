@@ -59,7 +59,7 @@ export function sheet(
     const id = opts.placed ? (opts.placed[i] ?? undefined) : ids[i];
     if (id === undefined) {
       const g = opts.ghosts?.[i - ids.length];
-      if (g?.src) return `<i class="cell ghost" title="Credit #${g.id}"><img src="${g.src}" alt="" loading="lazy" decoding="async"></i>`;
+      if (g?.src) return `<i class="cell ghost"><img src="${g.src}" alt="" loading="lazy" decoding="async"></i>`;
       return `<i class="cell empty"></i>`;
     }
     const mine = opts.mine?.has(id.toString()) ? ' mine' : '';
@@ -105,6 +105,7 @@ const ERRORS: Record<string, string> = {
   AuctionOver: 'The auction has ended.',
   AuctionRunning: 'The auction is still running.',
   NothingToClaim: 'Nothing to claim.',
+  ReserveTooLow: 'Reserve must be 0 or at least 0.01 ETH.',
   NameTooLong: 'Name is too long (64 bytes max).',
   BadDuration: 'Duration must be 3–90 days.',
   NoSpecifiedOrdersAvailable: 'None of those listings are available any more. Get a new price.',

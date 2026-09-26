@@ -1,18 +1,10 @@
 import { mountWall } from '../wall';
-import { chain, config, explorer } from '../chain';
+import { FAMILY } from './figures';
 import { esc, short } from '../ui';
 
-const REPO = 'https://github.com/lucibotnyc/eighty';
-const CREDITS_MAINNET = '0x97630aA70AB14ed9883B41dAfccBc11349723043';
-const SEAPORT = '0x0000000000000068F116a894984e2DB1123eB395';
 
 
 const link = (href: string, text: string) => `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(text)} ↗</a>`;
-const addr = (a: string, label: string) => {
-  const u = explorer('address', a);
-  return `<span class="addr"><span>${esc(label)}</span>${u ? `<a class="mono" href="${u}" target="_blank" rel="noopener">${short(a)} ↗</a>` : `<span class="mono">${short(a)}</span>`}</span>`;
-};
-const src = (path: string) => link(`${REPO}/blob/main/${path}`, path.split('/').pop()!);
 
 /* ---------------------------------------------------------------- figures
    Drawn in the Credits' own inks on paper. Plate mixes indexed by the 4-bit CMYK mask, as in wall.ts. */
@@ -36,7 +28,7 @@ const sheet = (x: number, y: number, fill: (i: number, c: number, row: number) =
 const fig = (inner: string, caption = '') => `<figure class="fig"><div class="viz">${inner}</div>${caption ? `<figcaption>${caption}</figcaption>` : ''}</figure>`;
 
 
-const FIG = {
+export const FIG = {
   lifecycle: () => {
     const steps: [string, string, string][] = [
       ['Open', 'join or leave any time', C],
@@ -134,81 +126,53 @@ const FIG = {
 type Chapter = { id: string; nav: string; title: string; figure?: string; body: string };
 
 export function docs(app: HTMLElement) {
-  const testnet = config.chainId !== 1;
   const chapters: Chapter[] = [
     {
       id: 'lifecycle',
       nav: 'How it runs',
-      title: 'Five steps, all onchain',
-      figure: FIG.lifecycle(),
-      body: `<p>Start a party with your Credit. At 80, anyone can burn them into a Statement. It sells at auction and the money is split between the 80, after a 2% fee.</p>`,
-    },
-    {
-      id: 'exit',
-      nav: 'Leaving',
-      title: 'You can always leave',
-      figure: FIG.exit(),
-      body: `<p>Take your Credits back any time before the party fills. A full party locks for 7 days so it can be burned. Not burned by then? Anyone can leave.</p>`,
+      title: 'Party together',
+      figure: FAMILY.story,
+      body: `<p>Pool your Credits with other holders. At 80 they burn into a Statement, and everyone in shares the sale.</p>`,
     },
     {
       id: 'eligibility',
       nav: 'Who joins',
-      title: 'Parties pick who joins',
-      figure: FIG.eligibility(),
-      body: `<p>By Jack’s traits: Colors, Plates, Print, Weight, Eights, Bits, Payment Time or ${link('https://jack.art/credits/rating', 'Rating')}. Or by name, up to 200 Credits. Every deposit is checked onchain.</p>`,
+      title: 'Guest list',
+      figure: FAMILY.invited,
+      body: `<p>Let any Credit holder join, or pick traits to make a special Statement.</p>`,
     },
     {
       id: 'order',
       nav: 'Burn order',
-      title: 'And the order they burn in',
-      figure: FIG.order(),
-      body: `<p>Deposit order, mint time, Credit number, or a sheet you paint by Colors, Eights, Print, Weight or Plates. It’s the order the 80 go to Jack’s contract.</p>`,
-    },
-    {
-      id: 'auction',
-      nav: 'Auction',
-      title: '24 hours from the first bid',
-      figure: FIG.auction(),
-      body: `<p>Each bid beats the last by 5%. A bid in the final 15 minutes puts 15 back on the clock. Outbid? Your ETH comes straight back.</p>`,
-    },
-    {
-      id: 'early',
-      nav: 'Early bird',
-      title: 'Early bird pays more',
-      figure: FIG.early(),
-      body: `<p>Early bird parties pay the first Credit in three times the last. Equal parties pay every Credit the same.</p>`,
+      title: 'Custom seating',
+      figure: FAMILY.painted,
+      body: `<p>Set the order they burn in: deposit order, original mint time, or a custom design.</p>`,
     },
     {
       id: 'buying',
       nav: 'Buying in',
-      title: 'No Credit? Buy in',
-      figure: FIG.buying(),
-      body: `<p>Eighty finds the cheapest OpenSea listings that fit, then buys and deposits them in one transaction, for a 2% fee.</p>`,
+      title: 'Buy refreshments',
+      figure: FAMILY.buy,
+      body: `<p>Buy Credits right here, through OpenSea, to help fill any party.</p>`,
     },
     {
-      id: 'launch',
-      nav: 'Before launch',
-      title: 'Filling now, burning soon',
-      figure: FIG.launch(),
-      body: `<p>Jack’s Statement contract isn’t out yet. When it ships, we plug in the piece that burns through it. You get 30 minutes’ notice to leave first.</p>`,
+      id: 'exit',
+      nav: 'Leaving',
+      title: 'Exit plan',
+      figure: FAMILY.door,
+      body: `<p>Withdraw anytime before the party fills. If a full party isn’t burned within 7 days, anyone can leave.</p>`,
     },
     {
-      id: 'contracts',
-      nav: 'Contracts',
-      title: 'Contracts',
-      body: `<div class="addrs">
-        ${addr(config.factory, 'BatchFactory')}
-        ${addr(config.credits, testnet ? 'Test Credits' : 'Credits')}
-        ${config.sweeper ? addr(config.sweeper, 'Sweeper') : ''}
-        ${config.ratings ? addr(config.ratings, 'Ratings') : ''}
-      </div>
-      ${testnet ? `<p class="small muted">This is a preview on ${esc(chain.name)}. The Credits are test mints with the real art.</p>` : ''}
-      <p class="small muted">${link(REPO, 'Source')} · ${src('contracts/AUDIT.md')} · ${link(`https://etherscan.io/address/${CREDITS_MAINNET}`, 'Jack’s Credits')} · ${link('https://opensea.io/collection/credits', 'OpenSea')} · ${link(`https://etherscan.io/address/${SEAPORT}`, 'Seaport 1.6')}</p>`,
+      id: 'auction',
+      nav: 'Auction',
+      title: 'Afterparty',
+      figure: FAMILY.paddles,
+      body: `<p>The Statement goes to auction, and the proceeds are split across everyone in the party.</p>`,
     },
   ];
 
   // Two sections to a row, and between rows a band of the living wall in another view.
-  const panels = chapters.filter((c) => c.id !== 'contracts');
+  const panels = chapters;
   const panel = (c: Chapter) => `<section class="chapter" id="${c.id}">
       <h2>${esc(c.title)}</h2>
       ${c.body}
@@ -219,11 +183,7 @@ export function docs(app: HTMLElement) {
   <div id="wall"></div>
   <article class="about doc">
     <div class="chapter-grid">${panels.map(panel).join('')}</div>
-    ${chapters
-      .filter((c) => c.id === 'contracts')
-      .map((c) => `<section class="contracts-foot" id="${c.id}"><h2>${esc(c.title)}</h2>${c.body}</section>`)
-      .join('')}
-    <p class="muted small">Eighty is independent and not affiliated with Jack Butcher.</p>
+    <section class="faq"><h2>Questions</h2><div class="faq-cols"><div><details><summary>Is Eighty official?</summary><p>No. It’s an independent project built on Jack Butcher’s Credits. Links to his official pages are in the footer.</p></details><details><summary>What does it cost?</summary><p>Starting or joining a party is free. Eighty takes 2% of the sale, only if it sells. Buying Credits in through Eighty adds 2% on the purchase.</p></details><details><summary>What if a party never fills?</summary><p>Nothing happens to your Credits. Take them back whenever you want.</p></details><details><summary>Jack’s Statement contract isn’t out yet. Can parties still fill?</summary><p>Yes. Parties fill now and burn once it ships. We then plug in the piece that burns through it, and you get 30 minutes’ notice to leave any party before it’s switched on.</p></details></div><div><details><summary>What if it fills before Jack’s contract is live?</summary><p>It waits, locked. Once the contract is live it has 7 days to be burned. If it isn’t, anyone can take their Credits back.</p></details><details><summary>What if nobody bids?</summary><p>The Statement stays in the party until someone bids at least 0.01 ETH. The 24 hours start with that bid.</p></details><details><summary>How is the money split?</summary><p>The party picks when it starts. Equal pays every Credit the same. Early bird pays the first Credit in three times the last, sliding down in between.</p></details><details><summary>How do I get paid?</summary><p>When the auction settles, your share is waiting on the party page. Claim it there.</p></details></div></div></section>
   </article>`;
 
   // In-page links scroll; the router never sees them.
@@ -239,7 +199,6 @@ export function docs(app: HTMLElement) {
 
   mountWall(document.getElementById('wall')!, {
     label: `<h1>Turn 80 Credits into a Statement.<br>Together.</h1>
-    <p>Join an Eighty Party, pool your Credits, and mint a Statement.<br>When it sells, the party splits the proceeds.</p>
     <p class="wall-cta"><a class="btn primary" href="/parties">Join a party</a><a class="btn" href="/create">Start a party</a></p>`,
   });
 

@@ -1753,6 +1753,11 @@ export const batchAbi = [
   },
   {
     "type": "error",
+    "name": "ReserveTooLow",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "StatementNotReceived",
     "inputs": []
   },

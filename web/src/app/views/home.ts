@@ -74,7 +74,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[]) {
     s.state !== 'Open' ? '' : mine.size ? `You’re in · ${mine.size}` : !session.account ? '' : fits ? `${fits} of yours fit` : '';
   const state = s.state === 'Open' ? '' : `<span class="tag state ${s.state.toLowerCase()}">${s.state}</span>`;
   registerFilter(s.address, s.filter);
-  registerDeposits(ids, depositors);
+  registerDeposits(ids, depositors, s.split === 1);
   return `<a class="card${canJoin ? ' can-join' : ''}" href="/party/${s.address}">
     <div class="card-art">${sheet(ids, { size: 'sm', mine, batch: s.state === 'Open' ? s.address : undefined })}<span class="count num">${s.count}/80</span>${state}</div>
     <div class="card-meta">

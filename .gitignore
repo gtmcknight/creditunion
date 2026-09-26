@@ -1,4 +1,17 @@
+# Foundry
 contracts/out
 contracts/cache
 contracts/broadcast
+
+# Node / Cloudflare
+node_modules
+.wrangler
+
+# Secrets
+.env
+.env.*
+!.env.example
+.dev.vars
+!.dev.vars.example
+
 .DS_Store

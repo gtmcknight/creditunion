@@ -1,108 +1,167 @@
 # Eighty
 
-Trustless pools for Jack Butcher's [Credits](https://jack.art/credits). Eighty Credits burn into one Statement, and most holders have one. A batch contract holds the Credits, burns them together, auctions the Statement onchain, and splits the sale 80 ways. No Credits? Buy in from OpenSea and deposit in one transaction.
+Eighty lets holders of Jack Butcher's [Credits](https://jack.art/credits) pool 80 Credits into a party. At 80, the party burns them into one Statement, auctions it onchain, and splits the sale among everyone in the party. Contracts hold the Credits and the ETH; there is no owner, admin, pause or upgrade. The site runs at [eighty.fun](https://eighty.fun). It is live on Sepolia testnet; mainnet is not deployed yet.
 
-Independent. Not affiliated with Jack Butcher.
+## How a party works
 
-## How it works
+1. **Open.** Anyone with a Credit opens a party and sets its rules: who can join, the burn order, and the split (Equal or Early bird).
+2. **Join.** Holders deposit Credits. Every deposit is checked onchain against the party's rules. No Credit? The Sweeper buys the cheapest fitting OpenSea listings and deposits them in one transaction.
+3. **Leave.** Anyone can withdraw before the party fills. The 80th Credit locks it for 7 days so it can be burned. Not burned by then, depositors may leave or stay.
+4. **Burn.** Anyone calls `assemble()`. The 80 Credits go to Jack's contract in the party's order and the party must end up holding the Statement, or the call reverts.
+5. **Auction.** 24 hours from the first bid. Each bid beats the last by 5% (minimum 0.01 ETH). Bids in the last 15 minutes extend it by 15 minutes. Outbid ETH is refunded in the same transaction. The site opens parties with no reserve.
+6. **Split.** Anyone settles. The Statement goes to the winner. A 2% protocol fee comes off the top, only if it sells. The rest goes to the 80 positions: 1/80 each (Equal), or a straight line from 1.5 shares for the first deposit to 0.5 for the last (Early bird). Payouts are pulled with `claim`, callable by anyone for anyone.
 
-| | |
+**Who can join.** Any combination of Jack's traits (Colors, Eights, Print, Weight, Plates, Bits), payment time, [rating](https://jack.art/credits/rating), a Credit-number range, or a named list of up to 200 Credits.
+
+**Burn order.** Deposit order, mint time, Credit number, the creator's order, or a painted sheet (the 8×10 grid painted by palette; each painted slot only takes a matching Credit).
+
+## Repo layout
+
+```
+contracts/          Foundry
+  src/              Batch, BatchFactory, Sweeper, Ratings, interfaces, mocks, vendored Credits art
+  script/           deploy and check scripts
+  test/             unit, fuzz, invariant, adversarial and mainnet fork tests
+  data/scores.bin   the frozen rating table deployed onchain
+  AUDIT.md          internal review log
+web/                Cloudflare Worker + static site (Vite, TypeScript, viem, no framework)
+  src/app/          the site; reads the chain directly, wallets sign in the browser (EIP-6963)
+  src/worker/       the Worker: config, RPC proxy, art, ratings, OpenSea, link cards
+  src/shared/       code used by both (rating formula, eligibility rules, layout)
+  scripts/          data and asset builders
+  public/           static assets and precomputed edition data
+  data/             credits.json.gz, the full edition every derived file is built from
+```
+
+There is no database or indexer. Parties, slots and bids are read from the contracts.
+
+## Contracts
+
+| Contract | What it does |
 |---|---|
-| **Open** | Anyone with a Credit opens a batch. Optional eligibility, all combinable and enforced onchain on every deposit: trait filter (Colors / Print / Weight / Eights via Jack's own `CreditArt.describe`), a payment window (e.g. one minute of the mint), a Credit-number range, or an explicit list of up to 200 Credits. Optional reserve. Deadline 3–90 days. |
-| **Order** | Chosen by the opener and shown before anyone deposits: *Deposit order*, *Mint time*, *Credit number*, *Creator's order*, or a *Layout* (the 8×10 sheet painted with palettes on the design page; each painted slot only takes a Credit of that palette, enforced on every deposit, and the burn follows the painting). With the last, the creator arranges the full sheet by hand (or by rating, mint time, number) and burns with that order; if they haven't within a day of filling, anyone can burn in deposit order. The adapter receives the arrangement too, so whatever Jack's contract wants can be handled there. |
-| **Deposit** | Approve the factory once and deposit any number, or `safeTransferFrom` one Credit straight to the batch (no approval; `data` may name a beneficiary). Deposit order is the Statement order. Plain `transferFrom` fires no hook: such strays go to the fee recipient via `rescue()` as lost-and-found. |
-| **Buy in** | The `Sweeper` buys the cheapest fitting OpenSea listings through Seaport 1.6 and deposits them in the buyer's name, in one transaction. The buyer pays the listings plus the sweep fee (2%). Unused ETH is refunded, and listings that sold first are skipped. |
-| **Withdraw** | Any depositor, any time, until the batch holds 80. |
-| **Lock** | The 80th Credit locks it for 7 days (`UNLOCK_AFTER`). Open batches have no deadline. |
-| **Burn** | Anyone calls `assemble()`. The batch checks that all 80 Credits are gone and that it holds the Statement, or the whole call reverts. |
-| **Unlock** | Not burned within 7 days of filling (no assembler yet, Statements sold out, anything): depositors may withdraw, which reopens the batch, or stay, and it can still be burned while all 80 remain. A refill starts a fresh 7 days. |
-| **Auction** | A 24h clock starts at the first bid. Each bid +5% (min 0.01 ETH). Bids in the last 15 min extend it. Outbid ETH is refunded in the same tx. A reserve lapses after 7 days with no bids (the minimum is then 0.01 ETH). |
-| **Split** | Anyone settles. The Statement goes to the winner. The protocol fee (2%) comes off the top; the rest goes to the 80 positions: 1/80 each (*Equal*), or 1.5 → 0.5 shares by deposit order (*Early bird*, chosen when the batch opens — the curator deposits first, so that is their reward instead of a fee), and each deposited Credit claims 1/80 of the rest. |
+| `BatchFactory` | Deploys parties as minimal clones, moves Credits from its caller into its own parties, holds fees and the one-time assembler setting. |
+| `Batch` | One party: eligibility checks, deposits and withdrawals, lock, burn through the assembler, auction, split, claims. |
+| `Sweeper` | Buys OpenSea listings through Seaport 1.6 and deposits them in the buyer's name. Unused ETH is refunded; listings that sold first are skipped. 2% fee. |
+| `Ratings` | Jack's official rating for all 122,154 Credits, stored as data contracts and read by eligibility rules. |
+| `IAssembler` | The adapter a party calls (never delegatecalls) to burn 80 Credits into a Statement. `MockAssembler` is the testnet version; the mainnet adapter gets written once Jack's Statement contract is published. |
 
-## Ratings
+The factory can deploy with no assembler. Parties fill and lock but cannot burn. When the adapter is ready, the setter address proposes it once, which opens a 30-minute window in which anyone can withdraw from any party. After that anyone activates it and the setter has no further powers.
 
-Batch pages show each Credit's **official rating**: Jack Butcher's published formula (methodology v3.4.0, [jack.art/credits/rating](https://jack.art/credits/rating)), reproduced in `web/src/shared/credits.ts` from his MIT-licensed art contracts and verified to match his API exactly (score and rank) on sampled Credits. The frozen edition (122,154 Credits: seeds and payment times from the `Distributed` events) is compiled into `web/public/edition.bin` by `node scripts/edition.ts credits.json`; the Worker's `/ratings` endpoint rates any ids against it, including testnet Credits.
+Fees are set at deploy and capped in code: protocol 2% (max 5%), creator 0% (max 10%), sweep 2% (max 5%). The fee recipient can change them within the caps; a party keeps the fees it opened with.
 
-## Reproducing the edition data
+Review history, findings and fixes: [contracts/AUDIT.md](contracts/AUDIT.md).
 
-Everything derived about the edition — trait bits, the mint timeline, the rating statistics and the score table that is frozen onchain — comes from one file, `web/data/credits.json.gz` (`{ id: [seed, paidAt] }` for all 122,154 Credits), which is itself rebuilt from the Credits contract's `Distributed` events:
+### Build and test
+
+```sh
+git submodule update --init --recursive
+cd contracts
+forge build
+forge test
+```
+
+The fork tests (`*.fork.t.sol`) run against mainnet Seaport and Credits through a public node. Set `MAINNET_RPC` to use your own.
+
+### Deploy
+
+Copy `contracts/.env.example` to `contracts/.env`, fill it in, and load it with `set -a; . ./.env; set +a`.
+
+| Script | Purpose | Env |
+|---|---|---|
+| `DeployTestnet.s.sol` | Sepolia: test Credits (real art, anyone can mint), mock Statement, mock assembler, rating table, factory, Sweeper | `FEE_RECIPIENT` (optional), `STAGED` (optional, no assembler at deploy) |
+| `DeployFactory.s.sol` | Sepolia: a new factory over existing test Credits and Ratings, staged like mainnet | `CREDITS`, `RATINGS`, `SETTER` and `FEE_RECIPIENT` (optional) |
+| `DeployMainnet.s.sol` | Mainnet: rating table, factory, Sweeper | `FEE_RECIPIENT` (required), `SETTER`, `ASSEMBLER`, `RATINGS`, `PROTOCOL_FEE_BPS`, `CREATOR_FEE_BPS`, `SWEEP_FEE_BPS` |
+| `DeployRatings.s.sol` | The rating table on its own | none |
+| `CheckRatings.s.sol` | Read-only: the deployed table matches `data/scores.bin` byte for byte | args `$RATINGS $CREDITS` |
+| `SeedDemo.s.sol` | Local anvil: mocks plus parties in every state | none (anvil default keys) |
+
+```sh
+forge script script/DeployTestnet.s.sol --rpc-url "$SEPOLIA_RPC" --private-key "$PRIVATE_KEY" --broadcast --slow
+forge script script/DeployMainnet.s.sol --rpc-url "$MAINNET_RPC" --private-key "$PRIVATE_KEY" --broadcast --slow
+forge script script/CheckRatings.s.sol --sig "run(address,address)" $RATINGS $CREDITS --rpc-url "$MAINNET_RPC"
+```
+
+Local chain for UI work:
+
+```sh
+anvil --gas-limit 60000000
+forge script script/SeedDemo.s.sol --rpc-url http://127.0.0.1:8545 --broadcast --slow
+```
+
+## Web
 
 ```sh
 cd web
-MAINNET_RPC=… node scripts/fetch-credits.ts data/credits.json   # ~140 log queries from the deploy block
-gzip -k data/credits.json
-node scripts/edition.ts data/credits.json.gz                     # writes public/*.bin, minutes.json, ../contracts/data/scores.bin
+pnpm install
+cp .dev.vars.example .dev.vars   # optional locally; RPC falls back to a public node
+pnpm dev
 ```
 
-Re-running both on Sept 25 2026 reproduced every committed file byte for byte. `forge script script/CheckRatings.s.sol` compares the deployed `Ratings` table against `contracts/data/scores.bin`.
+Public config (`CHAIN_ID`, `CREDITS`, `FACTORY`, `SWEEPER`, `RATINGS`, `FALLBACK_RPC`) lives in `wrangler.jsonc` `vars`. To point the site at a local anvil, override them in `.dev.vars`.
 
-## Fees
+After changing contracts, run `forge build` and then `pnpm abi` to regenerate `src/app/abi.ts`. `pnpm build` fails if the ABI is stale.
 
-| | Launch | Set by | Ceiling (in code) |
-|---|---|---|---|
-| Protocol, on each Statement sale | 2% | deploy (`PROTOCOL_FEE_BPS`), later `setFees` | 5% |
-| Creator, on each Statement sale | 0% | deploy (`CREATOR_FEE_BPS`), later `setFees` | 10% |
-| Sweep, on OpenSea buy-ins | 2% | deploy (`SWEEP_FEE_BPS`), later `setFee` | 5% |
+Worker endpoints:
 
-The fee recipient can change any of these within the ceilings. A batch copies the protocol and creator fees the moment it opens and keeps them forever (`Batch.protocolFeeBps` / `creatorFeeBps`, shown on its page), so a change only reaches batches opened afterwards. The sweep fee is read at each purchase and included in the quote before signing. Batch cards and pages lead with the creator (ENS name and avatar, resolved on mainnet); a creator fee, when there is one, is shown beside them.
+| Path | |
+|---|---|
+| `/config.json` | chain and contract addresses for the app |
+| `/rpc` | read-only JSON-RPC proxy with a method allowlist, so the RPC key stays server-side |
+| `/art/:id.svg` | Credit art, rendered from the contract and cached |
+| `/ratings`, `/edition/match` | ratings for ids; how many Credits in the edition fit a rule set |
+| `/opensea/listings`, `/opensea/quote` | fitting listings and signed Seaport orders for the Sweeper |
+| `/bids/:party`, `/owner/:id`, `/ens/:address` | bid history, current holder of a Credit, ENS name and avatar |
+| `/og/...` | link-preview cards |
 
-## Launching before the Statement contract exists
+Rate limits are per IP (`unsafe.bindings` in `wrangler.jsonc`).
 
-The factory can deploy with **no assembler**. Batches open, fill and lock as normal, but cannot burn: pooling only. When Jack's Statement contract ships and the adapter is written and reviewed, one address (the *setter*, ideally a multisig) **proposes** it. That opens a **30-minute exit window** in which anyone can withdraw from any batch, full ones included. After 30 minutes anyone can **activate** it, permanently; the setter then has no powers at all. Full batches never expire while waiting: after their 7-day lock, depositors may leave or stay for the burn. The setter can replace a pending proposal (which restarts the window) but can do nothing else, ever.
-
-## Trust model
-
-- No owner, admin, pause, or upgrade. Every parameter is fixed at deploy, except the assembler when launched in pooling mode: one setter key, one proposal at a time, always behind a 30-minute exit window, gone once active.
-- The factory only moves Credits **from its caller** into **its own** batches.
-- The Statement mint goes through an immutable `IAssembler`, **called** (never delegatecalled) with an operator approval that exists only for the duration of the call. The batch verifies the result: the adapter's `statement()` matches, none of the 80 still exist, and it owns the Statement. Adapter storage cannot reach the batch.
-- The auction follows the Nouns/Zora pattern. Refunds are gas-capped and never copy return data. A failed refund becomes `owed` (pull), so a hostile bidder can't block the auction.
-- Payouts are pull-based (`claim`, callable by anyone for anyone).
-
-**Internally reviewed, not externally audited.** See [contracts/AUDIT.md](contracts/AUDIT.md): static analysis, three adversarial reviews, invariant fuzzing and mainnet fork tests, with every finding and what changed. Get an independent audit before mainnet, including the Jack assembler.
-
-## Layout
-
-```
-contracts/   Foundry. Batch.sol, BatchFactory.sol, Sweeper.sol, IAssembler, mocks, tests
-             (31 unit incl. fuzz, plus 4 against real mainnet Seaport and Credits: MAINNET_RPC=… forge test)
-web/         Cloudflare Worker + static app (Vite, TypeScript, viem, no framework)
-  src/worker   /config.json, /rpc (read-only proxy, key stays secret), /art/:id.svg (cached forever),
-               /ens/:address (mainnet ENS, cached), /opensea/quote (listings → signed Seaport orders)
-  src/app      the site; reads the chain directly, wallets sign in the browser (EIP-6963)
-```
-
-The site has no database or indexer. Batches, slots, and bids are read straight from the contracts, and `Credits.tokensOf(owner)` lists a wallet's Credits onchain.
-
-## Develop
+### Deploy
 
 ```sh
-# contracts
-cd contracts && forge test
-
-# local chain with demo batches in every state
-anvil --gas-limit 60000000
-forge script script/SeedDemo.s.sol --rpc-url http://127.0.0.1:8545 --broadcast --slow
-#   → then: cast rpc evm_increaseTime 86401; cast rpc evm_mine; cast send <SETTLE_ME> "settle()" …
-#   → then: forge script script/SeedDemo.s.sol --sig "later(address)" <FACTORY> …
-
-# site (web/.dev.vars holds CHAIN_ID / CREDITS / FACTORY / FALLBACK_RPC for local)
-cd web && pnpm i && pnpm dev
+cd web
+pnpm wrangler secret put RPC_URL
+pnpm wrangler secret put OPENSEA_API_KEY   # without it buy-in is hidden
+pnpm wrangler secret put ENS_RPC           # optional; mainnet RPC for ENS when not on mainnet
+pnpm run deploy                            # abi check, typecheck, vite build, wrangler deploy
 ```
 
-After changing contracts, run `pnpm abi` in `web/` to regenerate `src/app/abi.ts`.
+Use `pnpm run deploy`, not `pnpm deploy` (that is a built-in pnpm command). Edit the `routes` in `wrangler.jsonc` to deploy under your own domain.
 
-## Deploy
+### Edition data
 
-Secrets: `wrangler secret put RPC_URL` and `wrangler secret put OPENSEA_API_KEY` (buy-in is hidden without it). Optional `ENS_RPC` when not on mainnet.
+Trait bits, the mint timeline, rating statistics and the onchain score table all derive from `web/data/credits.json.gz` (`{ id: [seed, paidAt] }` for all 122,154 Credits), rebuilt from the Credits contract's `Distributed` events:
 
-**Sepolia (now):** `forge script script/DeployTestnet.s.sol --rpc-url $SEPOLIA --broadcast --private-key $PK` deploys mock Credits, a mock Statement, and the factory. Put the addresses in `web/wrangler.jsonc` `vars`, then run `wrangler secret put RPC_URL` and `pnpm deploy`.
+```sh
+cd web
+MAINNET_RPC=... node scripts/fetch-credits.ts data/credits.json
+gzip -k data/credits.json
+node scripts/edition.ts data/credits.json.gz   # public/*.bin, minutes.json, ../contracts/data/scores.bin
+node scripts/wall.ts                           # public/wall.bin, bits.bin, times.bin
+```
 
-**Mainnet, stage 1 (pooling, can happen now):** `FEE_RECIPIENT=… SETTER=… forge script script/DeployMainnet.s.sol --broadcast` deploys the factory with no assembler and the Sweeper. Set `CHAIN_ID=1`, `CREDITS`, `FACTORY`, `SWEEPER` in `wrangler.jsonc` and deploy the site. Batches fill and lock; burning waits.
+Ratings follow Jack's published formula (methodology v3.4.0), reproduced in `web/src/shared/credits.ts` and checked against his API.
 
-**Mainnet, stage 2 (after Jack publishes the Statement contract, ~Oct 1 2026):**
-1. Read the Statement contract. Write `JackAssembler` implementing `IAssembler` (called by the batch with a scoped operator approval; must finish with the batch owning the Statement). Test it on a mainnet fork against the real Credits.
-2. Get it and the core contracts reviewed. Then from the setter: `proposeAssembler(adapter)`; 30 minutes later anyone calls `activateAssembler()`.
-3. `ASSEMBLER=… FEE_RECIPIENT=… [PROTOCOL_FEE_BPS=100 SWEEP_FEE_BPS=100] forge script script/DeployMainnet.s.sol --broadcast` deploys the factory and the Sweeper.
-4. Set `CHAIN_ID=1`, `CREDITS=0x97630aA70AB14ed9883B41dAfccBc11349723043`, `FACTORY=…` and `SWEEPER=…` in `wrangler.jsonc`, then deploy.
+## Deployed addresses
 
-Open questions about Jack's contract that the assembler must answer: does it accept contract callers? Does it take ids in a meaningful order? Does it `safeMint` (batches accept that during assembly)? Is there a per-wallet limit?
+**Sepolia testnet** (chain 11155111):
+
+| | |
+|---|---|
+| BatchFactory | [`0x412B2490D792f19442dF1d7107a6383D0eD99f56`](https://sepolia.etherscan.io/address/0x412B2490D792f19442dF1d7107a6383D0eD99f56) |
+| Ratings | [`0xd64fE96d6A4f7C891dd55A2b494dA71f8b604510`](https://sepolia.etherscan.io/address/0xd64fE96d6A4f7C891dd55A2b494dA71f8b604510) |
+| Test Credits | [`0xce3a6B673eE04f0a63C511755992Cc5c41D7D1C0`](https://sepolia.etherscan.io/address/0xce3a6B673eE04f0a63C511755992Cc5c41D7D1C0) |
+| Sweeper | not configured (OpenSea can't list test Credits) |
+
+**Mainnet:** TBD. Credits is [`0x97630aA70AB14ed9883B41dAfccBc11349723043`](https://etherscan.io/address/0x97630aA70AB14ed9883B41dAfccBc11349723043).
+
+## Security
+
+The contracts have been reviewed internally (static analysis, adversarial reviews, invariant fuzzing, mainnet fork tests; see [contracts/AUDIT.md](contracts/AUDIT.md)). They have not had a third-party audit.
+
+To report a vulnerability, open a private [GitHub security advisory](../../security/advisories/new) on this repo. Please don't open a public issue.
+
+## Credits
+
+Created by [@taylor_](https://x.com/taylor_) and [@bigvibessss](https://x.com/bigvibessss). MIT licensed, see [LICENSE](LICENSE).
+
+Eighty is independent and unofficial. It is not affiliated with or endorsed by Jack Butcher. `contracts/src/vendor/credits/` holds Jack's MIT-licensed Credits art contracts, copied unmodified (see its NOTICE.md).

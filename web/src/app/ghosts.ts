@@ -1,7 +1,7 @@
 import type { Address } from 'viem';
 import { config, session } from './chain';
 import { hydrate, who } from './ens';
-import { hasLayout, layoutSlot, type Summary } from './data';
+import { earlyShare, hasLayout, layoutSlot, sharePct as pct, type Summary } from './data';
 import { describeFilter, inkName, maskInks } from './traits';
 import { art, esc, same } from './ui';
 import { ruleFor, slotName } from '../shared/layout';
@@ -17,9 +17,9 @@ export const editionArt = (id: bigint | number) => (config.chainId === 1 ? art(i
 
 const filters = new Map<string, Filter>();
 /// Who deposited each Credit and in what order, per party, for the hover card on filled slots.
-const deposits = new Map<string, { by: Address; pos: number }>();
-export function registerDeposits(ids: readonly bigint[], by: readonly Address[]) {
-  ids.forEach((id, i) => deposits.set(id.toString(), { by: by[i], pos: i + 1 }));
+const deposits = new Map<string, { by: Address; pos: number; early: boolean }>();
+export function registerDeposits(ids: readonly bigint[], by: readonly Address[], early = false) {
+  ids.forEach((id, i) => deposits.set(id.toString(), { by: by[i], pos: i + 1, early }));
 }
 /// Remember a batch's filter so `fillGhosts` can find it from the sheet's `data-batch`.
 export const registerFilter = (address: string, f: Filter) => filters.set(address.toLowerCase(), f);
@@ -114,7 +114,7 @@ function tip() {
     }
     if (cell === shown) return;
     shown = cell;
-    tipEl!.innerHTML = s ? card(s) : filled((cell as HTMLElement).dataset.id!, d!);
+    tipEl!.innerHTML = s ? card(s) : filled((cell as HTMLElement).dataset.id!, d!, (cell as HTMLElement).dataset.rating);
     tipEl!.classList.add('compact');
     hydrate(tipEl!);
     place(cell.getBoundingClientRect());
@@ -143,11 +143,12 @@ function card({ want, f, fit }: Slot) {
 
 const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
 
-function filled(id: string, d: { by: Address; pos: number }) {
+function filled(id: string, d: { by: Address; pos: number; early: boolean }, rating?: string) {
   // A small row: the Credit, then which one, whose, and where it sits in deposit order.
   const you = same(d.by, session.account);
   return `<div class="filled"><img src="${art(BigInt(id))}" alt="">
-    <div><p class="takes">#${Number(id).toLocaleString()} <span class="muted">· ${ordinal(d.pos)} in</span></p>
+    <div><p class="takes">#${Number(id).toLocaleString()} ${rating ? `<span class="muted">· rating ${rating}</span>` : ''}</p>
+    <p class="muted small">${ordinal(d.pos)} in${d.early ? ` · ${pct(earlyShare(d.pos - 1))} of the payout` : ''}</p>
     <p class="small">${you ? 'Yours' : who(d.by)}</p></div></div>`;
 }
 
