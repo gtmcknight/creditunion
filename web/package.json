@@ -5,10 +5,11 @@
   "scripts": {
     "abi": "node scripts/abi.mjs",
     "dev": "vite",
-    "build": "npm run typecheck && vite build",
+    "build": "npm run abi:check && npm run typecheck && vite build",
     "preview": "npm run build && wrangler dev",
     "deploy": "npm run build && wrangler deploy",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.worker.json"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.worker.json",
+    "abi:check": "node scripts/abi.mjs --check"
   },
   "dependencies": {
     "@noble/hashes": "^2.4.0",
