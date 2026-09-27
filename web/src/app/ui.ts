@@ -123,6 +123,24 @@ const ERRORS: Record<string, string> = {
   TooFewBought: 'Fewer listings were available than expected. Get a new price.',
   FeeNotCovered: 'Not enough ETH sent to cover the fee.',
   NotStray: 'That token is part of the credit union.',
+  Underpaid: 'Not enough ETH sent for those listings.',
+  NotAFWACredit: 'One of those FWA listings isn’t a Credit.',
+  NoFWA: 'FWA listings can’t be bought here.',
+  // FWA pool (Spin)
+  InventoryVersionMismatch: 'The pool changed since your price. Here is the new one.',
+  AcquisitionFeeTooHigh: 'The price went up. Here is the new one.',
+  TransactionExpired: 'That price expired. Here is a new one.',
+  InventoryChangeCooldownActive: 'The pool just changed. Spins open again in a few minutes.',
+  InsufficientPayment: 'Not enough ETH for the spin.',
+  AcquisitionsNotEnabled: 'This pool isn’t open for spins yet.',
+  FactoryPurchasesDisabled: 'FWA has spins paused right now.',
+  FactoryWithdrawOnly: 'FWA has spins paused right now.',
+  VrfRequestsPaused: 'FWA has spins paused right now.',
+  ConsumerNotReady: 'FWA has spins paused right now.',
+  NoActiveListings: 'The pool is empty.',
+  PoolAlreadyRetired: 'This pool is closed.',
+  PurchaseNotAllowed: 'This pool doesn’t allow your wallet to spin.',
+  NoAcquisitionRefund: 'Nothing to withdraw.',
 };
 
 export type { Address };

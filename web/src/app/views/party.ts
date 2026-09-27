@@ -463,13 +463,20 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
 
 const BUY_COUNTS = [1, 5, 10];
 
+/// Where a listing is: shown as a small mark on its tile.
+type Source = 'opensea' | 'fwa';
+const SOURCES: Record<Source, { name: string; icon: string }> = {
+  opensea: { name: 'OpenSea', icon: '/sources/opensea.svg' },
+  fwa: { name: 'FWA', icon: '/sources/fwa.png' },
+};
+
 function buyPane(connected: boolean) {
   // How many and the running total on one line; the Credits; then one button that carries the price.
   return `<div class="buy-head"><div class="seg sm" role="radiogroup" aria-label="How many">${BUY_COUNTS.map((n) => `<label><input type="radio" name="buy-n" value="${n}" ${n === 5 ? 'checked' : ''}><span>${n}</span></label>`).join('')}</div><span class="num" id="buy-sub"></span></div>
     <div class="listings" id="listings">${'<span class="listing skel" aria-hidden="true"><span class="art"></span><span class="price"></span></span>'.repeat(5)}</div>
     <div id="buy-quote" class="quote small"></div>
     ${connected || !config.sweeper ? `<button class="btn primary block" id="buy-go" disabled>Buy</button>` : '<button class="btn primary block" data-connect>Connect to buy</button>'}
-    <p class="muted small buy-source">The cheapest listings on OpenSea that fit, bought and deposited in one transaction.</p>
+    <p class="muted small buy-source">The cheapest listings on OpenSea and FWA that fit, bought and deposited in one transaction.</p>
 `;
 }
 
@@ -813,7 +820,17 @@ async function drawPicker(
   sync();
 }
 
-type Quote = { orders: unknown[]; ids: string[]; prices: string[]; total: string; expires?: number | null; error?: string };
+/// OpenSea listings come as signed orders (orders/ids/prices); FWA listings by id and price. `total` is both.
+type Quote = {
+  orders: unknown[];
+  ids: string[];
+  prices: string[];
+  total: string;
+  expires?: number | null;
+  fwa?: { listingId: string; id: string; price: string }[];
+  error?: string;
+};
+const quotedCount = (q: Quote) => q.ids.length + (q.fwa?.length ?? 0);
 let quotedFeeBps = 0n; // the Sweeper's rate at quote time; the sweep reverts if it has been raised since
 
 /// The orders are what gets sent to the chain; the ids/prices/total are what gets shown. Make sure they agree,
@@ -835,6 +852,10 @@ function checkQuote(q: Quote) {
     if (price !== BigInt(q.prices[i])) throw new Error('Bad quote.');
     sum += price;
   });
+  for (const f of q.fwa ?? []) {
+    if (!/^\d+$/.test(f.listingId) || !/^\d+$/.test(f.id) || !/^\d+$/.test(f.price)) throw new Error('Bad quote.');
+    sum += BigInt(f.price);
+  }
   if (sum !== BigInt(q.total)) throw new Error('Bad quote.');
 }
 
@@ -854,10 +875,10 @@ async function bindBuy(
   const go = document.getElementById('buy-go') as HTMLButtonElement | null;
   if (!line || !grid || !out) return;
   const room = 80 - b.s.count;
-  const tile = (id: string | number, src: string, price: string | null) =>
-    `<button type="button" class="listing" data-id="${id}" aria-pressed="false" title="Credit #${id}${price === null ? '' : ' · tap to skip'}"${price === null ? ' disabled' : ''}><span class="art"><img src="${src}" alt="" loading="lazy" decoding="async"></span><span class="price num">${price === null ? `#${id}` : `${minEth(BigInt(price))} ETH`}</span></button>`;
+  const tile = (id: string | number, src: string, price: string | null, source?: Source) =>
+    `<button type="button" class="listing" data-id="${id}" aria-pressed="false" title="Credit #${id}${source ? ` on ${SOURCES[source].name}` : ''}${price === null ? '' : ' · tap to skip'}"${price === null ? ' disabled' : ''}><span class="art"><img src="${src}" alt="" loading="lazy" decoding="async">${source ? `<img class="src" src="${SOURCES[source].icon}" alt="${SOURCES[source].name}">` : ''}</span><span class="price num">${price === null ? `#${id}` : `${minEth(BigInt(price))} ETH`}</span></button>`;
 
-  let listings: { id: string; price: string }[] = [];
+  let listings: { id: string; price: string; source?: Source }[] = [];
   // preview: no OpenSea key here, so edition Credits stand in. mainnetOnly: real mainnet listings and prices,
   // but this party is on a testnet and can't take them.
   let preview = false;
@@ -878,7 +899,7 @@ async function bindBuy(
   if (!grid.isConnected) return;
 
   // Pick how many; the cheapest that fit fill the row. Tap one to skip it and the next cheapest takes its place.
-  const pool: { id: string; price: string | null }[] = preview
+  const pool: { id: string; price: string | null; source?: Source }[] = preview
     ? (await examples(b.s.filter)).map((id) => ({ id: String(id), price: null }))
     : listings;
   const skipped = new Set<string>();
@@ -911,7 +932,7 @@ async function bindBuy(
     q = null;
     const pick = chosen();
     grid.classList.toggle('preview', preview);
-    grid.innerHTML = pick.map((l) => tile(l.id, preview || mainnetOnly ? editionArt(Number(l.id)) : art(BigInt(l.id)), l.price)).join('');
+    grid.innerHTML = pick.map((l) => tile(l.id, preview || mainnetOnly ? editionArt(Number(l.id)) : art(BigInt(l.id)), l.price, l.source)).join('');
     const sub = pick.reduce((a, l) => a + (l.price ? BigInt(l.price) : 0n), 0n);
     const subEl = document.getElementById('buy-sub');
     if (subEl) subEl.textContent = pick.length && !preview ? eth(sub) : '';
@@ -971,12 +992,12 @@ async function bindBuy(
           pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'quote', args: [total] }),
           pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'feeBps' }),
         ])) as [bigint, bigint];
-        out.innerHTML = `<div class="quote-row"><span>${plural(q.ids.length)}</span><span class="num">${eth(total)}</span></div>
+        out.innerHTML = `<div class="quote-row"><span>${plural(quotedCount(q))}</span><span class="num">${eth(total)}</span></div>
           <div class="quote-row"><span>Credit Union fee</span><span class="num">${eth(value - total)}</span></div>
           <div class="quote-row total"><span>Total</span><span class="num">${eth(value)}</span></div>
-          ${chosen().length > q.ids.length ? `<p>${chosen().length - q.ids.length} no longer available.</p>` : ''}
+          ${chosen().length > quotedCount(q) ? `<p>${chosen().length - quotedCount(q)} no longer available.</p>` : ''}
           ${q.expires ? '<p class="muted small num" id="buy-expiry"></p>' : ''}`;
-        go.textContent = `Buy ${q.ids.length} & deposit`;
+        go.textContent = `Buy ${quotedCount(q)} & deposit`;
         if (q.expires) countdown(q.expires);
       } catch (e) {
         q = null;
@@ -989,8 +1010,14 @@ async function bindBuy(
     const quote = q;
     stopTimer();
     await run(go, 'Buying…', async () => {
-      await send({ address: config.sweeper!, abi: sweeperAbi, functionName: 'sweep', args: [batch, quote.orders, 1n, quotedFeeBps], value }, txNote);
-      justJoined(batch, quote.ids.length);
+      const fwa = (quote.fwa ?? []).map((f) => ({ listingId: BigInt(f.listingId), price: BigInt(f.price) }));
+      await send(
+        fwa.length
+          ? { address: config.sweeper!, abi: sweeperAbi, functionName: 'sweepWithFWA', args: [batch, quote.orders, fwa, 1n, quotedFeeBps], value }
+          : { address: config.sweeper!, abi: sweeperAbi, functionName: 'sweep', args: [batch, quote.orders, 1n, quotedFeeBps], value },
+        txNote,
+      );
+      justJoined(batch, quotedCount(quote));
     }, '');
   });
 }

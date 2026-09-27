@@ -14,6 +14,7 @@ const CARDS: Record<string, Card> = {
   mint: { title: 'Mint test Credits · Credit Union', description: 'Real Credits art on testnet, to try a credit union end to end.', image: '/og/mint.png' },
   me: { title: 'Your credit unions', description: 'Your Credits in credit unions, and what they’re worth.', image: '/og/home.png' },
   member: { title: 'Member · Credit Union', description: 'Their credit unions and Credits.', image: '/og/home.png' },
+  spin: { title: 'Spin · Credit Union', description: 'One spin, one random NFT from an FWA pool. Some of them are Credits.', image: '/og/home.png' },
   og: { title: 'Link previews · Credit Union', description: 'Every page’s link card.', image: '/og/home.png' },
 };
 

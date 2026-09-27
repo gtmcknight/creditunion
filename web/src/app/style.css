@@ -2527,6 +2527,18 @@ input[type='datetime-local'] {
   font-size: 12px;
   color: var(--muted);
 }
+/* Where it's listed: a small mark in the art's corner (on the Credit's white border). */
+.listing .art {
+  position: relative;
+}
+.listing img.src {
+  position: absolute;
+  left: 3px;
+  bottom: 3px;
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+}
 .listing:hover .art {
   box-shadow: 0 0 0 1px var(--fg);
 }
@@ -5941,4 +5953,34 @@ dialog.eligible::backdrop {
   .hero-text h1 { font-size: min(6vw, 30px); }
   .hero-text .wall-cta { gap: 6px; }
   .hero-text .wall-cta .btn { height: 40px; padding: 0 12px; font-size: 14px; }
+}
+
+/* ---------------------------------------------------------------- spin */
+
+.spin-out {
+  display: grid;
+  gap: 10px;
+  font-size: 14px;
+}
+.won-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.won-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.won-list li span {
+  flex: 1;
+  min-width: 0;
+}
+.won-list img {
+  width: 56px;
+  height: 56px;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--line);
 }

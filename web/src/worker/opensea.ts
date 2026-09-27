@@ -15,7 +15,21 @@ const OS_FEES = '0x0000a26b00c1f0df003000390027140000faa719';
 
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-export type Listing = { id: string; price: string; hash: string; protocol: string };
+/// A listing that fits: on OpenSea (a Seaport order, by hash) or on FWA's marketplace (by listing id).
+export type Listing = { id: string; price: string; source: 'opensea' | 'fwa'; hash?: string; protocol?: string; listingId?: string };
+/// An FWA listing handed to the scan: already confirmed live on-chain.
+export type Extra = { id: string; price: string; listingId: string };
+type Cand = {
+  id: string;
+  price: bigint;
+  source: 'opensea' | 'fwa';
+  hash?: string;
+  protocol?: string;
+  listingId?: string;
+  seller?: Address;
+  operator?: Address | null;
+  recipients?: Address[];
+};
 export type Quote = {
   orders: Json[]; // AdvancedOrder, ready for Sweeper.sweep
   ids: string[];
@@ -61,8 +75,11 @@ function usable(l: Json, credits: Address) {
 /// The cheapest listings that fit, one per Credit, checked on-chain so a stale one cannot revert the sweep:
 /// the seller still owns it and still has Seaport (or OpenSea's conduit) approved, and no consideration
 /// goes to a contract other than OpenSea's fee wallet (a contract recipient could revert the whole fill).
+/// `extra` FWA listings join in price order: each OpenSea page takes the ones priced within it, and whatever is
+/// left joins once OpenSea runs out. With extras, an OpenSea outage (or no key) leaves the FWA ones; without
+/// them it throws as before.
 export async function scan(o: {
-  key: string;
+  key?: string;
   slug: string;
   credits: Address;
   max: number;
@@ -71,6 +88,9 @@ export async function scan(o: {
   take: (ids: bigint[]) => Promise<readonly boolean[]>;
   live: (id: bigint, seller: Address, operator: Address) => Promise<boolean>;
   hasCode: (a: Address) => Promise<boolean>;
+  extra?: Extra[];
+  /// Dev only: stand-in OpenSea listings instead of the API (they skip the on-chain liveness checks).
+  fakeOpenSea?: { id: string; price: string }[];
 }): Promise<Listing[]> {
   const picked: Listing[] = [];
   const seen = new Set<string>();
@@ -80,12 +100,37 @@ export async function scan(o: {
     if (!codeMemo.has(a)) codeMemo.set(a, o.hasCode(a).catch(() => true));
     return codeMemo.get(a)!;
   };
+  const byPrice = (a: { price: bigint }, b: { price: bigint }) => (a.price < b.price ? -1 : a.price > b.price ? 1 : 0);
+  let extras: Cand[] = (o.extra ?? []).map((e) => ({ id: e.id, price: BigInt(e.price), source: 'fwa' as const, listingId: e.listingId })).sort(byPrice);
+  let osDone = !o.key && !o.fakeOpenSea;
   let next = '';
-  for (let page = 0; page < PAGES && picked.length < o.max; page++) {
-    const r = await os(o.key, `/listings/collection/${o.slug}/best?limit=100${next ? `&next=${encodeURIComponent(next)}` : ''}`);
-    const fresh = ((r.listings ?? []) as Json[])
-      .map((l) => usable(l, o.credits))
-      .filter((c): c is NonNullable<typeof c> => !!c && !!c.operator && !seen.has(c.id) && !!seen.add(c.id));
+  for (let page = 0; picked.length < o.max && (!osDone || extras.length); page++) {
+    let fresh: Cand[] = [];
+    if (!osDone) {
+      if (o.fakeOpenSea) {
+        fresh = o.fakeOpenSea.map((f) => ({ id: f.id, price: BigInt(f.price), source: 'opensea' as const, hash: `0xfake${f.id}`, protocol: SEAPORT }));
+        osDone = true;
+      } else {
+        let r: Json | null = null;
+        try {
+          r = await os(o.key!, `/listings/collection/${o.slug}/best?limit=100${next ? `&next=${encodeURIComponent(next)}` : ''}`);
+        } catch (e) {
+          if (!extras.length) throw e;
+          console.warn('[scan] OpenSea unavailable, FWA only:', (e as Error).message.slice(0, 80));
+        }
+        fresh = ((r?.listings ?? []) as Json[])
+          .map((l) => usable(l, o.credits))
+          .filter((c): c is NonNullable<typeof c> => !!c && !!c.operator)
+          .map((c) => ({ ...c, source: 'opensea' as const }));
+        next = r?.next ?? '';
+        if (!r || !next || page + 1 >= PAGES) osDone = true;
+      }
+    }
+    // FWA listings priced within this page join it; all the rest once OpenSea is done.
+    const top = fresh.reduce((m, c) => (c.price > m ? c.price : m), -1n);
+    const join = osDone ? extras : extras.filter((e) => e.price <= top);
+    extras = osDone ? [] : extras.filter((e) => e.price > top);
+    fresh = [...join, ...fresh].filter((c) => !seen.has(c.id) && !!seen.add(c.id)).sort(byPrice);
     // Ask the batch in small chunks, with what's already picked booked first, so a painted sheet's slots fill in
     // price order and the scan keeps going past Credits it has no room for. Chunks keep each call's gas modest.
     const fits: boolean[] = [];
@@ -99,18 +144,24 @@ export async function scan(o: {
       fresh.map(async (c, i) => {
         // Cheapest first: most listings don't fit, so the liveness calls run only for those that do.
         if (!fits[i]) return false;
+        // FWA listings are custodial and were just read from the market; the dev stand-ins have nothing to check.
+        if (c.source === 'fwa' || o.fakeOpenSea) return true;
         const [live, contracts] = await Promise.all([
-          o.live(BigInt(c.id), c.seller, c.operator!).catch(() => false),
-          Promise.all(c.recipients.map(isContract)),
+          o.live(BigInt(c.id), c.seller!, c.operator!).catch(() => false),
+          Promise.all(c.recipients!.map(isContract)),
         ]);
         return live && !contracts.some(Boolean);
       }),
     );
     for (let i = 0; i < fresh.length && picked.length < o.max; i++) {
-      if (ok[i]) picked.push({ id: fresh[i].id, price: fresh[i].price.toString(), hash: fresh[i].hash, protocol: fresh[i].protocol });
+      if (!ok[i]) continue;
+      const c = fresh[i];
+      picked.push(
+        c.source === 'fwa'
+          ? { id: c.id, price: c.price.toString(), source: 'fwa', listingId: c.listingId }
+          : { id: c.id, price: c.price.toString(), source: 'opensea', hash: c.hash, protocol: c.protocol },
+      );
     }
-    next = r.next;
-    if (!next) break;
   }
   picked.sort((a, b) => (BigInt(a.price) < BigInt(b.price) ? -1 : BigInt(a.price) > BigInt(b.price) ? 1 : 0));
   return picked;
@@ -131,7 +182,7 @@ export async function quote(o: { key: string; sweeper: Address; listings: Listin
   // Fill data is per listing and changes only when the listing does; a short cache means a burst of quotes
   // for the same batch costs OpenSea one call per listing, not one per quote.
   const fill = async (l: Listing): Promise<Json> => {
-    const key = new Request(`${o.origin}/opensea/fill/${l.hash}/${o.sweeper.toLowerCase()}`);
+    const key = new Request(`${o.origin}/opensea/fill/${l.hash!}/${o.sweeper.toLowerCase()}`);
     const hit = await cache.match(key);
     if (hit) return hit.json();
     const r = await os(o.key, '/listings/fulfillment_data', {

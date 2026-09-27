@@ -4,11 +4,14 @@
 ///   /art/...       a Credit's art, read from Jack's art contract and cached forever (art never changes)
 ///   /opensea/quote cheapest OpenSea listings that fit a batch, as signed Seaport orders for the Sweeper
 ///   /ens/:address  primary ENS name (always from mainnet), cached a day
+///   /fwa/pool      the Spin page's FWA pool: what's in it, the odds of a Credit, the price of a spin (mainnet)
+///   /fwa/spin      where one spin transaction stands (mainnet)
 /// Every response carries the security headers in `secure()`.
 import { createPublicClient, http, type Address, parseAbiItem } from 'viem';
 import { mainnet } from 'viem/chains';
 import { batchAbi, creditsAbi, creditArtAbi, factoryAbi } from '../app/abi';
-import { quote, scan } from './opensea';
+import { quote, scan, type Extra, type Listing } from './opensea';
+import { cacheStore, confirmListing, marketListings, readPool, readSpin, type FwaListing } from './fwa';
 import { ratings } from './ratings';
 import { load, match, predicate, type Rules } from './match';
 import { cardFor, partyCard, withCard } from './og';
@@ -37,6 +40,12 @@ interface Env {
   RL_QUOTE?: RateLimit;
   RL_MISC?: RateLimit;
   RL_ART?: RateLimit;
+  /// FWA's marketplace on mainnet: a second Buy Credits source. Empty to turn it off.
+  FWA_MARKET?: string;
+  /// The FWA pool the Spin page sells spins of (mainnet). Empty hides the page's Spin button.
+  FWA_POOL?: string;
+  /// Dev only (localhost): JSON [{ "id": "123", "price": "<wei>", "source": "fwa" | "opensea" }] shown as listings.
+  DEV_FAKE_LISTINGS?: string;
 }
 
 /// Exactly what viem's public client needs for readContract, simulateContract and waitForTransactionReceipt.
@@ -190,6 +199,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         factory: env.FACTORY,
         sweeper: env.OPENSEA_API_KEY && !/^0x0+$/.test(env.SWEEPER ?? '0x0') ? env.SWEEPER : null,
         ratings: env.RATINGS && !/^0x0+$/.test(env.RATINGS) ? env.RATINGS : null,
+        fwaMarket: addrOrNull(env.FWA_MARKET),
+        fwaPool: addrOrNull(env.FWA_POOL),
       },
       { headers: { 'cache-control': 'public, max-age=60' } },
     );
@@ -266,25 +277,27 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
 
   // Live OpenSea listings that fit a party, cheapest first: what the Buy tab shows before anyone asks for a price.
   if (url.pathname === '/opensea/listings') {
-    if (!env.OPENSEA_API_KEY) return text('OpenSea is not configured', 501);
+    if (!env.OPENSEA_API_KEY && !addrOrNull(env.FWA_MARKET) && !devFake(env, url)) return text('OpenSea is not configured', 501);
     if (!sameSite(req)) return text('forbidden', 403);
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
     const batch = (url.searchParams.get('batch') ?? '').toLowerCase();
     if (!/^0x[0-9a-f]{40}$/.test(batch)) return text('bad request', 400);
     if (!(await isBatch(env, url, batch as Address))) return text('not a batch', 404);
+    // No OpenSea key and nothing on FWA: the client shows its edition preview, as before FWA.
+    if (!env.OPENSEA_API_KEY && !devFake(env, url) && !(await fwaExtras(env, url, ctx)).extra.length) return text('OpenSea is not configured', 501);
     try {
       // Without a Sweeper (testnets) the party can't take mainnet Credits, so this is a live preview: real
       // mainnet listings and prices, checked against the party's rules via the frozen edition.
       const live = hasSweeper(env);
       const listings = live ? await fitting(env, url, ctx, batch as Address) : await previewFitting(env, url, ctx, batch as Address);
-      return Response.json({ listings: listings.map((l) => ({ id: l.id, price: l.price })), preview: !live }, { headers: { 'cache-control': 'no-store' } });
+      return Response.json({ listings: listings.map((l) => ({ id: l.id, price: l.price, source: l.source })), preview: !live }, { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
     }
   }
 
   if (url.pathname === '/opensea/quote') {
-    if (!env.OPENSEA_API_KEY || !hasSweeper(env)) return text('OpenSea is not configured', 501);
+    if (!hasSweeper(env) || (!env.OPENSEA_API_KEY && !addrOrNull(env.FWA_MARKET))) return text('OpenSea is not configured', 501);
     if (!sameSite(req)) return text('forbidden', 403);
     if (await limited(env.RL_QUOTE, req)) return text('slow down', 429);
     const batch = (url.searchParams.get('batch') ?? '').toLowerCase();
@@ -301,8 +314,65 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         const want = new Set(ids);
         listings = listings.filter((l) => want.has(l.id));
       }
-      const result = await quote({ key: env.OPENSEA_API_KEY, sweeper: env.SWEEPER, listings, n, origin: url.origin });
-      return Response.json(result, { headers: { 'cache-control': 'no-store' } });
+      listings = listings.slice(0, n);
+      // FWA listings need no signed fill: read each again now, and send the listing id and price to the Sweeper.
+      const main = mainClient(env);
+      const fwaPicked = listings.filter((l) => l.source === 'fwa');
+      const fwaLive = (
+        await Promise.all(
+          fwaPicked.map(async (l) =>
+            (await confirmListing(main, env.FWA_MARKET as Address, env.CREDITS, { id: l.id, price: l.price, listingId: l.listingId! }).catch(() => false)) ? l : null,
+          ),
+        )
+      ).filter((l): l is Listing => !!l);
+      const osPicked = listings.filter((l) => l.source === 'opensea');
+      let os = { orders: [] as unknown[], ids: [] as string[], prices: [] as string[], total: '0', expires: null as number | null };
+      if (osPicked.length) {
+        try {
+          os = await quote({ key: env.OPENSEA_API_KEY!, sweeper: env.SWEEPER, listings: osPicked, n: osPicked.length, origin: url.origin });
+        } catch (e) {
+          if (!fwaLive.length) throw e; // with FWA listings still good, the quote is those
+        }
+      }
+      if (!os.ids.length && !fwaLive.length) throw new Error('No listings fit this batch right now.');
+      const fwa = fwaLive.map((l) => ({ listingId: l.listingId!, id: l.id, price: l.price }));
+      const total = BigInt(os.total) + fwa.reduce((a, l) => a + BigInt(l.price), 0n);
+      return Response.json({ ...os, total: total.toString(), fwa }, { headers: { 'cache-control': 'no-store' } });
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
+  }
+
+  // The Spin page's pool, on mainnet whatever chain the site is on. Cached briefly: it moves with gas and spins.
+  if (url.pathname === '/fwa/pool') {
+    const pool = addrOrNull(env.FWA_POOL);
+    if (!pool) return text('no pool configured', 501);
+    if (!sameSite(req)) return text('forbidden', 403);
+    const cache = caches.default;
+    const key = new Request(`${url.origin}/fwa/pool/${pool.toLowerCase()}`);
+    const hit = await cache.match(key);
+    if (hit) return hit;
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    try {
+      const p = await readPool(mainClient(env), pool, MAINNET_CREDITS, cacheStore(url.origin));
+      const res = Response.json(p, { headers: { 'cache-control': 'public, max-age=12' } });
+      ctx.waitUntil(cache.put(key, res.clone()));
+      return res;
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
+  }
+
+  // /fwa/spin?tx=0x…: a spin transaction on the configured pool, and what each draw in it landed.
+  if (url.pathname === '/fwa/spin') {
+    const pool = addrOrNull(env.FWA_POOL);
+    if (!pool) return text('no pool configured', 501);
+    if (!sameSite(req)) return text('forbidden', 403);
+    const tx = url.searchParams.get('tx') ?? '';
+    if (!/^0x[0-9a-fA-F]{64}$/.test(tx)) return text('bad request', 400);
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    try {
+      return Response.json(await readSpin(mainClient(env), pool, MAINNET_CREDITS, tx as `0x${string}`), { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
     }
@@ -570,6 +640,50 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
 /// Listings that fit a party and would land in it, cheapest first. The scan (list pages, trait and liveness
 /// checks) is the expensive part and the same for everyone, so it is cached briefly and shared while in flight.
 const hasSweeper = (env: Env) => !!env.SWEEPER && !/^0x0+$/.test(env.SWEEPER);
+const addrOrNull = (a?: string) => (a && /^0x[0-9a-fA-F]{40}$/.test(a) && !/^0x0+$/.test(a) ? (a as Address) : null);
+/// Mainnet reads (FWA). ENS_RPC when set; publicnode otherwise, which (unlike drpc's free tier) honours an eth_call's
+/// gas price, needed to price FWA's randomness fee.
+const mainClient = (env: Env) =>
+  createPublicClient({ chain: mainnet, transport: http(env.ENS_RPC || (env.CHAIN_ID === '1' ? rpcUrl(env) : 'https://ethereum-rpc.publicnode.com'), { timeout: 8_000 }) });
+
+type Fake = { id: string; price: string; source: 'fwa' | 'opensea' };
+/// DEV_FAKE_LISTINGS, on localhost only: made-up listings to see both sources on the Buy tab without real ones.
+function devFake(env: Env, url: URL): Fake[] | null {
+  if (!env.DEV_FAKE_LISTINGS || !isDev(url)) return null;
+  try {
+    const list = JSON.parse(env.DEV_FAKE_LISTINGS) as Fake[];
+    return Array.isArray(list) ? list.filter((f) => /^\d{1,6}$/.test(String(f.id)) && /^\d{1,30}$/.test(String(f.price))) : null;
+  } catch {
+    return null;
+  }
+}
+
+/// Live FWA listings of mainnet Credits, cached briefly, as extras for the scan. A failed read is no FWA listings,
+/// never a failed Buy tab.
+async function fwaExtras(env: Env, url: URL, ctx: ExecutionContext): Promise<{ extra: Extra[]; fakeOpenSea?: { id: string; price: string }[] }> {
+  const fake = devFake(env, url);
+  if (fake) {
+    const os = fake.filter((f) => f.source === 'opensea').map((f) => ({ id: String(f.id), price: String(f.price) }));
+    return {
+      extra: fake.filter((f) => f.source === 'fwa').map((f, i) => ({ id: String(f.id), price: String(f.price), listingId: String(900_000 + i) })),
+      fakeOpenSea: os.length ? os : undefined, // none: the real OpenSea listings
+    };
+  }
+  const market = addrOrNull(env.FWA_MARKET);
+  if (!market) return { extra: [] };
+  const cache = caches.default;
+  const key = new Request(`${url.origin}/fwa/listings/${market.toLowerCase()}`);
+  const hit = await cache.match(key);
+  if (hit) return { extra: await hit.json<FwaListing[]>() };
+  try {
+    const live = await marketListings(mainClient(env), { market, collection: MAINNET_CREDITS, store: cacheStore(url.origin) });
+    ctx.waitUntil(cache.put(key, Response.json(live, { headers: { 'cache-control': 'public, max-age=30' } })));
+    return { extra: live };
+  } catch (e) {
+    console.warn('[fwa] listings unavailable', safeError(e));
+    return { extra: [] };
+  }
+}
 
 /// Testnet preview of `fitting`: mainnet listings that pass the party's rules as the edition knows them.
 /// Layouts: a Credit fits if its palette has a painted slot, or any slot is open.
@@ -649,10 +763,12 @@ async function previewFitting(env: Env, url: URL, ctx: ExecutionContext, batch: 
       });
     };
   }
+  const fwa = await fwaExtras(env, url, ctx);
   const listings = await scan({
-    key: env.OPENSEA_API_KEY!,
+    key: env.OPENSEA_API_KEY,
     slug: env.OPENSEA_SLUG,
     credits: MAINNET_CREDITS,
+    ...fwa,
     max: 40,
     take: async (ids) => {
       const pass = await Promise.all(ids.map(async (id) => ok(Number(id)) && (await inList(id))));
@@ -679,10 +795,11 @@ async function fitting(env: Env, url: URL, ctx: ExecutionContext, batch: Address
   if (!listings && inflight.has(batch)) listings = await inflight.get(batch)!;
   if (!listings) {
     const c = client(env);
-    const p = scan({
-      key: env.OPENSEA_API_KEY!,
+    const p = fwaExtras(env, url, ctx).then((fwa) => scan({
+      key: env.OPENSEA_API_KEY,
       slug: env.OPENSEA_SLUG,
       credits: env.CREDITS,
+      ...fwa,
       max: 40,
       take: (ids) => c.readContract({ address: batch, abi: batchAbi, functionName: 'canTake', args: [ids] }),
       live: (id, seller, operator) =>
@@ -691,7 +808,7 @@ async function fitting(env: Env, url: URL, ctx: ExecutionContext, batch: Address
           c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'isApprovedForAll', args: [seller, operator] }),
         ]).then(([o, ok]) => o.toLowerCase() === seller.toLowerCase() && ok),
       hasCode: (a) => c.getCode({ address: a }).then((code) => !!code && code !== '0x'),
-    });
+    }));
     // waitUntil keeps this request's context (and so the scan's I/O) alive even if the client goes away.
     inflight.set(batch, p);
     ctx.waitUntil(p.finally(() => inflight.delete(batch)).catch(() => {}));
