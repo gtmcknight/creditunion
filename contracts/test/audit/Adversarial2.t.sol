@@ -308,9 +308,11 @@ contract Adversarial2Test is Test {
         new Ratings(chunks, 5);
         vm.expectRevert(abi.encodeWithSelector(Ratings.BadChunk.selector, 0));
         new Ratings(chunks, 3);
+        vm.expectRevert(Ratings.BadCount.selector); // zero ids is refused before any chunk is read
+        new Ratings(chunks, 0);
         chunks[0] = alice; // EOA
         vm.expectRevert(abi.encodeWithSelector(Ratings.BadChunk.selector, 0));
-        new Ratings(chunks, 0);
+        new Ratings(chunks, 4);
         address[] memory two = new address[](2);
         two[0] = DataStore.write(new bytes(8));
         two[1] = DataStore.write(new bytes(2));
