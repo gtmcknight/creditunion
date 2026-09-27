@@ -2,7 +2,7 @@ import type { Listed } from '../data';
 import { listBatches } from '../data';
 import { bin } from '../bins';
 import { rangeStrip, stripHTML } from './range';
-import { bindPairTabs, creditTiles, drawOpenUnions, creditsHead, pairTabs, pct } from './trait';
+import { buyGrid, buyRow, creditsHead, pct, unionsLink } from './trait';
 
 const PAGE = 120; // Credits per Show more
 const n = (x: number) => x.toLocaleString();
@@ -28,6 +28,9 @@ type Spec = {
   href: (a: number, b: number) => string; // the Start button
   note: string;
   overlaps: (l: Listed, a: number, b: number) => boolean;
+  rules: (a: number, b: number) => Record<string, number>; // the window as edition rules, for its listings
+  unionsQuery: (a: number, b: number) => string; // /unions?… for the Credit Unions that take it
+  buy: (a: number, b: number) => string; // the Buy heading
 };
 
 async function scalePage(app: HTMLElement, s: Spec) {
@@ -51,23 +54,16 @@ async function scalePage(app: HTMLElement, s: Spec) {
   b = clamp(b);
 
   app.innerHTML = `
-  <section class="trait-page time-page scale-page">
+  <section class="trait-page time-page scale-page jb">
     ${creditsHead(s.kind)}
-    <header class="trait-head time-head">
-      <div class="trait-title">
-        <h2>${s.title}</h2>
-        <p class="muted num" id="scale-readout">&nbsp;</p>
-      </div>
-      <a class="btn primary trait-start" id="scale-start" href="/create">Start a Credit Union for these Credits</a>
-    </header>
+    <p class="jb-line num"><b id="scale-readout">&nbsp;</b><a class="jb-link" id="scale-start" href="/create">Start a Credit Union for them</a><a class="jb-link" id="jb-unions" hidden></a></p>
     ${stripHTML('Min', 'Max')}
     <div class="time-controls">
       <div class="win-inputs scale-inputs"><label><span>Min</span><input type="number" inputmode="decimal" id="scale-min" step="${s.step}" min="${s.show(0)}" max="${s.show(M - 1)}"></label><label><span>Max</span><input type="number" inputmode="decimal" id="scale-max" step="${s.step}" min="${s.show(0)}" max="${s.show(M - 1)}"></label></div>
       <div class="win-presets">${s.picks.map(([k, l]) => `<button type="button" data-pick="${k}">${l}</button>`).join('')}</div>
     </div>
-    ${pairTabs(s.note)}
+    ${buyRow('Buy these Credits')}
   </section>`;
-  bindPairTabs();
 
   const readout = document.getElementById('scale-readout')!;
   const start = document.getElementById('scale-start') as HTMLAnchorElement;
@@ -114,32 +110,21 @@ async function scalePage(app: HTMLElement, s: Spec) {
   // ---- the Credits in the window, PAGE at a time
   const unions = listBatches();
   unions.catch(() => {});
-  const grid = document.getElementById('trait-grid')!;
-  const more = document.getElementById('trait-more') as HTMLButtonElement;
-  let ids: ArrayLike<number> = [], shown = 0;
-  const showMore = () => {
-    const next = Array.from((ids as Uint32Array).slice(shown, shown + PAGE));
-    grid.insertAdjacentHTML('beforeend', creditTiles(next));
-    shown += next.length;
-    const left = ids.length - shown;
-    more.hidden = left <= 0;
-    more.textContent = `Show more · ${n(left)} left`;
-  };
-  more.addEventListener('click', showMore);
+  // The Credits in the window: listed ones first, cheapest first, then the rest (highest first for Rating).
+  let ids: Uint32Array = new Uint32Array(0);
+  const grid = buyGrid(app, {}, async (page) => ({ ids: Array.from(ids.subarray(page * PAGE, (page + 1) * PAGE)), total: ids.length }));
   const settle = () => {
-    if (!grid.isConnected) return;
+    if (!app.isConnected) return;
     history.replaceState(null, '', `/${s.kind}?min=${s.show(a)}&max=${s.show(b)}`);
-    void drawOpenUnions((l) => s.overlaps(l, a, b), unions);
-    if (s.best === 'high') ids = order.subarray(above[b + 1], above[a]);
+    void unionsLink(app, (l) => s.overlaps(l, a, b), unions, s.unionsQuery(a, b));
+    if (s.best === 'high') ids = order.slice(above[b + 1], above[a]);
     else {
       const out: number[] = [];
       for (let i = 0; i < val.length; i++) if (val[i] >= a && val[i] <= b) out.push(i + 1);
       ids = Uint32Array.from(out);
     }
-    document.getElementById('credits-n')!.textContent = n(ids.length);
-    grid.innerHTML = ids.length ? '' : '<p class="muted">No Credit in this range.</p>';
-    shown = 0;
-    showMore();
+    app.querySelector('.jb-buy')!.textContent = s.buy(a, b);
+    void grid.start({ rules: s.rules(a, b) });
   };
   let timer = 0;
   function update(now = false) {
@@ -190,7 +175,7 @@ const fmtScore = (x: number) => (Math.floor(x * 100) / 100).toFixed(2); // as Cr
 /// /rating?min=&max=: Jack's rating, 80 to 800. Units are tenths of a point, the contract's Rating rule
 /// (round(score × 10)), so the window is exactly what a Credit Union's rule would take.
 export async function ratingPage(app: HTMLElement) {
-  app.innerHTML = `<section class="trait-page time-page">${creditsHead('rating')}<h2 class="page-sub">Rating</h2><p class="muted">Loading…</p></section>`;
+  app.innerHTML = `<section class="trait-page time-page jb">${creditsHead('rating')}<p class="muted">Loading…</p></section>`;
   let raw: ArrayBuffer, ed: ArrayBuffer;
   try {
     [raw, ed] = await Promise.all([bin('scores.bin'), bin('edition.bin')]);
@@ -242,12 +227,15 @@ export async function ratingPage(app: HTMLElement) {
     href: (a, b) => `/create?minRating=${((a + 800) / 10).toFixed(1)}&maxRating=${((b + 800) / 10).toFixed(1)}`,
     note: 'Any without a Rating rule, or with one that overlaps this range.',
     overlaps: ({ s: { filter: f } }, a, b) => (!f.minScore && !f.maxScore) || ((f.minScore || 0) <= b + 800 && (f.maxScore || Infinity) >= a + 800),
+    rules: (a, b) => ({ minScore: a + 800, maxScore: b + 800 }),
+    buy: (a, b) => `Buy Credits rated ${((a + 800) / 10).toFixed(1)} to ${((b + 800) / 10).toFixed(1)}`,
+    unionsQuery: (a, b) => `minScore=${a + 800}&maxScore=${b + 800}`,
   });
 }
 
 /// /bits?min=&max=: how many marks a Credit's active plates set (Jack's Bits), as the Bits rule counts them.
 export async function bitsPage(app: HTMLElement) {
-  app.innerHTML = `<section class="trait-page time-page">${creditsHead('bits')}<h2 class="page-sub">Bits</h2><p class="muted">Loading…</p></section>`;
+  app.innerHTML = `<section class="trait-page time-page jb">${creditsHead('bits')}<p class="muted">Loading…</p></section>`;
   let raw: ArrayBuffer;
   try {
     raw = await bin('bits.bin');
@@ -288,5 +276,8 @@ export async function bitsPage(app: HTMLElement) {
       const from = f.bitsFrom || 0, to = f.bitsTo || 0;
       return (!from && !to) || (from <= b + lo && (to || Infinity) >= a + lo);
     },
+    rules: (a, b) => ({ bitsFrom: a + lo, bitsTo: b + lo }),
+    buy: (a, b) => `Buy Credits with ${a + lo} to ${b + lo} Bits`,
+    unionsQuery: (a, b) => `bitsFrom=${a + lo}&bitsTo=${b + lo}`,
   });
 }

@@ -6,6 +6,8 @@ import { editionArt, examples, fillGhosts, registerDeposits, registerFilter } fr
 import type { Address } from 'viem';
 import { describeFilter } from '../traits';
 import { clock, eth, esc, pageHead, same, sheet, until } from '../ui';
+import { TRAIT_KINDS, parseTrait, type TraitValue } from '../../shared/trait';
+import { creditsOf, takes } from './trait';
 
 function status(s: Summary) {
   switch (s.state) {
@@ -135,7 +137,12 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     const parties = all.filter((b) => PARTY_STATES.has(b.s.state));
     // Auctions: full ones waiting to burn (Upcoming), at auction (Live), and sold.
     const auctions = all.filter((b) => b.s.state !== 'Open' && b.s.state !== 'Expired');
-    const list = tab === 'parties' ? parties : auctions;
+    // ?eights=3 (or palette, print, weight): only the open Credit Unions that take those Credits.
+    const want = tab === 'parties' ? filterFromQuery() : null;
+    const list = want ? parties.filter((b) => b.s.state === 'Open' && want.test(b)) : tab === 'parties' ? parties : auctions;
+    if (want) {
+      app.querySelector('.page-head')?.insertAdjacentHTML('beforeend', `<p class="filter-line">Open to ${esc(want.label)} · <a href="/unions">Show all</a></p>`);
+    }
     const bar = app.querySelector<HTMLElement>('.page-bar');
     // For you / All: shown only when something is for you; until someone picks, For you leads when it has any.
     let view: 'you' | 'all' | null = null;
@@ -153,7 +160,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       if (tab === 'parties') {
         // For you always shows; signed out it opens on All and For you asks to connect.
         const has = mine.length > 0;
-        const v = view ?? (has ? 'you' : 'all');
+        const v = view ?? (has && !want ? 'you' : 'all');
         app.querySelectorAll<HTMLElement>('[data-stage]').forEach((b) =>
       b.addEventListener('click', () => {
         stage = b.dataset.stage as Stage;
@@ -229,4 +236,29 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     const el = document.getElementById('batches');
     if (el) el.innerHTML = `<p class="error">Couldn't read Credit Unions from chain. ${esc((e as Error).message)}</p>`;
   }
+}
+
+/// What a /unions link narrows to, from a trait or range page: a trait (?palette=C, ?eights=3, ?print=slip,
+/// ?weight=sparse), or a range (?minScore=&maxScore= in tenths, ?bitsFrom=&bitsTo=, ?paidFrom=&paidTo= in unix
+/// seconds). A Credit Union counts when its own rule on that thing is absent or overlaps.
+function filterFromQuery(): { label: string; test: (b: Listed) => boolean } | null {
+  const q = new URLSearchParams(location.search);
+  for (const k of TRAIT_KINDS) {
+    const v = q.get(k);
+    const t = v ? parseTrait(k, v) : null;
+    if (t) return { label: creditsOf(t), test: (b) => takes(b, t) };
+  }
+  const num = (k: string) => (q.has(k) && /^\d{1,10}$/.test(q.get(k)!) ? Number(q.get(k)) : null);
+  const overlap = (from = 0, to = 0, lo: number, hi: number) => (!from && !to) || (from <= hi && (to || Infinity) >= lo);
+  const sLo = num('minScore'), sHi = num('maxScore');
+  if (sLo !== null && sHi !== null)
+    return { label: `Credits rated ${(sLo / 10).toFixed(1)} to ${(sHi / 10).toFixed(1)}`, test: ({ s: { filter: f } }) => overlap(f.minScore, f.maxScore, sLo, sHi) };
+  const bLo = num('bitsFrom'), bHi = num('bitsTo');
+  if (bLo !== null && bHi !== null) return { label: `Credits with ${bLo} to ${bHi} Bits`, test: ({ s: { filter: f } }) => overlap(f.bitsFrom, f.bitsTo, bLo, bHi) };
+  const pLo = num('paidFrom'), pHi = num('paidTo');
+  if (pLo !== null && pHi !== null) {
+    const d = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return { label: `Credits paid ${d.format(pLo * 1000)} to ${d.format(pHi * 1000)}`, test: ({ s: { filter: f } }) => overlap(f.paidFrom, f.paidTo, pLo, pHi) };
+  }
+  return null;
 }

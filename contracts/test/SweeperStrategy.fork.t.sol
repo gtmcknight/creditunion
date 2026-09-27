@@ -135,4 +135,74 @@ contract SweeperStrategyForkTest is Test {
         vm.expectRevert(Sweeper.NotACreditStrategy.selector);
         new Sweeper(SEAPORT, factory, 100, IFWAMarket(address(0)), STRATEGY);
     }
+
+    // --- buy: from the strategy straight to the buyer's wallet ---
+
+    function test_Buy_FromStrategyToWallet_ChargesFeeRefundsRest() public {
+        (Sweeper.StrategyListing[] memory ls, uint256 total) = _listings(3);
+        uint256 stratBefore = address(STRATEGY).balance;
+        uint256 buyerBefore = buyer.balance;
+        uint256 sweeperBefore = address(sweeper).balance;
+        uint256 batchCount = batch.count();
+        vm.expectEmit(true, false, false, true, address(sweeper));
+        emit Sweeper.Bought(buyer, 3, total, total / 100);
+        vm.prank(buyer);
+        uint256[] memory ids =
+            sweeper.buy{value: total * 2}(new AdvancedOrder[](0), new Sweeper.FWAListing[](0), ls, 3, 100);
+        assertEq(ids.length, 3);
+        for (uint256 i; i < 3; ++i) {
+            assertEq(ids[i], held[i]);
+            assertEq(CREDITS.ownerOf(held[i]), buyer);
+            assertEq(STRATEGY.nftForSale(held[i]), 0);
+        }
+        assertEq(batch.count(), batchCount);
+        assertEq(address(STRATEGY).balance - stratBefore, total);
+        assertEq(fee.balance, total / 100);
+        assertEq(buyerBefore - buyer.balance, total + total / 100);
+        assertEq(address(sweeper).balance, sweeperBefore);
+    }
+
+    function test_Buy_SoldOrRepricedIsSkipped() public {
+        address other = makeAddr("other");
+        vm.deal(other, 1 ether);
+        vm.prank(other);
+        STRATEGY.sellTargetNFT{value: prices[0]}(held[0]);
+
+        (Sweeper.StrategyListing[] memory ls, uint256 total) = _listings(3);
+        ls[1].price = prices[1] + 1;
+        uint256 buyerBefore = buyer.balance;
+        vm.prank(buyer);
+        uint256[] memory ids =
+            sweeper.buy{value: total * 2}(new AdvancedOrder[](0), new Sweeper.FWAListing[](0), ls, 1, 100);
+        assertEq(ids.length, 1);
+        assertEq(ids[0], held[2]);
+        assertEq(CREDITS.ownerOf(held[2]), buyer);
+        assertEq(CREDITS.ownerOf(held[0]), other);
+        assertEq(CREDITS.ownerOf(held[1]), address(STRATEGY));
+        assertEq(buyerBefore - buyer.balance, prices[2] + prices[2] / 100);
+    }
+
+    function test_Buy_MinBoughtReverts() public {
+        (Sweeper.StrategyListing[] memory ls, uint256 total) = _listings(2);
+        ls[0].price = 1;
+        vm.prank(buyer);
+        vm.expectRevert(abi.encodeWithSelector(Sweeper.TooFewBought.selector, 1));
+        sweeper.buy{value: total}(new AdvancedOrder[](0), new Sweeper.FWAListing[](0), ls, 2, 100);
+    }
+
+    function test_Buy_UnderpaidReverts() public {
+        (Sweeper.StrategyListing[] memory ls,) = _listings(2);
+        vm.prank(buyer);
+        vm.expectRevert(Sweeper.Underpaid.selector);
+        sweeper.buy{value: prices[0]}(new AdvancedOrder[](0), new Sweeper.FWAListing[](0), ls, 1, 100);
+    }
+
+    function test_Buy_FeeRaiseReverts() public {
+        vm.prank(fee);
+        sweeper.setFee(200);
+        (Sweeper.StrategyListing[] memory ls, uint256 total) = _listings(1);
+        vm.prank(buyer);
+        vm.expectRevert(abi.encodeWithSelector(Sweeper.FeeChanged.selector, 200));
+        sweeper.buy{value: total * 2}(new AdvancedOrder[](0), new Sweeper.FWAListing[](0), ls, 1, 100);
+    }
 }

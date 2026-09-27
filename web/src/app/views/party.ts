@@ -7,6 +7,7 @@ import { hydrate, pct, who } from '../ens';
 import { editionArt, examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
 import { keyOf as layoutKey } from '../../shared/layout';
 import { Room, books, depositedKeys, keysOf, noRoomReason, type Books } from '../slots';
+import { checkQuote, minEth, sourceMark, type Quote, type Source } from '../forsale';
 import { $$, art, clock, errText, esc, eth, same, sheet, short, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
 import { go as navigate } from '../main';
@@ -486,13 +487,6 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
 
 const BUY_COUNTS = [1, 5, 10];
 
-/// Where a listing is: shown as a small mark on its tile.
-type Source = 'opensea' | 'fwa' | 'strategy';
-const SOURCES: Record<Source, { name: string; icon: string }> = {
-  opensea: { name: 'OpenSea', icon: '/sources/opensea.svg' },
-  fwa: { name: 'FWA', icon: '/sources/fwa.png' },
-  strategy: { name: 'CreditStrategy', icon: '/sources/strategy.svg' },
-};
 
 function buyPane(connected: boolean) {
   // How many and the running total on one line; the Credits; then one button that carries the price.
@@ -504,7 +498,6 @@ function buyPane(connected: boolean) {
 `;
 }
 
-const minEth = (wei: bigint) => (Number(wei) / 1e18).toFixed(4).replace(/\.?0+$/, '');
 
 function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: Map<string, number> | null) {
   const s = b.s;
@@ -860,50 +853,8 @@ async function drawPicker(
   sync();
 }
 
-/// OpenSea listings come as signed orders (orders/ids/prices); FWA listings by listing id and price; CreditStrategy's
-/// by Credit id and price. `total` is all of them.
-type Quote = {
-  orders: unknown[];
-  ids: string[];
-  prices: string[];
-  total: string;
-  expires?: number | null;
-  fwa?: { listingId: string; id: string; price: string }[];
-  strategy?: { id: string; price: string }[];
-  error?: string;
-};
 const quotedCount = (q: Quote) => q.ids.length + (q.fwa?.length ?? 0) + (q.strategy?.length ?? 0);
 let quotedFeeBps = 0n; // the Sweeper's rate at quote time; the sweep reverts if it has been raised since
-
-/// The orders are what gets sent to the chain; the ids/prices/total are what gets shown. Make sure they agree,
-/// so a bad quote (or a tampered one) can't show ten Credits and buy one.
-function checkQuote(q: Quote) {
-  type Order = { parameters?: { offer?: { token?: string; identifierOrCriteria?: string; itemType?: number }[]; consideration?: { itemType?: number; startAmount?: string; endAmount?: string }[] } };
-  const orders = q.orders as Order[];
-  if (!Array.isArray(orders) || orders.length !== q.ids.length || q.prices.length !== q.ids.length) throw new Error('Bad quote.');
-  let sum = 0n;
-  orders.forEach((o, i) => {
-    const offer = o.parameters?.offer ?? [];
-    const cons = o.parameters?.consideration ?? [];
-    if (offer.length !== 1 || Number(offer[0].itemType) !== 2 || String(offer[0].identifierOrCriteria) !== q.ids[i]) throw new Error('Bad quote.');
-    if (String(offer[0].token).toLowerCase() !== config.credits.toLowerCase()) throw new Error('Bad quote.');
-    const price = cons.reduce((a, c) => {
-      if (Number(c.itemType) !== 0 || c.startAmount !== c.endAmount) throw new Error('Bad quote.');
-      return a + BigInt(c.endAmount ?? '0');
-    }, 0n);
-    if (price !== BigInt(q.prices[i])) throw new Error('Bad quote.');
-    sum += price;
-  });
-  for (const f of q.fwa ?? []) {
-    if (!/^\d+$/.test(f.listingId) || !/^\d+$/.test(f.id) || !/^\d+$/.test(f.price)) throw new Error('Bad quote.');
-    sum += BigInt(f.price);
-  }
-  for (const f of q.strategy ?? []) {
-    if (!/^\d+$/.test(f.id) || !/^\d+$/.test(f.price)) throw new Error('Bad quote.');
-    sum += BigInt(f.price);
-  }
-  if (sum !== BigInt(q.total)) throw new Error('Bad quote.');
-}
 
 /// The Buy tab: pick 1, 5 or 10 and the cheapest live OpenSea listings that fit fill in, with prices; then a
 /// signed price for exactly those. Where buy-in is off (testnets), it previews edition Credits that fit, disabled.
@@ -923,7 +874,7 @@ async function bindBuy(
   const room = 80 - b.s.count;
   // The art opens the Credit's page; the source mark opens the listing on its marketplace.
   const tile = (id: string | number, src: string, price: string | null, source?: Source, url?: string) =>
-    `<div class="listing" data-id="${id}"><span class="art"><a class="art-link" href="/credit/${id}" title="Credit #${id}"><img src="${src}" alt="Credit #${id}" loading="lazy" decoding="async"></a>${price === null ? '' : `<button type="button" class="skip" aria-label="Skip Credit #${id}" title="Skip">×</button>`}</span><span class="price num">${source ? `<a class="src" href="${esc(url ?? '#')}" target="_blank" rel="noopener" title="Credit #${id} on ${SOURCES[source].name}"><img class="src" src="${SOURCES[source].icon}" alt="${SOURCES[source].name}"></a>` : ''}${price === null ? `#${id}` : `${minEth(BigInt(price))} ETH`}</span></div>`;
+    `<div class="listing" data-id="${id}"><span class="art"><a class="art-link" href="/credit/${id}" title="Credit #${id}"><img src="${src}" alt="Credit #${id}" loading="lazy" decoding="async"></a>${price === null ? '' : `<button type="button" class="skip" aria-label="Skip Credit #${id}" title="Skip">×</button>`}</span><span class="price num">${source ? sourceMark(id, source, url) : ''}${price === null ? `#${id}` : `${minEth(BigInt(price))} ETH`}</span></div>`;
 
   let listings: { id: string; price: string; source?: Source; url?: string; traits?: number }[] = [];
   // preview: no OpenSea key here, so edition Credits stand in. mainnetOnly: real mainnet listings and prices,

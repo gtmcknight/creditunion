@@ -10,7 +10,7 @@
 import { createPublicClient, hexToBytes, http, type Address, type Hex, parseAbiItem } from 'viem';
 import { mainnet } from 'viem/chains';
 import { batchAbi, creditsAbi, creditArtAbi, factoryAbi } from '../app/abi';
-import { best, quote, scan, type Extra, type Listing } from './opensea';
+import { best, bestPage, quote, scan, type Extra, type Listing } from './opensea';
 import { cacheStore, confirmListing, marketListings, type FwaListing } from './fwa';
 import { confirmStrategy, strategyAbi, strategyListings } from './strategy';
 import { ratings } from './ratings';
@@ -338,38 +338,138 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         listings = listings.filter((l) => want.has(l.id));
       }
       listings = listings.slice(0, n);
-      // FWA and strategy listings need no signed fill: read each again now, and send it with its price to the Sweeper.
-      const main = mainClient(env);
-      const confirmed = async (source: 'fwa' | 'strategy') =>
-        (
-          await Promise.all(
-            listings
-              .filter((l) => l.source === source)
-              .map(async (l) =>
-                (await (source === 'fwa'
-                  ? confirmListing(main, env.FWA_MARKET as Address, env.CREDITS, { id: l.id, price: l.price, listingId: l.listingId! })
-                  : confirmStrategy(main, env.STRATEGY as Address, l)
-                ).catch(() => false))
-                  ? l
-                  : null,
-              ),
-          )
-        ).filter((l): l is Listing => !!l);
-      const [fwaLive, strategyLive] = await Promise.all([confirmed('fwa'), confirmed('strategy')]);
-      const osPicked = listings.filter((l) => l.source === 'opensea');
-      let os = { orders: [] as unknown[], ids: [] as string[], prices: [] as string[], total: '0', expires: null as number | null };
-      if (osPicked.length) {
-        try {
-          os = await quote({ key: env.OPENSEA_API_KEY!, sweeper: env.SWEEPER, listings: osPicked, n: osPicked.length, origin: url.origin });
-        } catch (e) {
-          if (!fwaLive.length && !strategyLive.length) throw e; // with other listings still good, the quote is those
+      return Response.json(await quoteListings(env, url, listings), { headers: { 'cache-control': 'no-store' } });
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
+  }
+
+  // The cheapest Credits for sale across OpenSea, CreditStrategy and FWA, for /credits and trait pages
+  // (?trait=palette/K). Mainnet's listings on testnets. Cached a minute per trait.
+  if (url.pathname === '/opensea/forsale') {
+    if (!env.OPENSEA_API_KEY && !offOpenSea(env)) return text('OpenSea is not configured', 501);
+    if (!sameSite(req)) return text('forbidden', 403);
+    const raw = url.searchParams.get('trait') ?? '';
+    const tm = raw.match(/^(palette|eights|print|weight)\/([^/]{1,16})$/);
+    const trait = tm ? parseTrait(tm[1], tm[2]) : null;
+    if (raw && !trait) return text('bad trait', 400);
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    try {
+      const live = hasSweeper(env);
+      const listings = await forSale(env, url, ctx, trait);
+      return Response.json(
+        { listings: listings.map((l) => ({ ...l, url: listingUrl(env, live, l) })), preview: !live },
+        { headers: { 'cache-control': 'no-store' } },
+      );
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
+  }
+
+  // Every Credit for sale, cheapest first, a chunk at a time (?trait=palette/K&c=<cursor>): OpenSea's listings page
+  // by page with CreditStrategy's and FWA's merged in by price, then whatever of those is left. Shown as listed;
+  // a sweep's quote re-checks each one.
+  if (url.pathname === '/opensea/listed') {
+    if (!env.OPENSEA_API_KEY && !offOpenSea(env)) return text('OpenSea is not configured', 501);
+    if (!sameSite(req)) return text('forbidden', 403);
+    const raw = url.searchParams.get('trait') ?? '';
+    const tm = raw.match(/^(palette|eights|print|weight)\/([^/]{1,16})$/);
+    const trait = tm ? parseTrait(tm[1], tm[2]) : null;
+    if (raw && !trait) return text('bad trait', 400);
+    // Or a range (/rating, /bits, /time): rules the edition answers, with OpenSea read unfiltered.
+    let rules: Rules | null = null;
+    const rawRules = url.searchParams.get('rules');
+    if (rawRules) {
+      try {
+        const b = JSON.parse(rawRules) as Record<string, unknown>;
+        const keys = ['minScore', 'maxScore', 'bitsFrom', 'bitsTo', 'paidFrom', 'paidTo'] as const;
+        if (!b || typeof b !== 'object' || Object.keys(b).some((k) => !(keys as readonly string[]).includes(k))) throw 0;
+        rules = {};
+        for (const k of keys) {
+          const v = b[k];
+          if (v === undefined) continue;
+          if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 0xffffffff) throw 0;
+          (rules as Record<string, number>)[k] = v;
         }
+      } catch {
+        return text('bad rules', 400);
       }
-      if (!os.ids.length && !fwaLive.length && !strategyLive.length) throw new Error('No listings fit this batch right now.');
-      const fwa = fwaLive.map((l) => ({ listingId: l.listingId!, id: l.id, price: l.price }));
-      const strategy = strategyLive.map((l) => ({ id: l.id, price: l.price }));
-      const total = [...fwa, ...strategy].reduce((a, l) => a + BigInt(l.price), BigInt(os.total));
-      return Response.json({ ...os, total: total.toString(), fwa, strategy }, { headers: { 'cache-control': 'no-store' } });
+    }
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    // OpenSea's next page, the highest OpenSea price shown so far, OpenSea done, how many of the rest are shown.
+    type Cursor = { n: string; w: string; d: boolean; i: number; p?: number };
+    let cur: Cursor = { n: '', w: '-1', d: !env.OPENSEA_API_KEY, i: 0 };
+    try {
+      const c = url.searchParams.get('c');
+      if (c) cur = JSON.parse(atob(c)) as Cursor;
+      if (typeof cur.n !== 'string' || !/^-?\d{1,40}$/.test(cur.w) || typeof cur.d !== 'boolean' || !Number.isInteger(cur.i) || cur.i < 0) throw 0;
+    } catch {
+      return text('bad cursor', 400);
+    }
+    try {
+      const live = hasSweeper(env);
+      const credits = live ? env.CREDITS : MAINNET_CREDITS;
+      const ok = trait ? await predicate(env.ASSETS, url.origin, trait.rules) : rules ? await predicate(env.ASSETS, url.origin, rules) : () => true;
+      const more = (await extras(env, url, ctx)).extra
+        .map((e): Listing => ({ id: e.id, price: e.price, source: e.source, listingId: e.listingId }))
+        .sort((a, b) => (BigInt(a.price) < BigInt(b.price) ? -1 : BigInt(a.price) > BigInt(b.price) ? 1 : 0));
+      const out: Listing[] = [];
+      // Merge by price: the rest's listings up to OpenSea's price reached, a chunk at a time; then OpenSea's next
+      // page (OpenSea filters by the trait itself). Up to five OpenSea pages per call.
+      for (let pages = 0; ; ) {
+        const upTo = cur.d ? null : BigInt(cur.w);
+        const start = cur.i;
+        while (cur.i < more.length && cur.i - start < LISTED_CHUNK * 4 && (upTo === null || BigInt(more[cur.i].price) <= upTo)) {
+          const l = more[cur.i++];
+          if (ok(Number(l.id))) out.push(l);
+        }
+        if (out.length >= LISTED_CHUNK) break;
+        if (cur.i - start >= LISTED_CHUNK * 4) continue; // a long run at one price: keep going on the rest
+        if (cur.d || pages >= (rules ? 10 : 5)) break; // unfiltered for a range, so read further
+        const pg = await bestPage(env.OPENSEA_API_KEY!, env.OPENSEA_SLUG, credits, cur.n, trait ? openseaTrait(trait) : undefined);
+        pages++;
+        out.push(...pg.items.filter((l) => ok(Number(l.id))));
+        const top = pg.items.reduce((m, l) => (BigInt(l.price) > m ? BigInt(l.price) : m), BigInt(cur.w));
+        const read = (cur.p ?? 0) + 1;
+        // A range OpenSea can't filter (rules) reads the cheapest RANGE_DEPTH pages of the whole collection and stops,
+        // so a rare range doesn't read every listing before the page can move on.
+        cur = { ...cur, n: pg.next, w: top.toString(), d: !pg.next || !pg.items.length || (!!rules && read >= RANGE_DEPTH), p: read };
+      }
+      const items = out
+        .sort((a, b) => (BigInt(a.price) < BigInt(b.price) ? -1 : BigInt(a.price) > BigInt(b.price) ? 1 : 0))
+        .map((l) => ({ ...l, url: listingUrl(env, live, l) }));
+      const left = !cur.d || cur.i < more.length;
+      return Response.json({ items, next: left ? btoa(JSON.stringify(cur)) : null, preview: !live }, { headers: { 'cache-control': 'no-store' } });
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
+  }
+
+  // A price for sweeping exactly these listings into the buyer's wallet (Sweeper.buy). Each is checked again here:
+  // OpenSea's through its signed fill, CreditStrategy's and FWA's read on-chain.
+  if (url.pathname === '/opensea/buyquote') {
+    if (req.method !== 'POST' || !sameSite(req)) return text('forbidden', 403);
+    if (!hasSweeper(env)) return text('buying is off here', 501);
+    if (await limited(env.RL_QUOTE, req)) return text('slow down', 429);
+    let ls: Listing[];
+    try {
+      const raw = await readBody(req, 16_000);
+      if (raw === null) return text('too large', 413);
+      const b = JSON.parse(raw) as { listings?: unknown };
+      if (!Array.isArray(b.listings) || !b.listings.length || b.listings.length > FOR_SALE) throw 0;
+      ls = b.listings.map((x) => {
+        const l = x as Record<string, unknown>;
+        const id = String(l.id), price = String(l.price), source = String(l.source);
+        if (!/^\d{1,6}$/.test(id) || !inSupply(Number(id)) || !/^\d{1,30}$/.test(price) || !['opensea', 'fwa', 'strategy'].includes(source)) throw 0;
+        if (source === 'opensea' && (!/^0x[0-9a-fA-F]{64}$/.test(String(l.hash)) || !/^0x[0-9a-fA-F]{40}$/.test(String(l.protocol)))) throw 0;
+        if (source === 'fwa' && !/^\d{1,20}$/.test(String(l.listingId))) throw 0;
+        return { id, price, source: source as Listing['source'], hash: l.hash as string | undefined, protocol: l.protocol as string | undefined, listingId: l.listingId as string | undefined };
+      });
+    } catch {
+      return text('bad request', 400);
+    }
+    try {
+      return Response.json(await quoteListings(env, url, ls), { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
     }
@@ -813,12 +913,96 @@ const mainClient = (env: Env) =>
   createPublicClient({ chain: mainnet, transport: http(env.ENS_RPC || (env.CHAIN_ID === '1' ? rpcUrl(env) : 'https://ethereum-rpc.publicnode.com'), { timeout: 8_000 }) });
 
 type Fake = { id: string; price: string; source: 'fwa' | 'strategy' | 'opensea' };
+/// A price for exactly these listings, ready for the Sweeper: OpenSea's as signed Seaport orders (the Sweeper as
+/// fulfiller), FWA's and CreditStrategy's each re-read now and sent by id and price. Gone ones drop out.
+async function quoteListings(env: Env, url: URL, listings: Listing[]) {
+  // FWA and strategy listings need no signed fill: read each again now, and send it with its price to the Sweeper.
+  const main = mainClient(env);
+  const confirmed = async (source: 'fwa' | 'strategy') =>
+    (
+      await Promise.all(
+        listings
+          .filter((l) => l.source === source)
+          .map(async (l) =>
+            (await (source === 'fwa'
+              ? confirmListing(main, env.FWA_MARKET as Address, env.CREDITS, { id: l.id, price: l.price, listingId: l.listingId! })
+              : confirmStrategy(main, env.STRATEGY as Address, l)
+            ).catch(() => false))
+              ? l
+              : null,
+          ),
+      )
+    ).filter((l): l is Listing => !!l);
+  const [fwaLive, strategyLive] = await Promise.all([confirmed('fwa'), confirmed('strategy')]);
+  const osPicked = listings.filter((l) => l.source === 'opensea');
+  let os = { orders: [] as unknown[], ids: [] as string[], prices: [] as string[], total: '0', expires: null as number | null };
+  if (osPicked.length) {
+    try {
+      os = await quote({ key: env.OPENSEA_API_KEY!, sweeper: env.SWEEPER, listings: osPicked, n: osPicked.length, origin: url.origin });
+    } catch (e) {
+      if (!fwaLive.length && !strategyLive.length) throw e; // with other listings still good, the quote is those
+    }
+  }
+  if (!os.ids.length && !fwaLive.length && !strategyLive.length) throw new Error('Those listings just sold. Try again.');
+  const fwa = fwaLive.map((l) => ({ listingId: l.listingId!, id: l.id, price: l.price }));
+  const strategy = strategyLive.map((l) => ({ id: l.id, price: l.price }));
+  const total = [...fwa, ...strategy].reduce((a, l) => a + BigInt(l.price), BigInt(os.total));
+  return { ...os, total: total.toString(), fwa, strategy };
+}
+
+/// The cheapest Credits for sale anywhere, of one trait or of all, cached a minute per trait (the full listings,
+/// with what a quote needs).
+async function forSale(env: Env, url: URL, ctx: ExecutionContext, trait: ReturnType<typeof parseTrait>): Promise<Listing[]> {
+  const cache = caches.default;
+  const key = new Request(`${url.origin}/opensea/forsale/v2/${trait ? `${trait.kind}/${trait.slug}` : 'all'}`);
+  const hit = await cache.match(key);
+  if (hit) return hit.json<Listing[]>();
+  const live = hasSweeper(env);
+  const credits = live ? env.CREDITS : MAINNET_CREDITS;
+  const c = live ? client(env) : createPublicClient({ transport: http(env.ENS_RPC || 'https://eth.drpc.org', { timeout: 8_000 }) });
+  const ok = trait ? await predicate(env.ASSETS, url.origin, trait.rules) : () => true;
+  const listings = (
+    await scan({
+      key: env.OPENSEA_API_KEY,
+      slug: env.OPENSEA_SLUG,
+      credits,
+      ...(await extras(env, url, ctx)),
+      max: FOR_SALE,
+      take: async (ids) => ids.map((id) => ok(Number(id))),
+      live: (id, seller, operator) =>
+        Promise.all([
+          c.readContract({ address: credits, abi: creditsAbi, functionName: 'ownerOf', args: [id] }),
+          c.readContract({ address: credits, abi: creditsAbi, functionName: 'isApprovedForAll', args: [seller, operator] }),
+        ]).then(([o, a]) => o.toLowerCase() === seller.toLowerCase() && a),
+      hasCode: (a) => c.getCode({ address: a }).then((code) => !!code && code !== '0x'),
+    })
+  ).slice(0, FOR_SALE);
+  ctx.waitUntil(cache.put(key, Response.json(listings, { headers: { 'cache-control': 'public, max-age=60' } })));
+  return listings;
+}
+
 /// Where a listing can be seen on its own marketplace. OpenSea's is the Credit's item page (mainnet's on testnets).
 function listingUrl(env: Env, live: boolean, l: Pick<Listing, 'id' | 'source'>): string {
   if (l.source === 'strategy') return `https://www.nftstrategy.fun/strategies/${(addrOrNull(env.STRATEGY) ?? '').toLowerCase()}`;
   if (l.source === 'fwa') return 'https://fwa.fun';
   return `https://opensea.io/assets/ethereum/${(live ? env.CREDITS : MAINNET_CREDITS).toLowerCase()}/${l.id}`;
 }
+/// A trait as OpenSea's Credits metadata names it, so its listings can be asked for directly.
+function openseaTrait(t: NonNullable<ReturnType<typeof parseTrait>>): { traitType: string; value: string } {
+  if (t.kind === 'palette') return { traitType: 'Colors', value: t.name };
+  if (t.kind === 'eights') return { traitType: 'Eights', value: ['None', 'One', 'Two', 'Three', 'Four', 'Five'][t.v - 1] };
+  const cap = t.slug.charAt(0).toUpperCase() + t.slug.slice(1);
+  return { traitType: t.kind === 'print' ? 'Print' : 'Weight', value: cap };
+}
+
+/// OpenSea pages (100 listings each) a range search reads, cheapest first, before it stops: past every listing
+/// today, as a guard.
+const RANGE_DEPTH = 150;
+
+/// Credits in a For sale row, and the most one sweep takes.
+const FOR_SALE = 10;
+/// Listed Credits per page of /opensea/listed (before a trait filters them).
+const LISTED_CHUNK = 60;
 const offOpenSea = (env: Env) => !!(addrOrNull(env.FWA_MARKET) || addrOrNull(env.STRATEGY));
 /// DEV_FAKE_LISTINGS, on localhost only: made-up listings to see both sources on the Buy tab without real ones.
 function devFake(env: Env, url: URL): Fake[] | null {

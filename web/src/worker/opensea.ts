@@ -90,6 +90,19 @@ export async function best(key: string, slug: string, credits: Address, id: numb
   return l && l.id === String(id) ? { price: l.price, seller: l.seller } : null;
 }
 
+/// One page of OpenSea's listings of the collection, cheapest first, as fillable listings (the checks `scan` makes
+/// before a fill are left to the quote). `next`: OpenSea's cursor for the page after, empty at the end.
+/// `trait`: only Credits with it, as OpenSea names it ({ traitType: 'Eights', value: 'Three' }).
+export async function bestPage(key: string, slug: string, credits: Address, next = '', trait?: { traitType: string; value: string }): Promise<{ items: Listing[]; next: string }> {
+  const q = `limit=100${trait ? `&traits=${encodeURIComponent(JSON.stringify([trait]))}` : ''}${next ? `&next=${encodeURIComponent(next)}` : ''}`;
+  const r = await os(key, `/listings/collection/${slug}/best?${q}`);
+  const items = ((r.listings ?? []) as Json[])
+    .map((l) => usable(l, credits))
+    .filter((c): c is NonNullable<typeof c> => !!c && !!c.operator)
+    .map((c): Listing => ({ id: c.id, price: c.price.toString(), source: 'opensea', hash: c.hash, protocol: c.protocol }));
+  return { items, next: String(r.next ?? '') };
+}
+
 /// The cheapest listings that fit, one per Credit, checked on-chain so a stale one cannot revert the sweep:
 /// the seller still owns it and still has Seaport (or OpenSea's conduit) approved, and no consideration
 /// goes to a contract other than OpenSea's fee wallet (a contract recipient could revert the whole fill).

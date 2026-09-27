@@ -43,6 +43,7 @@ export function go(path: string) {
 /// The Credits explorer: its landing, the trait indexes and pages, the range pages.
 const EXPLORER = new Set(['credits', 'palette', 'eights', 'print', 'weight', 'time', 'rating', 'bits']);
 
+let lastPage = '';
 async function route() {
   const run = ++seq;
   const [page, arg] = pagePath();
@@ -51,7 +52,10 @@ async function route() {
   document.querySelectorAll<HTMLAnchorElement>('#account [data-nav]').forEach((a) =>
     a.classList.toggle('current', page === 'me'),
   );
-  app.classList.remove('in');
+  // Moving within the Credits explorer (trait to trait) swaps the page in place; elsewhere it fades in.
+  const within = EXPLORER.has(page) && EXPLORER.has(lastPage);
+  lastPage = page;
+  if (!within) app.classList.remove('in');
   try {
     if (page === '' || page === 'about') home(app);
     else if (page === 'mint') await mint(app, route);

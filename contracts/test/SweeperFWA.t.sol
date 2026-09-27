@@ -302,4 +302,151 @@ contract SweeperFWATest is Test {
         assertEq(ids.length, 2);
         assertEq(batch.count(), 12);
     }
+
+    // --- buy: the same purchase, delivered to the buyer's wallet instead of a batch ---
+
+    function test_Buy_DeliversToWalletChargesFeeRefundsRest() public {
+        uint256 a = _list(11, 1 ether);
+        uint256 b = _list(12, 2 ether);
+        vm.roll(block.number + 1);
+        Sweeper.FWAListing[] memory fwa = new Sweeper.FWAListing[](2);
+        fwa[0] = _fwa(a, 1 ether);
+        fwa[1] = _fwa(b, 2 ether);
+        uint256 carolBefore = carol.balance;
+
+        vm.expectEmit(true, false, false, true, address(sweeper));
+        emit Sweeper.Bought(carol, 2, 3 ether, 0.03 ether);
+        vm.prank(carol);
+        uint256[] memory ids = sweeper.buy{value: 5 ether}(new AdvancedOrder[](0), fwa, new Sweeper.StrategyListing[](0), 2, 100);
+
+        assertEq(ids.length, 2);
+        assertEq(ids[0], 11);
+        assertEq(ids[1], 12);
+        assertEq(credits.ownerOf(11), carol);
+        assertEq(credits.ownerOf(12), carol);
+        assertEq(batch.count(), 10); // no batch touched
+        assertEq(fee.balance, 0.03 ether);
+        assertEq(carolBefore - carol.balance, 3.03 ether);
+        assertEq(address(sweeper).balance, 0);
+    }
+
+    function test_Buy_MixedOpenSeaAndFWA() public {
+        uint256 a = _list(20, 0.5 ether);
+        vm.roll(block.number + 1);
+        seaport.setFill(2);
+        Sweeper.FWAListing[] memory fwa = new Sweeper.FWAListing[](1);
+        fwa[0] = _fwa(a, 0.5 ether);
+        uint256 value = sweeper.quote(2.5 ether);
+        uint256 carolBefore = carol.balance;
+
+        vm.prank(carol);
+        uint256[] memory ids = sweeper.buy{value: value}(_orders(11, 2, 1 ether), fwa, new Sweeper.StrategyListing[](0), 3, 100);
+
+        assertEq(ids.length, 3);
+        assertEq(ids[0], 20);
+        assertEq(ids[1], 11);
+        assertEq(ids[2], 12);
+        for (uint256 i; i < 3; ++i) assertEq(credits.ownerOf(ids[i]), carol);
+        assertEq(fee.balance, 0.025 ether);
+        assertEq(carolBefore - carol.balance, value);
+        assertEq(address(sweeper).balance, 0);
+    }
+
+    function test_Buy_SkipsGoneRepricedAndImmature() public {
+        uint256 a = _list(11, 1 ether);
+        uint256 b = _list(12, 1 ether);
+        uint256 c = _list(13, 1 ether);
+        vm.roll(block.number + 1);
+        vm.prank(bob);
+        market.reprice(b, 0.9 ether);
+        uint256 d = _list(14, 1 ether);
+        Sweeper.FWAListing[] memory fwa = new Sweeper.FWAListing[](4);
+        fwa[0] = _fwa(a, 1 ether);
+        fwa[1] = _fwa(b, 1 ether);
+        fwa[2] = _fwa(c, 1 ether);
+        fwa[3] = _fwa(d, 1 ether);
+        uint256 carolBefore = carol.balance;
+        uint256 value = sweeper.quote(4 ether);
+
+        vm.prank(carol);
+        uint256[] memory ids =
+            sweeper.buy{value: value}(new AdvancedOrder[](0), fwa, new Sweeper.StrategyListing[](0), 1, 100);
+        assertEq(ids.length, 2);
+        assertEq(ids[0], 11);
+        assertEq(ids[1], 13);
+        assertEq(credits.ownerOf(11), carol);
+        assertEq(credits.ownerOf(13), carol);
+        assertEq(credits.ownerOf(14), address(market));
+        assertEq(carolBefore - carol.balance, sweeper.quote(2 ether));
+    }
+
+    function test_Buy_MinBoughtReverts() public {
+        seaport.setFill(1);
+        vm.prank(carol);
+        vm.expectRevert(abi.encodeWithSelector(Sweeper.TooFewBought.selector, 1));
+        sweeper.buy{value: 3 ether}(_orders(11, 2, 1 ether), new Sweeper.FWAListing[](0), new Sweeper.StrategyListing[](0), 2, 100);
+        vm.prank(carol);
+        vm.expectRevert(abi.encodeWithSelector(Sweeper.TooFewBought.selector, 0));
+        sweeper.buy{value: 3 ether}(new AdvancedOrder[](0), new Sweeper.FWAListing[](0), new Sweeper.StrategyListing[](0), 0, 100);
+    }
+
+    function test_Buy_UnderpaidReverts() public {
+        uint256 a = _list(11, 1 ether);
+        uint256 b = _list(12, 1 ether);
+        vm.roll(block.number + 1);
+        Sweeper.FWAListing[] memory fwa = new Sweeper.FWAListing[](2);
+        fwa[0] = _fwa(a, 1 ether);
+        fwa[1] = _fwa(b, 1 ether);
+        vm.prank(carol);
+        vm.expectRevert(Sweeper.Underpaid.selector);
+        sweeper.buy{value: 1.5 ether}(new AdvancedOrder[](0), fwa, new Sweeper.StrategyListing[](0), 1, 100);
+    }
+
+    function test_Buy_FeeNotCoveredReverts() public {
+        uint256 a = _list(11, 1 ether);
+        vm.roll(block.number + 1);
+        Sweeper.FWAListing[] memory fwa = new Sweeper.FWAListing[](1);
+        fwa[0] = _fwa(a, 1 ether);
+        vm.prank(carol);
+        vm.expectRevert(abi.encodeWithSelector(Sweeper.FeeNotCovered.selector, 0.01 ether));
+        sweeper.buy{value: 1 ether}(new AdvancedOrder[](0), fwa, new Sweeper.StrategyListing[](0), 1, 100);
+    }
+
+    function test_Buy_FeeRaiseReverts() public {
+        uint256 a = _list(11, 1 ether);
+        vm.roll(block.number + 1);
+        vm.prank(fee);
+        sweeper.setFee(300);
+        Sweeper.FWAListing[] memory fwa = new Sweeper.FWAListing[](1);
+        fwa[0] = _fwa(a, 1 ether);
+        vm.prank(carol);
+        vm.expectRevert(abi.encodeWithSelector(Sweeper.FeeChanged.selector, 300));
+        sweeper.buy{value: 2 ether}(new AdvancedOrder[](0), fwa, new Sweeper.StrategyListing[](0), 1, 100);
+    }
+
+    /// A contract wallet without an ERC721 receiver still gets its Credits: delivery is plain transferFrom.
+    function test_Buy_ToContractWallet() public {
+        Wallet w = new Wallet(sweeper);
+        vm.deal(address(w), 5 ether);
+        seaport.setFill(1);
+        uint256[] memory ids = w.go(_orders(11, 1, 1 ether));
+        assertEq(ids.length, 1);
+        assertEq(credits.ownerOf(11), address(w));
+        assertEq(address(w).balance, 5 ether - sweeper.quote(1 ether));
+    }
+}
+
+/// @dev A contract wallet with no onERC721Received, which takes refunds.
+contract Wallet {
+    Sweeper immutable sweeper;
+
+    constructor(Sweeper s) {
+        sweeper = s;
+    }
+
+    function go(AdvancedOrder[] memory orders) external returns (uint256[] memory) {
+        return sweeper.buy{value: 2 ether}(orders, new Sweeper.FWAListing[](0), new Sweeper.StrategyListing[](0), 1, 100);
+    }
+
+    receive() external payable {}
 }

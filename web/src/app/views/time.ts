@@ -3,7 +3,7 @@ import { listBatches, type Listed } from '../data';
 import { fromLocalInput, toLocalInput } from '../ui';
 import { loadTimes, mintSpan, paidAtOrAfter, PAL32, printsFor, tile } from '../wall';
 import { rangeStrip, stripHTML } from './range';
-import { bindPairTabs, creditTiles, drawOpenUnions, creditsHead, pairTabs, pct } from './trait';
+import { buyGrid, buyRow, creditsHead, pct, unionsLink } from './trait';
 
 const PAGE = 120; // Credits per Show more
 const SIZES = [48, 40, 32, 24, 16, 8, 6, 4, 3, 2, 1]; // Stream tile sizes, device pixels; multiples of 8 draw the art
@@ -13,24 +13,17 @@ const SIZES = [48, 40, 32, 24, 16, 8, 6, 4, 3, 2, 1]; // Stream tile sizes, devi
 /// the Credit Unions that take them and every Credit paid in it. Windows snap to whole minutes, `to` inclusive.
 export async function timePage(app: HTMLElement) {
   app.innerHTML = `
-  <section class="trait-page time-page">
+  <section class="trait-page time-page jb">
     ${creditsHead('time')}
-    <header class="trait-head time-head">
-      <div class="trait-title">
-        <h2>Time</h2>
-        <p class="muted num" id="time-readout">&nbsp;</p>
-      </div>
-      <a class="btn primary trait-start" id="time-start" href="/create">Start a Credit Union for these Credits</a>
-    </header>
+    <p class="jb-line num"><b id="time-readout">&nbsp;</b><a class="jb-link" id="time-start" href="/create">Start a Credit Union for them</a><a class="jb-link" id="jb-unions" hidden></a></p>
     <div class="time-stream"><canvas aria-label="The Credits paid in this window, each second a column"></canvas><span class="time-scale small muted"></span></div>
     ${stripHTML()}
     <div class="time-controls">
       <div class="win-inputs"><label><span>Start</span><input type="datetime-local" id="time-from" step="60"></label><label><span>End</span><input type="datetime-local" id="time-to" step="60"></label></div>
       <div class="win-presets"><button type="button" data-pick="first">First hour</button><button type="button" data-pick="last">Last hour</button></div>
     </div>
-    ${pairTabs('Any without a Payment Time rule, or with one that overlaps this window.')}
+    ${buyRow('Buy Credits paid in this window')}
   </section>`;
-  bindPairTabs();
   const sv = app.querySelector<HTMLCanvasElement>('.time-stream canvas')!;
   // Payment times drive everything here; prints load only for the window on screen (printsFor).
   const e = await loadTimes().catch(() => null);
@@ -228,28 +221,17 @@ export async function timePage(app: HTMLElement) {
   // ---- what follows the window: the URL, the Credit Unions, the Credits (after a pause while dragging)
   const unions = listBatches();
   unions.catch(() => {});
-  const grid = document.getElementById('trait-grid')!;
-  const more = document.getElementById('trait-more') as HTMLButtonElement;
-  let shown = 0;
-  const showMore = () => {
-    const i0 = lo() + shown, i1 = Math.min(hi(), i0 + PAGE);
-    grid.insertAdjacentHTML('beforeend', creditTiles(Array.from({ length: Math.max(0, i1 - i0) }, (_, k) => i0 + k + 1)));
-    shown += Math.max(0, i1 - i0);
-    const left = hi() - lo() - shown;
-    more.hidden = left <= 0;
-    more.textContent = `Show more · ${left.toLocaleString()} left`;
-  };
-  more.addEventListener('click', showMore);
+  // The Credits paid in the window: listed ones first, cheapest first, then the rest in the order they were paid.
+  const grid = buyGrid(app, {}, async (page) => {
+    const i0 = lo() + page * PAGE, i1 = Math.min(hi(), i0 + PAGE);
+    return { ids: Array.from({ length: Math.max(0, i1 - i0) }, (_, k) => i0 + k + 1), total: hi() - lo() };
+  });
   const settle = () => {
-    if (!grid.isConnected) return;
+    if (!app.isConnected) return;
     history.replaceState(null, '', `/time?from=${fromT()}&to=${toT()}`);
     const f = fromT(), t = toT();
-    void drawOpenUnions(({ s: { filter: w } }: Listed) => (!w.paidFrom && !w.paidTo) || ((w.paidFrom || 0) <= t && (w.paidTo || Infinity) >= f), unions);
-    const n = hi() - lo();
-    document.getElementById('credits-n')!.textContent = n.toLocaleString();
-    grid.innerHTML = n ? '' : '<p class="muted">No Credit was paid in this window.</p>';
-    shown = 0;
-    showMore();
+    void unionsLink(app, ({ s: { filter: w } }: Listed) => (!w.paidFrom && !w.paidTo) || ((w.paidFrom || 0) <= t && (w.paidTo || Infinity) >= f), unions, `paidFrom=${f}&paidTo=${t}`);
+    void grid.start({ rules: { paidFrom: f, paidTo: t } });
   };
   let timer = 0, queued = false;
   const redraw = () => {

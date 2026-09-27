@@ -18,7 +18,7 @@ import {
 
 /// @title Sweeper
 /// @notice One transaction: buy listed Credits on Seaport (OpenSea's exchange), FWA's marketplace and from
-///         CreditStrategy, then deposit them into a batch in the buyer's name. Pay the listings plus the fee; unused ETH comes back.
+///         CreditStrategy, then deposit them into a batch in the buyer's name (or send them to the buyer's wallet). Pay the listings plus the fee; unused ETH comes back.
 ///         Nothing is held between transactions. No owner, no admin.
 contract Sweeper is ReentrancyGuardTransient {
     uint256 public constant MAX_FEE_BPS = 500;
@@ -38,6 +38,7 @@ contract Sweeper is ReentrancyGuardTransient {
     address public immutable feeRecipient;
 
     event Swept(address indexed buyer, address indexed batch, uint256 bought, uint256 spent, uint256 fee);
+    event Bought(address indexed buyer, uint256 bought, uint256 spent, uint256 fee);
 
     error NotBatch();
     error NotACredit(uint256 orderIndex);
@@ -121,6 +122,30 @@ contract Sweeper is ReentrancyGuardTransient {
         return _sweep(batch, orders, fwaListings, strategyListings, minBought, maxFeeBps);
     }
 
+    /// @notice `sweepAll`, without the batch: every Credit bought goes straight to your wallet. Same listings, same
+    ///         skipping, same fee; unused ETH comes back.
+    /// @dev Delivered with plain transferFrom, like Seaport, FWA and CreditStrategy themselves: a contract wallet
+    ///      that can't handle ERC721s would hold them all the same.
+    /// @return ids The Credits bought and sent to you, in order.
+    function buy(
+        AdvancedOrder[] calldata orders,
+        FWAListing[] calldata fwaListings,
+        StrategyListing[] calldata strategyListings,
+        uint256 minBought,
+        uint256 maxFeeBps
+    ) external payable nonReentrant returns (uint256[] memory ids) {
+        uint256 spent;
+        uint256 fee;
+        uint256 left;
+        (ids, spent, fee, left) = _buyAll(orders, fwaListings, strategyListings, minBought, maxFeeBps);
+        uint256 n = ids.length;
+        for (uint256 i; i < n; ++i) {
+            credits.transferFrom(address(this), msg.sender, ids[i]);
+        }
+        emit Bought(msg.sender, n, spent, fee);
+        _settle(fee, left);
+    }
+
     function _sweep(
         address batch,
         AdvancedOrder[] calldata orders,
@@ -130,6 +155,28 @@ contract Sweeper is ReentrancyGuardTransient {
         uint256 maxFeeBps
     ) internal returns (uint256[] memory ids) {
         if (!factory.isBatch(batch)) revert NotBatch();
+        uint256 spent;
+        uint256 fee;
+        uint256 left;
+        (ids, spent, fee, left) = _buyAll(orders, fwaListings, strategyListings, minBought, maxFeeBps);
+        factory.depositFor(batch, ids, msg.sender); // reverts if the batch can't take them all
+        emit Swept(msg.sender, batch, ids.length, spent, fee);
+        _settle(fee, left);
+    }
+
+    /// @dev Buys everything still available into this contract: FWA, then CreditStrategy, then Seaport. Reverts
+    ///      unless at least `minBought` (and at least one) came through and what is left covers the fee.
+    /// @return ids What was bought, in order.
+    /// @return spent What the listings cost.
+    /// @return fee What is owed on `spent`.
+    /// @return left msg.value minus `spent`, still in this contract.
+    function _buyAll(
+        AdvancedOrder[] calldata orders,
+        FWAListing[] memory fwaListings,
+        StrategyListing[] memory strategyListings,
+        uint256 minBought,
+        uint256 maxFeeBps
+    ) internal returns (uint256[] memory ids, uint256 spent, uint256 fee, uint256 left) {
         if (feeBps > maxFeeBps) revert FeeChanged(feeBps);
         uint256 m = fwaListings.length;
         uint256 s = strategyListings.length;
@@ -141,7 +188,6 @@ contract Sweeper is ReentrancyGuardTransient {
         // What the listings cost: FWA's and the strategy's exact prices (each takes exactly the price or reverts), then Seaport's own
         // record of what it paid out. Never a balance delta, so ETH pushed at this contract by a seller or royalty
         // wallet mid-call cannot distort it.
-        uint256 spent;
         for (uint256 i; i < m; ++i) {
             uint256 price = fwaListings[i].price;
             if (price > msg.value - spent) revert Underpaid();
@@ -164,19 +210,19 @@ contract Sweeper is ReentrancyGuardTransient {
             (bought, paid) = _buySeaport(orders, msg.value - spent, ids, bought);
             spent += paid;
         }
-        uint256 left = msg.value - spent; // Seaport returned the rest to this contract
+        left = msg.value - spent; // Seaport returned the rest to this contract
 
         if (bought < minBought || bought == 0) revert TooFewBought(bought);
         assembly {
             mstore(ids, bought)
         }
 
-        uint256 fee = spent * feeBps / 10_000;
+        fee = spent * feeBps / 10_000;
         if (left < fee) revert FeeNotCovered(fee);
+    }
 
-        factory.depositFor(batch, ids, msg.sender); // reverts if the batch can't take them all
-        emit Swept(msg.sender, batch, bought, spent, fee);
-
+    /// @dev Pays the fee, then returns the rest of `left` to the buyer.
+    function _settle(uint256 fee, uint256 left) internal {
         if (fee > 0 && !_send(feeRecipient, fee)) revert PaymentFailed();
         if (left > fee && !_send(msg.sender, left - fee)) revert PaymentFailed();
     }

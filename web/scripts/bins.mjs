@@ -97,6 +97,15 @@ function facts(read) {
     busiest: Math.max(...perMin.values()),
     rating,
     top1: sorted[Math.max(0, sorted.length - Math.round(sorted.length / 100))],
+    // The rating at each 0.5% of rank, lowest to highest: the curve the Rating tile draws.
+    ratingCurve: Array.from({ length: 201 }, (_, k) => sorted[Math.min(sorted.length - 1, Math.round((k / 200) * (sorted.length - 1)))]),
+    // Where each ink count's Credits sit in Bits (their median), for the Bits tile's labels.
+    bitsByInks: [1, 2, 3, 4].map((k) => {
+      const v = [];
+      for (let i = 0; i < traits.length; i++) if (traits[i] && [0, 1, 2, 3].filter((b) => traits[i] & (1 << b)).length === k) v.push(bits[i]);
+      v.sort((x, y) => x - y);
+      return v[v.length >> 1] ?? 0;
+    }),
     bits: bitCounts,
     bitsLo: lo,
     bitsHi: hi,

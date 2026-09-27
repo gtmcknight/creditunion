@@ -6144,10 +6144,21 @@ dialog.eligible::backdrop {
 }
 .trait-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 16px 12px;
   margin-bottom: 20px;
 }
+/* A Credit in a grid, OpenSea style: its art, then its number and, when listed, its price. */
+.cc { display: grid; gap: 6px; min-width: 0; color: inherit; text-decoration: none; }
+.cc-art { display: block; }
+.cc-art img { display: block; width: 100%; aspect-ratio: 1; background: #fff; border-radius: 2px; outline: 1px solid var(--img-outline); outline-offset: -1px; }
+.cc-art:hover img { outline-color: var(--fg); }
+.cc-cap a { color: inherit; text-decoration: none; }
+.cc-cap a:hover { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; }
+.cc.sel .cc-art img { outline: 2px solid var(--fg); outline-offset: -2px; }
+.cc-cap { display: flex; justify-content: space-between; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.cc-price { display: flex; align-items: center; gap: 3px; color: var(--fg); }
+.cc-price img.src { width: 11px; height: 11px; }
 .trait-grid .pick {
   display: block;
   border-radius: 0;
@@ -6192,7 +6203,7 @@ dialog.eligible::backdrop {
     grid-column: 1 / -1;
   }
   .trait-grid {
-    grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
   }
 }
 
@@ -6505,3 +6516,175 @@ dialog.eligible::backdrop {
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) img.src[src$='strategy.svg'] { filter: invert(1); }
 }
+
+/* Buy Credits box (/credits, trait pages): the cheapest Credits listed anywhere, 1, 5 or 10 at a time. */
+.for-sale { display: grid; gap: 16px; margin: 0 0 var(--tile-gap); padding: 18px 20px 20px; background: var(--surface); border-radius: var(--r); }
+.for-sale h3 { margin: 0; }
+.for-sale.flat { margin: 0 0 40px; padding: 0; background: none; }
+.all-head { margin: 0 0 16px; font-size: 17px; font-weight: 600; }
+.for-sale-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.trait-section.pair { margin-top: 32px; }
+.for-sale p { margin: 0; }
+.listings.for-sale-row { grid-template-columns: repeat(10, 1fr); max-height: none; overflow: visible; }
+@media (max-width: 720px) { .listings.for-sale-row { grid-template-columns: repeat(5, 1fr); } }
+
+/* A trait's Credits tab: the bar (how many for sale, 1/5/10, Sweep), then the grid, listed Credits first with their
+   price under the number; the ones a sweep would take are outlined. */
+.sale-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.sale-act { display: flex; align-items: center; gap: 8px; }
+
+/* A trait's page, reduced: a breadcrumb with the sections beside it, the trait's values as a row of glyphs, one
+   line of counts and links, one line of controls as words, then the grid. */
+.jb-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px; margin: 8px 0 24px; }
+.jb-crumb { display: flex; gap: 8px; align-items: baseline; font-size: 22px; letter-spacing: -0.01em; }
+.jb-crumb a { padding: 0; margin: 0; color: var(--muted); text-decoration: none; font-size: inherit; }
+.jb-crumb a:hover { color: var(--fg); }
+.jb-crumb span { color: var(--faint); }
+.jb-crumb b { font-weight: inherit; color: var(--fg); } /* current by colour, not weight: the words never move */
+.jb-kinds { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 14px; }
+.jb-kinds a { color: var(--muted); text-decoration: none; }
+.jb-kinds a:hover, .jb-kinds a[aria-current] { color: var(--fg); }
+.jb-kinds a[aria-current] { text-decoration: underline; text-underline-offset: 4px; }
+.jb-values { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+.jb-values a { display: block; opacity: 0.45; transition: opacity 120ms var(--ease); }
+.jb-values a:hover, .jb-values a[aria-current], .jb-values.all a { opacity: 1; }
+.jb-values a[aria-current] .trait-glyph { box-shadow: 0 0 0 2px var(--fg); }
+.jb-values .trait-glyph { width: 40px; height: 40px; }
+.jb-values .trait-glyph svg { width: 28px; height: 28px; }
+.jb-values .trait-glyph .ink { width: 24px; height: 24px; }
+.jb-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin: 0 0 12px; font-size: 15px; }
+.jb-line b { font-weight: 600; }
+.jb-link { padding: 0; border: 0; background: none; font: inherit; color: var(--muted); text-decoration: underline; text-underline-offset: 4px; text-decoration-color: var(--line-strong); cursor: pointer; }
+.jb-link:hover { color: var(--fg); }
+#trait-unions { margin: 16px 0 8px; }
+.jb-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; margin: 28px 0 16px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 15px; }
+.jb-sweep { display: flex; align-items: center; gap: 14px; }
+.jb-sort { display: flex; gap: 14px; }
+.jb-sort label { position: relative; cursor: pointer; }
+.jb-sort input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; pointer-events: none; }
+.jb-sort span { color: var(--muted); }
+.jb-sort label:hover span { color: var(--fg); }
+.jb-sort input:checked + span { color: var(--fg); text-decoration: underline; text-underline-offset: 4px; }
+.jb-sort input:focus-visible + span { outline: 2px solid var(--fg); outline-offset: 2px; }
+/* A sweep's Credits: outlined in ink, price in ink; the rest of the listed ones grey. */
+.jb .cc-price { color: var(--muted); }
+.jb .cc.sel .cc-price { color: var(--fg); font-weight: 600; }
+.jb .cc.sel .cc-art img { outline: 2px solid var(--fg); outline-offset: 0; }
+.jb .cc.listed .cc-art { cursor: pointer; }
+
+/* Header: the mark and name on the left, Unions · Auctions · Credits centred, the account on the right. */
+.top { grid-template-columns: 1fr auto 1fr; }
+.logo .logo-word { display: inline; font-size: 16px; font-weight: 600; letter-spacing: -0.02em; color: var(--fg); }
+.logo .mark { opacity: 1; }
+.main-nav { justify-self: center; margin-left: 0; }
+@media (max-width: 720px) { .logo .logo-word { display: none; } }
+
+/* Eight to a row, as the Statement is laid out; four on phones. Equal columns whatever the captions say. */
+.trait-grid { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+@media (max-width: 720px) { .trait-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.cc-cap { overflow: hidden; }
+.cc-cap > .num:first-child { overflow: hidden; text-overflow: ellipsis; }
+/* A picked Credit: the border plus a check in its corner, so a sweep's picks read at a glance. */
+.jb .cc-art { position: relative; }
+.jb .cc.sel .cc-art::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--fg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5.5 10.5l3 3 6-7' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 20px no-repeat;
+}
+:root[data-theme='dark'] .jb .cc.sel .cc-art::after { background-color: #0a0a0a; box-shadow: 0 0 0 1.5px #fff; }
+
+.jb-buy { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+
+.filter-line { margin: 8px 0 0; font-size: 15px; color: var(--muted); }
+.filter-line a { color: var(--fg); }
+/* The Buy row stays under the header while the grid scrolls, so picks and the total are always in view. */
+.jb-controls { position: sticky; top: 64px; z-index: 5; margin-top: 12px; padding: 14px 0; background: var(--bg); border-top: 0; box-shadow: 0 1px 0 var(--line); }
+
+/* Tabs as words (Credits · Credit Unions under a time or range), the current one underlined; counts muted. */
+.jb-tabs { display: flex; gap: 20px; margin: 28px 0 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.jb-tabs button { padding: 0; border: 0; background: none; font: inherit; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; color: var(--muted); cursor: pointer; }
+.jb-tabs button { display: inline-flex; align-items: baseline; gap: 6px; }
+.jb-tabs button .num { display: inline; font-weight: 400; color: var(--muted); }
+.jb-tabs button[aria-selected='true'] { color: var(--fg); text-decoration: underline; text-underline-offset: 6px; }
+
+/* /credits: the Buy block sits in the page like a trait page's, not sticky, with room before the tiles. */
+.jb-controls.static { position: static; margin: 0 0 16px; padding: 0; background: none; box-shadow: none; }
+.cr-buy .jb-line { margin: 12px 0 0; }
+
+/* The centre nav is quiet: regular weight, the current page by ink alone. */
+.main-nav a { font-weight: 400; letter-spacing: -0.01em; }
+
+/* /credits: every block a grey tile like the trait tiles below: Buy first, then the mint, then the traits. */
+.cr-box { margin: 16px 0 var(--tile-gap); padding: 18px 20px 20px; background: var(--surface); border-radius: var(--r); }
+.cr-box + .cr-box { margin-top: 0; }
+.cr-strip-box .cr-strip { margin: 0; }
+.cr-buy .trait-grid { margin-bottom: 0; }
+/* One line box for every crumb and section link, so the header sits at the same height on every page. */
+.jb-head { align-items: center; min-height: 32px; }
+.jb-crumb { align-items: center; line-height: 32px; }
+.jb-crumb > * { line-height: 32px; display: inline-block; }
+.jb-kinds a { line-height: 20px; }
+.jb-crumb a { min-height: 0; height: 32px; }
+
+/* /credits Time tile: a title, the moment shown, play/pause; the mint along the bottom scrubs. */
+.cr-strip-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+.cr-strip-head h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+.cr-strip-head h2 a { color: inherit; text-decoration: none; }
+.cr-strip-head h2 a:hover { text-decoration: underline; text-underline-offset: 4px; }
+.cr-play { align-self: center; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; }
+.cr-play:hover { color: var(--fg); }
+.cr-play svg { width: 12px; height: 12px; fill: currentColor; }
+.cr-play[aria-pressed='true'] .play, .cr-play[aria-pressed='false'] .pause { display: none; }
+.cr-strip-box .cr-strip { height: 260px; padding: 0; }
+.cr-strip-box .cr-mint { z-index: 1; height: 28px; cursor: ew-resize; touch-action: none; } /* over the stacks' feet */
+.cr-strip-box .cr-head-line { z-index: 2; height: 28px; }
+.cr-strip-head .cr-now { position: static; }
+.cr-strip-head .cr-now { margin-left: auto; } /* the moment shown sits right, beside play/pause */
+/* The Time tile, final: the whole mint as a faint silhouette behind (80% of the tile), the stacks standing on a
+   16px band along the bottom, and that band is the scrubber, a thin track with a small marker for where you are. */
+.cr-strip-box .cr-strip canvas { position: relative; z-index: 1; height: calc(100% - 16px); pointer-events: none; }
+.cr-strip-box .cr-mint { z-index: 0; bottom: 16px; height: calc(90% - 16px); fill: var(--fg); fill-opacity: 0.12; pointer-events: none; cursor: default; }
+.cr-strip-box .cr-strip:hover .cr-mint { fill: var(--fg); }
+.cr-scrub { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; height: 16px; cursor: ew-resize; touch-action: none; }
+.cr-scrub::before { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px; background: var(--line-strong); }
+.cr-strip-box .cr-scrub .cr-head-line { position: absolute; top: 2px; bottom: auto; width: 3px; height: 12px; margin-left: -1.5px; border-radius: 2px; background: var(--fg); }
+/* The strip fills the whole tile, the title row laid over its top, so the silhouette can stand 80% of the tile. */
+.cr-strip-box { position: relative; }
+.cr-strip-head { position: absolute; top: 18px; left: 20px; right: 20px; z-index: 4; margin: 0; }
+.cr-strip-box .cr-strip { height: 300px; }
+
+/* /credits tiles on six columns: a tile spans two, a wide one four, the last row's two halves three each. */
+.cr-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.cr-tile { grid-column: span 2; }
+.cr-tile.wide { grid-column: span 4; }
+.cr-tile.half { grid-column: span 3; }
+@media (max-width: 900px) { .cr-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .cr-tile, .cr-tile.half { grid-column: span 1; } .cr-tile.wide { grid-column: span 2; } }
+@media (max-width: 560px) { .cr-tiles { grid-template-columns: 1fr; } .cr-tile, .cr-tile.half, .cr-tile.wide { grid-column: auto; } }
+.cr-curve { shape-rendering: auto; }
+.cr-humps { position: relative; width: 100%; padding-bottom: 18px; }
+.cr-hump { position: absolute; bottom: 0; translate: -50% 0; font-size: 11px; color: var(--muted); white-space: nowrap; }
+
+/* Skeletons the same shape as what replaces them. */
+.skel-bar { display: inline-block; width: 60%; height: 12px; border-radius: 2px; background: var(--empty); vertical-align: middle; }
+.jb-sweep .skel-bar { height: 44px; }
+.cc.skel .cc-art { aspect-ratio: 1; background: var(--empty); border-radius: 2px; }
+.cc.skel .cc-cap { height: 19px; }
+.jb-line .skel-bar { height: 22px; }
+
+/* Rating as a ruler: a faint track lowest to highest, the top 1% in ink, three marks labelled above it. */
+.cr-ruler { position: relative; width: 100%; height: 84px; }
+.cr-ruler-track { position: absolute; left: 0; right: 0; bottom: 22px; height: 10px; background: var(--faint); }
+.cr-ruler-top { position: absolute; right: 0; bottom: 22px; height: 10px; background: var(--fg); }
+.cr-ruler-mark { position: absolute; bottom: 36px; translate: -50% 0; display: grid; justify-items: center; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.cr-ruler-mark::after { content: ''; width: 1px; height: 8px; margin-top: 3px; background: var(--fg); }
+.cr-ruler-mark b { font-size: 15px; font-weight: 600; color: var(--fg); }
+.cr-ruler-end { position: absolute; bottom: 0; translate: -50% 0; font-size: 11px; color: var(--muted); }
+.cr-ruler-end:first-of-type { translate: 0 0; }
+.cr-ruler-end:last-of-type { translate: -100% 0; }
+.cr-ruler-mark.last { translate: calc(-100% + 1px) 0; justify-items: end; } /* the top 1% sits at the right edge: its label reads leftward */
+.cc-cap { padding: 0 2px; } /* number and price sit just inside the square's edges */

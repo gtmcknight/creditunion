@@ -11,6 +11,7 @@ import { fillGhosts } from '../ghosts';
 import { maskInks, paletteBit } from '../traits';
 import { art, errText, esc, eth, same, toast } from '../ui';
 import { card } from './lists';
+import { SOURCES, type Source } from '../forsale';
 
 /// Credits ever minted: the same numbers on every network.
 const SUPPLY = 122_154;
@@ -122,12 +123,6 @@ async function drawFits(id: bigint, r: Rated | undefined, list: Listed[], mine: 
   fillGhosts(el);
 }
 
-/// Where each marketplace's mark and name come from (same as the Buy tab).
-const SOURCES = {
-  opensea: { name: 'OpenSea', icon: '/sources/opensea.svg' },
-  strategy: { name: 'CreditStrategy', icon: '/sources/strategy.svg' },
-  fwa: { name: 'FWA', icon: '/sources/fwa.png' },
-} as const;
 const buyAbi = parseAbi(['function sellTargetNFT(uint256 tokenId) payable', 'function buy(uint256 listingId, address recipient) payable']);
 
 /// This Credit's cheapest listing: OpenSea, CreditStrategy or FWA. CreditStrategy and FWA sell from their own
@@ -136,7 +131,7 @@ const buyAbi = parseAbi(['function sellTargetNFT(uint256 tokenId) payable', 'fun
 async function drawBuy(n: number) {
   const el = document.getElementById('credit-buy');
   if (!el) return;
-  type Offer = { price?: string | null; source?: keyof typeof SOURCES; contract?: Address | null; listingId?: string | null; preview?: boolean; url?: string };
+  type Offer = { price?: string | null; source?: Source; contract?: Address | null; listingId?: string | null; preview?: boolean; url?: string };
   let d: Offer;
   try {
     const res = await fetch(`/opensea/credit/${n}`);

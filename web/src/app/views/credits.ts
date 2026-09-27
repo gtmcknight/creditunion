@@ -1,4 +1,5 @@
 import { dice, printGlyph, swatch, weightGlyph } from '../glyphs';
+import { drawForSale } from '../forsale';
 import facts from 'virtual:credits-facts';
 import { loadTimes, mintSpan, paidAtOrAfter, PAL32, printsFor, tile, type Mint, type Prints, WALL_BLOCK } from '../wall';
 import { creditsHead, pct } from './trait';
@@ -21,10 +22,38 @@ export type Facts = {
   busiest: number; // payments in the busiest minute
   rating: number[]; // per ten points, 80..800
   top1: number; // tenths: the lowest rating in the top 1%
+  ratingCurve: number[]; // tenths: the rating at each 0.5% of rank, lowest first (201 points)
+  bitsByInks: number[]; // the median Bits of 1-, 2-, 3- and 4-ink Credits
   bits: number[]; // per Bit, lo..hi
   bitsLo: number;
   bitsHi: number;
 };
+
+/// Rating as a ruler from the lowest to the highest: ratings spread evenly by rank, so the story is where the marks
+/// fall. Ticks at the middle Credit, the top 10% and the top 1%, the stretch above the top 1% in full ink.
+function ratingCurve(f: Facts) {
+  const c = f.ratingCurve, lo = c[0], hi = c[c.length - 1];
+  const at = (v: number) => (((v - lo) / Math.max(1, hi - lo)) * 100).toFixed(2);
+  const marks: [number, string][] = [
+    [c[100], 'Middle'],
+    [c[180], 'Top 10%'],
+    [c[198], 'Top 1%'],
+  ];
+  return `<div class="cr-ruler">
+    <i class="cr-ruler-track"></i><i class="cr-ruler-top" style="left:${at(c[198])}%"></i>
+    ${marks.map(([v, l], i) => `<span class="cr-ruler-mark${i === marks.length - 1 ? ' last' : ''}" style="left:${at(v)}%"><b class="num">${(v / 10).toFixed(0)}</b>${l}</span>`).join('')}
+    <span class="cr-ruler-end num" style="left:0">${(lo / 10).toFixed(0)}</span><span class="cr-ruler-end num" style="left:100%">${(hi / 10).toFixed(0)}</span>
+  </div>`;
+}
+
+/// Bits as a histogram with each hump named by its ink count (1 ink, 2 inks…), under its peak.
+function bitsHumps(f: Facts) {
+  const N = f.bits.length;
+  const labels = f.bitsByInks
+    .map((b, i) => `<span class="cr-hump" style="left:${(((b - f.bitsLo + 0.5) / N) * 100).toFixed(2)}%">${i + 1} ink${i ? 's' : ''}</span>`)
+    .join('');
+  return `<div class="cr-humps">${bars(f.bits)}${labels}</div>`;
+}
 
 /// A histogram as one SVG path, drawn in the text color; `hot(i)` bars in full ink, the rest faint.
 function bars(counts: ArrayLike<number>, hot: (i: number) => boolean = () => true, sqrt = false) {
@@ -55,7 +84,7 @@ const columns = (vals: { glyph: string; count: number; cls?: string }[], total: 
     .join('')}</div>`;
 };
 
-type Tile = { kind: string; name: string; wide?: boolean; draw: (f: Facts, total: number) => [string, string] };
+type Tile = { kind: string; name: string; wide?: boolean; half?: boolean; draw: (f: Facts, total: number) => [string, string] };
 const TILES: Tile[] = [
   {
     kind: 'palette',
@@ -86,6 +115,7 @@ const TILES: Tile[] = [
   {
     kind: 'print',
     name: 'Print',
+    half: true,
     draw: (f, total) => [
       columns(f.print.map((c, i) => ({ glyph: printGlyph(PRINTS[i]), count: c })), total),
       `${Math.round((f.print[0] / total) * 100)}% Registered · ${n(f.print[5])} Loose`,
@@ -94,32 +124,23 @@ const TILES: Tile[] = [
   {
     kind: 'weight',
     name: 'Weight',
+    half: true,
     draw: (f, total) => [
       columns(f.weight.map((c, i) => ({ glyph: weightGlyph(WEIGHTS[i]), count: c })), total),
       `${Math.round((f.weight[0] / total) * 100)}% Even · ${n(f.weight[3])} Extreme`,
     ],
   },
   {
-    kind: 'time',
-    name: 'Time',
-    wide: true,
-    draw: (f) => {
-      const h = Math.floor(f.hours), m = Math.round((f.hours - h) * 60);
-      return [bars(f.perHour), `Paid over ${h} hours ${m} minutes · ${n(f.busiest)} in the busiest minute`];
-    },
-  },
-  {
     kind: 'rating',
     name: 'Rating',
-    draw: (f) => {
-      const cut = Math.floor((f.top1 - 800) / 100);
-      return [bars(f.rating, (i) => i >= cut), `Top 1% from ${(f.top1 / 10).toFixed(1)}`];
-    },
+    half: true,
+    draw: (f) => [ratingCurve(f), `Top 1% from ${(f.top1 / 10).toFixed(1)}`],
   },
   {
     kind: 'bits',
     name: 'Bits',
-    draw: (f) => [bars(f.bits), `${f.bitsLo} to ${f.bitsHi} Bits`],
+    half: true,
+    draw: (f) => [bitsHumps(f), `${f.bitsLo} to ${f.bitsHi} Bits · each hump is an ink count`],
   },
 ];
 
@@ -127,16 +148,27 @@ const TILES: Tile[] = [
 /// with its distribution and one fact, linking to that trait's index.
 export async function creditsPage(app: HTMLElement) {
   app.innerHTML = `
-  <section class="trait-page credits-page">
+  <section class="trait-page credits-page jb">
     ${creditsHead('credits')}
-    <a class="cr-strip" href="/time" aria-label="The mint, second by second. Open Time">
-      <canvas aria-hidden="true"></canvas>
-      <svg class="cr-mint" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true"></svg>
-      <i class="cr-head-line"></i>
-      <span class="cr-now small num"></span>
-    </a>
+    <section class="cr-buy cr-box" id="for-sale">
+      <div class="jb-controls static"><h2 class="jb-buy">Buy Credits</h2><div class="jb-sweep"><span class="skel-bar" style="width:220px"></span></div></div>
+      <div class="trait-grid">${'<div class="cc skel"><span class="cc-art"></span><span class="cc-cap"><span class="skel-bar"></span></span></div>'.repeat(8)}</div>
+      <p class="jb-line"><span class="skel-bar" style="width:260px"></span></p>
+    </section>
+    <div class="cr-box cr-strip-box">
+      <div class="cr-strip-head">
+        <h2><a href="/time">Time</a></h2>
+        <span class="cr-now small muted num"></span>
+        <button type="button" class="cr-play" aria-label="Pause" aria-pressed="true"><svg viewBox="0 0 16 16" aria-hidden="true"><path class="pause" d="M4 3h3v10H4zM9 3h3v10H9z"/><path class="play" d="M5 3l8 5-8 5z"/></svg></button>
+      </div>
+      <div class="cr-strip">
+        <canvas aria-hidden="true"></canvas>
+        <svg class="cr-mint" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <div class="cr-scrub" aria-label="The whole mint. Tap or drag to jump."><i class="cr-head-line"></i></div>
+      </div>
+    </div>
     <div class="cr-tiles" id="cr-tiles">${TILES.map(
-      (t) => `<a class="cr-tile${t.wide ? ' wide' : ''}${t.kind === 'time' ? ' time' : ''}" href="/${t.kind}" data-kind="${t.kind}">
+      (t) => `<a class="cr-tile${t.wide ? ' wide' : ''}${t.half ? ' half' : ''}" href="/${t.kind}" data-kind="${t.kind}">
         <h2>${t.name}</h2>
         <div class="cr-pic"></div>
         <p class="muted small cr-fact">&nbsp;</p>
@@ -144,6 +176,7 @@ export async function creditsPage(app: HTMLElement) {
     ).join('')}</div>
   </section>`;
 
+  void drawForSale(app.querySelector<HTMLElement>('#for-sale')!);
   for (const t of TILES) {
     const el = app.querySelector<HTMLElement>(`.cr-tile[data-kind="${t.kind}"]`)!;
     const [pic, fact] = t.draw(facts, facts.n);
@@ -163,7 +196,9 @@ export async function creditsPage(app: HTMLElement) {
 /// mint's payments per minute with a line where the strip is. Still under reduced motion; rests off screen.
 function drift(host: HTMLElement, e: Mint, prints: Prints) {
   const cv = host.querySelector('canvas')!;
-  const nowEl = host.querySelector<HTMLElement>('.cr-now')!;
+  const box = host.closest<HTMLElement>('.cr-strip-box')!;
+  const nowEl = box.querySelector<HTMLElement>('.cr-now')!;
+  const play = box.querySelector<HTMLButtonElement>('.cr-play')!;
   const line = host.querySelector<HTMLElement>('.cr-head-line')!;
   const span = mintSpan(e);
   const SPAN = Math.max(1, span.end - span.start);
@@ -172,12 +207,22 @@ function drift(host: HTMLElement, e: Mint, prints: Prints) {
   const M = Math.ceil(SPAN / 60) + 1;
   const perMin = new Uint16Array(M);
   for (let i = span.first; i < e.n; i++) perMin[Math.floor((e.times[i] - span.start) / 60)]++;
-  const peak = Math.max(1, ...perMin);
+  // Drawn as one smooth area: a moving average over a quarter hour either side, so it reads as a shape, not bars.
+  const R = 15;
+  const smooth = new Float64Array(M);
+  let run = 0;
+  for (let m = 0; m < Math.min(M, R); m++) run += perMin[m];
+  for (let m = 0; m < M; m++) {
+    if (m + R < M) run += perMin[m + R];
+    if (m - R - 1 >= 0) run -= perMin[m - R - 1];
+    smooth[m] = run / (Math.min(M - 1, m + R) - Math.max(0, m - R) + 1);
+  }
+  const peak = Math.max(1e-9, ...smooth);
   const mint = host.querySelector('svg')!;
   mint.setAttribute('viewBox', `0 0 ${M} 1`);
-  let d = '';
-  for (let m = 0; m < M; m++) if (perMin[m]) d += `M${m} 1h1v${-Math.sqrt(perMin[m] / peak).toFixed(3)}h-1z`;
-  mint.innerHTML = `<path d="${d}"/>`;
+  let d = `M0 1`;
+  for (let m = 0; m < M; m++) d += `L${m + 0.5} ${(1 - Math.sqrt(smooth[m] / peak)).toFixed(4)}`;
+  mint.innerHTML = `<path d="${d}L${M} 1Z"/>`;
 
   let img: ImageData | null = null, px: Uint32Array | null = null, W = 1, H = 1, dpr = 1;
   const size = () => {
@@ -192,7 +237,7 @@ function drift(host: HTMLElement, e: Mint, prints: Prints) {
   const frame = () => {
     if (!px) return;
     px.fill(0);
-    const k = Math.max(1, Math.round(1.5 * dpr)); // device pixels per cell: a Credit about 12 CSS pixels
+    const k = Math.max(1, Math.round(3 * dpr)); // device pixels per cell: a Credit about 24 CSS pixels
     const s = 8 * k, gap = Math.max(1, Math.round(dpr)), pitch = s + gap;
     const perSec = pitch + gap;
     const from = clock - W / perSec;
@@ -225,19 +270,41 @@ function drift(host: HTMLElement, e: Mint, prints: Prints) {
     const whole = Math.floor(clock);
     if (whole !== shown) {
       shown = whole;
-      nowEl.textContent = `${sec.format(new Date(whole * 1000))} · ${n(paidAtOrAfter(e, whole + 1))} paid`;
+      nowEl.textContent = sec.format(new Date(whole * 1000));
     }
   };
 
-  // Open on a busy stretch, so the strip is full from the first frame.
-  let best = 0;
-  for (let m = 0; m < M; m++) if (perMin[m] > perMin[best]) best = m;
-  clock = span.start + best * 60 - 30;
+  // Open at this time of day in the mint: now's clock time (local), counted from the mint's first day.
+  const dayOf = (t: number) => {
+    const d = new Date(t * 1000);
+    return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+  };
+  clock = span.start + ((dayOf(Date.now() / 1000) - dayOf(span.start) + 86400) % 86400);
+  if (clock > span.end) clock = span.start;
   const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let visible = true, last = 0;
+  let visible = true, last = 0, playing = !still;
+  const setPlaying = (on: boolean) => {
+    playing = on;
+    play.setAttribute('aria-pressed', String(on));
+    play.setAttribute('aria-label', on ? 'Pause' : 'Play');
+  };
+  setPlaying(playing);
+  play.addEventListener('click', () => setPlaying(!playing));
+  // The band along the bottom scrubs: press or drag to jump the strip to that moment; it plays on from there.
+  const scrub = box.querySelector<HTMLElement>('.cr-scrub')!;
+  const seek = (ev: PointerEvent) => {
+    const r = scrub.getBoundingClientRect();
+    clock = span.start + Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)) * SPAN;
+    frame();
+  };
+  scrub.addEventListener('pointerdown', (ev) => {
+    scrub.setPointerCapture(ev.pointerId);
+    seek(ev);
+  });
+  scrub.addEventListener('pointermove', (ev) => scrub.hasPointerCapture(ev.pointerId) && seek(ev));
   const tick = (now: number) => {
     if (!cv.isConnected) return;
-    if (visible && last && !still) {
+    if (visible && last && playing) {
       clock += Math.min(0.1, (now - last) / 1000) * 4;
       if (clock > span.end + 30) clock = span.start;
       frame();
