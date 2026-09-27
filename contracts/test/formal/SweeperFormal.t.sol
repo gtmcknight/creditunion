@@ -155,6 +155,64 @@ contract SweeperFormal is FormalBase {
         }
     }
 
+    /// buy(): the same three markets, straight to the wallet. The buyer ends up owning every Credit bought, pays
+    /// exactly what those listings cost plus the fee (only at quoted prices), and the Sweeper keeps no ETH and no
+    /// Credit. Nothing is deposited anywhere.
+    function check_buyExactAndHoldsNothing(
+        uint96 fwaLive,
+        uint256 fwaQuote,
+        uint256 stratLive,
+        uint256 stratQuote,
+        uint256 seaPrice,
+        uint256 value
+    ) public {
+        vm.assume(fwaQuote <= 1e30 && stratLive <= 1e30 && stratQuote <= 1e30 && seaPrice <= 1e30 && value <= 4e30);
+        vm.startPrank(fwaSeller);
+        credits.setApprovalForAll(address(fwa), true);
+        uint256 listingId = fwa.list(address(credits), 3, fwaLive);
+        vm.stopPrank();
+        strategy.offer(4, stratLive);
+        vm.roll(block.number + 1);
+
+        Sweeper.FWAListing[] memory fl = new Sweeper.FWAListing[](1);
+        fl[0] = Sweeper.FWAListing(listingId, fwaQuote);
+        Sweeper.StrategyListing[] memory sl = new Sweeper.StrategyListing[](1);
+        sl[0] = Sweeper.StrategyListing(4, stratQuote);
+
+        vm.deal(buyer, value);
+        vm.prank(buyer);
+        try sweeper.buy{value: value}(_order(seaPrice), fl, sl, 1, FEE_BPS) {
+            bool gotF = credits.ownerOf(3) == buyer;
+            bool gotS = credits.ownerOf(4) == buyer;
+            if (gotF) assert(fwaQuote == fwaLive);
+            if (gotS) assert(stratQuote == stratLive && stratLive != 0);
+            uint256 spent = seaPrice + (gotF ? fwaQuote : 0) + (gotS ? stratQuote : 0);
+            uint256 fee = spent * FEE_BPS / 10_000;
+            assert(address(sweeper).balance == 0);
+            assert(buyer.balance == value - spent - fee);
+            assert(FEE.balance == fee);
+            assert(credits.ownerOf(2) == buyer);
+            assert(credits.balanceOf(address(sweeper)) == 0);
+            assert(credits.ownerOf(3) == buyer || credits.ownerOf(3) == address(fwa));
+            assert(credits.ownerOf(4) == buyer || credits.ownerOf(4) == address(strategy));
+            assert(batch.count() == 1); // untouched
+        } catch {
+            assert(buyer.balance == value);
+            assert(credits.ownerOf(2) == seller);
+        }
+    }
+
+    /// buy() is held to the quoted fee too.
+    function check_buyFeeRaiseNeverSlipsIn(uint256 quoted, uint256 price) public {
+        vm.assume(price <= 1e30 && quoted < FEE_BPS);
+        uint256 value = price * 2 + 1 ether;
+        vm.deal(buyer, value);
+        vm.prank(buyer);
+        try sweeper.buy{value: value}(_order(price), new Sweeper.FWAListing[](0), new Sweeper.StrategyListing[](0), 1, quoted) {
+            assert(false);
+        } catch {}
+    }
+
     /// A raised fee never applies to a sweep quoted at the old rate.
     function check_feeRaiseNeverSlipsIn(uint256 quoted, uint256 price) public {
         vm.assume(price <= 1e30 && quoted < FEE_BPS);

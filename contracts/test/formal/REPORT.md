@@ -2,14 +2,13 @@
 
 | | |
 |---|---|
-| Commit | `6c81ccc` (main, HEAD). Started at `40ecae0`; only `Sweeper.sol` changed in between (FWA and CreditStrategy buys), so the Sweeper rules were rewritten for it and every proved rule was rerun at `6c81ccc`. |
+| Commit | `6c81ccc`, Sweeper at `b5e11f8`. Started at `40ecae0`; only `Sweeper.sol` changed in between (FWA and CreditStrategy buys), so the Sweeper rules were rewritten for it and every proved rule was rerun at `6c81ccc`. `Sweeper.buy()` (added in `b5e11f8`) got its own rules; the Sweeper suite was rerun at `b5e11f8`. |
 | Build | `forge build` in a fresh clone of `40ecae0`: exit 0 (forge 1.7.1, solc 0.8.28, via-IR), lint warnings only. `6c81ccc` builds too. |
-| forge test | 229 of 230 passed at both commits. The failure was stale: `Adversarial2.t.sol` expected `BadChunk(0)` from `new Ratings(chunks, 0)`, but `Ratings` now rejects a zero count first with `BadCount()`. Fixed in this commit; the suite passes. |
+| forge test | 229 of 230 passed at both commits. The failure was stale: `Adversarial2.t.sol:313` expected `BadChunk(0)` from `new Ratings(chunks, 0)`, but `Ratings` now rejects a zero count first with `BadCount()`. Fixed in `1c91a56`; the suite passes. |
 | Halmos | 0.3.3 (`uv tool install halmos`). Default solver Yices 2.6.4; Bitwuzla for the payout math. |
 | In scope | `Batch.sol`, `BatchFactory.sol`, `Sweeper.sol`, `Ratings.sol` |
-| Not covered | The uncommitted `Sweeper.buy()` (Credits straight to the wallet) in the working tree as of this run. Rerun `test/formal/run.sh SweeperFormal` once it lands. |
 
-**Result: 43 rules proved, 0 broken, 5 timed out.** Every timeout except one was split into parts that all proved. The one property still unproven: each outbid clears the last bid by 5% (`check_outbidRaisesEnough`). The refund proved, and `test/Batch.t.sol:308` checks the 5% step with one concrete bid (3 ETH, then 3.15 ETH minimum).
+**Result: 45 rules proved, 0 broken, 5 timed out.** Every timeout except one was split into parts that all proved. The one property still unproven: each outbid clears the last bid by 5% (`check_outbidRaisesEnough`). The refund proved, and `test/Batch.t.sol:308` checks the 5% step with one concrete bid (3 ETH, then 3.15 ETH minimum).
 
 ## What "proved" means here
 
@@ -74,6 +73,8 @@ Every argument to a `check_` function is symbolic: Halmos proves the rule for ev
 | Rule | Why it matters | Result |
 |---|---|---|
 | `SweeperFormal.check_sweepAllExactAndHoldsNothing` | One sweep across Seaport, FWA and CreditStrategy: a listing is bought only at its quoted price, the buyer pays exactly what they got plus the fee, every Credit is booked to them, and the Sweeper keeps nothing. | Proved |
+| `SweeperFormal.check_buyExactAndHoldsNothing` | buy() (straight to the wallet): the buyer owns every Credit bought, pays exactly those listings plus the fee at quoted prices, nothing is deposited, and the Sweeper keeps no ETH and no Credit. | Proved |
+| `SweeperFormal.check_buyFeeRaiseNeverSlipsIn` | buy() is held to the quoted fee like sweep(). | Proved |
 | `SweeperFormal.check_constructorRejectsOtherStrategy` | The Sweeper can't be wired to a strategy that sells some other collection. | Proved |
 | `SweeperFormal.check_setFee_onlyRecipientAndCapped` | Only the fee recipient sets the sweep fee, never above 5%. | Proved |
 | `SweeperFormal.check_sweepExactAndHoldsNothing` | A buyer pays exactly the listing price plus the fee, gets the rest back, is booked as depositor, and the Sweeper keeps nothing. | Proved |
@@ -148,46 +149,14 @@ Symbolic test result: 1 passed; 0 failed; time: 9.93s
 **BatchAccessFormal.check_depositFrom_onlyFactory.log**
 ```
 $ halmos --match-contract '^BatchAccessFormal$' --match-test '^check_depositFrom_onlyFactory\('
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:379:40:
-    |
 379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
-    |                                        ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (2519): This declaration shadows an existing declaration.
-   --> src/Batch.sol:450:17:
-    |
 450 |                 uint256 p = keyOf[id];
-    |                 ^^^^^^^^^
-Note: The shadowed declaration is here:
-   --> src/Batch.sol:440:9:
-    |
 440 |         Phase p = phase();
-    |         ^^^^^^^
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:438:23:
-    |
 438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
-    |                       ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:614:22:
-    |
 614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
-    |                      ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
 WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
          (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
@@ -392,46 +361,14 @@ Symbolic test result: 1 passed; 0 failed; time: 0.41s
 **BatchAuctionFormal.check_bidNeverShortensAuction.log**
 ```
 $ halmos --match-contract '^BatchAuctionFormal$' --match-test '^check_bidNeverShortensAuction\('
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:379:40:
-    |
 379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
-    |                                        ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (2519): This declaration shadows an existing declaration.
-   --> src/Batch.sol:450:17:
-    |
 450 |                 uint256 p = keyOf[id];
-    |                 ^^^^^^^^^
-Note: The shadowed declaration is here:
-   --> src/Batch.sol:440:9:
-    |
 440 |         Phase p = phase();
-    |         ^^^^^^^
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:438:23:
-    |
 438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
-    |                       ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:614:22:
-    |
 614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
-    |                      ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
 WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
          (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
@@ -636,46 +573,14 @@ Symbolic test result: 1 passed; 0 failed; time: 47.94s
 **BatchAuctionFormal.check_outbidRefundsExactly.log**
 ```
 $ halmos --match-contract '^BatchAuctionFormal$' --match-test '^check_outbidRefundsExactly\(' --solver bitwuzla --solver-timeout-assertion 0
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:379:40:
-    |
 379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
-    |                                        ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (2519): This declaration shadows an existing declaration.
-   --> src/Batch.sol:450:17:
-    |
 450 |                 uint256 p = keyOf[id];
-    |                 ^^^^^^^^^
-Note: The shadowed declaration is here:
-   --> src/Batch.sol:440:9:
-    |
 440 |         Phase p = phase();
-    |         ^^^^^^^
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:438:23:
-    |
 438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
-    |                       ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:614:22:
-    |
 614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
-    |                      ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
 WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
          (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
@@ -880,46 +785,14 @@ Symbolic test result: 1 passed; 0 failed; time: 94.66s
 **BatchInvariantFormal.log**
 ```
 $ halmos --match-contract '^BatchInvariantFormal$' --loop 5
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:379:40:
-    |
 379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
-    |                                        ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (2519): This declaration shadows an existing declaration.
-   --> src/Batch.sol:450:17:
-    |
 450 |                 uint256 p = keyOf[id];
-    |                 ^^^^^^^^^
-Note: The shadowed declaration is here:
-   --> src/Batch.sol:440:9:
-    |
 440 |         Phase p = phase();
-    |         ^^^^^^^
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:438:23:
-    |
 438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
-    |                       ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:614:22:
-    |
 614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
-    |                      ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
 WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
          (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
@@ -1085,46 +958,14 @@ Symbolic test result: 1 passed; 0 failed; time: 19.02s
 **BatchLockFormal.check_noWithdrawWhileBurnable.log**
 ```
 $ halmos --match-contract '^BatchLockFormal$' --match-test '^check_noWithdrawWhileBurnable\('
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:379:40:
-    |
 379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
-    |                                        ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (2519): This declaration shadows an existing declaration.
-   --> src/Batch.sol:450:17:
-    |
 450 |                 uint256 p = keyOf[id];
-    |                 ^^^^^^^^^
-Note: The shadowed declaration is here:
-   --> src/Batch.sol:440:9:
-    |
 440 |         Phase p = phase();
-    |         ^^^^^^^
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:438:23:
-    |
 438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
-    |                       ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:614:22:
-    |
 614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
-    |                      ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
 WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
          (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
@@ -1575,46 +1416,14 @@ Symbolic test result: 1 passed; 0 failed; time: 0.40s
 **FactoryFormal.check_setFees_onlyFeeRecipient.log**
 ```
 $ halmos --match-contract '^FactoryFormal$' --match-test '^check_setFees_onlyFeeRecipient\('
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:379:40:
-    |
 379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
-    |                                        ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (2519): This declaration shadows an existing declaration.
-   --> src/Batch.sol:450:17:
-    |
 450 |                 uint256 p = keyOf[id];
-    |                 ^^^^^^^^^
-Note: The shadowed declaration is here:
-   --> src/Batch.sol:440:9:
-    |
 440 |         Phase p = phase();
-    |         ^^^^^^^
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:438:23:
-    |
 438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
-    |                       ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:614:22:
-    |
 614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
-    |                      ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
 WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
          (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
@@ -1739,46 +1548,14 @@ Symbolic test result: 1 passed; 0 failed; time: 0.11s
 **RatingsFormal.check_unknownIdScoresZero.log**
 ```
 $ halmos --match-contract '^RatingsFormal$' --match-test '^check_unknownIdScoresZero\('
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:379:40:
-    |
 379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
-    |                                        ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (2519): This declaration shadows an existing declaration.
-   --> src/Batch.sol:450:17:
-    |
 450 |                 uint256 p = keyOf[id];
-    |                 ^^^^^^^^^
-Note: The shadowed declaration is here:
-   --> src/Batch.sol:440:9:
-    |
 440 |         Phase p = phase();
-    |         ^^^^^^^
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:438:23:
-    |
 438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
-    |                       ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:614:22:
-    |
 614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
-    |                      ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
 WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
          (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
@@ -1817,13 +1594,31 @@ WARNING  unknown deployed bytecode: 0x0020033412401f
 Symbolic test result: 1 passed; 0 failed; time: 0.10s
 ```
 
+**SweeperFormal.check_buyExactAndHoldsNothing.log**
+```
+$ halmos --match-contract '^SweeperFormal$' --match-test '^check_buyExactAndHoldsNothing\('
+No files changed, compilation skipped
+Running 1 tests for test/formal/SweeperFormal.t.sol:SweeperFormal
+[PASS] check_buyExactAndHoldsNothing(uint96,uint256,uint256,uint256,uint256,uint256) (paths: 209, time: 17.86s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 18.10s
+```
+
+**SweeperFormal.check_buyFeeRaiseNeverSlipsIn.log**
+```
+$ halmos --match-contract '^SweeperFormal$' --match-test '^check_buyFeeRaiseNeverSlipsIn\('
+No files changed, compilation skipped
+Running 1 tests for test/formal/SweeperFormal.t.sol:SweeperFormal
+[PASS] check_buyFeeRaiseNeverSlipsIn(uint256,uint256) (paths: 3, time: 0.06s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.31s
+```
+
 **SweeperFormal.check_constructorRejectsOtherStrategy.log**
 ```
 $ halmos --match-contract '^SweeperFormal$' --match-test '^check_constructorRejectsOtherStrategy\('
 No files changed, compilation skipped
 Running 1 tests for test/formal/SweeperFormal.t.sol:SweeperFormal
-[PASS] check_constructorRejectsOtherStrategy(address) (paths: 4, time: 0.07s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.31s
+[PASS] check_constructorRejectsOtherStrategy(address) (paths: 4, time: 0.11s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.47s
 ```
 
 **SweeperFormal.check_feeRaiseNeverSlipsIn.log**
@@ -1831,17 +1626,26 @@ Symbolic test result: 1 passed; 0 failed; time: 0.31s
 $ halmos --match-contract '^SweeperFormal$' --match-test '^check_feeRaiseNeverSlipsIn\('
 No files changed, compilation skipped
 Running 1 tests for test/formal/SweeperFormal.t.sol:SweeperFormal
-[PASS] check_feeRaiseNeverSlipsIn(uint256,uint256) (paths: 3, time: 0.06s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.31s
+[PASS] check_feeRaiseNeverSlipsIn(uint256,uint256) (paths: 3, time: 0.10s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.52s
 ```
 
 **SweeperFormal.check_setFee_onlyRecipientAndCapped.log**
 ```
 $ halmos --match-contract '^SweeperFormal$' --match-test '^check_setFee_onlyRecipientAndCapped\('
-No files changed, compilation skipped
+379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
+892 |     function ids() external view returns (uint256[] memory) {
+450 |                 uint256 p = keyOf[id];
+440 |         Phase p = phase();
+438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
+892 |     function ids() external view returns (uint256[] memory) {
+614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
+892 |     function ids() external view returns (uint256[] memory) {
+42 |         BatchFactory f = new BatchFactory(ICredits(address(c)), IRatings(address(r)), IAssembler(address(0)), a0, a0, 200, 0, 0);
+70 |     BatchFactory f;
 Running 1 tests for test/formal/SweeperFormal.t.sol:SweeperFormal
-[PASS] check_setFee_onlyRecipientAndCapped(address,uint256) (paths: 4, time: 0.07s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.29s
+[PASS] check_setFee_onlyRecipientAndCapped(address,uint256) (paths: 4, time: 0.06s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.32s
 ```
 
 **SweeperFormal.check_sweepAllExactAndHoldsNothing.log**
@@ -1849,8 +1653,8 @@ Symbolic test result: 1 passed; 0 failed; time: 0.29s
 $ halmos --match-contract '^SweeperFormal$' --match-test '^check_sweepAllExactAndHoldsNothing\('
 No files changed, compilation skipped
 Running 1 tests for test/formal/SweeperFormal.t.sol:SweeperFormal
-[PASS] check_sweepAllExactAndHoldsNothing(uint96,uint256,uint256,uint256,uint256,uint256) (paths: 207, time: 18.80s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 19.04s
+[PASS] check_sweepAllExactAndHoldsNothing(uint96,uint256,uint256,uint256,uint256,uint256) (paths: 208, time: 17.74s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 17.97s
 ```
 
 **SweeperFormal.check_sweepExactAndHoldsNothing.log**
@@ -1858,8 +1662,8 @@ Symbolic test result: 1 passed; 0 failed; time: 19.04s
 $ halmos --match-contract '^SweeperFormal$' --match-test '^check_sweepExactAndHoldsNothing\('
 No files changed, compilation skipped
 Running 1 tests for test/formal/SweeperFormal.t.sol:SweeperFormal
-[PASS] check_sweepExactAndHoldsNothing(uint256,uint256) (paths: 16, time: 0.61s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.87s
+[PASS] check_sweepExactAndHoldsNothing(uint256,uint256) (paths: 14, time: 0.51s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.74s
 ```
 
 **SweeperFormal.check_sweepOnlyIntoBatches.log**
@@ -1867,8 +1671,8 @@ Symbolic test result: 1 passed; 0 failed; time: 0.87s
 $ halmos --match-contract '^SweeperFormal$' --match-test '^check_sweepOnlyIntoBatches\('
 No files changed, compilation skipped
 Running 1 tests for test/formal/SweeperFormal.t.sol:SweeperFormal
-[PASS] check_sweepOnlyIntoBatches(address,uint256) (paths: 3, time: 0.08s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.35s
+[PASS] check_sweepOnlyIntoBatches(address,uint256) (paths: 3, time: 0.14s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.59s
 ```
 
 ### Timeouts (run at 40ecae0; the code they cover is unchanged at 6c81ccc)
@@ -1891,56 +1695,16 @@ TIMED OUT after 600s (wall clock)
 **BatchAuctionFormal.check_outbidRaisesAndRefunds.log**
 ```
 $ halmos --match-contract '^BatchAuctionFormal$' --match-test '^check_outbidRaisesAndRefunds\('
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:379:40:
-    |
 379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
-    |                                        ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (2519): This declaration shadows an existing declaration.
-   --> src/Batch.sol:450:17:
-    |
 450 |                 uint256 p = keyOf[id];
-    |                 ^^^^^^^^^
-Note: The shadowed declaration is here:
-   --> src/Batch.sol:440:9:
-    |
 440 |         Phase p = phase();
-    |         ^^^^^^^
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:438:23:
-    |
 438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
-    |                       ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:614:22:
-    |
 614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
-    |                      ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (2519): This declaration shadows an existing declaration.
-  --> script/Matrix.s.sol:42:9:
-   |
 42 |         BatchFactory f = new BatchFactory(ICredits(address(c)), IRatings(address(r)), IAssembler(address(0)), a0, a0, 200, 0, 0);
-   |         ^^^^^^^^^^^^^^
-Note: The shadowed declaration is here:
-  --> script/Matrix.s.sol:70:5:
-   |
 70 |     BatchFactory f;
-   |     ^^^^^^^^^^^^^^
 Running 1 tests for test/formal/BatchAuctionFormal.t.sol:BatchAuctionFormal
 [TIMEOUT] check_outbidRaisesAndRefunds(uint256,uint256) (paths: 26, time: 61.68s, bounds: [])
 Timeout queries saved in: /var/folders/6q/tt5xvkvd76ldv0wkmkwc8p240000gn/T/check_outbidRaisesAndRefunds-7y4cdw21-timeout
@@ -1960,56 +1724,16 @@ Symbolic test result: 0 passed; 1 failed; time: 87.62s
 **BatchEarlyFormal.check_earlySplitConserves.log**
 ```
 $ halmos --match-contract '^BatchEarlyFormal$' --match-test '^check_earlySplitConserves\('
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:379:40:
-    |
 379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
-    |                                        ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (2519): This declaration shadows an existing declaration.
-   --> src/Batch.sol:450:17:
-    |
 450 |                 uint256 p = keyOf[id];
-    |                 ^^^^^^^^^
-Note: The shadowed declaration is here:
-   --> src/Batch.sol:440:9:
-    |
 440 |         Phase p = phase();
-    |         ^^^^^^^
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:438:23:
-    |
 438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
-    |                       ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (8760): This declaration has the same name as another declaration.
-   --> src/Batch.sol:614:22:
-    |
 614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
-    |                      ^^^^^^^^^^^^^^^^^^^^^^
-Note: The other declaration is here:
-   --> src/Batch.sol:892:5:
-    |
 892 |     function ids() external view returns (uint256[] memory) {
-    |     ^ (Relevant source part starts here and spans across multiple lines).
-Warning (2519): This declaration shadows an existing declaration.
-  --> script/Matrix.s.sol:42:9:
-   |
 42 |         BatchFactory f = new BatchFactory(ICredits(address(c)), IRatings(address(r)), IAssembler(address(0)), a0, a0, 200, 0, 0);
-   |         ^^^^^^^^^^^^^^
-Note: The shadowed declaration is here:
-  --> script/Matrix.s.sol:70:5:
-   |
 70 |     BatchFactory f;
-   |     ^^^^^^^^^^^^^^
 WARNING  Skipped Clones.json due to parsing failure: JSONDecodeError: Expecting
          value: line 1 column 1 (char 0)
          (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
@@ -2930,6 +2654,64 @@ contract SweeperFormal is FormalBase {
         } catch {
             assert(buyer.balance == value);
         }
+    }
+
+    /// buy(): the same three markets, straight to the wallet. The buyer ends up owning every Credit bought, pays
+    /// exactly what those listings cost plus the fee (only at quoted prices), and the Sweeper keeps no ETH and no
+    /// Credit. Nothing is deposited anywhere.
+    function check_buyExactAndHoldsNothing(
+        uint96 fwaLive,
+        uint256 fwaQuote,
+        uint256 stratLive,
+        uint256 stratQuote,
+        uint256 seaPrice,
+        uint256 value
+    ) public {
+        vm.assume(fwaQuote <= 1e30 && stratLive <= 1e30 && stratQuote <= 1e30 && seaPrice <= 1e30 && value <= 4e30);
+        vm.startPrank(fwaSeller);
+        credits.setApprovalForAll(address(fwa), true);
+        uint256 listingId = fwa.list(address(credits), 3, fwaLive);
+        vm.stopPrank();
+        strategy.offer(4, stratLive);
+        vm.roll(block.number + 1);
+
+        Sweeper.FWAListing[] memory fl = new Sweeper.FWAListing[](1);
+        fl[0] = Sweeper.FWAListing(listingId, fwaQuote);
+        Sweeper.StrategyListing[] memory sl = new Sweeper.StrategyListing[](1);
+        sl[0] = Sweeper.StrategyListing(4, stratQuote);
+
+        vm.deal(buyer, value);
+        vm.prank(buyer);
+        try sweeper.buy{value: value}(_order(seaPrice), fl, sl, 1, FEE_BPS) {
+            bool gotF = credits.ownerOf(3) == buyer;
+            bool gotS = credits.ownerOf(4) == buyer;
+            if (gotF) assert(fwaQuote == fwaLive);
+            if (gotS) assert(stratQuote == stratLive && stratLive != 0);
+            uint256 spent = seaPrice + (gotF ? fwaQuote : 0) + (gotS ? stratQuote : 0);
+            uint256 fee = spent * FEE_BPS / 10_000;
+            assert(address(sweeper).balance == 0);
+            assert(buyer.balance == value - spent - fee);
+            assert(FEE.balance == fee);
+            assert(credits.ownerOf(2) == buyer);
+            assert(credits.balanceOf(address(sweeper)) == 0);
+            assert(credits.ownerOf(3) == buyer || credits.ownerOf(3) == address(fwa));
+            assert(credits.ownerOf(4) == buyer || credits.ownerOf(4) == address(strategy));
+            assert(batch.count() == 1); // untouched
+        } catch {
+            assert(buyer.balance == value);
+            assert(credits.ownerOf(2) == seller);
+        }
+    }
+
+    /// buy() is held to the quoted fee too.
+    function check_buyFeeRaiseNeverSlipsIn(uint256 quoted, uint256 price) public {
+        vm.assume(price <= 1e30 && quoted < FEE_BPS);
+        uint256 value = price * 2 + 1 ether;
+        vm.deal(buyer, value);
+        vm.prank(buyer);
+        try sweeper.buy{value: value}(_order(price), new Sweeper.FWAListing[](0), new Sweeper.StrategyListing[](0), 1, quoted) {
+            assert(false);
+        } catch {}
     }
 
     /// A raised fee never applies to a sweep quoted at the old rate.
