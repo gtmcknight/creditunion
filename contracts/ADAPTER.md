@@ -91,7 +91,7 @@ wait on a stranger. **Guess:** only 1,526 Statements can ever exist, so there ma
 
 ## Open questions (filled in when Jack's contract ships)
 
-- The exact function the adapter calls, and whether the order of the 80 matters to it.
+- The exact function the adapter calls, and how it maps the order of the 80 onto the sheet (see [ORDER.md](ORDER.md)).
 - Whether minting needs payment, a signature, a whitelist or an approval.
 - Whether a Credit Union contract can call it directly (some mints are limited to regular wallets).
 - Gas for a full burn of 80.
