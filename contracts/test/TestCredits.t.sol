@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {ratingsOf} from "../script/RatingsOf.sol";
 import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {MockAssembler} from "../src/mocks/MockAssembler.sol";
@@ -79,7 +80,7 @@ contract TestCreditsTest is Test {
             first[i] = i + 1;
             rest[i] = i + 41;
         }
-        Batch b = Batch(f.create("Test", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, first, 100, 0));
+        Batch b = Batch(f.create("Test", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, first, 100, 0, ratingsOf(address(f))));
         f.deposit(address(b), rest);
         vm.stopPrank();
         ready(b);
@@ -117,7 +118,7 @@ contract TestCreditsTest is Test {
         one[0] = 1;
         vm.startPrank(alice);
         credits.setApprovalForAll(address(f), true);
-        Batch b = Batch(f.create("Two", fl, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, one, 100, 0));
+        Batch b = Batch(f.create("Two", fl, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, one, 100, 0, ratingsOf(address(f))));
         vm.stopPrank();
         for (uint256 id = 2; id <= 60; ++id) {
             uint256 m = _mask(art.describe(credits.seedOf(id), credits.timestampOf(id)).colors);
@@ -129,7 +130,7 @@ contract TestCreditsTest is Test {
         g.eights = 1;
         uint256[] memory seed = _first(art);
         vm.prank(alice);
-        Batch c = Batch(f.create("PE", g, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, seed, 100, 0));
+        Batch c = Batch(f.create("PE", g, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, seed, 100, 0, ratingsOf(address(f))));
         for (uint256 id = 2; id <= 60; ++id) {
             CreditArt.Read memory r = art.describe(credits.seedOf(id), credits.timestampOf(id));
             bool pr = keccak256(bytes(r.register)) == keccak256("Registered") || keccak256(bytes(r.register)) == keccak256("Nudge");
@@ -163,7 +164,7 @@ contract TestCreditsTest is Test {
         one[0] = 1;
         vm.startPrank(alice);
         credits.setApprovalForAll(address(f), true);
-        Batch b = Batch(f.create("Match", fl, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, one, 100, 0));
+        Batch b = Batch(f.create("Match", fl, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, one, 100, 0, ratingsOf(address(f))));
         vm.stopPrank();
         for (uint256 id = 2; id <= 40; ++id) {
             bool same = keccak256(bytes(art.describe(credits.seedOf(id), credits.timestampOf(id)).colors))
@@ -187,7 +188,7 @@ contract TestCreditsTest is Test {
         one[0] = 1;
         vm.startPrank(alice);
         credits.setApprovalForAll(address(f), true);
-        Batch b = Batch(f.create("Bits", fl, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, one, 100, 0));
+        Batch b = Batch(f.create("Bits", fl, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, one, 100, 0, ratingsOf(address(f))));
         uint256 inside;
         uint256 outside;
         for (uint256 id = 2; id <= 40; ++id) {
@@ -201,7 +202,7 @@ contract TestCreditsTest is Test {
         bad.bitsFrom = 100;
         bad.bitsTo = 50;
         vm.expectRevert(Batch.BadFilter.selector);
-        f.create("Backwards", bad, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _next(art), 100, 0);
+        f.create("Backwards", bad, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _next(art), 100, 0, ratingsOf(address(f)));
         vm.stopPrank();
     }
 

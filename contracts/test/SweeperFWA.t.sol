@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {ratingsOf} from "../script/RatingsOf.sol";
 import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {Sweeper} from "../src/Sweeper.sol";
@@ -106,7 +107,7 @@ contract SweeperFWATest is Test {
         for (uint256 i; i < 10; ++i) first[i] = i + 1;
         vm.prank(alice);
         batch = Batch(
-            factory.create("FWA", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, first, 100, 0)
+            factory.create("FWA", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, first, 100, 0, ratingsOf(address(factory)))
         );
     }
 

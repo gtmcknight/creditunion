@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {ratingsOf} from "../../script/RatingsOf.sol";
 import {Batch, IRatings} from "../../src/Batch.sol";
 import {BatchFactory} from "../../src/BatchFactory.sol";
 import {MockAssembler} from "../../src/mocks/MockAssembler.sol";
@@ -66,7 +67,7 @@ contract Audit5Test is Test {
         returns (Batch b)
     {
         vm.prank(alice);
-        b = Batch(f.create("x", filter, new uint256[](0), reserve, arr, Batch.Split.Equal, 14 days, ids, 200, 0));
+        b = Batch(f.create("x", filter, new uint256[](0), reserve, arr, Batch.Split.Equal, 14 days, ids, 200, 0, ratingsOf(address(f))));
     }
 
     // ------------------------------------------------------------------ R5-1 reserve below the floor
@@ -77,9 +78,9 @@ contract Audit5Test is Test {
         uint256[] memory none = new uint256[](0);
         vm.startPrank(alice);
         vm.expectRevert(Batch.ReserveTooLow.selector);
-        factory.create("x", noFilter, none, 1, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 1), 200, 0);
+        factory.create("x", noFilter, none, 1, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 1), 200, 0, ratingsOf(address(factory)));
         vm.expectRevert(Batch.ReserveTooLow.selector);
-        factory.create("x", noFilter, none, 0.01 ether - 1, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 1), 200, 0);
+        factory.create("x", noFilter, none, 0.01 ether - 1, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 1), 200, 0, ratingsOf(address(factory)));
         vm.stopPrank();
     }
 
@@ -113,7 +114,7 @@ contract Audit5Test is Test {
             f.layout0 = v;
             vm.prank(alice);
             vm.expectRevert(Batch.BadFilter.selector);
-            factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, _range(1, 1), 200, 0);
+            factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, _range(1, 1), 200, 0, ratingsOf(address(factory)));
         }
     }
 
@@ -202,7 +203,7 @@ contract Audit5Test is Test {
     function _expectBadLayout(Batch.Filter memory f) internal {
         vm.prank(alice);
         vm.expectRevert(Batch.BadFilter.selector);
-        factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, _range(1, 1), 200, 0);
+        factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, _range(1, 1), 200, 0, ratingsOf(address(factory)));
     }
 
     // ------------------------------------------------------------------ R5-3 empty withdraw by anyone
@@ -244,7 +245,7 @@ contract Audit5Test is Test {
         f.layout0 = 1; // one painted slot, 79 any: every Credit fits until 80
         f.weights = 15; // any weight, but forces the describe() path in passes()
         uint256 g = gasleft();
-        Batch b = Batch(tf.create("x", f, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, _range(1, 40), 200, 0));
+        Batch b = Batch(tf.create("x", f, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, _range(1, 40), 200, 0, ratingsOf(address(tf))));
         g -= gasleft();
         vm.stopPrank();
         emit log_named_uint("create+deposit 40, layout + trait filter, real art", g);
@@ -289,9 +290,9 @@ contract Audit5Test is Test {
         f.layout0 = 8;
         vm.prank(eve);
         vm.expectRevert(Batch.AlreadyInitialized.selector);
-        b.initialize(eve, "y", f, new uint256[](0), 0, 0, 0, Batch.Arrangement.Layout, Batch.Split.Equal, 0);
+        b.initialize(eve, "y", f, new uint256[](0), 0, 0, 0, Batch.Arrangement.Layout, Batch.Split.Equal, 0, IRatings(address(0)));
         Batch impl = Batch(factory.implementation());
         vm.expectRevert(Batch.AlreadyInitialized.selector);
-        impl.initialize(eve, "y", noFilter, new uint256[](0), 0, 0, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 0);
+        impl.initialize(eve, "y", noFilter, new uint256[](0), 0, 0, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 0, IRatings(address(0)));
     }
 }

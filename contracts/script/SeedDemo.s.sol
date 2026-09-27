@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Script, console} from "forge-std/Script.sol";
+import {ratingsOf} from "./RatingsOf.sol";
 import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {MockAssembler} from "../src/mocks/MockAssembler.sol";
@@ -94,7 +95,7 @@ contract SeedDemo is Script {
 
         // 6. Full, by Credit number, unburned: anyone can burn it
         vm.broadcast(keys[0]);
-        address b6 = f.create("By Number", none, new uint256[](0), 0, Batch.Arrangement.Number, Batch.Split.Equal, 30 days, _r(101, 40), 200, 0);
+        address b6 = f.create("By Number", none, new uint256[](0), 0, Batch.Arrangement.Number, Batch.Split.Equal, 30 days, _r(101, 40), 200, 0, ratingsOf(address(f)));
         _dep(f, keys[2], b6, _r(481, 40));
         console.log("BURN_ME", b6); // Burnable for an hour once its countdown passes
 
@@ -104,7 +105,7 @@ contract SeedDemo is Script {
         win.paidTo = 760;
         win.idFrom = 700;
         vm.broadcast(keys[3]);
-        f.create("Minute Seven", win, new uint256[](0), 0, Batch.Arrangement.Number, Batch.Split.Equal, 30 days, _r(701, 12), 200, 0);
+        f.create("Minute Seven", win, new uint256[](0), 0, Batch.Arrangement.Number, Batch.Split.Equal, 30 days, _r(701, 12), 200, 0, ratingsOf(address(f)));
     }
 
     /// @dev After LOCK_DELAY: burn the second party and place two bids.
@@ -126,13 +127,13 @@ contract SeedDemo is Script {
             else fl.layout1 |= uint64(m) << uint64(4 * (i - 64));
         }
         vm.broadcast(k);
-        b = f.create(n, fl, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 30 days, ids, 200, 0);
+        b = f.create(n, fl, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 30 days, ids, 200, 0, ratingsOf(address(f)));
     }
 
     function _openEarly(BatchFactory f, uint256 k, string memory n, uint256[] memory ids) internal returns (address b) {
         Batch.Filter memory none;
         vm.broadcast(k);
-        b = f.create(n, none, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Early, 30 days, ids, 200, 0);
+        b = f.create(n, none, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Early, 30 days, ids, 200, 0, ratingsOf(address(f)));
     }
 
     function _open(
@@ -144,7 +145,7 @@ contract SeedDemo is Script {
         uint256[] memory ids
     ) internal returns (address b) {
         vm.broadcast(k);
-        b = f.create(n, fl, new uint256[](0), res, Batch.Arrangement.Deposit, Batch.Split.Equal, 30 days, ids, 200, 0);
+        b = f.create(n, fl, new uint256[](0), res, Batch.Arrangement.Deposit, Batch.Split.Equal, 30 days, ids, 200, 0, ratingsOf(address(f)));
     }
 
     function _dep(BatchFactory f, uint256 k, address b, uint256[] memory ids) internal {

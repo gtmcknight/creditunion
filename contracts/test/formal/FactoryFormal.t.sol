@@ -2,7 +2,8 @@
 pragma solidity 0.8.28;
 
 import {FormalBase, svm} from "./FormalBase.sol";
-import {Batch} from "../../src/Batch.sol";
+import {ratingsOf} from "../../script/RatingsOf.sol";
+import {Batch, IRatings} from "../../src/Batch.sol";
 import {IAssembler} from "../../src/interfaces/IAssembler.sol";
 
 /// @dev BatchFactory: who may touch fees and the assembler, and that it only ever moves the caller's Credits.
@@ -95,7 +96,7 @@ contract FactoryFormal is FormalBase {
         Batch target = impl ? Batch(factory.implementation()) : batch;
         Batch.Filter memory f;
         vm.prank(caller);
-        try target.initialize(caller, "x", f, new uint256[](0), 0, 500, 1000, Batch.Arrangement.Deposit, Batch.Split.Equal, 0) {
+        try target.initialize(caller, "x", f, new uint256[](0), 0, 500, 1000, Batch.Arrangement.Deposit, Batch.Split.Equal, 0, IRatings(address(0))) {
             assert(false);
         } catch {}
     }
@@ -134,7 +135,7 @@ contract FactoryFormal is FormalBase {
         uint256[] memory ids = new uint256[](1);
         ids[0] = id;
         vm.prank(caller);
-        try factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 3 days, ids, 250, 500) {}
+        try factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 3 days, ids, 250, 500, ratingsOf(address(factory))) {}
             catch {}
         assert(address(factory.assembler()) == a);
         assert(factory.assemblerActiveAt() == at);
@@ -160,7 +161,7 @@ contract FactoryFormal is FormalBase {
         uint256[] memory ids = new uint256[](1);
         ids[0] = id;
         vm.prank(caller);
-        try factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 3 days, ids, 250, 500) {}
+        try factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 3 days, ids, 250, 500, ratingsOf(address(factory))) {}
             catch {}
         assert(credits.ownerOf(2) == ALICE);
     }

@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {ratingsOf} from "../../script/RatingsOf.sol";
 import {Batch, IRatings} from "../../src/Batch.sol";
 import {BatchFactory} from "../../src/BatchFactory.sol";
 import {IAssembler} from "../../src/interfaces/IAssembler.sol";
@@ -65,7 +66,7 @@ abstract contract FormalBase is Test {
         vm.startPrank(who);
         credits.setApprovalForAll(address(factory), true);
         b = Batch(
-            factory.create("u", f, new uint256[](0), 0, Batch.Arrangement.Deposit, split, 3 days, ids, PROTOCOL_BPS, CREATOR_BPS)
+            factory.create("u", f, new uint256[](0), 0, Batch.Arrangement.Deposit, split, 3 days, ids, PROTOCOL_BPS, CREATOR_BPS, ratingsOf(address(factory)))
         );
         vm.stopPrank();
     }

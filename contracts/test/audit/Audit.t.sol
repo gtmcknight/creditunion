@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {ratingsOf} from "../../script/RatingsOf.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {Batch, IRatings} from "../../src/Batch.sol";
 import {BatchFactory} from "../../src/BatchFactory.sol";
@@ -79,7 +80,7 @@ contract AuditTest is Test {
 
     function _open(address who, uint256[] memory ids) internal returns (Batch) {
         vm.prank(who);
-        return Batch(factory.create("Audit", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, ids, 100, 0));
+        return Batch(factory.create("Audit", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, ids, 100, 0, ratingsOf(address(factory))));
     }
 
     // ---------------------------------------------------------------- F1: delegatecall storage exposure
@@ -94,7 +95,7 @@ contract AuditTest is Test {
         vm.prank(bob);
         credits.setApprovalForAll(address(f2), true);
         vm.prank(alice);
-        Batch b = Batch(f2.create("Bug", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0));
+        Batch b = Batch(f2.create("Bug", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0, ratingsOf(address(f2))));
         vm.prank(bob);
         f2.deposit(address(b), _range(51, 40));
 

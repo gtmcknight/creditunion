@@ -4,7 +4,7 @@ import { decodeEventLog, parseEther } from 'viem';
 import { creditsAbi, factoryAbi } from '../abi';
 import { canBatch, config, send, sendBatch, session } from '../chain';
 import { INK, maskInks, maskLabel } from '../traits';
-import { SPLITS, creatorFeeBps, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Rated } from '../data';
+import { SPLITS, creatorFeeBps, factoryRatings, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Rated } from '../data';
 import { paletteBit, TRAITS } from '../traits';
 import { $$, art, errText, esc, fromLocalInput, sheet, toast, toLocalInput } from '../ui';
 import { LAYOUT_TRAITS, keyOf, ruleFor, slotMark, slotName, type LayoutTrait } from '../../shared/layout';
@@ -186,12 +186,13 @@ export async function create(app: HTMLElement) {
     return;
   }
 
-  const [owned, approved, min, protocolBps, creatorBps, minutes] = await Promise.all([
+  const [owned, approved, min, protocolBps, creatorBps, table, minutes] = await Promise.all([
     myCredits(session.account),
     isApproved(session.account),
     minOpen(),
     protocolFeeBps(),
     creatorFeeBps(),
+    factoryRatings(),
     fetch('/minutes.json').then((r) => r.json() as Promise<Minutes>).catch(() => [] as Minutes),
   ]);
   const rules: Rules = { palettes: 0, prints: 0, weights: 0, eights: 0, minuteFrom: -1, minuteTo: -1, idFrom: 0, idTo: 0, minScore: 0, maxScore: 0, bitsFrom: 0, bitsTo: 0, list: [] };
@@ -1256,8 +1257,8 @@ export async function create(app: HTMLElement) {
         address: config.factory,
         abi: factoryAbi,
         functionName: 'create',
-        // The fees shown on this page go along: the open reverts if they changed underneath you.
-        args: [name, f, rules.list.map(BigInt), reserve, arr, split, BigInt(days * 86400), ids.slice(0, CHUNK), BigInt(protocolBps), BigInt(creatorBps)],
+        // The fees and score table shown on this page go along: the open reverts if either changed underneath you.
+        args: [name, f, rules.list.map(BigInt), reserve, arr, split, BigInt(days * 86400), ids.slice(0, CHUNK), BigInt(protocolBps), BigInt(creatorBps), table],
       };
       const approve = { address: config.credits, abi: creditsAbi, functionName: 'setApprovalForAll', args: [config.factory, true] };
       let logs: { address: string; data: `0x${string}`; topics: readonly `0x${string}`[] }[];

@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {ratingsOf} from "../script/RatingsOf.sol";
 import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {MockAssembler} from "../src/mocks/MockAssembler.sol";
@@ -162,7 +163,7 @@ contract BatchInvariants is Test {
         for (uint256 i; i < 10; ++i) ids[i] = i + 1;
         vm.startPrank(creator);
         credits.setApprovalForAll(address(factory), true);
-        batch = Batch(factory.create("Inv", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0.5 ether, Batch.Arrangement.Deposit, Batch.Split.Equal, 30 days, ids, 100, 0));
+        batch = Batch(factory.create("Inv", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0.5 ether, Batch.Arrangement.Deposit, Batch.Split.Equal, 30 days, ids, 100, 0, ratingsOf(address(factory))));
         vm.stopPrank();
 
         handler = new Handler(credits, factory, batch, actors);

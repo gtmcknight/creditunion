@@ -4,7 +4,7 @@
 
 # Credit Union
 
-Credit Union lets holders of Jack Butcher's [Credits](https://jack.art/credits) pool 80 Credits into a Credit Union. At 80 the Credit Union burns them into one Statement, auctions it onchain, and splits the sale among everyone in. Contracts hold the Credits and the ETH: no owner, admin, pause or upgrade. Live on Sepolia testnet; mainnet is not deployed yet.
+Credit Union lets holders of Jack Butcher's [Credits](https://jack.art/credits) pool 80 Credits into a Credit Union. At 80 the Credit Union burns them into one Statement, auctions it onchain, and splits the sale among everyone in. Contracts hold the Credits and the ETH: no owner, pause or upgrade. The fee recipient (a multisig) sets fees and the score table for Credit Unions opened afterwards; it can't touch an open one. Live on Sepolia testnet; mainnet is not deployed yet.
 
 <table>
 <tr><td width="33%" valign="top"><img src="docs/lifecycle.svg" alt="Start a Credit Union"><br><b>Start a Credit Union</b><br>Pool your Credits with other holders. At 80 they burn into a Statement, and everyone in shares the sale.</td><td width="33%" valign="top"><img src="docs/eligibility.svg" alt="Deposit"><br><b>Deposit</b><br>Pick exactly which Credits get in: any Credit, or only ones with the traits you choose.</td><td width="33%" valign="top"><img src="docs/order.svg" alt="Layout"><br><b>Layout</b><br>Arrange the 80 however you like: in deposit order, by Credit number, or painted into a design.</td></tr>
@@ -37,6 +37,9 @@ contracts/          Foundry
   data/scores.bin   the frozen rating table deployed onchain
   AUDIT.md          internal review log
   ADAPTER.md        the plan for connecting Jack's Statement contract
+  ORDER.md          how each Credit Union decides where every Credit goes on the sheet
+  DEPLOY.md         the mainnet deployment record: addresses, settings, commit
+  SAFE.md           what the fee recipient multisig can and can't do
 web/                Cloudflare Worker + static site (Vite, TypeScript, viem, no framework)
   src/app/          the site; reads the chain directly, wallets sign in the browser (EIP-6963)
   src/worker/       the Worker: config, RPC proxy, art, ratings, OpenSea, link cards
@@ -58,7 +61,7 @@ There is no database or indexer. Credit Unions, slots and bids are read from the
 | `BatchFactory` | Deploys Credit Unions as minimal clones, moves Credits from its caller into its own Credit Unions, holds fees and the one-time assembler setting. |
 | `Batch` | One Credit Union: eligibility checks, deposits and withdrawals, lock, burn through the assembler, auction, split, claims. |
 | `Sweeper` | Buys OpenSea listings through Seaport 1.6 and deposits them in the buyer's name. Unused ETH is refunded; listings that sold first are skipped. 2% fee. |
-| `Ratings` | Jack's official rating for all 122,154 Credits, stored as data contracts and read by eligibility rules. |
+| `Ratings` | Jack's rating for all 122,154 Credits under one methodology version (`version()`), stored as data contracts and read by eligibility rules. Anyone can call `scoreOf`. The factory can move new Credit Unions to a later version; each Credit Union keeps the table it opened with, and `ratingsHistory()` lists every table used. |
 | `IAssembler` | The adapter a Credit Union calls (never delegatecalls) to burn 80 Credits into a Statement. `MockAssembler` is the testnet version; the mainnet adapter gets written once Jack's Statement contract is published. |
 
 The factory can deploy with no assembler. Credit Unions fill but never lock, so anyone can always leave. When the adapter is ready, the setter address proposes it once; 30 minutes later anyone activates it and the setter has no further powers. Only then do full Credit Unions start their 5-minute countdowns.
@@ -68,6 +71,8 @@ Fees are set at deploy and capped in code: protocol 2% (max 5%), creator 0% (max
 Review history, findings and fixes: [contracts/AUDIT.md](contracts/AUDIT.md).
 
 How burning gets switched on once Jack's Statement contract ships, who controls it, and how it's tested: [contracts/ADAPTER.md](contracts/ADAPTER.md).
+
+How the 80 are ordered, and how a Layout paints the sheet by trait: [contracts/ORDER.md](contracts/ORDER.md).
 
 #### Build and test
 

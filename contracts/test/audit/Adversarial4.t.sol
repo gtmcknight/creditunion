@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {ratingsOf} from "../../script/RatingsOf.sol";
 import {Batch, IRatings} from "../../src/Batch.sol";
 import {BatchFactory} from "../../src/BatchFactory.sol";
 import {MockAssembler} from "../../src/mocks/MockAssembler.sol";
@@ -82,7 +83,7 @@ contract Adversarial4Test is Test {
 
     function _open(BatchFactory f, address who, uint256[] memory ids, Batch.Split split, Batch.Arrangement arr) internal returns (Batch b) {
         vm.prank(who);
-        b = Batch(f.create("S", noFilter, new uint256[](0), 0, arr, split, 14 days, ids, FEE_BPS, 0));
+        b = Batch(f.create("S", noFilter, new uint256[](0), 0, arr, split, 14 days, ids, FEE_BPS, 0, ratingsOf(address(f))));
     }
 
     function _bidAndSettle(Batch b, uint256 amount) internal {
@@ -132,7 +133,7 @@ contract Adversarial4Test is Test {
         uint256 first = 241;
         vm.startPrank(ds[0]);
         credits.setApprovalForAll(address(factory), true);
-        Batch b = Batch(factory.create("S", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Early, 14 days, _one(first), FEE_BPS, 0));
+        Batch b = Batch(factory.create("S", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Early, 14 days, _one(first), FEE_BPS, 0, ratingsOf(address(factory))));
         vm.stopPrank();
         for (uint256 i = 1; i < 80; ++i) {
             if (i % 2 == 0) {

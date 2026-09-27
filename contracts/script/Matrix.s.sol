@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Script, console} from "forge-std/Script.sol";
+import {ratingsOf} from "./RatingsOf.sol";
 import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {IAssembler} from "../src/interfaces/IAssembler.sol";
@@ -319,7 +320,7 @@ contract Matrix is Script {
         returns (address bt)
     {
         vm.broadcast(K1);
-        bt = f.create(name, x, list, 0, arr, arr == Batch.Arrangement.NumberDesc ? Batch.Split.Early : Batch.Split.Equal, 30 days, new uint256[](0), 200, 0);
+        bt = f.create(name, x, list, 0, arr, arr == Batch.Arrangement.NumberDesc ? Batch.Split.Early : Batch.Split.Equal, 30 days, new uint256[](0), 200, 0, ratingsOf(address(f)));
         console.log("PARTY", bt, name);
         if (seed == 0) return bt;
         // Candidates: the next 120 unspent (canTake reads the art twice per Credit; all 400 would pass 60M gas).

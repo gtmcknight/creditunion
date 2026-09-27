@@ -70,7 +70,9 @@ ETH accounting under mixed reverting/gas-burning receivers; reentrancy via refun
 
 ### Ratings (score table)
 
-`Ratings.sol` freezes Jack's official rating (methodology v3.4.0, ×10 as uint16) for all 122,154 Credits in 11 SSTORE2-style data contracts read with `EXTCODECOPY`. It is pure data: no owner, no setters, no external calls. The constructor rejects a chunk whose code length does not match the expected `1 + 2 × ids`, so a truncated or padded table cannot be deployed. `scoreOf` returns 0 for id 0 or ids past `count`, which a rating rule treats as "does not qualify". `Batch` reads it only inside `passes()` after the cheaper checks, through the factory's immutable `ratings()`; a factory deployed without a table rejects rating rules at `create` (`BadFilter`) rather than silently admitting everything. The generated `data/scores.bin` is checked against jack.art (score and rank) in `Ratings.t.sol` and `web/scripts/edition.ts`.
+`Ratings.sol` freezes Jack's official rating (methodology v3.4.0, ×10 as uint16) for all 122,154 Credits in 11 SSTORE2-style data contracts read with `EXTCODECOPY`. It is pure data: no owner, no setters, no external calls; `version()` names the methodology. The constructor rejects a chunk whose code length does not match the expected `1 + 2 × ids`, so a truncated or padded table cannot be deployed. `scoreOf` returns 0 for id 0 or ids past `count`, which a rating rule treats as "does not qualify". `Batch` reads it only inside `passes()` after the cheaper checks, through its own `ratings`, copied from the factory at creation and never changed; a batch opened without a table rejects rating rules at `create` (`BadFilter`) rather than silently admitting everything.
+
+**Later methodologies.** The fee recipient may `proposeRatings` a table covering the same `count`; anyone `activateRatings` after `RATINGS_DELAY` (30 minutes), and only batches opened afterwards use it. `create` takes `expectRatings` and reverts `RatingsChanged` if the table moved, like the fee check. Re-proposing the current table withdraws a proposal. The key cannot change any open batch's table: `test/RatingsVersion.t.sol` and `test/formal/RatingsSwitchFormal.t.sol`. Trust: a bad table only reaches batches opened after the 30-minute notice. The generated `data/scores.bin` is checked against jack.art (score and rank) in `Ratings.t.sol` and `web/scripts/edition.ts`.
 
 ## Round 2 (Sept 24, after fees became adjustable and the score table went onchain)
 
@@ -103,7 +105,7 @@ ETH accounting under mixed reverting/gas-burning receivers; reentrancy via refun
 
 ### Accepted / documented (round 2)
 
-- The fee recipient is now an admin key: `setFees` and `Sweeper.setFee` within the caps, plus receiving fees, dust and rescued strays. It cannot touch any batch, pooled Credit or the assembler. Use a multisig.
+- The fee recipient is now an admin key: `setFees` and `Sweeper.setFee` within the caps, `proposeRatings` for batches opened later, plus receiving fees, dust and rescued strays. It cannot touch any batch, pooled Credit or the assembler. Use a multisig.
 - Scan cache (30 s) residual: a seller can revoke or transfer after the scan; the sweep skips or reverts at simulation. Same class as S2.
 - `/ens`, `/art`, `/config.json` are usable cross-site (cached, rate limited); the quote endpoint's same-site check is defence in depth, the key never leaves the Worker and no CORS headers are set.
 - `style-src 'unsafe-inline'` remains for the inline widths on sheets and bars.

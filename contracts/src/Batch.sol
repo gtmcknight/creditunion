@@ -9,11 +9,11 @@ import {IAssembler} from "./interfaces/IAssembler.sol";
 
 interface IRatings {
     function scoreOf(uint256 id) external view returns (uint16);
+    function count() external view returns (uint256);
 }
 
 interface IBatchFactory {
     function credits() external view returns (ICredits);
-    function ratings() external view returns (IRatings);
     function assembler() external view returns (IAssembler);
     function assemblerActiveAt() external view returns (uint64);
     function feeRecipient() external view returns (address);
@@ -57,6 +57,9 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     uint256 public constant MIN_RAISE_BPS = 500; // 5%
     uint256 public constant MIN_RAISE = 0.01 ether;
     uint256 public constant REFUND_GAS = 50_000;
+    /// @dev Gas settle() must have left before each member payment: REFUND_GAS reaches the member intact under
+    ///      the 63/64 rule, with room for the bookkeeping around it.
+    uint256 internal constant PAY_GAS = REFUND_GAS * 64 / 63 + 10_000;
     uint256 public constant MAX_NAME = 64;
     uint256 public constant MAX_ALLOWLIST = 200;
 
@@ -210,6 +213,10 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
 
     bool private _assembling;
 
+    /// @notice The score table this batch opened with, or zero. Fixed for the batch's life: a later table on
+    ///         the factory only reaches batches opened after it.
+    IRatings public ratings;
+
     event Deposited(address indexed from, uint256 indexed id, uint256 count);
     event Withdrawn(address indexed to, uint256 indexed id, uint256 count);
     event Filled(uint64 lockAt); // lockAt is 0 while no assembler is active
@@ -250,6 +257,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     error NoSlot(uint256 id);
     error LayoutMismatch(uint256 slot);
     error ReserveTooLow();
+    error SettleGasTooLow();
 
     // ---------------------------------------------------------------- setup
 
@@ -268,7 +276,8 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         uint256 creatorFeeBps_,
         Arrangement arrangement_,
         Split split_,
-        uint64 deadline_
+        uint64 deadline_,
+        IRatings ratings_
     ) external {
         if (address(factory) != address(0)) revert AlreadyInitialized();
         if (bytes(name_).length > MAX_NAME) revert NameTooLong();
@@ -282,7 +291,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         // palettes = {mask 0} (every Credit has at least one ink). The allowlist is checked below, deduped.
         if (filter_.idTo != 0 && filter_.idTo - filter_.idFrom + 1 < SIZE) revert BadFilter();
         if (filter_.bitsFrom > 256 || filter_.palettes == 1) revert BadFilter();
-        if ((filter_.minScore != 0 || filter_.maxScore != 0) && address(IBatchFactory(msg.sender).ratings()) == address(0)) {
+        if ((filter_.minScore != 0 || filter_.maxScore != 0) && address(ratings_) == address(0)) {
             revert BadFilter();
         }
         if (arrangement_ == Arrangement.Creator || arrangement_ == Arrangement.MintTime) revert ArrangementRetired();
@@ -315,6 +324,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         factory = IBatchFactory(msg.sender);
         credits = factory.credits();
         art = credits.art();
+        ratings = ratings_;
         creator = creator_;
         name = name_;
         _filter = filter_;
@@ -478,7 +488,7 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
             if (t < f.paidFrom || (f.paidTo != 0 && t > f.paidTo)) return false;
         }
         if (f.minScore != 0 || f.maxScore != 0) {
-            uint16 sc = factory.ratings().scoreOf(id);
+            uint16 sc = ratings.scoreOf(id);
             // 0 means "not in the table" (real scores start at 80.0): never admitted by a rating rule.
             if (sc == 0 || sc < f.minScore || (f.maxScore != 0 && sc > f.maxScore)) return false;
         }
@@ -809,6 +819,34 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         }
         _push(factory.feeRecipient(), fee);
         if (creatorFee > 0) _push(creator, creatorFee);
+        _payMembers(per);
+    }
+
+    /// @dev Settlement pays every member their share, each send capped at REFUND_GAS. A send that fails (a wallet
+    ///      that refuses ETH or needs more gas) leaves that member's share claimable through claim(), so no
+    ///      member can stop settlement or anyone else's payment. Too little gas for the next send reverts the
+    ///      whole settle rather than skipping it: a wallet's gas estimate then always covers every payment.
+    function _payMembers(uint256 per) internal {
+        uint256 n = _ids.length;
+        address[] memory members = new address[](n);
+        uint256[] memory units = new uint256[](n);
+        uint256 m;
+        bool equal = split == Split.Equal;
+        for (uint256 i; i < n; ++i) {
+            address d = depositorOf[_ids[i]];
+            uint256 j;
+            while (j < m && members[j] != d) ++j;
+            if (j == m) members[m++] = d;
+            units[j] += equal ? 1 : 237 - 2 * i;
+        }
+        for (uint256 j; j < m; ++j) {
+            if (gasleft() < PAY_GAS) revert SettleGasTooLow();
+            address to = members[j];
+            uint256 amount = units[j] * per;
+            claimed[to] = true;
+            if (_send(to, amount, REFUND_GAS)) emit Claimed(to, amount);
+            else claimed[to] = false;
+        }
     }
 
     /// @notice Winner's fallback when settle() could not deliver the Statement.

@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test, stdError} from "forge-std/Test.sol";
+import {ratingsOf} from "../../script/RatingsOf.sol";
 import {Batch, IRatings} from "../../src/Batch.sol";
 import {BatchFactory} from "../../src/BatchFactory.sol";
 import {Sweeper} from "../../src/Sweeper.sol";
@@ -129,7 +130,7 @@ contract Adversarial2Test is Test {
     /// A fee change after a batch opened never reaches it: settle() pays the split it opened with.
     function test_FeeSnapshotSurvivesSetFees() public {
         vm.prank(alice);
-        Batch b = Batch(factory.create("S", noFilter, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0));
+        Batch b = Batch(factory.create("S", noFilter, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0, ratingsOf(address(factory))));
         assertEq(b.protocolFeeBps(), 100);
         assertEq(b.creatorFeeBps(), 0);
 
@@ -161,11 +162,11 @@ contract Adversarial2Test is Test {
         // Fixed: the creator states the fees they saw, and the open reverts instead of taking the new ones.
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(BatchFactory.FeesChanged.selector, 500, 1000));
-        factory.create("F", noFilter, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0);
+        factory.create("F", noFilter, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0, ratingsOf(address(factory)));
         vm.prank(fee);
         factory.setFees(100, 0); // restored: opens as seen
         vm.prank(alice);
-        Batch b = Batch(factory.create("F", noFilter, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0));
+        Batch b = Batch(factory.create("F", noFilter, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0, ratingsOf(address(factory))));
         assertEq(b.protocolFeeBps(), 100);
         assertEq(b.creatorFeeBps(), 0);
     }
@@ -173,12 +174,12 @@ contract Adversarial2Test is Test {
     /// The implementation and every clone refuse a second initialize; the factory pointer is fixed.
     function test_NoReinitialize() public {
         vm.prank(alice);
-        Batch b = Batch(factory.create("I", noFilter, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0));
+        Batch b = Batch(factory.create("I", noFilter, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0, ratingsOf(address(factory))));
         vm.expectRevert(Batch.AlreadyInitialized.selector);
-        b.initialize(alice, "x", noFilter, none, 0, 0, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, uint64(block.timestamp + 3 days));
+        b.initialize(alice, "x", noFilter, none, 0, 0, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, uint64(block.timestamp + 3 days), IRatings(address(0)));
         Batch impl = Batch(factory.implementation());
         vm.expectRevert(Batch.AlreadyInitialized.selector);
-        impl.initialize(alice, "x", noFilter, none, 0, 0, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, uint64(block.timestamp + 3 days));
+        impl.initialize(alice, "x", noFilter, none, 0, 0, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, uint64(block.timestamp + 3 days), IRatings(address(0)));
     }
 
     // ---------------------------------------------------------------- 1b. sweep fee between quote and sweep
@@ -205,7 +206,7 @@ contract Adversarial2Test is Test {
         vm.prank(bob);
         credits.setApprovalForAll(address(seaport), true);
         vm.prank(alice);
-        Batch b = Batch(factory.create("W", noFilter, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 10), 100, 0));
+        Batch b = Batch(factory.create("W", noFilter, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 10), 100, 0, ratingsOf(address(factory))));
 
         uint256 q = sweeper.quote(10 ether); // 10.1
         vm.prank(fee);
@@ -224,7 +225,7 @@ contract Adversarial2Test is Test {
         vm.prank(bob);
         credits.setApprovalForAll(address(seaport), true);
         vm.prank(alice);
-        Batch b = Batch(factory.create("W", noFilter, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 10), 100, 0));
+        Batch b = Batch(factory.create("W", noFilter, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 10), 100, 0, ratingsOf(address(factory))));
 
         uint256 q = sweeper.quote(10 ether); // carol agreed to 1%: 0.1 ETH on 10 listings
         vm.prank(fee);
@@ -293,11 +294,11 @@ contract Adversarial2Test is Test {
         address[] memory chunks = new address[](1);
         chunks[0] = DataStore.write(data);
         vm.expectRevert(Ratings.BadCount.selector);
-        new Ratings(chunks, n);
+        new Ratings(chunks, n, "test");
         vm.expectRevert(Ratings.BadCount.selector);
-        new Ratings(new address[](0), 5);
+        new Ratings(new address[](0), 5, "test");
         vm.expectRevert(Ratings.BadCount.selector);
-        new Ratings(chunks, 0);
+        new Ratings(chunks, 0, "test");
     }
 
     /// The constructor rejects wrong lengths, EOAs and empty addresses.
@@ -305,19 +306,19 @@ contract Adversarial2Test is Test {
         address[] memory chunks = new address[](1);
         chunks[0] = DataStore.write(new bytes(8)); // 4 ids
         vm.expectRevert(abi.encodeWithSelector(Ratings.BadChunk.selector, 0));
-        new Ratings(chunks, 5);
+        new Ratings(chunks, 5, "test");
         vm.expectRevert(abi.encodeWithSelector(Ratings.BadChunk.selector, 0));
-        new Ratings(chunks, 3);
+        new Ratings(chunks, 3, "test");
         vm.expectRevert(Ratings.BadCount.selector); // zero ids is refused before any chunk is read
-        new Ratings(chunks, 0);
+        new Ratings(chunks, 0, "test");
         chunks[0] = alice; // EOA
         vm.expectRevert(abi.encodeWithSelector(Ratings.BadChunk.selector, 0));
-        new Ratings(chunks, 4);
+        new Ratings(chunks, 4, "test");
         address[] memory two = new address[](2);
         two[0] = DataStore.write(new bytes(8));
         two[1] = DataStore.write(new bytes(2));
         vm.expectRevert(abi.encodeWithSelector(Ratings.BadChunk.selector, 0)); // first must be full
-        new Ratings(two, 12001);
+        new Ratings(two, 12001, "test");
     }
 
     /// Info: the first byte is never validated (it is never read either), so a chunk with a live runtime
@@ -334,7 +335,7 @@ contract Adversarial2Test is Test {
         assertEq(at.code[0], bytes1(0xFE));
         address[] memory chunks = new address[](1);
         chunks[0] = at;
-        Ratings r = new Ratings(chunks, 4);
+        Ratings r = new Ratings(chunks, 4, "test");
         assertEq(r.scoreOf(1), 0);
     }
 
@@ -358,7 +359,7 @@ contract Adversarial2Test is Test {
         Batch.Filter memory f;
         f.minScore = 4000;
         vm.prank(alice);
-        Batch b = Batch(f2.create("R", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(2), 100, 0));
+        Batch b = Batch(f2.create("R", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(2), 100, 0, ratingsOf(address(f2))));
 
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Batch.Excluded.selector, 1));
@@ -378,7 +379,7 @@ contract Adversarial2Test is Test {
         // create() itself with an excluded seed
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Batch.Excluded.selector, 1));
-        f2.create("R", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(1), 100, 0);
+        f2.create("R", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(1), 100, 0, ratingsOf(address(f2)));
         // a plain transferFrom is a stray, never recorded, and rescue() forwards it
         vm.prank(alice);
         credits.transferFrom(alice, address(b), 1);
@@ -396,7 +397,7 @@ contract Adversarial2Test is Test {
         Batch.Filter memory f;
         f.maxScore = 6000;
         vm.prank(alice);
-        Batch b = Batch(f2.create("M", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(2), 100, 0));
+        Batch b = Batch(f2.create("M", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(2), 100, 0, ratingsOf(address(f2))));
         assertFalse(b.passes(5)); // unknown
         assertFalse(b.passes(200)); // unknown
         assertFalse(b.passes(3)); // 8000 > 6000
@@ -414,16 +415,16 @@ contract Adversarial2Test is Test {
         f.maxScore = 4000;
         vm.prank(alice);
         vm.expectRevert(Batch.BadFilter.selector);
-        f2.create("B", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(2), 100, 0);
+        f2.create("B", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(2), 100, 0, ratingsOf(address(f2)));
         f.maxScore = 0;
         vm.prank(alice);
         vm.expectRevert(Batch.BadFilter.selector);
-        factory.create("B", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 10), 100, 0); // no table
+        factory.create("B", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 10), 100, 0, ratingsOf(address(factory))); // no table
         f.minScore = 0;
         f.maxScore = 1;
         vm.prank(alice);
         vm.expectRevert(Batch.BadFilter.selector);
-        factory.create("B", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 10), 100, 0);
+        factory.create("B", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 10), 100, 0, ratingsOf(address(factory)));
     }
 
     // ---------------------------------------------------------------- 4. feeRecipient powers
@@ -432,7 +433,7 @@ contract Adversarial2Test is Test {
     /// fees / strays. It cannot touch an open batch, its snapshot, the assembler, or pooled Credits.
     function test_FeeRecipientCannotTouchPooledCredits() public {
         vm.prank(alice);
-        Batch b = Batch(factory.create("P", noFilter, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0));
+        Batch b = Batch(factory.create("P", noFilter, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0, ratingsOf(address(factory))));
         vm.startPrank(fee);
         vm.expectRevert(abi.encodeWithSelector(Batch.NotStray.selector));
         b.rescue(address(credits), 1);

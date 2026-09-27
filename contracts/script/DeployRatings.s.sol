@@ -7,7 +7,12 @@ import {DataStore, Ratings} from "../src/Ratings.sol";
 /// @notice Deploys the frozen score table from data/scores.bin (uint16 LE, score×10 per id).
 ///   forge script script/DeployRatings.s.sol --rpc-url $RPC --private-key $PK --broadcast --slow
 library RatingsDeploy {
+    /// @dev data/scores.bin is methodology v3.4.0.
     function deploy(bytes memory data) internal returns (Ratings r) {
+        r = deploy(data, "3.4.0");
+    }
+
+    function deploy(bytes memory data, string memory version) internal returns (Ratings r) {
         uint256 count = data.length / 2;
         uint256 per = 12_000 * 2;
         uint256 n = (data.length + per - 1) / per;
@@ -19,7 +24,7 @@ library RatingsDeploy {
             for (uint256 j; j < len; ++j) part[j] = data[start + j];
             chunks[i] = DataStore.write(part);
         }
-        r = new Ratings(chunks, count);
+        r = new Ratings(chunks, count, version);
     }
 }
 

@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {ratingsOf} from "../script/RatingsOf.sol";
 import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {MockAssembler} from "../src/mocks/MockAssembler.sol";
@@ -58,7 +59,7 @@ contract ArrangementTest is Test {
     /// bob deposits first (51..90), then alice (1..40): deposit order differs from id order.
     function _full(Batch.Arrangement how) internal returns (Batch b) {
         vm.prank(bob);
-        b = Batch(factory.create("Arr", noFilter, new uint256[](0), 0, how, Batch.Split.Equal, 14 days, _range(51, 40), 100, 0));
+        b = Batch(factory.create("Arr", noFilter, new uint256[](0), 0, how, Batch.Split.Equal, 14 days, _range(51, 40), 100, 0, ratingsOf(address(factory))));
         vm.prank(alice);
         factory.deposit(address(b), _range(1, 40));
     }
@@ -93,7 +94,7 @@ contract ArrangementTest is Test {
     function test_CreatorArrangementRetired() public {
         vm.prank(bob);
         vm.expectRevert(Batch.ArrangementRetired.selector);
-        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Creator, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0);
+        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Creator, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0, ratingsOf(address(factory)));
     }
 
     function test_ArrangementInSummary() public {

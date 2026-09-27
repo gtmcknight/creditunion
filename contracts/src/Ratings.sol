@@ -5,17 +5,21 @@ pragma solidity 0.8.28;
 /// @notice Jack Butcher's official Credit rating (methodology v3.4.0) for every Credit, frozen onchain so a
 ///         batch can require a minimum score. Scores are stored ×10 (80.00 → 800, 800.00 → 8000) as
 ///         little-endian uint16s in data contracts (SSTORE2 style: a STOP byte then raw bytes), read with
-///         EXTCODECOPY. Immutable: the edition is sealed and the rating is a pure function of it.
+///         EXTCODECOPY. Immutable: the edition is sealed and the rating is a pure function of it. A later
+///         methodology is a new table; the factory can point new batches at it, and each batch keeps the table
+///         it opened with.
 contract Ratings {
     uint256 public constant PER_CHUNK = 12_000; // ids per data contract (24 000 bytes)
     uint256 public immutable count;
+    /// @notice The methodology version this table was computed with, e.g. "3.4.0".
+    string public version;
     address[] internal _chunks;
 
     error BadChunk(uint256 index);
     error BadCount();
 
     /// @param chunks_ Data contracts in id order, each `0x00` + PER_CHUNK×2 bytes (the last may be shorter).
-    constructor(address[] memory chunks_, uint256 count_) {
+    constructor(address[] memory chunks_, uint256 count_, string memory version_) {
         // Exactly enough chunks for `count_` ids, so every id in range maps to a chunk that exists.
         if (count_ == 0 || chunks_.length != (count_ + PER_CHUNK - 1) / PER_CHUNK) revert BadCount();
         for (uint256 i; i < chunks_.length; ++i) {
@@ -24,6 +28,7 @@ contract Ratings {
         }
         _chunks = chunks_;
         count = count_;
+        version = version_;
     }
 
     function chunks() external view returns (address[] memory) {

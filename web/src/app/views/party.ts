@@ -1075,10 +1075,12 @@ async function loadRatings(
 ) {
   let rated: Record<string, Rated>;
   let n = 0;
+  let version = '';
   try {
     const r = await ratings(b.ids);
     rated = r.ratings;
     n = r.n;
+    version = r.version;
   } catch {
     document.getElementById('rating')?.replaceChildren('unavailable');
     return;
@@ -1090,7 +1092,7 @@ async function loadRatings(
     const avg = scores.reduce((a, x) => a + x, 0) / scores.length;
     const top = Math.max(...scores);
     el.classList.remove('muted');
-    el.innerHTML = `<span class="num">avg ${fmtScore(avg)}</span> · <span class="num">top ${fmtScore(top)}</span> <a href="${RATING_URL}" target="_blank" rel="noopener" class="muted small" title="Jack Butcher’s official rating, v3.4.0, over all ${n.toLocaleString()} Credits">official ↗</a>`;
+    el.innerHTML = `<span class="num">avg ${fmtScore(avg)}</span> · <span class="num">top ${fmtScore(top)}</span> <a href="${RATING_URL}" target="_blank" rel="noopener" class="muted small" title="Jack Butcher’s rating, v${version}, over all ${n.toLocaleString()} Credits">v${version} ↗</a>`;
   }
   document.querySelectorAll<HTMLElement>('.batch-art .cell[data-id]').forEach((c) => {
     const r = rated[c.dataset.id!];

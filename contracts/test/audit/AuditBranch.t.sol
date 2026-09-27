@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {ratingsOf} from "../../script/RatingsOf.sol";
 import {Batch, IRatings} from "../../src/Batch.sol";
 import {BatchFactory} from "../../src/BatchFactory.sol";
 import {MockAssembler} from "../../src/mocks/MockAssembler.sol";
@@ -46,7 +47,7 @@ contract AuditBranchTest is Test {
 
     function _open79() internal returns (Batch b) {
         vm.prank(alice);
-        b = Batch(factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0));
+        b = Batch(factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0, ratingsOf(address(factory))));
         vm.prank(bob);
         factory.deposit(address(b), _range(51, 39));
     }
@@ -82,23 +83,23 @@ contract AuditBranchTest is Test {
         f.bitsTo = 4;
         vm.prank(alice);
         vm.expectRevert(Batch.BadFilter.selector);
-        factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 10), 100, 0);
+        factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 10), 100, 0, ratingsOf(address(factory)));
 
         f.bitsTo = 0; // bitsFrom only: mock marks = 0 fails it
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Batch.Excluded.selector, 1));
-        factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 10), 100, 0);
+        factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 10), 100, 0, ratingsOf(address(factory)));
 
         f.bitsFrom = 0;
         f.bitsTo = 3; // upper bound only admits marks 0
         vm.prank(alice);
-        Batch b = Batch(factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 10), 100, 0));
+        Batch b = Batch(factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 10), 100, 0, ratingsOf(address(factory))));
         assertTrue(b.passes(11));
     }
 
     function test_CreatorRetired() public {
         vm.prank(alice);
         vm.expectRevert(Batch.ArrangementRetired.selector);
-        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Creator, Batch.Split.Equal, 14 days, _range(1, 10), 100, 0);
+        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Creator, Batch.Split.Equal, 14 days, _range(1, 10), 100, 0, ratingsOf(address(factory)));
     }
 }

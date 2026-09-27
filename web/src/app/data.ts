@@ -210,6 +210,11 @@ export async function protocolFeeBps() {
   return Number(await pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'protocolFeeBps' }));
 }
 
+/// The score table batches opened now use (zero address if none); create() reverts if it changed.
+export async function factoryRatings() {
+  return (await pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'ratings' })) as Address;
+}
+
 /// The creator share every batch opened now receives; set on the factory, not per batch.
 export async function creatorFeeBps() {
   return Number(await pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'creatorFeeBps' }));

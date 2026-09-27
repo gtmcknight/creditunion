@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {ratingsOf} from "../script/RatingsOf.sol";
 import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {MockAssembler} from "../src/mocks/MockAssembler.sol";
@@ -84,7 +85,7 @@ contract BatchTest is Test {
 
     function _openAt(address who, uint256[] memory ids, uint256 reserve, uint256 pf, uint256 cf) internal returns (Batch) {
         vm.prank(who);
-        return Batch(factory.create("Test", noFilter, new uint256[](0), reserve, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, ids, pf, cf));
+        return Batch(factory.create("Test", noFilter, new uint256[](0), reserve, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, ids, pf, cf, ratingsOf(address(factory))));
     }
 
     function _full(uint256 reserve) internal returns (Batch b) {
@@ -99,15 +100,15 @@ contract BatchTest is Test {
     function test_OpenRequiresMinimum() public {
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(BatchFactory.TooFewToOpen.selector, 10));
-        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 9), 100, 0);
+        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 9), 100, 0, ratingsOf(address(factory)));
     }
 
     function test_OpenRejectsBadDuration() public {
         vm.startPrank(alice);
         vm.expectRevert(BatchFactory.BadDuration.selector);
-        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 1 days, _range(1, 10), 100, 0);
+        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 1 days, _range(1, 10), 100, 0, ratingsOf(address(factory)));
         vm.expectRevert(BatchFactory.BadDuration.selector);
-        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 91 days, _range(1, 10), 100, 0);
+        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 91 days, _range(1, 10), 100, 0, ratingsOf(address(factory)));
     }
 
     function test_CannotDepositSomeoneElsesCredits() public {
@@ -162,10 +163,10 @@ contract BatchTest is Test {
     function test_ImplementationAndClonesCannotBeReinitialized() public {
         Batch b = _open(alice, _range(1, 10), 0);
         vm.expectRevert(Batch.AlreadyInitialized.selector);
-        b.initialize(bob, "x", noFilter, new uint256[](0), 0, 0, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 1);
+        b.initialize(bob, "x", noFilter, new uint256[](0), 0, 0, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 1, IRatings(address(0)));
         Batch impl = Batch(factory.implementation());
         vm.expectRevert(Batch.AlreadyInitialized.selector);
-        impl.initialize(bob, "x", noFilter, new uint256[](0), 0, 0, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 1);
+        impl.initialize(bob, "x", noFilter, new uint256[](0), 0, 0, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 1, IRatings(address(0)));
     }
 
     function test_Filter() public {
@@ -174,7 +175,7 @@ contract BatchTest is Test {
         uint256[] memory evens = new uint256[](10);
         for (uint256 i; i < 10; ++i) evens[i] = 2 + 2 * i;
         vm.prank(alice);
-        Batch b = Batch(factory.create("Evens", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, evens, 100, 0));
+        Batch b = Batch(factory.create("Evens", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, evens, 100, 0, ratingsOf(address(factory))));
         assertEq(b.count(), 10);
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Batch.Excluded.selector, 1));
@@ -225,7 +226,7 @@ contract BatchTest is Test {
     /// An open batch never expires, whatever duration it was created with.
     function test_OpenBatchNeverExpires() public {
         vm.prank(alice);
-        Batch b = Batch(factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 3 days, _range(1, 40), 100, 0));
+        Batch b = Batch(factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 3 days, _range(1, 40), 100, 0, ratingsOf(address(factory))));
         skip(365 days);
         assertEq(uint256(b.state()), uint256(Batch.State.Open));
         assertEq(b.lockAt(), 0);
@@ -265,7 +266,7 @@ contract BatchTest is Test {
         vm.prank(bob);
         credits.setApprovalForAll(address(bad), true);
         vm.prank(alice);
-        Batch b = Batch(bad.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0));
+        Batch b = Batch(bad.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0, ratingsOf(address(bad))));
         vm.prank(bob);
         bad.deposit(address(b), _range(51, 40));
         ready(b);
@@ -428,7 +429,7 @@ contract BatchTest is Test {
         vm.prank(fee);
         factory.setFees(100, 200); // 2% creator
         vm.prank(alice);
-        Batch b = Batch(factory.create("Fee", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 200));
+        Batch b = Batch(factory.create("Fee", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 200, ratingsOf(address(factory))));
         vm.prank(bob);
         factory.deposit(address(b), _range(51, 40));
         ready(b);
@@ -456,7 +457,7 @@ contract BatchTest is Test {
         vm.prank(fee);
         factory.setFees(100, creatorFee);
         vm.prank(alice);
-        Batch b = Batch(factory.create("F", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, a), 100, creatorFee));
+        Batch b = Batch(factory.create("F", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, a), 100, creatorFee, ratingsOf(address(factory))));
         vm.prank(bob);
         factory.deposit(address(b), _range(51, 80 - a));
         ready(b);
@@ -505,7 +506,7 @@ contract BatchTest is Test {
     function test_GasFor40Deposit() public {
         vm.prank(alice);
         uint256 g = gasleft();
-        factory.create("Gas", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0);
+        factory.create("Gas", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0, ratingsOf(address(factory)));
         emit log_named_uint("create with 40", g - gasleft());
     }
 }

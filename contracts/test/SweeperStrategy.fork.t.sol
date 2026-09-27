@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {ratingsOf} from "../script/RatingsOf.sol";
 import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {Sweeper} from "../src/Sweeper.sol";
@@ -42,7 +43,7 @@ contract SweeperStrategyForkTest is Test {
                     one[0] = id;
                     vm.startPrank(o);
                     CREDITS.setApprovalForAll(address(factory), true);
-                    batch = Batch(factory.create("Fork", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, one, 100, 0));
+                    batch = Batch(factory.create("Fork", Batch.Filter(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, one, 100, 0, ratingsOf(address(factory))));
                     vm.stopPrank();
                 }
             } catch {}

@@ -769,6 +769,11 @@ export const batchAbi = [
         "name": "deadline_",
         "type": "uint64",
         "internalType": "uint64"
+      },
+      {
+        "name": "ratings_",
+        "type": "address",
+        "internalType": "contract IRatings"
       }
     ],
     "outputs": [],
@@ -978,6 +983,19 @@ export const batchAbi = [
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "ratings",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IRatings"
       }
     ],
     "stateMutability": "view"
@@ -1945,7 +1963,27 @@ export const factoryAbi = [
   },
   {
     "type": "function",
+    "name": "RATINGS_DELAY",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "activateAssembler",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "activateRatings",
     "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
@@ -2156,6 +2194,11 @@ export const factoryAbi = [
         "name": "expectCreatorFeeBps",
         "type": "uint256",
         "internalType": "uint256"
+      },
+      {
+        "name": "expectRatings",
+        "type": "address",
+        "internalType": "contract IRatings"
       }
     ],
     "outputs": [
@@ -2307,6 +2350,32 @@ export const factoryAbi = [
   },
   {
     "type": "function",
+    "name": "pendingRatings",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IRatings"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "pendingRatingsUntil",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "pendingUntil",
     "inputs": [],
     "outputs": [
@@ -2326,6 +2395,19 @@ export const factoryAbi = [
         "name": "a",
         "type": "address",
         "internalType": "contract IAssembler"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "proposeRatings",
+    "inputs": [
+      {
+        "name": "r",
+        "type": "address",
+        "internalType": "contract IRatings"
       }
     ],
     "outputs": [],
@@ -2353,6 +2435,19 @@ export const factoryAbi = [
         "name": "",
         "type": "address",
         "internalType": "contract IRatings"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "ratingsHistory",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address[]",
+        "internalType": "contract IRatings[]"
       }
     ],
     "stateMutability": "view"
@@ -2458,6 +2553,38 @@ export const factoryAbi = [
     "anonymous": false
   },
   {
+    "type": "event",
+    "name": "RatingsActivated",
+    "inputs": [
+      {
+        "name": "ratings",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RatingsProposed",
+    "inputs": [
+      {
+        "name": "ratings",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "activatableAt",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
     "type": "error",
     "name": "AssemblerFixed",
     "inputs": []
@@ -2465,6 +2592,11 @@ export const factoryAbi = [
   {
     "type": "error",
     "name": "BadDuration",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "BadRatings",
     "inputs": []
   },
   {
@@ -2548,6 +2680,17 @@ export const factoryAbi = [
     "type": "error",
     "name": "ProtocolFeeTooHigh",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RatingsChanged",
+    "inputs": [
+      {
+        "name": "ratings",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
   },
   {
     "type": "error",

@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {ratingsOf} from "../script/RatingsOf.sol";
 import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {MockAssembler} from "../src/mocks/MockAssembler.sol";
@@ -66,17 +67,17 @@ contract LayoutTest is Test {
 
     function _open(Batch.Filter memory f, uint256[] memory ids) internal returns (Batch b) {
         vm.prank(alice);
-        b = Batch(factory.create("L", f, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, ids, 200, 0));
+        b = Batch(factory.create("L", f, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, ids, 200, 0, ratingsOf(address(factory))));
     }
 
     function test_LayoutRequiresLayoutArrangement() public {
         Batch.Filter memory f = _layout(_checkered());
         vm.prank(alice);
         vm.expectRevert(Batch.BadFilter.selector);
-        factory.create("L", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(2), 200, 0);
+        factory.create("L", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(2), 200, 0, ratingsOf(address(factory)));
         vm.prank(alice);
         vm.expectRevert(Batch.BadFilter.selector);
-        factory.create("L", noFilter, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, _one(2), 200, 0);
+        factory.create("L", noFilter, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, _one(2), 200, 0, ratingsOf(address(factory)));
     }
 
     /// 40 CMY slots + 40 K slots: the 41st of either palette has no slot.
@@ -243,7 +244,7 @@ contract LayoutTest is Test {
         f.layoutTrait = 4;
         vm.prank(alice);
         vm.expectRevert(Batch.BadFilter.selector);
-        factory.create("L", f, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, _one(2), 200, 0);
+        factory.create("L", f, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, _one(2), 200, 0, ratingsOf(address(factory)));
 
         f.layoutTrait = 5; // no such trait
         s[0] = 1;
@@ -251,12 +252,12 @@ contract LayoutTest is Test {
         g.layoutTrait = 5;
         vm.prank(alice);
         vm.expectRevert(Batch.BadFilter.selector);
-        factory.create("L", g, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, _one(2), 200, 0);
+        factory.create("L", g, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, _one(2), 200, 0, ratingsOf(address(factory)));
 
         Batch.Filter memory h; // a trait with no layout
         h.layoutTrait = 1;
         vm.prank(alice);
         vm.expectRevert(Batch.BadFilter.selector);
-        factory.create("L", h, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(2), 200, 0);
+        factory.create("L", h, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(2), 200, 0, ratingsOf(address(factory)));
     }
 }

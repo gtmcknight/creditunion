@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {ratingsOf} from "../script/RatingsOf.sol";
 import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {MockAssembler} from "../src/mocks/MockAssembler.sol";
@@ -34,7 +35,7 @@ contract EligibilityTest is Test {
 
     function _open(Batch.Filter memory f, uint256[] memory list, uint256 seed) internal returns (Batch b) {
         vm.prank(alice);
-        b = Batch(factory.create("E", f, list, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(seed), 100, 0));
+        b = Batch(factory.create("E", f, list, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(seed), 100, 0, ratingsOf(address(factory))));
     }
 
     /// Rating rules read the frozen score table. Here: ids 1..4 score 1000, 5000, 8000, 5500 (×10).
@@ -49,7 +50,7 @@ contract EligibilityTest is Test {
         Batch.Filter memory f;
         f.minScore = 4000;
         vm.prank(alice);
-        Batch b = Batch(f2.create("R", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(2), 100, 0));
+        Batch b = Batch(f2.create("R", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(2), 100, 0, ratingsOf(address(f2))));
         assertFalse(b.passes(1)); // 100.0 < 400.0
         assertTrue(b.passes(2));
         assertTrue(b.passes(3));
@@ -57,7 +58,7 @@ contract EligibilityTest is Test {
         assertFalse(b.passes(5)); // unknown id scores 0
         f.maxScore = 6000;
         vm.prank(alice);
-        Batch c = Batch(f2.create("R2", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(4), 100, 0));
+        Batch c = Batch(f2.create("R2", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(4), 100, 0, ratingsOf(address(f2))));
         assertTrue(c.passes(2));
         assertFalse(c.passes(3)); // 800 > 600
         assertFalse(c.passes(1));
@@ -68,7 +69,7 @@ contract EligibilityTest is Test {
         f.minScore = 100; // this factory has no ratings table
         vm.prank(alice);
         vm.expectRevert(Batch.BadFilter.selector);
-        factory.create("R", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(9), 100, 0);
+        factory.create("R", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(9), 100, 0, ratingsOf(address(factory)));
     }
 
     function test_PaymentWindow() public {
@@ -138,7 +139,7 @@ contract EligibilityTest is Test {
         Batch.Filter memory f;
         vm.prank(alice);
         vm.expectRevert(Batch.AllowlistTooLong.selector);
-        factory.create("E", f, list, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(1), 100, 0);
+        factory.create("E", f, list, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(1), 100, 0, ratingsOf(address(factory)));
     }
 
     function test_BadRangesRejected() public {
@@ -147,13 +148,13 @@ contract EligibilityTest is Test {
         f.paidTo = 5;
         vm.prank(alice);
         vm.expectRevert(Batch.BadFilter.selector);
-        factory.create("E", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(7), 100, 0);
+        factory.create("E", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(7), 100, 0, ratingsOf(address(factory)));
         Batch.Filter memory g;
         g.idFrom = 10;
         g.idTo = 5;
         vm.prank(alice);
         vm.expectRevert(Batch.BadFilter.selector);
-        factory.create("E", g, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(7), 100, 0);
+        factory.create("E", g, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(7), 100, 0, ratingsOf(address(factory)));
     }
 
     function test_CreatorsOwnDepositMustQualify() public {
@@ -161,6 +162,6 @@ contract EligibilityTest is Test {
         f.idFrom = 100;
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Batch.Excluded.selector, 5));
-        factory.create("E", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(5), 100, 0);
+        factory.create("E", f, none, 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(5), 100, 0, ratingsOf(address(factory)));
     }
 }

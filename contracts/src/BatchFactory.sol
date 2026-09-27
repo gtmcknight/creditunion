@@ -18,16 +18,19 @@ import {IAssembler} from "./interfaces/IAssembler.sol";
 ///         activates it, permanently. The delay is the notice: nothing locks until activation, and a full
 ///         batch then counts down Batch.LOCK_DELAY before it locks. The setter can replace a pending proposal
 ///         (restarting the delay) but has no other power, and none at all once an assembler is active.
+///
+///         The score table can move to a later rating methodology the same way: the fee recipient proposes a table
+///         covering the same edition, anyone activates it after RATINGS_DELAY, and only batches opened afterwards
+///         use it. Each batch keeps the table it opened with, so an open batch's rules never change.
 contract BatchFactory {
     uint256 public constant MIN_DURATION = 3 days;
     uint256 public constant MAX_DURATION = 90 days;
     uint256 public constant MAX_PROTOCOL_FEE_BPS = 500; // hard ceiling, deploy or later: 5%
     uint256 public constant MAX_CREATOR_FEE_BPS = 1000; // 10%
     uint256 public constant ASSEMBLER_DELAY = 30 minutes; // notice before a proposed assembler can go live
+    uint256 public constant RATINGS_DELAY = 30 minutes; // notice before a proposed score table can go live
 
     ICredits public immutable credits;
-    /// @notice The frozen official score table, or zero if rating rules are unavailable on this deployment.
-    IRatings public immutable ratings;
     address public immutable feeRecipient;
     /// @notice The one address that may propose an assembler. Irrelevant once one is active.
     address public immutable assemblerSetter;
@@ -43,6 +46,12 @@ contract BatchFactory {
     /// @notice Creator share of each Statement sale, in basis points, the same for every batch opened while it
     ///         is set. Same rules as the protocol fee; capped at MAX_CREATOR_FEE_BPS.
     uint256 public creatorFeeBps;
+    /// @notice The score table new batches open with, or zero if rating rules are unavailable on this deployment.
+    IRatings public ratings;
+    IRatings public pendingRatings;
+    uint64 public pendingRatingsUntil;
+    /// @dev Every table ever active, oldest first, so anyone can find each methodology's scores onchain.
+    IRatings[] internal _ratingsHistory;
     /// @notice Credits the creator must put in to open a batch.
     uint256 public immutable minOpen;
     address public immutable implementation;
@@ -54,6 +63,8 @@ contract BatchFactory {
     event AssemblerProposed(address indexed assembler, uint64 activatableAt);
     event AssemblerActivated(address indexed assembler);
     event FeesSet(uint256 protocolFeeBps, uint256 creatorFeeBps);
+    event RatingsProposed(address indexed ratings, uint64 activatableAt);
+    event RatingsActivated(address indexed ratings);
 
     error TooFewToOpen(uint256 min);
     error BadDuration();
@@ -69,6 +80,8 @@ contract BatchFactory {
     error NothingPending();
     error TooEarly();
     error NoAssembler();
+    error BadRatings();
+    error RatingsChanged(address ratings);
 
     /// @param assembler_ The adapter, or zero to open pooling before it exists (then `setter_` proposes it).
     constructor(
@@ -81,7 +94,11 @@ contract BatchFactory {
         uint256 creatorFeeBps_,
         uint256 minOpen_
     ) {
-        ratings = ratings_;
+        if (address(ratings_) != address(0)) {
+            ratings = ratings_;
+            _ratingsHistory.push(ratings_);
+            emit RatingsActivated(address(ratings_));
+        }
         if (feeRecipient_ == address(0)) revert NoFeeRecipient();
         if (address(assembler_) == address(0) && setter_ == address(0)) revert NoAssembler();
         credits = credits_;
@@ -136,12 +153,46 @@ contract BatchFactory {
         emit AssemblerActivated(address(assembler));
     }
 
+    // ---------------------------------------------------------------- ratings
+
+    /// @notice Propose a score table for batches opened from now on; it can be activated after RATINGS_DELAY.
+    ///         Replaces any pending proposal. Only the fee recipient. The table must cover the same number of
+    ///         Credits as the current one (any nonzero count if there is none).
+    function proposeRatings(IRatings r) external {
+        if (msg.sender != feeRecipient) revert NotFeeRecipient();
+        if (address(r) == address(0)) revert BadRatings();
+        uint256 n = r.count();
+        if (n == 0 || (address(ratings) != address(0) && n != ratings.count())) revert BadRatings();
+        pendingRatings = r;
+        pendingRatingsUntil = uint64(block.timestamp + RATINGS_DELAY);
+        emit RatingsProposed(address(r), pendingRatingsUntil);
+    }
+
+    /// @notice After RATINGS_DELAY, anyone makes the pending table the one new batches open with.
+    function activateRatings() external {
+        if (address(pendingRatings) == address(0)) revert NothingPending();
+        if (block.timestamp < pendingRatingsUntil) revert TooEarly();
+        IRatings r = pendingRatings;
+        delete pendingRatings;
+        delete pendingRatingsUntil;
+        if (r == ratings) return; // re-proposing the current table withdraws a proposal
+        ratings = r;
+        _ratingsHistory.push(r);
+        emit RatingsActivated(address(r));
+    }
+
+    /// @notice Every score table this factory has used, oldest first.
+    function ratingsHistory() external view returns (IRatings[] memory) {
+        return _ratingsHistory;
+    }
+
     /// @notice Open a batch with at least `minOpen` of your Credits.
     /// @param filter Trait hashes (0 for any), payment window and number range (0 for unbounded).
     /// @param allowlist Up to 200 specific Credit numbers that alone may join; empty for no list.
     /// @param reserve Opening bid floor, dropped if no bid within 7 days of assembly. 0 for none.
     /// @param expectProtocolFeeBps The fees shown to you before opening; the call reverts if either has changed
     ///        since, so a fee change can never be slipped in front of an opening batch.
+    /// @param expectRatings The score table shown to you before opening; same rule, for a table change.
     /// @dev The batch takes the factory's current protocol and creator fees and keeps them forever.
     /// @param arrangement How the 80 are ordered on the Statement (Batch.Arrangement).
     /// @param split How the sale is divided among the 80 positions (Batch.Split): equal, or early money earns more.
@@ -157,11 +208,13 @@ contract BatchFactory {
         uint256 duration,
         uint256[] calldata ids,
         uint256 expectProtocolFeeBps,
-        uint256 expectCreatorFeeBps
+        uint256 expectCreatorFeeBps,
+        IRatings expectRatings
     ) external returns (address batch) {
         if (protocolFeeBps != expectProtocolFeeBps || creatorFeeBps != expectCreatorFeeBps) {
             revert FeesChanged(protocolFeeBps, creatorFeeBps);
         }
+        if (ratings != expectRatings) revert RatingsChanged(address(ratings));
         if (ids.length < minOpen) revert TooFewToOpen(minOpen);
         if (duration < MIN_DURATION || duration > MAX_DURATION) revert BadDuration();
 
@@ -169,7 +222,7 @@ contract BatchFactory {
         isBatch[batch] = true;
         _batches.push(batch);
         Batch(batch).initialize(
-            msg.sender, name, filter, allowlist, reserve, protocolFeeBps, creatorFeeBps, arrangement, split, uint64(block.timestamp + duration)
+            msg.sender, name, filter, allowlist, reserve, protocolFeeBps, creatorFeeBps, arrangement, split, uint64(block.timestamp + duration), ratings
         );
         emit BatchCreated(batch, msg.sender, name, _batches.length - 1);
 

@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {ratingsOf} from "../../script/RatingsOf.sol";
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {Batch, IRatings} from "../../src/Batch.sol";
 import {BatchFactory} from "../../src/BatchFactory.sol";
@@ -128,7 +129,7 @@ contract Adversarial5Test is Test {
 
     function _open(BatchFactory f, address who, Batch.Filter memory filter, uint256[] memory ids) internal returns (Batch b) {
         vm.prank(who);
-        b = Batch(f.create("L", filter, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, ids, 200, 0));
+        b = Batch(f.create("L", filter, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, ids, 200, 0, ratingsOf(address(f))));
     }
 
     function _deposit(BatchFactory f, address who, Batch b, uint256[] memory ids) internal {
@@ -328,7 +329,7 @@ contract Adversarial5Test is Test {
         credits.mintAt(bob, 40, K_AT);
         Batch.Filter memory f;
         vm.prank(alice);
-        Batch b = Batch(factory.create("D", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 200, 0));
+        Batch b = Batch(factory.create("D", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 200, 0, ratingsOf(address(factory))));
         _deposit(factory, bob, b, _range(41, 40));
         uint256 g = gasleft();
         ready(b);
@@ -485,11 +486,11 @@ contract Adversarial5Test is Test {
         credits.mintAt(alice, 1, K_AT);
         vm.prank(alice);
         vm.expectRevert(Batch.BadFilter.selector);
-        factory.create("L", f, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, _one(1), 200, 0);
+        factory.create("L", f, new uint256[](0), 0, Batch.Arrangement.Layout, Batch.Split.Equal, 14 days, _one(1), 200, 0, ratingsOf(address(factory)));
         f.layout1 = 1 << 60;
         vm.prank(alice);
         vm.expectRevert(Batch.BadFilter.selector);
-        factory.create("L", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(1), 200, 0);
+        factory.create("L", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _one(1), 200, 0, ratingsOf(address(factory)));
     }
 
     // ---------------------------------------------------------------- 6. sweeps

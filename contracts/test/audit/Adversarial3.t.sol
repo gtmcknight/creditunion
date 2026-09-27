@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {ratingsOf} from "../../script/RatingsOf.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {Batch, IRatings} from "../../src/Batch.sol";
 import {BatchFactory} from "../../src/BatchFactory.sol";
@@ -179,7 +180,7 @@ contract Adversarial3Test is Test {
 
     function _open(BatchFactory f, address who, Batch.Arrangement how, uint256[] memory ids) internal returns (Batch) {
         vm.prank(who);
-        return Batch(f.create("A3", noFilter, new uint256[](0), 0, how, Batch.Split.Equal, 14 days, ids, 100, 0));
+        return Batch(f.create("A3", noFilter, new uint256[](0), 0, how, Batch.Split.Equal, 14 days, ids, 100, 0, ratingsOf(address(f))));
     }
 
     function _open(address who, uint256[] memory ids) internal returns (Batch) {
@@ -238,7 +239,7 @@ contract Adversarial3Test is Test {
             ICredits(address(c)), IRatings(address(0)), new MockAssembler(s), address(0), fee, 100, 0, 0
         );
         vm.prank(alice);
-        Batch b = Batch(f.create("M", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, new uint256[](0), 100, 0));
+        Batch b = Batch(f.create("M", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, new uint256[](0), 100, 0, ratingsOf(address(f))));
         vm.expectRevert(Batch.NoDepositor.selector);
         c.safeMintTo(address(b));
         assertEq(b.count(), 0);
@@ -288,13 +289,13 @@ contract Adversarial3Test is Test {
         // create with >80 or with duplicates reverts
         vm.prank(carol);
         vm.expectRevert();
-        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(101, 81), 100, 0);
+        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(101, 81), 100, 0, ratingsOf(address(factory)));
         uint256[] memory dup = new uint256[](2);
         dup[0] = 101;
         dup[1] = 101;
         vm.prank(carol);
         vm.expectRevert();
-        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, dup, 100, 0);
+        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, dup, 100, 0, ratingsOf(address(factory)));
         // hook with data that is not 32 bytes credits `from`; 32 bytes of zero credits `from`
         Batch b3 = _open(alice, _range(41, 10));
         vm.prank(carol);
@@ -469,7 +470,7 @@ contract Adversarial3Test is Test {
 
     function test_ReserveOnlyForSevenDays() public {
         vm.prank(alice);
-        Batch b = Batch(factory.create("R", noFilter, new uint256[](0), 5 ether, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0));
+        Batch b = Batch(factory.create("R", noFilter, new uint256[](0), 5 ether, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 40), 100, 0, ratingsOf(address(factory))));
         vm.prank(bob);
         factory.deposit(address(b), _range(51, 40));
         ready(b);
@@ -506,15 +507,15 @@ contract Adversarial3Test is Test {
         // minOpen boundary and durations
         vm.prank(carol);
         vm.expectRevert(abi.encodeWithSelector(BatchFactory.TooFewToOpen.selector, 10));
-        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(101, 9), 100, 0);
+        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(101, 9), 100, 0, ratingsOf(address(factory)));
         vm.prank(carol);
         vm.expectRevert(BatchFactory.BadDuration.selector);
-        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 3 days - 1, _range(101, 10), 100, 0);
+        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 3 days - 1, _range(101, 10), 100, 0, ratingsOf(address(factory)));
         vm.prank(carol);
         vm.expectRevert(BatchFactory.BadDuration.selector);
-        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 90 days + 1, _range(101, 10), 100, 0);
+        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 90 days + 1, _range(101, 10), 100, 0, ratingsOf(address(factory)));
         vm.prank(carol);
-        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 90 days, _range(101, 10), 100, 0);
+        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 90 days, _range(101, 10), 100, 0, ratingsOf(address(factory)));
     }
 
     // test_UnlockEdges covered the retired 7-day lock; the new edges are in test/Lock.t.sol.

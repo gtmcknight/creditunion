@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {ratingsOf} from "../script/RatingsOf.sol";
 import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {MockAssembler} from "../src/mocks/MockAssembler.sol";
@@ -46,7 +47,7 @@ contract SplitTest is Test {
 
     function _open(address who, uint256[] memory ids, Batch.Split split) internal returns (Batch b) {
         vm.prank(who);
-        b = Batch(factory.create("S", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, split, 14 days, ids, 200, 0));
+        b = Batch(factory.create("S", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, split, 14 days, ids, 200, 0, ratingsOf(address(factory))));
     }
 
     function _sell(Batch b, uint256 amount) internal {

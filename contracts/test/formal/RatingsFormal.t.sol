@@ -13,7 +13,7 @@ contract RatingsFormal is Test {
         chunk = DataStore.write(hex"2003" hex"3412" hex"401f");
         address[] memory c = new address[](1);
         c[0] = chunk;
-        ratings = new Ratings(c, 3);
+        ratings = new Ratings(c, 3, "test");
     }
 
     /// Unknown ids score 0, which Batch treats as "never admitted by a rating rule".
@@ -35,7 +35,7 @@ contract RatingsFormal is Test {
     function check_constructorRejectsWrongCount(uint256 n) public {
         address[] memory c = new address[](1);
         c[0] = chunk;
-        try new Ratings(c, n) {
+        try new Ratings(c, n, "test") {
             assert(n == 3);
         } catch {}
     }

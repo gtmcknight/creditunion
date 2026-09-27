@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {ratingsOf} from "../script/RatingsOf.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
@@ -81,7 +82,7 @@ contract BurnOrderTest is Test {
 
     function _create(Batch.Arrangement how, Batch.Filter memory f, uint256[] memory ids) internal returns (Batch) {
         vm.prank(bob);
-        return Batch(factory.create("B", f, new uint256[](0), 0, how, Batch.Split.Equal, 14 days, ids, 100, 0));
+        return Batch(factory.create("B", f, new uint256[](0), 0, how, Batch.Split.Equal, 14 days, ids, 100, 0, ratingsOf(address(factory))));
     }
 
     /// Churn: bob opens with 151..190, alice adds 1..30, bob leaves with 160..164, alice adds 31..45.
@@ -230,10 +231,10 @@ contract BurnOrderTest is Test {
     function test_InitializeRejectsRetired() public {
         vm.prank(bob);
         vm.expectRevert(Batch.ArrangementRetired.selector);
-        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.MintTime, Batch.Split.Equal, 14 days, _range(101, 1), 100, 0);
+        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.MintTime, Batch.Split.Equal, 14 days, _range(101, 1), 100, 0, ratingsOf(address(factory)));
         vm.prank(bob);
         vm.expectRevert(Batch.ArrangementRetired.selector);
-        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Creator, Batch.Split.Equal, 14 days, _range(101, 1), 100, 0);
+        factory.create("x", noFilter, new uint256[](0), 0, Batch.Arrangement.Creator, Batch.Split.Equal, 14 days, _range(101, 1), 100, 0, ratingsOf(address(factory)));
     }
 
     function test_InitializeAcceptsNumberDesc() public {

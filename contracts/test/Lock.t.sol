@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {ratingsOf} from "../script/RatingsOf.sol";
 import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {MockAssembler} from "../src/mocks/MockAssembler.sol";
@@ -58,7 +59,7 @@ contract LockTest is Test {
 
     function _fullFrom(BatchFactory f, uint256 off) internal returns (Batch b) {
         vm.prank(alice);
-        b = Batch(f.create("L", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1 + off, 40), 100, 0));
+        b = Batch(f.create("L", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1 + off, 40), 100, 0, ratingsOf(address(f))));
         vm.prank(bob);
         f.deposit(address(b), _range(101 + off, 40));
         assertEq(uint256(b.state()), uint256(Batch.State.Full));
