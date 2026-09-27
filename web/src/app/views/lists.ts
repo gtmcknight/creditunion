@@ -137,7 +137,6 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     const auctions = all.filter((b) => b.s.state !== 'Open' && b.s.state !== 'Expired');
     const list = tab === 'parties' ? parties : auctions;
     const bar = app.querySelector<HTMLElement>('.page-bar');
-    const tabsEl = app.querySelector<HTMLElement>('.page-bar .subtabs');
     // For you / All: shown only when something is for you; until someone picks, For you leads when it has any.
     let view: 'you' | 'all' | null = null;
     let stage: Stage | null = null;
@@ -152,10 +151,9 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       const rest = list.filter((b) => !forYou(b));
       const titled = (title: string, items: Listed[]) => (items.length ? `<h2 class="group-title">${title} <span class="num">${items.length}</span></h2>${grid(items)}` : '');
       if (tab === 'parties') {
+        // For you always shows; signed out it opens on All and For you asks to connect.
         const has = mine.length > 0;
-        if (tabsEl) tabsEl.hidden = !has;
-        if (bar) bar.hidden = !has && list.length < 4;
-        const v = has ? view ?? 'you' : 'all';
+        const v = view ?? (has ? 'you' : 'all');
         app.querySelectorAll<HTMLElement>('[data-stage]').forEach((b) =>
       b.addEventListener('click', () => {
         stage = b.dataset.stage as Stage;
@@ -164,11 +162,15 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     );
     app.querySelectorAll<HTMLElement>('[data-view]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === v)));
         const ny = document.getElementById('n-you'), na = document.getElementById('n-all');
-        if (ny) ny.textContent = String(mine.length);
+        if (ny) ny.textContent = session.account ? String(mine.length) : '';
         if (na) na.textContent = String(list.length);
         el.innerHTML = !list.length
           ? `<div class="empty-state"><p>No Credit Unions yet.</p><a class="btn primary" href="/create">Start a Credit Union</a></div>`
-          : grid(v === 'you' ? mine : list);
+          : v === 'you' && !session.account
+            ? `<div class="empty-state"><p>Connect to see the Credit Unions you're invited to.</p><button class="btn primary" data-connect>Connect wallet</button></div>`
+            : v === 'you' && !mine.length
+              ? `<p class="muted">None of your Credits fit an open Credit Union right now.</p>`
+              : grid(v === 'you' ? mine : list);
         hydrate(el);
         fillGhosts(el);
         return;

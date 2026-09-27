@@ -1,5 +1,6 @@
 import { dice, printGlyph, swatch, weightGlyph } from '../glyphs';
-import { loadEdition, mintSpan, paidAtOrAfter, PAL32, tile, type Edition } from '../wall';
+import facts from 'virtual:credits-facts';
+import { loadTimes, mintSpan, paidAtOrAfter, PAL32, printsFor, tile, type Mint, type Prints, WALL_BLOCK } from '../wall';
 import { creditsHead, pct } from './trait';
 
 const SUPPLY = 122_154;
@@ -7,80 +8,23 @@ const PRINTS = ['Registered', 'Nudge', 'Slip', 'Skew', 'Drift', 'Loose'];
 const WEIGHTS = ['even', 'lean', 'sparse', 'extreme'];
 const n = (x: number) => x.toLocaleString();
 
-/// Jack's ratings, tenths of a point (public/scores.bin), read once per visit.
-let scores: Promise<Uint16Array> | null = null;
-const loadScores = () =>
-  (scores ??= fetch('/scores.bin')
-    .then((r) => {
-      if (!r.ok) throw new Error('scores.bin missing');
-      return r.arrayBuffer();
-    })
-    .then((b) => new Uint16Array(b))
-    .catch((e) => {
-      scores = null;
-      throw e;
-    }));
-
-/// Everything the tiles show, counted once from the edition files (the same table /edition/match reads).
-type Facts = {
+/// Everything the tiles show, counted at build from the edition files (scripts/bins.mjs; the same table
+/// /edition/match reads), so the tiles draw with the page and read no data file.
+export type Facts = {
+  n: number; // Credits in the edition
   palette: [string, number][]; // mask letters, count
   eights: number[]; // Credits with 0..5 eights
   print: number[];
   weight: number[];
-  perHour: Uint32Array;
+  perHour: number[];
   hours: number;
   busiest: number; // payments in the busiest minute
-  rating: Uint32Array; // per ten points, 80..800
+  rating: number[]; // per ten points, 80..800
   top1: number; // tenths: the lowest rating in the top 1%
-  bits: Uint32Array; // per Bit, lo..hi
+  bits: number[]; // per Bit, lo..hi
   bitsLo: number;
   bitsHi: number;
 };
-let facts: Promise<Facts> | null = null;
-const loadFacts = () =>
-  (facts ??= Promise.all([loadEdition(), loadScores()]).then(([e, sc]) => {
-    const pal = new Array(16).fill(0), eights = new Array(6).fill(0), print = new Array(6).fill(0), weight = new Array(4).fill(0);
-    for (const v of e.traits) {
-      if (!v) continue;
-      pal[v & 15]++;
-      print[(v >> 4) & 7]++;
-      weight[(v >> 7) & 3]++;
-      eights[(v >> 9) & 31]++;
-    }
-    const palette = [1, 2, 3, 4]
-      .flatMap((k) => Array.from({ length: 15 }, (_, i) => i + 1).filter((m) => [0, 1, 2, 3].filter((b) => m & (1 << b)).length === k))
-      .map((m) => [[...'CMYK'].filter((_, b) => m & (1 << b)).join(''), pal[m]] as [string, number]);
-    const span = mintSpan(e);
-    const hours = Math.ceil((span.end - span.start + 1) / 3600);
-    const perHour = new Uint32Array(hours);
-    const perMin = new Map<number, number>();
-    for (let i = span.first; i < e.n; i++) {
-      perHour[Math.floor((e.times[i] - span.start) / 3600)]++;
-      const m = Math.floor(e.times[i] / 60);
-      perMin.set(m, (perMin.get(m) ?? 0) + 1);
-    }
-    const rating = new Uint32Array(72);
-    for (const t of sc) rating[Math.min(71, Math.max(0, Math.floor((t - 800) / 100)))]++;
-    const sorted = Uint16Array.from(sc).sort();
-    let lo = 65535, hi = 0;
-    for (const b of e.bits) (lo = Math.min(lo, b)), (hi = Math.max(hi, b));
-    const bits = new Uint32Array(hi - lo + 1);
-    for (const b of e.bits) bits[b - lo]++;
-    return {
-      palette,
-      eights,
-      print,
-      weight,
-      perHour,
-      hours: (span.end - span.start) / 3600,
-      busiest: Math.max(...perMin.values()),
-      rating,
-      top1: sorted[Math.max(0, sorted.length - Math.round(sorted.length / 100))],
-      bits,
-      bitsLo: lo,
-      bitsHi: hi,
-    };
-  }));
 
 /// A histogram as one SVG path, drawn in the text color; `hot(i)` bars in full ink, the rest faint.
 function bars(counts: ArrayLike<number>, hot: (i: number) => boolean = () => true, sqrt = false) {
@@ -199,28 +143,24 @@ export async function creditsPage(app: HTMLElement) {
     ).join('')}</div>
   </section>`;
 
-  const e = await loadEdition().catch(() => null);
-  if (!app.isConnected || !document.getElementById('cr-tiles')) return;
-  if (!e) {
-    app.querySelectorAll('.cr-fact').forEach((p) => (p.textContent = 'Couldn’t load the edition.'));
-    return;
-  }
-  drift(app.querySelector<HTMLElement>('.cr-strip')!, e);
-
-  const f = await loadFacts().catch(() => null);
-  if (!f || !document.getElementById('cr-tiles')) return;
   for (const t of TILES) {
     const el = app.querySelector<HTMLElement>(`.cr-tile[data-kind="${t.kind}"]`)!;
-    const [pic, fact] = t.draw(f, e.n);
+    const [pic, fact] = t.draw(facts, facts.n);
     el.querySelector('.cr-pic')!.innerHTML = pic;
     el.querySelector('.cr-fact')!.textContent = fact;
   }
+
+  // The strip after the tiles are up: payment times, then only the prints of the stretch it shows.
+  await new Promise((r) => requestAnimationFrame(() => setTimeout(r)));
+  const e = await loadTimes().catch(() => null);
+  const strip = app.querySelector<HTMLElement>('.cr-strip');
+  if (e && strip?.isConnected) drift(strip, e, printsFor(e.n));
 }
 
 /// The mint replayed across the strip: each second a column, its Credits stacked as they landed, each on its own
 /// white square over a see-through ground; it drifts on at four mint seconds a second. Along the bottom, the whole
 /// mint's payments per minute with a line where the strip is. Still under reduced motion; rests off screen.
-function drift(host: HTMLElement, e: Edition) {
+function drift(host: HTMLElement, e: Mint, prints: Prints) {
   const cv = host.querySelector('canvas')!;
   const nowEl = host.querySelector<HTMLElement>('.cr-now')!;
   const line = host.querySelector<HTMLElement>('.cr-head-line')!;
@@ -247,7 +187,7 @@ function drift(host: HTMLElement, e: Edition) {
     px = new Uint32Array(img.data.buffer);
   };
   const sec = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' });
-  let clock = span.start, shown = -1;
+  let clock = span.start, shown = -1, loading = false;
   const frame = () => {
     if (!px) return;
     px.fill(0);
@@ -255,8 +195,19 @@ function drift(host: HTMLElement, e: Edition) {
     const s = 8 * k, gap = Math.max(1, Math.round(dpr)), pitch = s + gap;
     const perSec = pitch + gap;
     const from = clock - W / perSec;
+    const i0 = paidAtOrAfter(e, Math.floor(from));
+    // The prints on screen, and half a block more before the strip gets there. Redraws once they land (a still
+    // strip too); a failed read isn't retried every frame.
+    const i1 = Math.min(e.n, paidAtOrAfter(e, Math.floor(clock) + 1) + WALL_BLOCK / 2);
+    if (!loading && (!prints.has(i0) || !prints.has(i1 - 1))) {
+      loading = true;
+      prints.need(i0, i1).then(() => {
+        loading = false;
+        frame();
+      }, () => {});
+    }
     let col = -1, stack = 0;
-    for (let i = paidAtOrAfter(e, Math.floor(from)); i < e.n && e.times[i] <= clock; i++) {
+    for (let i = i0; i < e.n && e.times[i] <= clock; i++) {
       const t = e.times[i];
       if (t !== col) (col = t), (stack = 0);
       const x = Math.round(W - (clock - t) * perSec) - s;
@@ -264,9 +215,9 @@ function drift(host: HTMLElement, e: Edition) {
       stack++;
       // Off the left or right edge: skip. (A negative end index would make fill() paint from the far end of
       // the buffer, which flashed the whole strip white.)
-      if (y < -s || x + s <= 0 || x >= W) continue;
+      if (y < -s || x + s <= 0 || x >= W || !prints.has(i)) continue;
       for (let dy = 0; dy < s; dy++) if (y + dy >= 0 && y + dy < H) px.fill(PAL32[0], (y + dy) * W + Math.max(0, x), (y + dy) * W + Math.min(W, x + s));
-      tile(px, W, H, e.cells, i, x, y, k);
+      tile(px, W, H, prints.cells, i, x, y, k);
     }
     cv.getContext('2d')!.putImageData(img!, 0, 0);
     line.style.left = `${((clock - span.start) / SPAN) * 100}%`;

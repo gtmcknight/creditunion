@@ -2,6 +2,7 @@
 /// A strip of Credits repeats every P pixels; where the hidden shape should float the repeat shortens.
 /// It's computed per pixel from a smooth depth map, so the shapes keep their curves instead of 16px blocks.
 /// Opened from the eye in the footer, full screen, Esc closes.
+import { loadCells } from './wall';
 
 const PALETTE = ['#ffffff', '#00b5e2', '#e4007c', '#00006e', '#ffd100', '#009400', '#e40000', '#000000', '#111111', '#000c0f', '#0f0008', '#000007', '#110e00', '#000a00', '#0f0000', '#000000'];
 const RGB = PALETTE.map((h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]);
@@ -180,8 +181,6 @@ const SUBJECTS: [string, Draw & { src?: string }][] = [
   ['Priced by Thirst', picture('/magic/6.png')],
 ];
 
-let cells: Promise<Uint8Array> | null = null;
-const loadCells = () => (cells ??= fetch('/wall.bin').then((r) => r.arrayBuffer()).then((b) => new Uint8Array(b)));
 
 /// A P-wide strip of random Credits, H tall: the texture that repeats across the wall.
 function strip(H: number, data: Uint8Array) {

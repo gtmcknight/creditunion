@@ -11,6 +11,7 @@ import { LAYOUT_TRAITS, keyOf, ruleFor, slotMark, slotName, type LayoutTrait } f
 import { bitsPath, ratingPath, setPath, timePath } from '../../shared/trait';
 import { editionArt } from '../ghosts';
 import { Room, booksOf, noRoomReason } from '../slots';
+import { bin } from '../bins';
 import { TRAIT_KINDS, parseTrait } from '../../shared/trait';
 
 const CHUNK = 40;
@@ -1008,8 +1009,7 @@ export async function create(app: HTMLElement) {
   const scoreHist = document.getElementById('score-hist')!;
   const scoreBins = new Array(72).fill(0);
   let scorePeak = 1;
-  fetch('/scores.bin')
-    .then((r) => r.arrayBuffer())
+  bin('scores.bin')
     .then((buf) => {
       for (const s of new Uint16Array(buf)) if (s) scoreBins[Math.min(71, Math.floor((s / 10 - 80) / 10))]++;
       scorePeak = Math.max(1, ...scoreBins);
@@ -1060,8 +1060,7 @@ export async function create(app: HTMLElement) {
   const bitsHist = document.getElementById('bits-hist')!;
   const bitsBins = new Array(BITS_HI - BITS_LO + 1).fill(0);
   let bitsPeak = 1;
-  fetch('/bits.bin')
-    .then((r) => r.arrayBuffer())
+  bin('bits.bin')
     .then((buf) => {
       for (const b of new Uint16Array(buf)) if (b >= BITS_LO && b <= BITS_HI) bitsBins[b - BITS_LO]++;
       bitsPeak = Math.max(1, ...bitsBins);

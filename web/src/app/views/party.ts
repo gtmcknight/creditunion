@@ -1,7 +1,7 @@
 import { parseAbi, parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi } from '../abi';
 import { canBatch, config, explorer, pub, send, sendBatch, session } from '../chain';
-import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, getSummary, hasLayout, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
+import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, forgetBatches, getBatch, getSummary, hasLayout, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { hydrate, pct, who } from '../ens';
 import { editionArt, examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
@@ -100,11 +100,16 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     addTab = { at: address, tab: 'mine' };
   }
   if (location.search) history.replaceState(history.state, '', location.pathname);
+  const s = b.s;
+  const burned = s.state === 'Auction' || s.state === 'Settled';
+  // On a layout batch the sheet shows every Credit in the slot it will burn into, not in deposit order.
+  const slots = hasLayout(s.filter) ? Array.from({ length: 80 }, (_, i) => layoutSlot(s.filter, i)) : null;
+  // The value of the painted trait each Credit in was booked under (Batch.keyOf), read alongside the wallet's
+  // own reads rather than after them.
+  const keysRead = slots && !burned ? depositedKeys(s.address, b.ids).catch(() => null) : null;
   const m: Mine = account ? await me(address, account) : null;
   const myIds = new Set(b.ids.filter((_, i) => same(b.depositors[i], account)).map(String));
-  const s = b.s;
   const rules = filterRules(s.filter, s.allowlistSize, (i) => layoutSlot(s.filter, i));
-  const burned = s.state === 'Auction' || s.state === 'Settled';
   const depositors = new Set(b.depositors.map((d) => d.toLowerCase())).size;
 
   // Cells added since this browser last saw the batch drop in, in deposit order.
@@ -115,16 +120,13 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     sessionStorage.setItem(seenKey, String(s.count));
   } catch {}
 
-  // On a layout batch the sheet shows every Credit in the slot it will burn into, not in deposit order.
-  const slots = hasLayout(s.filter) ? Array.from({ length: 80 }, (_, i) => layoutSlot(s.filter, i)) : null;
   let placed: (bigint | null)[] | undefined;
-  // The value of the painted trait each Credit in was booked under (Batch.keyOf): places them, and tells the
-  // picker what room is left. Null when unread (the picker then falls back to the rules alone).
-  let keyed: Map<string, number> | null = null;
-  if (slots && !burned) {
+  // The keys place the Credits in, and tell the picker what room is left. Null when unread (the picker then
+  // falls back to the rules alone).
+  const keyed: Map<string, number> | null = keysRead ? await keysRead : null;
+  if (slots && keyed) {
     try {
-      keyed = await depositedKeys(s.address, b.ids);
-      placed = b.ids.length ? placeOnLayout(slots, b.ids, (id) => keyed!.get(id.toString()) ?? 0) : undefined;
+      placed = b.ids.length ? placeOnLayout(slots, b.ids, (id) => keyed.get(id.toString()) ?? 0) : undefined;
     } catch {}
   }
   // Painted slot chips count the spaces left, not what the sheet was painted with.
@@ -251,6 +253,7 @@ function watchLive(app: HTMLElement, address: Address, s: Ctx['s'], rerender: ()
       if (`${stamp(n.state, n.count, n.highBid)}:${n.lockAt}:${n.state}` !== was) {
         clearInterval(live!);
         live = null;
+        forgetBatches(); // the lists should show it changed too
         await party(app, address, rerender);
       }
     } catch {}
@@ -634,14 +637,22 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
   if (s.state === 'Open' && m) drawPicker(b, m, keyed, run, txNote);
   if (b.ids.length) loadRatings(b, run, txNote);
   if (s.state === 'Open') {
+    // The Buy tab asks OpenSea for listings only once it's open.
+    let buying = false;
+    const buy = () => {
+      if (buying) return;
+      buying = true;
+      void bindBuy(b, !!m, run, txNote, keyed);
+    };
     document.querySelectorAll<HTMLButtonElement>('[data-add]').forEach((t) =>
       t.addEventListener('click', () => {
         document.querySelectorAll('[data-add]').forEach((x) => x.setAttribute('aria-selected', String(x === t)));
         document.querySelectorAll<HTMLElement>('[data-pane]').forEach((p) => (p.hidden = p.dataset.pane !== t.dataset.add));
         addTab = { at: s.address, tab: t.dataset.add! };
+        if (t.dataset.add === 'buy') buy();
       }),
     );
-    bindBuy(b, !!m, run, txNote, keyed);
+    if (document.querySelector('[data-add="buy"][aria-selected="true"]')) buy();
   }
 }
 
@@ -885,7 +896,7 @@ async function bindBuy(
   const tile = (id: string | number, src: string, price: string | null) =>
     `<button type="button" class="listing" data-id="${id}" aria-pressed="false" title="Credit #${id}${price === null ? '' : ' · tap to skip'}"${price === null ? ' disabled' : ''}><span class="art"><img src="${src}" alt="" loading="lazy" decoding="async"></span><span class="price num">${price === null ? `#${id}` : `${minEth(BigInt(price))} ETH`}</span></button>`;
 
-  let listings: { id: string; price: string }[] = [];
+  let listings: { id: string; price: string; traits?: number }[] = [];
   // preview: no OpenSea key here, so edition Credits stand in. mainnetOnly: real mainnet listings and prices,
   // but this party is on a testnet and can't take them.
   let preview = false;
@@ -921,12 +932,11 @@ async function bindBuy(
   // Testnet showing mainnet listings: the testnet sheet can't judge mainnet Credits, so book them against its
   // free slots by their real traits (mainnet the worker already asks the batch's canTake).
   let slotKey: ((id: string) => number) | null = null;
-  if (mainnetOnly && hasLayout(b.s.filter) && keyed) {
-    try {
-      const t = new Uint32Array(await (await fetch('/edition-traits.bin')).arrayBuffer());
-      const trait = b.s.filter.layoutTrait ?? 0;
-      slotKey = (id) => layoutKey(trait, t[Number(id) - 1] ?? 0);
-    } catch {}
+  if (mainnetOnly && hasLayout(b.s.filter) && keyed && listings.every((l) => l.traits !== undefined)) {
+    // Each preview listing comes with its packed edition traits (worker/index.ts), so no edition file to read.
+    const t = new Map(listings.map((l) => [l.id, l.traits ?? 0]));
+    const trait = b.s.filter.layoutTrait ?? 0;
+    slotKey = (id) => layoutKey(trait, t.get(id) ?? 0);
   }
   const chosen = () => {
     const free = pool.filter((l) => !skipped.has(l.id));

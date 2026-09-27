@@ -1,7 +1,7 @@
 import { go } from '../main';
 import { listBatches, type Listed } from '../data';
 import { fromLocalInput, toLocalInput } from '../ui';
-import { loadEdition, mintSpan, paidAtOrAfter, PAL32, tile } from '../wall';
+import { loadTimes, mintSpan, paidAtOrAfter, PAL32, printsFor, tile } from '../wall';
 import { rangeStrip, stripHTML } from './range';
 import { bindPairTabs, creditTiles, drawOpenUnions, creditsHead, pairTabs, pct } from './trait';
 
@@ -32,7 +32,8 @@ export async function timePage(app: HTMLElement) {
   </section>`;
   bindPairTabs();
   const sv = app.querySelector<HTMLCanvasElement>('.time-stream canvas')!;
-  const e = await loadEdition().catch(() => null);
+  // Payment times drive everything here; prints load only for the window on screen (printsFor).
+  const e = await loadTimes().catch(() => null);
   if (!sv.isConnected) return;
   if (!e) {
     document.getElementById('time-readout')!.textContent = 'Couldn’t load the mint.';
@@ -98,13 +99,14 @@ export async function timePage(app: HTMLElement) {
     img = new ImageData(W, H);
     px = new Uint32Array(img.data.buffer);
   };
+  const prints = printsFor(e.n);
   // Below a whole art tile, a Credit is one square of its most-used ink mix.
   const rep = new Uint32Array(e.n);
   const repOf = (i: number) => {
     if (rep[i]) return rep[i];
     const n = new Uint8Array(16);
     for (let c = 0; c < 32; c++) {
-      const byte = e.cells[i * 32 + c];
+      const byte = prints.cells[i * 32 + c];
       n[byte & 15]++;
       n[byte >> 4]++;
     }
@@ -153,10 +155,11 @@ export async function timePage(app: HTMLElement) {
       const x = x0 + c * pitch;
       const y = unit < 1 ? H - 1 - Math.floor(j * unit) : H - (j + 1) * pitch + gap;
       j++;
+      if (!prints.has(i)) continue; // its block is still on the way; drawStream runs again when it lands
       if (s >= 8) {
         // Each Credit keeps its own white paper square; tile() draws only the inked cells.
         if (x + s > 0 && x < W) for (let dy = 0; dy < s; dy++) if (y + dy >= 0 && y + dy < H) px.fill(PAL32[0], (y + dy) * W + Math.max(0, x), (y + dy) * W + Math.min(W, x + s));
-        tile(px, W, H, e.cells, i, x, y, s / 8);
+        tile(px, W, H, prints.cells, i, x, y, s / 8);
       }
       else {
         const color = repOf(i), side = unit < 1 ? 1 : s;
@@ -249,6 +252,14 @@ export async function timePage(app: HTMLElement) {
     showMore();
   };
   let timer = 0, queued = false;
+  const redraw = () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => {
+      queued = false;
+      if (sv.isConnected) drawStream();
+    });
+  };
   function update(now = false) {
     strip.set(a, b);
     drawReadout();
@@ -258,13 +269,9 @@ export async function timePage(app: HTMLElement) {
       const [pa, pb] = PICKS[p.dataset.pick!];
       p.setAttribute('aria-pressed', String(pa === a && pb === b));
     });
-    if (!queued) {
-      queued = true;
-      requestAnimationFrame(() => {
-        queued = false;
-        if (sv.isConnected) drawStream();
-      });
-    }
+    redraw();
+    // The window's prints; the stream draws again once they're in.
+    prints.need(lo(), hi()).then(redraw, () => {});
     clearTimeout(timer);
     if (now) settle();
     else timer = window.setTimeout(settle, 250);

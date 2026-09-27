@@ -97,6 +97,11 @@ export async function ensureChain() {
   }
 }
 
+/// Run after each transaction we send settles (landed, reverted or refused), so cached reads start over.
+const txDone = new Set<() => void>();
+export const onTx = (f: () => void) => txDone.add(f);
+const settled = () => txDone.forEach((f) => f());
+
 /// Simulate, send, wait. Simulation surfaces the contract's revert reason before the wallet opens.
 export async function send(
   req: { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[]; value?: bigint; gas?: bigint },
@@ -106,11 +111,15 @@ export async function send(
   await ensureChain();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { request } = await pub.simulateContract({ ...(req as any), account: session.account });
-  const hash = await session.wallet.writeContract({ ...request, chain } as never);
-  onHash?.(hash);
-  const receipt = await pub.waitForTransactionReceipt({ hash });
-  if (receipt.status !== 'success') throw new Error('Transaction reverted.');
-  return receipt;
+  try {
+    const hash = await session.wallet.writeContract({ ...request, chain } as never);
+    onHash?.(hash);
+    const receipt = await pub.waitForTransactionReceipt({ hash });
+    if (receipt.status !== 'success') throw new Error('Transaction reverted.');
+    return receipt;
+  } finally {
+    settled();
+  }
 }
 
 /// Can the wallet run several calls as one atomic step on this chain (EIP-5792)? False on any doubt: an error,
@@ -153,9 +162,13 @@ export async function sendBatch(calls: Call[], onSubmit?: (id: string) => void) 
     calls: calls.map((c) => ({ to: c.address, abi: c.abi, functionName: c.functionName, args: c.args })) as never,
   });
   onSubmit?.(id);
-  const res = await session.wallet.waitForCallsStatus({ id, timeout: 15 * 60_000 });
-  if (res.status !== 'success' || res.receipts?.some((r) => r.status !== 'success')) throw new Error('Transaction reverted.');
-  return res.receipts ?? [];
+  try {
+    const res = await session.wallet.waitForCallsStatus({ id, timeout: 15 * 60_000 });
+    if (res.status !== 'success' || res.receipts?.some((r) => r.status !== 'success')) throw new Error('Transaction reverted.');
+    return res.receipts ?? [];
+  } finally {
+    settled();
+  }
 }
 
 export const explorer = (kind: 'tx' | 'address', v: string) =>

@@ -171,7 +171,7 @@ export function home(app: HTMLElement) {
     </section>`;
 
   const headline = `<h1><span>Join a Credit Union</span> <span>to make a Statement together.</span></h1>`;
-  const cta = `<p class="wall-cta"><a class="btn primary" href="/unions">Browse Credit Unions</a><a class="btn" href="/create">Start your own</a></p>`;
+  const cta = `<p class="wall-cta"><a class="btn primary" href="/unions">Browse Credit Unions →</a><a class="btn" href="/create">Start your own</a></p>`;
   app.innerHTML = `
   <section class="hero"><div id="wall"></div><div class="hero-text">${headline}${cta}</div></section>
   <article class="about doc">

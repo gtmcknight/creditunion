@@ -1,6 +1,6 @@
 import type { Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi } from './abi';
-import { config, pub } from './chain';
+import { config, onTx, pub } from './chain';
 
 export const STATES = ['Open', 'Full', 'Expired', 'Auction', 'Settled'] as const;
 export type StateName = (typeof STATES)[number];
@@ -129,7 +129,21 @@ function toSummary(address: Address, s: Record<string, unknown>): Summary {
 
 export type Listed = { s: Summary; ids: readonly bigint[]; depositors: readonly Address[] };
 
-export async function listBatches(limit = 60): Promise<Listed[]> {
+/// The Credit Union list is read by most pages (about eleven calls), so one read serves every page for a few
+/// seconds. Forgotten after any transaction of ours and whenever a page sees a Credit Union change.
+const LIST_MS = 10_000;
+let listed: { limit: number; at: number; p: Promise<Listed[]> } | null = null;
+export function listBatches(limit = 60): Promise<Listed[]> {
+  if (listed && listed.limit === limit && Date.now() - listed.at < LIST_MS) return listed.p;
+  const p = readBatches(limit);
+  const entry = (listed = { limit, at: Date.now(), p });
+  p.catch(() => listed === entry && (listed = null)); // a failed read is retried next time, not remembered
+  return p;
+}
+export const forgetBatches = () => void (listed = null);
+onTx(forgetBatches);
+
+async function readBatches(limit: number): Promise<Listed[]> {
   const addrs = await pub.readContract({
     address: config.factory,
     abi: factoryAbi,

@@ -2,6 +2,7 @@
 ///   /config.json   chain id and contract addresses for the app
 ///   /rpc           read-only JSON-RPC proxy to our contracts (and Credits' art) only (keeps the provider key private)
 ///   /art/...       a Credit's art, read from Jack's art contract and cached forever (art never changes)
+///   /*.bin         the edition's data files, precompressed at build and cached by the browser until they change
 ///   /opensea/quote cheapest OpenSea listings that fit a batch, as signed Seaport orders for the Sweeper
 ///   /opensea/credit/:id  one Credit's best OpenSea listing price (mainnet's, as a preview, on testnets)
 ///   /ens/:address  primary ENS name (always from mainnet), cached a day
@@ -82,6 +83,9 @@ const CSP = [
   "form-action 'self'",
 ].join('; ');
 
+/// Responses whose body is already compressed (serveBin): passed on as they are, not encoded again.
+const precompressed = new WeakSet<Response>();
+
 function secure(res: Response, url: URL) {
   const h = new Headers(res.headers);
   h.set('x-frame-options', 'DENY');
@@ -92,7 +96,7 @@ function secure(res: Response, url: URL) {
     h.set('strict-transport-security', 'max-age=31536000; includeSubDomains');
     if (!h.has('content-security-policy')) h.set('content-security-policy', CSP);
   }
-  return new Response(res.body, { status: res.status, headers: h });
+  return new Response(res.body, { status: res.status, headers: h, encodeBody: precompressed.has(res) ? 'manual' : 'automatic' });
 }
 
 const text = (s: string, status: number) => new Response(s, { status });
@@ -199,6 +203,13 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
 
   if (url.pathname === '/rpc') return rpc(req, env, url);
 
+  // Data files; any other .bin (og/font.bin) is the plain asset, as before these came through here.
+  if (url.pathname.endsWith('.bin')) {
+    const binFile = url.pathname.match(/^\/((?:wall\/\d{1,3})|[a-z-]+)\.bin$/);
+    const res = binFile && (req.method === 'GET' || req.method === 'HEAD') ? await serveBin(req, env, url, binFile[1]) : null;
+    return res ?? env.ASSETS.fetch(req);
+  }
+
   // Design-time counts: how many Credits in the edition satisfy a rule set.
   if (url.pathname === '/edition/match') {
     if (req.method !== 'POST' || !sameSite(req)) return text('forbidden', 403);
@@ -283,7 +294,13 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       // mainnet listings and prices, checked against the party's rules via the frozen edition.
       const live = hasSweeper(env);
       const listings = live ? await fitting(env, url, ctx, batch as Address) : await previewFitting(env, url, ctx, batch as Address);
-      return Response.json({ listings: listings.map((l) => ({ id: l.id, price: l.price })), preview: !live }, { headers: { 'cache-control': 'no-store' } });
+      // A preview's listings carry their packed edition traits, so the Buy tab can book them against the sheet's
+      // slots without reading edition-traits.bin (478 KB) itself.
+      const table = live ? null : await load(env.ASSETS, url.origin).catch(() => null);
+      return Response.json(
+        { listings: listings.map((l) => ({ id: l.id, price: l.price, ...(table ? { traits: table[Number(l.id) - 1] ?? 0 } : {}) })), preview: !live },
+        { headers: { 'cache-control': 'no-store' } },
+      );
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
     }
@@ -454,10 +471,14 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     // Even opened directly, the SVG can run nothing and reach nothing.
     const svgHeaders = { 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" };
     try {
+      // The art contract is read once per isolate (artOf), not per Credit.
       const [seed, ts, artAddr] = await Promise.all([
         c.readContract({ address: creditsAddr, abi: creditsAbi, functionName: 'seedOf', args: [id] }),
         c.readContract({ address: creditsAddr, abi: creditsAbi, functionName: 'timestampOf', args: [id] }),
-        c.readContract({ address: creditsAddr, abi: creditsAbi, functionName: 'art' }),
+        artOf(env, creditsAddr, c).then((a) => {
+          if (!a) throw new Error('no art contract');
+          return a as Address;
+        }),
       ]);
       if (/^0x0+$/.test(seed)) {
         const miss = new Response('no such credit', { status: 404, headers: { 'cache-control': 'public, max-age=300' } });
@@ -601,7 +622,15 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
 
   const allowed = new Set([env.CREDITS, env.FACTORY, env.SWEEPER].map((a) => a?.toLowerCase()).filter(Boolean));
   const clean: { jsonrpc: string; id: unknown; method: string; params: unknown[] }[] = [];
+  // Targets outside `allowed`, by the call that first names each. They are checked together below (Credits' art
+  // contract once, each batch address once, in parallel), not one call at a time.
+  const others = new Map<string, number>();
+  let refused: Response | null = null; // the first malformed call's answer, once the calls before it are cleared
   for (const c of calls) {
+    refused = checkCall(c);
+    if (refused) break;
+  }
+  function checkCall(c: unknown): Response | null {
     if (!c || typeof c !== 'object') return text('bad call', 400);
     const { id, method, params } = c as { id?: unknown; method?: unknown; params?: unknown };
     if (typeof method !== 'string' || !RPC_METHODS.has(method)) return text('method not allowed', 403);
@@ -614,7 +643,7 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
       const to = String(call.to ?? '').toLowerCase();
       const data = String(call.data ?? '0x');
       if (!/^0x[0-9a-f]{40}$/.test(to) || !/^0x([0-9a-fA-F]{2}){0,8192}$/.test(data)) return text('bad call', 400);
-      if (!allowed.has(to) && to !== (await artOf(env)) && !(await isBatch(env, url, to as Address))) return text('target not allowed', 403);
+      if (!allowed.has(to) && !others.has(to)) others.set(to, clean.length);
       // `from` rides along (only as an address): simulating a write needs the real sender, or msg.sender is 0x0.
       const from = String(call.from ?? '').toLowerCase();
       // and `value` (a hex quantity), so a bid simulates with the ETH it carries.
@@ -630,7 +659,17 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
       out = [];
     }
     clean.push({ jsonrpc: '2.0', id: id ?? null, method, params: out });
+    return null;
   }
+  // eth_call only to our contracts: Credits, the factory, the Sweeper, Credits' art contract, or a batch the
+  // factory made. Every target named before the first malformed call must pass, as when checked in order.
+  if (others.size) {
+    const art = await artOf(env);
+    const rest = [...others.keys()].filter((to) => to !== art);
+    const ok = await Promise.all(rest.map((to) => isBatch(env, url, to as Address)));
+    if (ok.some((x) => !x)) return text('target not allowed', 403);
+  }
+  if (refused) return refused;
   const upstream = await fetch(rpcUrl(env), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -789,26 +828,29 @@ async function fitting(env: Env, url: URL, ctx: ExecutionContext, batch: Address
   return listings;
 }
 
-/// Credits' art contract, as Credits itself names it (`art()`), so the app can ask it for a Credit's traits
-/// (describe) the way a batch does. Read once per isolate; only a well-formed nonzero address is ever allowed.
-let artAddr: { credits: string; at: Promise<string | null> } | null = null;
-function artOf(env: Env): Promise<string | null> {
-  const credits = env.CREDITS.toLowerCase();
-  if (!artAddr || artAddr.credits !== credits) {
-    const at = client(env)
-      .readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'art' })
+/// A Credits contract's art contract, as Credits itself names it (`art()`): the app asks it for a Credit's traits
+/// (describe) the way a batch does, and /art draws with it. Read once per isolate per Credits contract (the
+/// configured one, and mainnet's for previews); only a well-formed nonzero address is ever returned.
+const artAddrs = new Map<string, Promise<string | null>>();
+function artOf(env: Env, credits: Address = env.CREDITS, c: ReturnType<typeof client> = client(env)): Promise<string | null> {
+  const key = credits.toLowerCase();
+  let at = artAddrs.get(key);
+  if (!at) {
+    const read = c
+      .readContract({ address: credits, abi: creditsAbi, functionName: 'art' })
       .then((a) => {
         const v = String(a).toLowerCase();
         return /^0x[0-9a-f]{40}$/.test(v) && !/^0x0+$/.test(v) ? v : null;
       })
       .catch(() => null);
+    at = read;
+    artAddrs.set(key, read);
     // A failed read is retried on the next call rather than remembered.
-    artAddr = { credits, at };
-    void at.then((v) => {
-      if (v === null && artAddr?.at === at) artAddr = null;
+    void read.then((v) => {
+      if (v === null && artAddrs.get(key) === read) artAddrs.delete(key);
     });
   }
-  return artAddr.at;
+  return at;
 }
 
 /// Whether an address is one of our factory's batches. Positives are cached forever (a batch is one for good).
@@ -825,4 +867,58 @@ async function isBatch(env: Env, url: URL, addr: Address): Promise<boolean> {
   }
   await cache.put(key, new Response(ok ? '1' : '0', { headers: { 'cache-control': `public, max-age=${ok ? 31536000 : 60}` } }));
   return ok;
+}
+
+/// Credits per block of wall.bin, as scripts/bins.mjs cuts them.
+const WALL_BLOCK = 4096;
+
+/// /<file>.bin and /wall/<k>.bin: the edition's data files. The build keeps a brotli and a gzip copy beside each
+/// (scripts/bins.mjs), handed out as they are, since Cloudflare leaves application/octet-stream uncompressed. The
+/// app asks with the file's content hash (?v=), so the browser keeps it for good; without one, for five minutes.
+/// Null when there is no such file: the request then goes to the assets as before. The Worker's own reads
+/// (env.ASSETS) never come through here, so they still get the raw bytes.
+async function serveBin(req: Request, env: Env, url: URL, name: string): Promise<Response | null> {
+  const asset = (path: string) =>
+    env.ASSETS.fetch(new Request(`${url.origin}/${path}`)).then((r) => (r.ok && !(r.headers.get('content-type') ?? '').includes('text/html') ? r : null));
+  // Encodings the client takes (q=0 means no).
+  const takes = new Set(
+    (req.headers.get('accept-encoding') ?? '')
+      .split(',')
+      .map((p) => p.trim().split(';'))
+      .filter(([, q]) => !q || !/^\s*q\s*=\s*0(\.0*)?\s*$/.test(q))
+      .map(([e]) => e.trim().toLowerCase()),
+  );
+  let found: Response | null = null, encoding = '';
+  // Cloudflare hands the Worker a normalized Accept-Encoding and decompresses for clients that can't take the
+  // encoding. `vite preview` can't pass a precompressed body on, so on localhost the raw file goes.
+  for (const [enc, ext] of [['br', 'br'], ['gzip', 'gz']] as const) {
+    if (!takes.has(enc) || isDev(url)) continue;
+    found = await asset(`${name}.bin.${ext}`);
+    if (found) {
+      encoding = enc;
+      break;
+    }
+  }
+  found ??= await asset(`${name}.bin`);
+  let body: BodyInit | null = found?.body ?? null;
+  if (!found) {
+    // Development serves public/ as it is, without the build's blocks: cut the block from wall.bin here.
+    const k = Number(name.match(/^wall\/(\d+)$/)?.[1] ?? -1);
+    const whole = k >= 0 && isDev(url) ? await asset('wall.bin') : null;
+    if (!whole) return null;
+    const cut = (await whole.arrayBuffer()).slice(k * WALL_BLOCK * 32, (k + 1) * WALL_BLOCK * 32);
+    if (!cut.byteLength) return null;
+    body = cut;
+  }
+  const h = new Headers({
+    'content-type': 'application/octet-stream',
+    vary: 'accept-encoding',
+    'cache-control': isDev(url) ? 'no-cache' : url.searchParams.has('v') ? 'public, max-age=31536000, immutable' : 'public, max-age=300',
+  });
+  if (encoding) h.set('content-encoding', encoding);
+  const len = found?.headers.get('content-length');
+  if (len) h.set('content-length', len);
+  const res = new Response(req.method === 'HEAD' ? null : body, { headers: h, encodeBody: encoding ? 'manual' : 'automatic' });
+  if (encoding) precompressed.add(res);
+  return res;
 }

@@ -4,10 +4,11 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import { cloudflare } from '@cloudflare/vite-plugin';
+import { bins } from './bins.mjs';
 
 export default defineConfig({
   root: fileURLToPath(new URL('..', import.meta.url)),
   cacheDir: 'node_modules/.vite-e2e',
-  plugins: [cloudflare({ configPath: process.env.E2E_WRANGLER, persistState: false })],
+  plugins: [cloudflare({ configPath: process.env.E2E_WRANGLER, persistState: false }), bins()],
   server: { port: Number(process.env.E2E_PORT ?? 5191), strictPort: true, host: '127.0.0.1' },
 });

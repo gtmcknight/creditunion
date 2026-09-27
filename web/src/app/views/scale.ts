@@ -1,5 +1,6 @@
 import type { Listed } from '../data';
 import { listBatches } from '../data';
+import { bin } from '../bins';
 import { rangeStrip, stripHTML } from './range';
 import { bindPairTabs, creditTiles, drawOpenUnions, creditsHead, pairTabs, pct } from './trait';
 
@@ -161,11 +162,6 @@ async function scalePage(app: HTMLElement, s: Spec) {
   new ResizeObserver(() => host.isConnected && strip.resize()).observe(host);
 }
 
-const bin = (path: string) =>
-  fetch(path).then((r) => {
-    if (!r.ok) throw new Error(`${path} missing`);
-    return r.arrayBuffer();
-  });
 
 const failed = (app: HTMLElement, title: string) => {
   app.innerHTML = `<section class="prose"><h1>${title}</h1><p class="error">Couldn’t load the edition.</p></section>`;
@@ -197,7 +193,7 @@ export async function ratingPage(app: HTMLElement) {
   app.innerHTML = `<section class="trait-page time-page">${creditsHead('rating')}<h2 class="page-sub">Rating</h2><p class="muted">Loading…</p></section>`;
   let raw: ArrayBuffer, ed: ArrayBuffer;
   try {
-    [raw, ed] = await Promise.all([bin('/scores.bin'), bin('/edition.bin')]);
+    [raw, ed] = await Promise.all([bin('scores.bin'), bin('edition.bin')]);
   } catch {
     return failed(app, 'Rating');
   }
@@ -254,7 +250,7 @@ export async function bitsPage(app: HTMLElement) {
   app.innerHTML = `<section class="trait-page time-page">${creditsHead('bits')}<h2 class="page-sub">Bits</h2><p class="muted">Loading…</p></section>`;
   let raw: ArrayBuffer;
   try {
-    raw = await bin('/bits.bin');
+    raw = await bin('bits.bin');
   } catch {
     return failed(app, 'Bits');
   }

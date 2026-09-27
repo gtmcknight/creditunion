@@ -5395,7 +5395,7 @@ a.who:hover .who-name {
 .wall-frame .wall-menu :is(.wall-expand, .wall-pause, .wall-zoomrow) {
   background: rgba(255, 255, 255, 0.94) !important;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 4px 12px -6px rgba(0, 0, 0, 0.25) !important;
-  border-radius: 8px !important;
+  border-radius: 0 !important;
   height: 32px !important;
   color: #111 !important;
 }
@@ -6448,3 +6448,25 @@ dialog.eligible::backdrop {
 .sort-pick select:focus, .sort-pick select:focus-visible { outline: none; box-shadow: none; }
 .sort-pick select { width: auto; height: auto; box-shadow: none; background: none; font-size: 14px; }
 .sort-pick select:focus { box-shadow: none; }
+/* Calls to action in empty states are square, like the hero's. */
+.empty-state .btn { border-radius: 0; }
+
+/* One shape: every button and button-like control is square. */
+:root { --r: 0px; --r-lg: 0px; }
+.btn, button.btn, a.btn, .subtabs a, .subtabs button, .seg, .seg span, .sort-pick, .acct-menu, .acct-menu > a, .acct-menu > button,
+.theme, .wall-tools button, .wall-zoom, .wall-expand, .listing, .tile, .brush, .arr-tile, .win-presets button, input, select, textarea {
+  border-radius: 0;
+}
+.rule-chip, .chip, .tag, .pick, .created-link { border-radius: 0; }
+/* Hero: black is the headline, white is what you click. */
+.hero-text .wall-cta .btn.primary { background: #fff; color: #0a0a0a; font-weight: 600; }
+.hero-text .wall-cta .btn:hover { background: #ececea; }
+/* The signed-in account reads as a name, not a button: no box, a quiet hover. */
+.btn.acct { background: none; box-shadow: none; border: 0; padding: 0 6px; }
+.btn.acct:hover, .btn.acct[aria-expanded='true'] { background: var(--surface); }
+.wall-tools, .wall-tools *, .wall-modes, .wall-modes button, .wall-zoomrow, .wall-card, .wall-hover, .slot-tip, .pick-tip { border-radius: 0 !important; }
+/* FAQ rows: the + brightens with the row on hover, and stays bright while open. */
+.faq summary::after { transition: color 150ms var(--ease); }
+.faq summary:hover::after, .faq details[open] summary::after { color: var(--fg); }
+/* Expanded, the wall covers the whole screen, whatever height its band had on the page. */
+.hero .wall-frame.expanded, .wall-frame.expanded { height: auto; }
