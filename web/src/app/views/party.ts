@@ -161,6 +161,11 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       <div class="takes"><h3>Who can join</h3><div class="rule-chips">${rules.length ? rules.map(rule).join('') : '<span class="rule-chip">Any Credit</span>'}</div></div>
       <div id="panel">${panel(b, m, myIds)}</div>
       <div class="folds">
+      ${s.state === 'Settled' ? `<details class="more" id="unclaimed" hidden>
+        <summary><span>Unclaimed</span><span class="muted small num" id="unclaimed-total"></span></summary>
+        <div class="dues" id="unclaimed-list"></div>
+        <p class="small muted">Anyone can send a member their share. It goes to them, you pay the gas.</p>
+      </details>` : ''}
       ${s.state === 'Auction' || s.state === 'Settled' ? `<details class="more" id="bids" open>
         <summary><span>Bids</span><span class="muted small" id="bids-count">…</span></summary>
         <ol class="bid-list" id="bid-list"><li class="muted small">Loading…</li></ol>
@@ -460,7 +465,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
       : '';
     return `<div class="box">
       <div class="bid-now"><div><span>Sold</span><strong class="num">${eth(s.highBid)}</strong></div><div><span>${s.split === 1 ? "Avg per Credit" : "Per Credit"}</span><strong class="num">${eth(per)}</strong></div></div>
-      <p class="small muted">To ${who(s.highBidder, 'sm', true)}</p>
+      <p class="small muted sold-to">To ${who(s.highBidder, 'sm', true)}</p>
       ${mine}${owed}
     </div>`;
   }
@@ -572,6 +577,8 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
       send({ address: s.address, abi: batchAbi, functionName: 'claim', args: [session.account!] }, txNote),
     'Claimed.'),
   );
+
+  if (s.state === 'Settled') void drawUnclaimed(b, run, txNote);
 
   document.getElementById('owed')?.addEventListener('click', (e) =>
     run(e.currentTarget as HTMLElement, 'Collecting…', () =>
@@ -1021,6 +1028,46 @@ async function bindBuy(
 }
 
 /// Official ratings for the sheet: the facts row, cell tooltips, and the creator's arranger presets.
+/// Settled: members who haven't claimed their share yet. `claim` pays the member whoever sends it, so any wallet
+/// can push a share out; the connected member's own share is the Claim button above, not listed here.
+async function drawUnclaimed(
+  b: Ctx,
+  run: (btn: HTMLElement | null, label: string, fn: () => Promise<unknown>, ok: string) => Promise<void>,
+  txNote: (h: string) => void,
+) {
+  const el = document.getElementById('unclaimed');
+  if (!el) return;
+  const account = session.account;
+  const members = [...new Map(b.depositors.map((d) => [d.toLowerCase(), d])).values()].filter((d) => !same(d, account));
+  const owed = (
+    await Promise.all(
+      members.map(async (addr) => ({
+        addr,
+        amount: (await pub.readContract({ address: b.s.address, abi: batchAbi, functionName: 'claimable', args: [addr] })) as bigint,
+      })),
+    )
+  ).filter((r) => r.amount > 0n);
+  if (!owed.length || !el.isConnected) return;
+  const total = owed.reduce((n, r) => n + r.amount, 0n);
+  document.getElementById('unclaimed-total')!.textContent = `${eth(total)} · ${owed.length} member${owed.length === 1 ? '' : 's'}`;
+  const list = document.getElementById('unclaimed-list')!;
+  list.innerHTML = owed
+    .sort((x, y) => (y.amount > x.amount ? 1 : y.amount < x.amount ? -1 : 0))
+    .map(
+      (r) => `<div class="due">${who(r.addr, 'sm', true)}<span class="num muted">${eth(r.amount)}</span>${
+        account ? `<button class="btn sm" data-claim-for="${r.addr}">Claim for them</button>` : '<button class="btn sm" data-connect>Connect to claim</button>'
+      }</div>`,
+    )
+    .join('');
+  hydrate(list);
+  el.hidden = false;
+  list.querySelectorAll<HTMLButtonElement>('[data-claim-for]').forEach((btn) =>
+    btn.addEventListener('click', () =>
+      run(btn, 'Claiming…', () => send({ address: b.s.address, abi: batchAbi, functionName: 'claim', args: [btn.dataset.claimFor as Address] }, txNote), 'Sent to them.'),
+    ),
+  );
+}
+
 async function loadRatings(
   b: Ctx,
   run: (btn: HTMLElement | null, label: string, fn: () => Promise<unknown>, ok: string) => Promise<void>,

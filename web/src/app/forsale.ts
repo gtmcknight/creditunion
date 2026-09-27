@@ -25,6 +25,9 @@ const COUNTS = [1, 5, 10, 20];
 const MAX_SWEEP = 20;
 /// Buying runs where the Sweeper is deployed (mainnet); elsewhere the prices are mainnet's, as a preview.
 const canBuy = (preview?: boolean) => !preview && !!config.sweeper;
+/// The Sweeper's fee on every buy, read once, so the button says it before the wallet does.
+let feeBps: Promise<bigint> | null = null;
+const sweepFee = () => (feeBps ??= pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'feeBps' }) as Promise<bigint>);
 
 /// /credits: the eight cheapest Credits for sale anywhere, laid out like a trait page's grid with the same Buy row
 /// (tap to pick, or 1 / 5 / 10), and a way through to all of them. It replaces the page's skeleton of the same
@@ -115,11 +118,20 @@ export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement) 
     host.querySelectorAll<HTMLInputElement>('input[name=sale-n]').forEach((r) => (r.checked = false));
     mark();
   });
+  let fee = '';
+  if (canBuy(sale.preview))
+    void sweepFee().then(
+      (bps) => {
+        fee = bps ? ` + ${Number(bps) / 100}% fee` : '';
+        mark();
+      },
+      () => {},
+    );
   const mark = () => {
     clear.hidden = !picked.size;
     grid.querySelectorAll<HTMLElement>('.cc').forEach((c) => c.classList.toggle('sel', picked.has(c.dataset.id!)));
     const total = chosen().reduce((a, l) => a + BigInt(l.price), 0n);
-    go.textContent = picked.size ? `Buy ${picked.size} · ${minEth(total)} ETH →` : 'Pick Credits to buy';
+    go.textContent = picked.size ? `Buy ${picked.size} · ${minEth(total)} ETH${fee} →` : 'Pick Credits to buy';
     if (!sale.preview && config.sweeper) go.disabled = !picked.size;
   };
   host.querySelectorAll<HTMLInputElement>('input[name=sale-n]').forEach((r) =>

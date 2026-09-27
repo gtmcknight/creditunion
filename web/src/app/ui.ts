@@ -1,5 +1,5 @@
 import { formatEther, type Address } from 'viem';
-import { config } from './chain';
+import { chain, config } from './chain';
 
 export const $ = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) => root.querySelector<T>(s)!;
 export const $$ = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) =>
@@ -101,7 +101,7 @@ export function errText(e: unknown): string {
   const m = err.shortMessage ?? err.message ?? String(e);
   if (/rejected|denied/i.test(m)) return 'Cancelled in wallet.';
   // A revert with no reason usually means the wallet ran it somewhere else (wrong network, stale page).
-  if (/reverted with the following reason:\s*$/.test(m.split('\n').slice(0, 2).join(' ').trim())) return 'The network rejected it without a reason. Check your wallet is on Sepolia, refresh, and try again.';
+  if (/reverted with the following reason:\s*$/.test(m.split('\n').slice(0, 2).join(' ').trim())) return `The network rejected it without a reason. Check your wallet is on ${chain.name}, refresh, and try again.`;
   return m.split('\n')[0];
 }
 

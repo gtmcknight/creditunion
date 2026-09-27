@@ -1260,6 +1260,11 @@ dialog form {
   outline: 1px solid var(--img-outline);
   outline-offset: -1px;
 }
+.sold-to {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .who-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2448,6 +2453,12 @@ a.rule-chip:hover {
 }
 .more .facts {
   border-top: 0;
+}
+.more > .dues + p {
+  margin: 10px 0 16px;
+}
+.more .due:last-child {
+  border-bottom: 0;
 }
 .batch-art .cell img {
   transition: opacity 160ms var(--ease);
