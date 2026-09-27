@@ -61,7 +61,7 @@ export async function previews(app: HTMLElement) {
   document.getElementById('og-samples')?.remove();
   grid.insertAdjacentHTML(
     'afterend',
-    `<div id="og-samples"><h2 class="og-h">Credit union cards, every state</h2><div class="og-grid">${SAMPLES.map(
+    `<div id="og-samples"><h2 class="og-h">Credit Union cards, every state</h2><div class="og-grid">${SAMPLES.map(
       ([k, l]) => `<figure class="og-sample"><img src="/og/sample/${k}.png" alt="" loading="lazy"><figcaption>${l}</figcaption></figure>`,
     ).join('')}</div></div>`,
   );

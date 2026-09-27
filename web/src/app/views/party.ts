@@ -9,6 +9,7 @@ import { keyOf as layoutKey } from '../../shared/layout';
 import { Room, books, depositedKeys, keysOf, noRoomReason, type Books } from '../slots';
 import { $$, art, clock, errText, esc, eth, same, sheet, short, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
+import { go as navigate } from '../main';
 
 const CHUNK = 40; // Credits per transaction; keeps each one well under the block gas limit
 // One Credit sent straight to the party: the Batch records the sender as depositor, no approval needed.
@@ -70,11 +71,13 @@ type Mine = Awaited<ReturnType<typeof me>> | null;
 const shareUrl = (s: Ctx['s']) => `${location.origin}/union/${s.address}?s=${stamp(s.state, s.count, s.highBid)}`;
 
 let picks = new Set<string>();
-/// Which Add Credits tab is open, per credit union, so a live refresh doesn't flip it back.
+/// A Credit to preselect once its picker draws (the ?pick= link).
+let pickAsk: { at: string; id: string } | null = null;
+/// Which Add Credits tab is open, per Credit Union, so a live refresh doesn't flip it back.
 let addTab: { at: string; tab: string } | null = null;
 /// Transactions in flight on this page: live refreshes wait while one is.
 let busy = 0;
-/// The live-refresh timer for the credit union on screen (one at a time).
+/// The live-refresh timer for the Credit Union on screen (one at a time).
 let live: ReturnType<typeof setInterval> | null = null;
 const LIVE_MS = 12_000; // about one block
 
@@ -86,10 +89,17 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     if (!ours) throw 0;
     b = got;
   } catch {
-    app.innerHTML = `<section class="prose"><h1>Credit union not found</h1><p><a href="/unions">← Credit Unions</a></p></section>`;
+    app.innerHTML = `<section class="prose"><h1>Credit Union not found</h1><p><a href="/unions">← Credit Unions</a></p></section>`;
     return;
   }
   const account = session.account;
+  // /union/0x…?pick=123 (from a Credit's page): open on Your Credits with that one picked, if it fits.
+  const want = new URLSearchParams(location.search).get('pick');
+  if (want && /^\d{1,6}$/.test(want)) {
+    pickAsk = { at: address.toLowerCase(), id: want };
+    addTab = { at: address, tab: 'mine' };
+  }
+  if (location.search) history.replaceState(history.state, '', location.pathname);
   const m: Mine = account ? await me(address, account) : null;
   const myIds = new Set(b.ids.filter((_, i) => same(b.depositors[i], account)).map(String));
   const s = b.s;
@@ -174,10 +184,17 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   // Chrome keeps a focus ring on <summary> after a mouse click; drop it for pointer use only.
   app.querySelectorAll<HTMLElement>('.more summary').forEach((el) => el.addEventListener('pointerup', () => setTimeout(() => el.blur(), 0)));
   fillGhosts(app);
+  // A Credit on the sheet opens its own page.
+  app.querySelector('.batch-art')?.addEventListener('click', (e) => {
+    const c = (e.target as HTMLElement).closest<HTMLElement>('.cell[data-id]');
+    if (!c) return;
+    if ((e as MouseEvent).metaKey || (e as MouseEvent).ctrlKey) window.open(`/credit/${c.dataset.id}`, '_blank');
+    else navigate(`/credit/${c.dataset.id}`);
+  });
   document.getElementById('share')?.addEventListener('click', async () => {
     const url = shareUrl(s);
     try {
-      if (navigator.share && matchMedia('(pointer: coarse)').matches) await navigator.share({ title: s.name || 'A credit union on creditunion.fun', url });
+      if (navigator.share && matchMedia('(pointer: coarse)').matches) await navigator.share({ title: s.name || 'A Credit Union on creditunion.fun', url });
       else {
         await navigator.clipboard.writeText(url);
         toast('Link copied', 'ok', 2500);
@@ -215,7 +232,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
 }
 
 /// Keep the page current while someone sits on it: every block or so, read the summary and redraw when the
-/// credit union changed (someone deposited, withdrew, bid, or it locked). Waits while the tab is hidden, a
+/// Credit Union changed (someone deposited, withdrew, bid, or it locked). Waits while the tab is hidden, a
 /// transaction is in flight or a dialog is open. New Credits drop in with the usual animation.
 function watchLive(app: HTMLElement, address: Address, s: Ctx['s'], rerender: () => void) {
   if (live) clearInterval(live);
@@ -247,7 +264,7 @@ function justJoined(address: string, n: number) {
   } catch {}
 }
 
-/// Congrats on a new credit union, or on joining one (`joined` = Credits just deposited), with its link and
+/// Congrats on a new Credit Union, or on joining one (`joined` = Credits just deposited), with its link and
 /// ways to pass it on.
 function openCreated(b: Ctx, placed?: (bigint | null)[], joined?: number) {
   const s = b.s;
@@ -255,15 +272,15 @@ function openCreated(b: Ctx, placed?: (bigint | null)[], joined?: number) {
   const name = s.name || 'Untitled';
   const left = 80 - s.count;
   const text = joined
-    ? `I joined ${name}, a credit union pooling 80 Credits into a Statement.${left > 0 ? ` ${left} to go.` : ''}`
-    : `Join my credit union: ${name}. 80 Credits make a Statement.`;
+    ? `I joined ${name}, a Credit Union pooling 80 Credits into a Statement.${left > 0 ? ` ${left} to go.` : ''}`
+    : `Join my Credit Union: ${name}. 80 Credits make a Statement.`;
   const x = `https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
   const d = document.createElement('dialog');
   d.className = 'created';
   d.innerHTML = `<form method="dialog">
     <div class="created-art">${sheet(b.ids, { size: 'sm', placed })}</div>
-    <div class="created-head"><h3>${joined ? 'You’re in' : 'Your credit union is live'}</h3><p class="muted">${joined ? `${joined} ${joined === 1 ? 'Credit' : 'Credits'} in ${esc(name)} · ${left > 0 ? `${left} to go` : 'full'}` : esc(name)}</p></div>
-    <input class="created-link" type="text" readonly value="${esc(url)}" aria-label="Credit union link">
+    <div class="created-head"><h3>${joined ? 'You’re in' : 'Your Credit Union is live'}</h3><p class="muted">${joined ? `${joined} ${joined === 1 ? 'Credit' : 'Credits'} in ${esc(name)} · ${left > 0 ? `${left} to go` : 'full'}` : esc(name)}</p></div>
+    <input class="created-link" type="text" readonly value="${esc(url)}" aria-label="Credit Union link">
     <div class="created-actions">
       <a class="btn primary" href="${esc(x)}" target="_blank" rel="noopener">Share on X</a>
       <button type="button" class="btn" id="created-copy">Copy link</button>
@@ -308,8 +325,11 @@ function split(s: Ctx['s']) {
 
 const fact = (k: string, v: string) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
 /// A rule row; hovering it lights the slots it governs on the sheet (every slot unless it's a layout row).
-const rule = (r: Rule) =>
-  `<span class="rule-chip" data-slots="${r.slots ? r.slots.join(',') : 'all'}">${r.swatch ? `<span class="swatches">${maskInks(r.swatch).map((c) => `<i style="background:${c}"></i>`).join('')}</span>` : ''}${esc(r.label)} <span class="num">${esc(r.value)}</span></span>`;
+/// A row with a trait page is a link to it.
+const rule = (r: Rule) => {
+  const tag = r.href ? 'a' : 'span';
+  return `<${tag} class="rule-chip"${r.href ? ` href="${esc(r.href)}"` : ''} data-slots="${r.slots ? r.slots.join(',') : 'all'}">${r.swatch ? `<span class="swatches">${maskInks(r.swatch).map((c) => `<i style="background:${c}"></i>`).join('')}</span>` : ''}${esc(r.label)} <span class="num">${esc(r.value)}</span></${tag}>`;
+};
 const link = (a: string) => {
   const u = explorer('address', a);
   return u ? `<a href="${u}" target="_blank" rel="noopener" class="mono">${short(a)} ↗</a>` : `<span class="mono">${short(a)}</span>`;
@@ -354,7 +374,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
   // Your Credits in this party as tiles: pick some to withdraw just those, or leave none picked to take all.
   const withdraw = (primary = false) =>
     myIds.size
-      ? `<div class="yours-in"><p class="small fit-row"><span>Yours in this credit union <span class="muted num">${myIds.size}</span></span><span id="w-actions"><button type="button" class="link small" id="w-clear" hidden>Clear</button></span></p>
+      ? `<div class="yours-in"><p class="small fit-row"><span>Yours in this Credit Union <span class="muted num">${myIds.size}</span></span><span id="w-actions"><button type="button" class="link small" id="w-clear" hidden>Clear</button></span></p>
         <div class="picker" id="w-picker">${[...myIds].map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="false" aria-label="Credit #${id}"><img src="${art(BigInt(id))}" alt="" loading="lazy"></button>`).join('')}</div>
         <button class="btn block${primary ? ' primary' : ''}" id="withdraw">Withdraw all ${plural(myIds.size)}</button></div>`
       : '';
@@ -662,6 +682,11 @@ async function drawPicker(
     // Picks carried over from before a redraw: keep the ones that still land, in the order they were picked.
     const r = new Room(bk, room);
     picks = new Set([...picks].filter((p) => fits.some((f) => f.toString() === p) && r.take(keyOf(p))));
+    if (pickAsk?.at === s.address.toLowerCase()) {
+      const id = pickAsk.id;
+      pickAsk = null;
+      if (fits.some((f) => f.toString() === id) && r.take(keyOf(id))) picks.add(id);
+    }
   }
 
   // The rest of your Credits, folded underneath with why they don't fit.
@@ -672,7 +697,7 @@ async function drawPicker(
     off.set(why, [...(off.get(why) ?? []), id]);
   }
   const outside = m.owned.filter((id) => !inRules.has(id.toString()));
-  if (outside.length) off.set('Outside this credit union’s rules', outside);
+  if (outside.length) off.set('Outside this Credit Union’s rules', outside);
   const offCount = [...off.values()].reduce((n, x) => n + x.length, 0);
   const offTile = (id: bigint) => `<button type="button" class="pick off" data-id="${id}" aria-disabled="true" aria-label="Credit #${id}"><img src="${art(id)}" alt="" loading="lazy"></button>`;
   const fold = offCount
@@ -690,7 +715,7 @@ async function drawPicker(
     // Nothing to deposit: say so, and point at the other ways in.
     if (line)
       line.outerHTML = `<div class="empty-mine">
-        <p>${!m.owned.length ? 'You don’t hold any Credits yet.' : passing.length ? `None of your ${m.owned.length} Credits fit: the sheet has no slot left for them.` : `None of your ${m.owned.length} Credits fit this credit union’s rules.`}</p>
+        <p>${!m.owned.length ? 'You don’t hold any Credits yet.' : passing.length ? `None of your ${m.owned.length} Credits fit: the sheet has no slot left for them.` : `None of your ${m.owned.length} Credits fit this Credit Union’s rules.`}</p>
         <button type="button" class="btn block" data-go-buy>Buy Credits</button>
         ${config.chainId !== 1 ? '<a class="small" href="/mint">Mint test Credits</a>' : ''}
       </div>${fold}`;
@@ -698,7 +723,7 @@ async function drawPicker(
     el.remove();
     return;
   }
-  if (line) line.innerHTML = `<span><strong class="num">${most.length}</strong> of your ${m.owned.length} Credits fit this credit union.</span><span class="fit-actions" id="fit-actions"></span>`;
+  if (line) line.innerHTML = `<span><strong class="num">${most.length}</strong> of your ${m.owned.length} Credits fit this Credit Union.</span><span class="fit-actions" id="fit-actions"></span>`;
 
   el.innerHTML = fits
     .map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="${picks.has(id.toString())}" aria-label="Credit #${id}"><img src="${art(id)}" alt="" loading="lazy"></button>`)
@@ -803,6 +828,9 @@ async function drawPicker(
     });
     draw();
   };
+  // Scroll the picker (not the page) to the first pick, so a preselected Credit is in view.
+  const first = el.querySelector<HTMLElement>('.pick[aria-pressed="true"]');
+  if (first) el.scrollTop += first.getBoundingClientRect().top - el.getBoundingClientRect().top - 6;
   el.addEventListener('click', (e) => {
     const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.pick');
     if (!btn || btn.classList.contains('off')) return;

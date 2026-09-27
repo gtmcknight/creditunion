@@ -1,4 +1,5 @@
 import { slotName } from '../shared/layout';
+import { bitsPath, ratingPath, setPath, slotPath, timePath } from '../shared/trait';
 import { keccak256, toBytes, type Hex } from 'viem';
 import type { Summary } from './data';
 
@@ -45,8 +46,9 @@ const INK_NAMES = ['Cyan', 'Magenta', 'Yellow', 'Black'];
 /// "Black", "Cyan + black" for a palette mask.
 export const inkName = (m: number) => INK_NAMES.filter((_, b) => m & (1 << b)).join(' + ').replace(/ \+ (\w)/g, (_, c) => ` + ${c.toLowerCase()}`);
 
-export type Rule = { label: string; value: string; swatch?: number; slots?: number[] };
-/// A batch's rules one per row, for the batch page. `slots`: the sheet slots a row governs (all when absent).
+export type Rule = { label: string; value: string; swatch?: number; slots?: number[]; href?: string };
+/// A batch's rules one per row, for the batch page. `slots`: the sheet slots a row governs (all when absent);
+/// `href`: the trait page for the Credits the row admits.
 export function filterRules(f: Summary['filter'], allowlistSize: number, slotOf: (i: number) => number): Rule[] {
   const rows: Rule[] = [];
   if (f.layout0 || f.layout1) {
@@ -57,17 +59,22 @@ export function filterRules(f: Summary['filter'], allowlistSize: number, slotOf:
     }
     const t = f.layoutTrait ?? 0;
     for (const [m, slots] of by)
-      rows.push(t === 0 ? { label: `${inkName(m)} slots`, value: String(slots.length), swatch: m, slots } : { label: `${slotName(t, m)} slots`, value: String(slots.length), slots });
+      rows.push(t === 0 ? { label: `${inkName(m)} slots`, value: String(slots.length), swatch: m, slots, href: slotPath(t, m) } : { label: `${slotName(t, m)} slots`, value: String(slots.length), slots, href: slotPath(t, m) });
     const open = Array.from({ length: 80 }, (_, i) => i).filter((i) => !slotOf(i));
     if (open.length) rows.push({ label: 'Open slots', value: String(open.length), slots: open });
   }
-  if (f.palettes) rows.push({ label: 'Palette', value: setLabels(f.palettes, TRAITS.colors, (l) => paletteBit(l)).join(', ') });
-  if (f.prints) rows.push({ label: 'Print', value: setLabels(f.prints, TRAITS.print, (_, i) => i).join(', ') });
-  if (f.weights) rows.push({ label: 'Weight', value: setLabels(f.weights, TRAITS.weight, (_, i) => i).join(', ') });
-  if (f.eights) rows.push({ label: 'Eights', value: Array.from({ length: 32 }, (_, n) => n).filter((n) => f.eights & (1 << n)).join(', ') });
-  if (f.paidFrom || f.paidTo) rows.push({ label: 'Paid', value: window(f.paidFrom, f.paidTo).replace(/^Paid /, '') });
+  if (f.palettes) rows.push({ label: 'Palette', value: setLabels(f.palettes, TRAITS.colors, (l) => paletteBit(l)).join(', '), href: setPath('palette', f.palettes) });
+  if (f.prints) rows.push({ label: 'Print', value: setLabels(f.prints, TRAITS.print, (_, i) => i).join(', '), href: setPath('print', f.prints) });
+  if (f.weights) rows.push({ label: 'Weight', value: setLabels(f.weights, TRAITS.weight, (_, i) => i).join(', '), href: setPath('weight', f.weights) });
+  if (f.eights) rows.push({ label: 'Eights', value: Array.from({ length: 32 }, (_, n) => n).filter((n) => f.eights & (1 << n)).join(', '), href: setPath('eights', f.eights) });
+  if (f.paidFrom || f.paidTo) rows.push({ label: 'Paid', value: window(f.paidFrom, f.paidTo).replace(/^Paid /, ''), href: timePath(f.paidFrom, f.paidTo) });
   if (f.minScore || f.maxScore)
-    rows.push(f.minScore && f.maxScore ? { label: 'Rating range', value: `${f.minScore / 10}–${f.maxScore / 10}` } : f.minScore ? { label: 'Min rating', value: `${f.minScore / 10}` } : { label: 'Max rating', value: `${f.maxScore / 10}` });
+    rows.push({
+      ...(f.minScore && f.maxScore ? { label: 'Rating range', value: `${f.minScore / 10}–${f.maxScore / 10}` } : f.minScore ? { label: 'Min rating', value: `${f.minScore / 10}` } : { label: 'Max rating', value: `${f.maxScore / 10}` }),
+      href: ratingPath(f.minScore, f.maxScore),
+    });
+  if (f.bitsFrom || f.bitsTo)
+    rows.push({ label: 'Bits', value: f.bitsFrom && f.bitsTo ? `${f.bitsFrom}–${f.bitsTo}` : f.bitsFrom ? `${f.bitsFrom}+` : `up to ${f.bitsTo}`, href: bitsPath(f.bitsFrom, f.bitsTo) });
   if (f.idFrom || f.idTo) rows.push({ label: 'Credit #', value: f.idFrom && f.idTo ? `${f.idFrom}–${f.idTo}` : f.idFrom ? `${f.idFrom}+` : `up to ${f.idTo}` });
   if (allowlistSize) rows.push({ label: 'Listed', value: `${allowlistSize} Credits` });
   return rows;

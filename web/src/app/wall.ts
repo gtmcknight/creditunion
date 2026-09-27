@@ -12,7 +12,7 @@
 /// Subtractive mixes as the contract's SVG draws them, indexed by the 4-bit CMYK mask (0 = paper).
 const PALETTE = ['#ffffff', '#00b5e2', '#e4007c', '#00006e', '#ffd100', '#009400', '#e40000', '#000000', '#111111', '#000c0f', '#0f0008', '#000007', '#110e00', '#000a00', '#0f0000', '#000000'];
 // RGBA packed little-endian for a Uint32 view of ImageData.
-const PAL32 = PALETTE.map((h) => (255 << 24) | (parseInt(h.slice(5, 7), 16) << 16) | (parseInt(h.slice(3, 5), 16) << 8) | parseInt(h.slice(1, 3), 16));
+export const PAL32 = PALETTE.map((h) => (255 << 24) | (parseInt(h.slice(5, 7), 16) << 16) | (parseInt(h.slice(3, 5), 16) << 8) | parseInt(h.slice(1, 3), 16));
 const LETTERS = 'CMYK';
 const inks = (m: number) => [...LETTERS].filter((_, b) => m & (1 << b)).join('');
 
@@ -36,9 +36,9 @@ const ICONS: Record<Mode, string> = {
   one: `<rect x="3" y="3" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5"/>` + sq(5.5, 5.5, 2.5) + sq(8, 8, 2.5),
 };
 
-type Edition = { cells: Uint8Array; palette: Uint8Array; bits: Uint16Array; times: Uint32Array; n: number };
+export type Edition = { cells: Uint8Array; palette: Uint8Array; traits: Uint32Array; bits: Uint16Array; times: Uint32Array; n: number };
 let edition: Promise<Edition> | null = null;
-const load = () =>
+export const loadEdition = () =>
   (edition ??= Promise.all([
     fetch('/wall.bin').then((r) => r.arrayBuffer()),
     fetch('/edition-traits.bin').then((r) => r.arrayBuffer()),
@@ -50,8 +50,21 @@ const load = () =>
     const traits = new Uint32Array(t);
     const palette = new Uint8Array(n);
     for (let i = 0; i < n; i++) palette[i] = traits[i] & 15; // same packing as worker/match.ts
-    return { cells, palette, bits: new Uint16Array(b), times: new Uint32Array(ts), n };
+    return { cells, palette, traits, bits: new Uint16Array(b), times: new Uint32Array(ts), n };
   }));
+
+/// Stream: index of the first Credit paid at or after a unix second (indexes are in payment order).
+export function paidAtOrAfter(e: Edition, t: number) {
+  let lo = 0, hi = e.n;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (e.times[mid] < t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+/// The mint's first and last payment, skipping Jack's two early Credits, weeks before the mint.
+export const mintSpan = (e: Edition) => ({ first: Math.min(2, e.n - 1), start: e.times[Math.min(2, e.n - 1)], end: e.times[e.n - 1] });
 
 /// Slot → Credit index for each mode. Ties fall back to payment order, so every order is stable.
 const orders = new Map<Mode, Uint32Array>();
@@ -67,7 +80,7 @@ function orderFor(e: Edition, mode: Mode) {
 }
 
 /// Draw one Credit at (x, y) in a Uint32 pixel buffer `w` wide, `k` pixels per cell.
-function tile(px: Uint32Array, w: number, h: number, cells: Uint8Array, id: number, x: number, y: number, k: number) {
+export function tile(px: Uint32Array, w: number, h: number, cells: Uint8Array, id: number, x: number, y: number, k: number) {
   for (let cell = 0; cell < 64; cell++) {
     const byte = cells[id * 32 + (cell >> 1)];
     const m = cell & 1 ? byte >> 4 : byte & 15;
@@ -111,7 +124,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
     </div>
   </figure>`;
   const cv = host.querySelector('canvas')!;
-  const e = await load().catch(() => null);
+  const e = await loadEdition().catch(() => null);
   if (!e || !cv.isConnected) return;
 
   const day = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -132,18 +145,8 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
   const byPalette: number[][] = Array.from({ length: 16 }, () => []);
   for (let i = 0; i < e.n; i++) byPalette[e.palette[i]].push(i);
   const pals = byPalette.map((l, p) => [p, l] as const).filter(([, l]) => l.length).map(([p]) => p);
-  // Stream: first Credit paid at or after a unix second (ids are in payment order).
-  const atOrAfter = (t: number) => {
-    let lo = 0, hi = e.n;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (e.times[mid] < t) lo = mid + 1;
-      else hi = mid;
-    }
-    return lo;
-  };
-  const MINT_START = e.times[Math.min(2, e.n - 1)]; // skip Jack's two early Credits, weeks before the mint
-  const MINT_END = e.times[e.n - 1];
+  const atOrAfter = (t: number) => paidAtOrAfter(e, t);
+  const { start: MINT_START, end: MINT_END } = mintSpan(e);
   const SPAN = Math.max(1, MINT_END - MINT_START);
   // Payments per minute across the mint, for the scrubber strip under Stream and One by one.
   const perMin = new Uint16Array(Math.ceil(SPAN / 60) + 1);

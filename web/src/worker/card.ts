@@ -169,8 +169,8 @@ export async function drawParty(fetcher: Fetcher, origin: string, p: PartyCard):
   const label =
     p.state === 'Settled' ? 'Sold'
     : p.state === 'Auction' ? (p.highBid > 0n ? (live ? 'At auction' : 'Auction ended') : 'At auction')
-    : p.state === 'Full' ? 'Full credit union'
-    : 'Credit union';
+    : p.state === 'Full' ? 'Full Credit Union'
+    : 'Credit Union';
   c.text(LABEL, label, x0, 92, MUTED);
 
   const name = c.wrap(TITLE, p.name || 'Untitled', colW, 2);
@@ -197,6 +197,25 @@ export async function drawParty(fetcher: Fetcher, origin: string, p: PartyCard):
     c.text(BODY, sub, x0, statY + 50, MUTED);
   }
 
+  c.text(LABEL, 'creditunion.fun', x0, H - 44, INK);
+  return png(c.px);
+}
+
+/// One Credit, large on the left from the edition's cells, its number on the right.
+export async function drawCredit(fetcher: Fetcher, origin: string, id: number): Promise<Uint8Array> {
+  const { cells, faces } = await load(fetcher, origin);
+  const c = new Canvas(faces);
+  const k = 66, T = 8 * k, sx = 51, sy = 51;
+  c.rect(sx - 1, sy - 1, T + 2, T + 2, TRACK);
+  c.rect(sx, sy, T, T, rgb('#ffffff'));
+  if (id <= cells.length / 32)
+    for (let cell = 0; cell < 64; cell++) {
+      const m = (cells[(id - 1) * 32 + (cell >> 1)] >> ((cell & 1) * 4)) & 15;
+      if (m) c.rect(sx + (cell % 8) * k, sy + Math.floor(cell / 8) * k, k, k, MIX[m]);
+    }
+  const x0 = 660;
+  c.text(LABEL, 'Credit', x0, 92, MUTED);
+  c.text(TITLE, `#${id.toLocaleString('en-US')}`, x0, 166, INK);
   c.text(LABEL, 'creditunion.fun', x0, H - 44, INK);
   return png(c.px);
 }

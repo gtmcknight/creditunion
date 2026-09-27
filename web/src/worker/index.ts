@@ -3,16 +3,18 @@
 ///   /rpc           read-only JSON-RPC proxy to our contracts (and Credits' art) only (keeps the provider key private)
 ///   /art/...       a Credit's art, read from Jack's art contract and cached forever (art never changes)
 ///   /opensea/quote cheapest OpenSea listings that fit a batch, as signed Seaport orders for the Sweeper
+///   /opensea/credit/:id  one Credit's best OpenSea listing price (mainnet's, as a preview, on testnets)
 ///   /ens/:address  primary ENS name (always from mainnet), cached a day
 /// Every response carries the security headers in `secure()`.
 import { createPublicClient, http, type Address, parseAbiItem } from 'viem';
 import { mainnet } from 'viem/chains';
 import { batchAbi, creditsAbi, creditArtAbi, factoryAbi } from '../app/abi';
-import { quote, scan } from './opensea';
+import { best, quote, scan } from './opensea';
 import { ratings } from './ratings';
 import { load, match, predicate, type Rules } from './match';
-import { cardFor, partyCard, withCard } from './og';
-import { drawParty, sample, type PartyCard } from './card';
+import { cardFor, creditCard, creditsCard, partyCard, rangeCard, timeCard, traitCard, withCard } from './og';
+import { parseTrait } from '../shared/trait';
+import { drawCredit, drawParty, sample, type PartyCard } from './card';
 import { stamp } from '../shared/stamp';
 import { keyOf, ruleFor } from '../shared/layout';
 
@@ -227,6 +229,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         minScore: int('minScore', 0, 8000, 0),
         maxScore: int('maxScore', 0, 8000, 0),
         list: list as number[],
+        paidFrom: int('paidFrom', 0, 0xffffffff, 0),
+        paidTo: int('paidTo', 0, 0xffffffff, 0),
+        bitsFrom: int('bitsFrom', 0, 256, 0),
+        bitsTo: int('bitsTo', 0, 256, 0),
       };
       page = int('page', -1, 2000, -1);
     } catch {
@@ -303,6 +309,38 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       }
       const result = await quote({ key: env.OPENSEA_API_KEY, sweeper: env.SWEEPER, listings, n, origin: url.origin });
       return Response.json(result, { headers: { 'cache-control': 'no-store' } });
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
+  }
+
+  // One Credit's best OpenSea listing, for its page. Without a Sweeper (testnets) it's the mainnet Credit of the
+  // same number, as a preview. Cached a minute per Credit, so a busy page costs OpenSea one call a minute.
+  const listed = url.pathname.match(/^\/opensea\/credit\/(\d{1,6})$/);
+  if (listed) {
+    if (!env.OPENSEA_API_KEY) return text('OpenSea is not configured', 501);
+    if (!sameSite(req)) return text('forbidden', 403);
+    const id = Number(listed[1]);
+    if (!inSupply(id)) return text('no such credit', 404);
+    const live = hasSweeper(env);
+    const credits = live ? env.CREDITS : MAINNET_CREDITS;
+    const cache = caches.default;
+    const key = new Request(`${url.origin}/opensea/credit/${credits.toLowerCase()}/${id}`);
+    const hit = await cache.match(key);
+    if (hit) return hit;
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    try {
+      const l = await best(env.OPENSEA_API_KEY, env.OPENSEA_SLUG, credits, id);
+      // A listing whose seller no longer holds the Credit is dead: say nothing.
+      const c = live ? client(env) : createPublicClient({ transport: http(env.ENS_RPC || 'https://eth.drpc.org', { timeout: 8_000 }) });
+      const holder = l ? await c.readContract({ address: credits, abi: creditsAbi, functionName: 'ownerOf', args: [BigInt(id)] }).catch(() => null) : null;
+      const price = l && holder && holder.toLowerCase() === l.seller.toLowerCase() ? l.price.toString() : null;
+      const res = Response.json(
+        { price, preview: !live, url: price ? `https://opensea.io/assets/ethereum/${credits.toLowerCase()}/${id}` : null },
+        { headers: { 'cache-control': 'public, max-age=60' } },
+      );
+      ctx.waitUntil(cache.put(key, res.clone()));
+      return res;
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
     }
@@ -440,11 +478,48 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   // Link cards drawn per party (and made-up ones for /og).
   const drawn = url.pathname.match(/^\/og\/(party|sample)\/([0-9a-zA-Zx]+)\.png$/);
   if (drawn) return linkCard(req, env, url, ctx, drawn[1], drawn[2]);
+  // A Credit's card: its art from the edition, drawn once and cached a day.
+  const creditPng = url.pathname.match(/^\/og\/credit\/(\d{1,6})\.png$/);
+  if (creditPng) {
+    const id = Number(creditPng[1]);
+    const generic = () => env.ASSETS.fetch(new Request(new URL('/og/home.png', url)));
+    if (!inSupply(id)) return generic();
+    const cache = caches.default;
+    const key = new Request(`${url.origin}/og/credit/${id}.png`);
+    const hit = await cache.match(key);
+    if (hit) return hit;
+    if (await limited(env.RL_MISC, req)) return generic();
+    const res = new Response(await drawCredit(env.ASSETS, url.origin, id), { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } });
+    ctx.waitUntil(cache.put(key, res.clone()));
+    return res;
+  }
 
   // Pages: the app shell with this route's link-preview tags; a party page describes that party.
   let card = req.method === 'GET' ? cardFor(url.pathname) : null;
   const party = url.pathname.match(/^\/(?:union|party|b)\/(0x[0-9a-fA-F]{40})$/)?.[1];
   // Each party page costs RPC reads, so it is rate limited; over the limit, or not one of ours, it gets the generic card.
+  const creditId = url.pathname.match(/^\/credit\/(\d{1,6})$/)?.[1];
+  if (card && creditId && inSupply(Number(creditId))) card = creditCard(Number(creditId));
+  // The Credits overview: the edition's real count.
+  if (card && url.pathname.replace(/\/$/, '') === '/credits') card = (await load(env.ASSETS, url.origin).then((t) => creditsCard(t.length)).catch(() => null)) ?? card;
+  // A trait page (/weight/sparse): its name and how many Credits in the edition have it.
+  const traitAt = req.method === 'GET' ? url.pathname.match(/^\/(palette|eights|print|weight)\/([^/]+)\/?$/) : null;
+  const trait = traitAt ? (() => { try { return parseTrait(traitAt[1], traitAt[2]); } catch { return null; } })() : null;
+  if (trait) card = traitCard(trait.name, (await match(env.ASSETS, url.origin, trait.rules, 1).catch(() => null))?.count ?? null);
+  // A time window (/time?from=&to=): how many Credits were paid in it.
+  const paidFrom = Number(url.searchParams.get('from')), paidTo = Number(url.searchParams.get('to'));
+  if (card && url.pathname === '/time' && paidFrom > 0 && paidTo >= paidFrom && paidTo < 2 ** 32)
+    card = (await match(env.ASSETS, url.origin, { paidFrom, paidTo }, 1).then((m) => timeCard(m.count)).catch(() => null)) ?? card;
+  // A range (/rating?min=443.1&max=800, /bits?min=20&max=40): how many Credits are in it.
+  const rMin = Number(url.searchParams.get('min')), rMax = Number(url.searchParams.get('max'));
+  if (card && (url.pathname === '/rating' || url.pathname === '/bits') && url.searchParams.has('min') && url.searchParams.has('max') && Number.isFinite(rMin) && Number.isFinite(rMax) && rMin <= rMax) {
+    const rating = url.pathname === '/rating';
+    const lo = rating ? Math.max(800, Math.min(8000, Math.round(rMin * 10))) : Math.max(0, Math.min(256, Math.round(rMin)));
+    const hi = rating ? Math.max(800, Math.min(8000, Math.round(rMax * 10))) : Math.max(0, Math.min(256, Math.round(rMax)));
+    const rules = rating ? { minScore: lo, maxScore: hi } : { bitsFrom: lo, bitsTo: hi };
+    const show = (x: number) => (rating ? (x / 10).toFixed(1) : String(x));
+    card = (await match(env.ASSETS, url.origin, rules, 1).then((m) => rangeCard(rating ? 'rating' : 'bits', m.count, show(lo), show(hi))).catch(() => null)) ?? card;
+  }
   if (card && party && !(await limited(env.RL_MISC, req)) && (await isBatch(env, url, party.toLowerCase() as Address))) {
     const p = await readParty(env, party as Address).catch(() => null);
     if (p) card = partyCard(party, p.name, p.state, p.count, p.highBid > 0n ? ethText(p.highBid) : '', stamp(p.state, p.count, p.highBid));

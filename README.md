@@ -1,23 +1,23 @@
-<a href="https://creditunion.fun"><img src="docs/banner.jpg" alt="Credit Union: join a credit union to make a Statement together"></a>
+<a href="https://creditunion.fun"><img src="docs/banner.jpg" alt="Credit Union: join a Credit Union to make a Statement together"></a>
 
 <p align="center"><b><a href="https://creditunion.fun">creditunion.fun</a></b> · <a href="#how-a-credit-union-works">How it works</a> · <a href="contracts/AUDIT.md">Audit</a> · <a href="contracts/ADAPTER.md">Adapter plan</a> · <a href="#deployed-addresses">Addresses</a></p>
 
 # Credit Union
 
-Credit Union lets holders of Jack Butcher's [Credits](https://jack.art/credits) pool 80 Credits into a credit union. At 80 the credit union burns them into one Statement, auctions it onchain, and splits the sale among everyone in. Contracts hold the Credits and the ETH: no owner, admin, pause or upgrade. Live on Sepolia testnet; mainnet is not deployed yet.
+Credit Union lets holders of Jack Butcher's [Credits](https://jack.art/credits) pool 80 Credits into a Credit Union. At 80 the Credit Union burns them into one Statement, auctions it onchain, and splits the sale among everyone in. Contracts hold the Credits and the ETH: no owner, admin, pause or upgrade. Live on Sepolia testnet; mainnet is not deployed yet.
 
 <table>
-<tr><td width="33%" valign="top"><img src="docs/lifecycle.svg" alt="Start a credit union"><br><b>Start a credit union</b><br>Pool your Credits with other holders. At 80 they burn into a Statement, and everyone in shares the sale.</td><td width="33%" valign="top"><img src="docs/eligibility.svg" alt="Deposit"><br><b>Deposit</b><br>Let any Credit holder join, or pick traits to make a special Statement.</td><td width="33%" valign="top"><img src="docs/order.svg" alt="Burn order"><br><b>Burn order</b><br>Set the order they burn in: deposit order, Credit number either way, or a custom design.</td></tr>
-<tr><td width="33%" valign="top"><img src="docs/buying.svg" alt="Buy in"><br><b>Buy in</b><br>Buy the cheapest Credits that fit from OpenSea, straight into any credit union.</td><td width="33%" valign="top"><img src="docs/exit.svg" alt="Withdrawals"><br><b>Withdrawals</b><br>Withdraw anytime until a full credit union locks. If nobody burns it within the hour, it unlocks again.</td><td width="33%" valign="top"><img src="docs/auction.svg" alt="Dividends"><br><b>Dividends</b><br>The Statement goes to auction, and the proceeds are split across its members.</td></tr>
+<tr><td width="33%" valign="top"><img src="docs/lifecycle.svg" alt="Start a Credit Union"><br><b>Start a Credit Union</b><br>Pool your Credits with other holders. At 80 they burn into a Statement, and everyone in shares the sale.</td><td width="33%" valign="top"><img src="docs/eligibility.svg" alt="Deposit"><br><b>Deposit</b><br>Pick exactly which Credits get in: any Credit, or only ones with the traits you choose.</td><td width="33%" valign="top"><img src="docs/order.svg" alt="Layout"><br><b>Layout</b><br>Arrange the 80 however you like: in deposit order, by Credit number, or painted into a design.</td></tr>
+<tr><td width="33%" valign="top"><img src="docs/buying.svg" alt="Buy in"><br><b>Buy in</b><br>Buy the cheapest Credits that fit from OpenSea, straight into any Credit Union.</td><td width="33%" valign="top"><img src="docs/exit.svg" alt="Withdrawals"><br><b>Withdrawals</b><br>Withdraw anytime until a full Credit Union locks. If nobody burns it within the hour, it unlocks again.</td><td width="33%" valign="top"><img src="docs/auction.svg" alt="Dividends"><br><b>Dividends</b><br>The Statement goes to auction, and the proceeds are split across its members.</td></tr>
 </table>
 
-## How a credit union works
+## How a Credit Union works
 
-1. **Open.** Anyone with a Credit opens a credit union and sets its rules: who can join, the burn order, and the split (Equal or Early bird).
-2. **Join.** Holders deposit Credits. Every deposit is checked onchain against the credit union's rules. No Credit? The Sweeper buys the cheapest fitting OpenSea listings and deposits them in one transaction.
-3. **Leave.** Anyone can withdraw until the credit union locks. A full credit union never locks before Jack's contract and the burn adapter are live. Once they are, a full credit union counts down 5 minutes (leaving drops it to 79 and stops the clock), then locks for 1 hour, during which nobody can leave and anyone can burn. If nobody burns it, it unlocks: depositors can leave again, and anyone can call `restartCountdown()` for a fresh 5 minutes and hour.
-4. **Burn.** During the locked hour, anyone calls `assemble()`. The 80 Credits go to Jack's contract in the credit union's order and the credit union must end up holding the Statement, or the call reverts.
-5. **Auction.** 24 hours from the first bid. Each bid beats the last by 5% (minimum 0.01 ETH). Bids in the last 15 minutes extend it by 15 minutes. Outbid ETH is refunded in the same transaction. The site opens credit unions with no reserve.
+1. **Open.** Anyone with a Credit opens a Credit Union and sets its rules: who can join, the burn order, and the split (Equal or Early bird).
+2. **Join.** Holders deposit Credits. Every deposit is checked onchain against the Credit Union's rules. No Credit? The Sweeper buys the cheapest fitting OpenSea listings and deposits them in one transaction.
+3. **Leave.** Anyone can withdraw until the Credit Union locks. A full Credit Union never locks before Jack's contract and the burn adapter are live. Once they are, a full Credit Union counts down 5 minutes (leaving drops it to 79 and stops the clock), then locks for 1 hour, during which nobody can leave and anyone can burn. If nobody burns it, it unlocks: depositors can leave again, and anyone can call `restartCountdown()` for a fresh 5 minutes and hour.
+4. **Burn.** During the locked hour, anyone calls `assemble()`. The 80 Credits go to Jack's contract in the Credit Union's order and the Credit Union must end up holding the Statement, or the call reverts.
+5. **Auction.** 24 hours from the first bid. Each bid beats the last by 5% (minimum 0.01 ETH). Bids in the last 15 minutes extend it by 15 minutes. Outbid ETH is refunded in the same transaction. The site opens Credit Unions with no reserve.
 6. **Split.** Anyone settles. The Statement goes to the winner. A 2% protocol fee comes off the top, only if it sells. The rest goes to the 80 positions: 1/80 each (Equal), or a straight line from 1.5 shares for the first deposit to 0.5 for the last (Early bird). Payouts are pulled with `claim`, callable by anyone for anyone.
 
 **Who can join.** Any combination of Jack's traits (Colors, Eights, Print, Weight, Plates, Bits), payment time, [rating](https://jack.art/credits/rating), a Credit-number range, or a named list of up to 200 Credits.
@@ -46,7 +46,7 @@ web/                Cloudflare Worker + static site (Vite, TypeScript, viem, no 
   data/             credits.json.gz, the full edition every derived file is built from
 ```
 
-There is no database or indexer. Credit unions, slots and bids are read from the contracts.
+There is no database or indexer. Credit Unions, slots and bids are read from the contracts.
 
 </details>
 
@@ -55,15 +55,15 @@ There is no database or indexer. Credit unions, slots and bids are read from the
 
 | Contract | What it does |
 |---|---|
-| `BatchFactory` | Deploys credit unions as minimal clones, moves Credits from its caller into its own credit unions, holds fees and the one-time assembler setting. |
-| `Batch` | One credit union: eligibility checks, deposits and withdrawals, lock, burn through the assembler, auction, split, claims. |
+| `BatchFactory` | Deploys Credit Unions as minimal clones, moves Credits from its caller into its own Credit Unions, holds fees and the one-time assembler setting. |
+| `Batch` | One Credit Union: eligibility checks, deposits and withdrawals, lock, burn through the assembler, auction, split, claims. |
 | `Sweeper` | Buys OpenSea listings through Seaport 1.6 and deposits them in the buyer's name. Unused ETH is refunded; listings that sold first are skipped. 2% fee. |
 | `Ratings` | Jack's official rating for all 122,154 Credits, stored as data contracts and read by eligibility rules. |
-| `IAssembler` | The adapter a credit union calls (never delegatecalls) to burn 80 Credits into a Statement. `MockAssembler` is the testnet version; the mainnet adapter gets written once Jack's Statement contract is published. |
+| `IAssembler` | The adapter a Credit Union calls (never delegatecalls) to burn 80 Credits into a Statement. `MockAssembler` is the testnet version; the mainnet adapter gets written once Jack's Statement contract is published. |
 
-The factory can deploy with no assembler. Credit unions fill but never lock, so anyone can always leave. When the adapter is ready, the setter address proposes it once; 30 minutes later anyone activates it and the setter has no further powers. Only then do full credit unions start their 5-minute countdowns.
+The factory can deploy with no assembler. Credit Unions fill but never lock, so anyone can always leave. When the adapter is ready, the setter address proposes it once; 30 minutes later anyone activates it and the setter has no further powers. Only then do full Credit Unions start their 5-minute countdowns.
 
-Fees are set at deploy and capped in code: protocol 2% (max 5%), creator 0% (max 10%), sweep 2% (max 5%). The fee recipient can change them within the caps; a credit union keeps the fees it opened with.
+Fees are set at deploy and capped in code: protocol 2% (max 5%), creator 0% (max 10%), sweep 2% (max 5%). The fee recipient can change them within the caps; a Credit Union keeps the fees it opened with.
 
 Review history, findings and fixes: [contracts/AUDIT.md](contracts/AUDIT.md).
 
@@ -91,7 +91,7 @@ Copy `contracts/.env.example` to `contracts/.env`, fill it in, and load it with 
 | `DeployMainnet.s.sol` | Mainnet: rating table, factory, Sweeper | `FEE_RECIPIENT` (required), `SETTER`, `ASSEMBLER`, `RATINGS`, `PROTOCOL_FEE_BPS`, `CREATOR_FEE_BPS`, `SWEEP_FEE_BPS` |
 | `DeployRatings.s.sol` | The rating table on its own | none |
 | `CheckRatings.s.sol` | Read-only: the deployed table matches `data/scores.bin` byte for byte | args `$RATINGS $CREDITS` |
-| `SeedDemo.s.sol` | Local anvil: mocks plus credit unions in every state | none (anvil default keys) |
+| `SeedDemo.s.sol` | Local anvil: mocks plus Credit Unions in every state | none (anvil default keys) |
 | `Matrix.s.sol` | Local anvil: the end-to-end test matrix (every filter, combinations, arrangements, painted layouts per trait) | run by `web/scripts/e2e-matrix.mjs` |
 
 ```sh
@@ -137,7 +137,7 @@ Worker endpoints:
 
 Rate limits are per IP (`unsafe.bindings` in `wrangler.jsonc`).
 
-End-to-end matrix: deploys a fresh anvil (port 8546) with `contracts/script/Matrix.s.sol`, runs a second copy of the site on port 5191, and drives it in Chrome with a mock wallet. Every credit union's picker is checked against `Batch.canTake`, every offered Credit must deposit and every folded one revert, then Select all, Deposit and a partial Withdraw go through the page; the create page runs a few configs too. Needs foundry and Chrome.
+End-to-end matrix: deploys a fresh anvil (port 8546) with `contracts/script/Matrix.s.sol`, runs a second copy of the site on port 5191, and drives it in Chrome with a mock wallet. Every Credit Union's picker is checked against `Batch.canTake`, every offered Credit must deposit and every folded one revert, then Select all, Deposit and a partial Withdraw go through the page; the create page runs a few configs too. Needs foundry and Chrome.
 
 ```sh
 cd web
@@ -188,7 +188,7 @@ Ratings follow Jack's published formula (methodology v3.4.0), reproduced in `web
 
 ## Security
 
-The contracts have been reviewed internally (static analysis, adversarial reviews, invariant fuzzing, mainnet fork tests; see [contracts/AUDIT.md](contracts/AUDIT.md)). They have not had a third-credit union audit.
+The contracts have been reviewed internally (static analysis, adversarial reviews, invariant fuzzing, mainnet fork tests; see [contracts/AUDIT.md](contracts/AUDIT.md)). They have not had a third-Credit Union audit.
 
 To report a vulnerability, open a private [GitHub security advisory](../../security/advisories/new) on this repo. Please don't open a public issue.
 
