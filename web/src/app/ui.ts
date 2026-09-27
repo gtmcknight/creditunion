@@ -106,11 +106,11 @@ export function errText(e: unknown): string {
 }
 
 const ERRORS: Record<string, string> = {
-  TooFewToOpen: 'Not enough Credits to open a credit union.',
-  WrongState: 'The credit union is not in the right state for that.',
+  TooFewToOpen: 'Not enough Credits to open a Credit Union.',
+  WrongState: 'The Credit Union is not in the right state for that.',
   WrongPhase: 'Not right now. Burning works only in the hour after the 5-minute countdown, and Credits can’t be withdrawn during that hour.',
   NotDepositor: 'Only the member who deposited it can withdraw that Credit.',
-  Excluded: "That Credit doesn't match this credit union's rules.",
+  Excluded: "That Credit doesn't match this Credit Union's rules.",
   BidTooLow: 'Bid is below the minimum.',
   AuctionOver: 'The auction has ended.',
   AuctionRunning: 'The auction is still running.',
@@ -122,7 +122,7 @@ const ERRORS: Record<string, string> = {
   NoSpecifiedOrdersAvailable: 'None of those listings are available any more. Get a new price.',
   TooFewBought: 'Fewer listings were available than expected. Get a new price.',
   FeeNotCovered: 'Not enough ETH sent to cover the fee.',
-  NotStray: 'That token is part of the credit union.',
+  NotStray: 'That token is part of the Credit Union.',
   Underpaid: 'Not enough ETH sent for those listings.',
   NotAFWACredit: 'One of those FWA listings isn’t a Credit.',
   NoFWA: 'FWA listings can’t be bought here.',
@@ -130,3 +130,33 @@ const ERRORS: Record<string, string> = {
 };
 
 export type { Address };
+
+/// Unix seconds ⇄ a datetime-local input's value ("2026-09-21T09:11"), in local time, to the minute.
+export function toLocalInput(unix: number) {
+  const d = new Date(unix * 1000);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+export function fromLocalInput(v: string) {
+  const t = new Date(v).getTime();
+  return Number.isFinite(t) ? Math.floor(t / 1000) : null;
+}
+
+/// A sub-nav item: a link (`href`, `current` marks the page) or a tab button (`attrs` carries its data-*).
+export type SubTab = { label: string; href?: string; current?: boolean; attrs?: string };
+
+/// Every section page opens the same way: the h1, one muted line, then a bar with sub-nav tabs on the left and
+/// the page's controls on the right. `title` and `lede` are HTML; callers escape.
+export function pageHead({ title, lede, tabs, tools, label = 'Sections' }: { title: string; lede?: string; tabs?: SubTab[]; tools?: string; label?: string }) {
+  const links = !!tabs?.[0]?.href;
+  const items = (tabs ?? [])
+    .map((t) =>
+      t.href
+        ? `<a href="${t.href}"${t.current ? ' aria-current="page"' : ''}>${t.label}</a>`
+        : `<button type="button" role="tab" aria-selected="${!!t.current}"${t.attrs ? ' ' + t.attrs : ''}>${t.label}</button>`,
+    )
+    .join('');
+  const nav = !tabs?.length ? '' : links ? `<nav class="subtabs" aria-label="${label}">${items}</nav>` : `<div class="subtabs" role="tablist" aria-label="${label}">${items}</div>`;
+  const bar = nav || tools ? `<div class="page-bar">${nav}${tools ? `<div class="page-tools">${tools}</div>` : ''}</div>` : '';
+  return `<header class="page-head"><h1>${title}</h1>${lede ? `<p class="page-lede">${lede}</p>` : ''}${bar}</header>`;
+}

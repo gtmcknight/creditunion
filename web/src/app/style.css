@@ -1334,6 +1334,9 @@ nav a[hidden] {
 .picker.static .pick {
   cursor: default;
 }
+.picker.static a.pick {
+  cursor: pointer;
+}
 
 /* ---------------------------------------------------------------- you */
 
@@ -1353,26 +1356,23 @@ nav a[hidden] {
 #account .btn.current {
   box-shadow: inset 0 0 0 1px var(--fg);
 }
-.profile {
-  display: grid;
-  gap: 28px;
-  padding: clamp(24px, 5vw, 56px) 0 8px;
-}
-.profile-head {
+/* Member page: the name is the h1; the full address is its lede line. */
+.page-head h1 .who.lg {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  max-width: 100%;
+  font: inherit;
+  letter-spacing: -0.02em;
+  gap: 12px;
 }
-.profile-head .who.lg {
-  font-size: clamp(24px, 4vw, 36px);
-  letter-spacing: -0.03em;
-  gap: 14px;
+.page-head h1 .who.lg img {
+  width: 30px;
+  height: 30px;
 }
-.profile-head .who.lg img {
-  width: clamp(36px, 5vw, 48px);
-  height: clamp(36px, 5vw, 48px);
+.page-head h1 .who-name.mono {
+  font-size: 0.92em;
+}
+.profile .dues-box {
+  margin-bottom: 28px;
 }
 .stats {
   margin: 0;
@@ -1412,9 +1412,6 @@ nav a[hidden] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.profile ~ section {
-  margin-top: 56px;
 }
 .wallet-grid {
   grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
@@ -2407,6 +2404,16 @@ input[type='datetime-local'] {
 .rule-chip:hover {
   box-shadow: inset 0 0 0 1px var(--fg);
 }
+a.rule-chip {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+a.rule-chip:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
 .rule-chip .swatches {
   display: inline-flex;
   gap: 2px;
@@ -2593,21 +2600,64 @@ input[type='datetime-local'] {
   box-shadow: 0 0 0 2px var(--fg);
 }
 
-/* Home: the sort sits over the grid, only when there are enough parties to sort. */
-.list-tools {
-  display: flex;
-  justify-content: flex-end;
-  margin: 8px 0 16px;
+/* ---------------------------------------------------------------- section page header */
+/* Every section page opens the same way: the h1, one muted line, then one bar (sub-nav left, controls right). */
+.page-head {
+  margin: 32px 0 28px;
 }
-.list-tools[hidden] {
+.page-head h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+.page-lede {
+  margin: 6px 0 0;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.page-lede .mono {
+  font-size: 13px;
+  word-break: break-all;
+}
+.page-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  min-height: 32px;
+  margin-top: 20px;
+}
+.page-bar[hidden] {
   display: none;
 }
-
-.home {
-  padding-top: 32px;
+.page-bar .subtabs {
+  flex-wrap: wrap;
+  min-width: 0;
 }
-.home .list-tools {
-  margin-top: -8px;
+.page-bar .subtabs > * {
+  white-space: nowrap;
+}
+.page-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.subtabs a[aria-current='page'] {
+  background: var(--line);
+  color: var(--fg);
+  font-weight: 500;
+}
+/* A page's own heading under the bar (a trait index, a range page loading). */
+.page-sub {
+  margin: 0 0 20px;
+  font-size: 20px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
 }
 
 /* Empty Auctions: a black-and-white, faded Statement as the placeholder card. */
@@ -4440,7 +4490,7 @@ a.who:hover .who-name {
 }
 .create-head h1 {
   margin: 0;
-  font-size: 24px;
+  font-size: 28px;
   line-height: 1.2;
   letter-spacing: -0.02em;
 }
@@ -4466,12 +4516,18 @@ a.who:hover .who-name {
   -webkit-mask-image: linear-gradient(#000 calc(100% - 32px), transparent);
 }
 
-/* Phones: "Credit Unions" and "Start a credit union" shorten to "Unions" and "Start" so the nav keeps one line. */
+/* Phones: "Credit Unions" and "Start a Credit Union" shorten to "Unions" and "Start" so the nav keeps one line. */
 .top nav a {
   white-space: nowrap;
 }
 @media (max-width: 640px) {
   .nav-long {
+    display: none;
+  }
+}
+/* Phones: Unions · Auctions · Credits on one line; Start stays as buttons on the pages. */
+@media (max-width: 480px) {
+  .side-nav .start-link {
     display: none;
   }
 }
@@ -4616,9 +4672,6 @@ a.who:hover .who-name {
 }
 .card:hover .btn.cta {
   opacity: 0.88;
-}
-.create-head + .home {
-  padding-top: 28px;
 }
 
 /* Card v3: the count sits on the sheet; under it, three evenly spaced lines and the button beside them. */
@@ -5361,7 +5414,7 @@ a.who:hover .who-name {
 .wall-frame .wall-menu :is(.wall-expand, .wall-pause, .wall-zoomrow) {
   background: rgba(255, 255, 255, 0.94) !important;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 4px 12px -6px rgba(0, 0, 0, 0.25) !important;
-  border-radius: 8px !important;
+  border-radius: 0 !important;
   height: 32px !important;
   color: #111 !important;
 }
@@ -5867,10 +5920,6 @@ dialog.eligible::backdrop {
   text-underline-offset: 3px;
 }
 
-/* Member page tabs: room under the tabs, and between the two Credit groups. */
-.member-tabs .subtabs {
-  margin-bottom: 24px;
-}
 #tab-body .section-head {
   margin-bottom: 16px;
 }
@@ -5961,3 +6010,482 @@ dialog.eligible::backdrop {
   .hero-text .wall-cta { gap: 6px; }
   .hero-text .wall-cta .btn { height: 40px; padding: 0 12px; font-size: 14px; }
 }
+
+/* ---------------------------------------------------------------- one Credit */
+
+.batch-art .cell[data-id] {
+  cursor: pointer;
+}
+.credit-art img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--img-outline);
+  image-rendering: pixelated;
+}
+.facts .swatches {
+  display: inline-flex;
+  gap: 2px;
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+.facts .swatches i {
+  width: 10px;
+  height: 10px;
+  display: block;
+  box-shadow: inset 0 0 0 1px var(--img-outline);
+}
+.facts dd .who {
+  vertical-align: middle;
+}
+.facts dd .tag.you {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.credit-fits {
+  margin-top: 56px;
+}
+/* Credit page: trait values carry the same glyphs as the create page, at the fact rows' size. */
+.facts .vchip { font-size: inherit; gap: 8px; }
+.credit-fits .section-sub { margin: -8px 0 16px; font-size: 14px; }
+.facts .vchip .ink, .facts .vchip svg { width: 18px; height: 18px; }
+
+/* Account menu under the wallet button: Profile, Disconnect. */
+.acct-wrap { position: relative; }
+.acct-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  min-width: 160px;
+  display: grid;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.25);
+}
+.acct-menu > a,
+.acct-menu > button {
+  display: block;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: calc(var(--r) - 2px);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.acct-menu > a:hover,
+.acct-menu > button:hover { background: var(--surface); }
+.acct-menu[hidden] { display: none; }
+
+/* ---------------------------------------------------------------- trait pages */
+
+.trait-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px 20px;
+}
+.trait-glyph {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+.trait-glyph svg {
+  width: 44px;
+  height: 44px;
+}
+.trait-glyph .ink {
+  display: block;
+  width: 40px;
+  height: 40px;
+}
+/* The eights die gets its face drawn, so No eights still reads as a die. */
+.trait-glyph.eights svg {
+  outline: 1.5px solid #111;
+  outline-offset: -3px;
+}
+.trait-title {
+  display: grid;
+  gap: 2px;
+}
+.trait-title h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+.trait-title p {
+  margin: 0;
+  font-size: 14px;
+}
+.trait-section {
+  margin-top: 48px;
+}
+.trait-section .section-head h3 {
+  margin: 0;
+}
+.trait-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 6px;
+  margin-bottom: 20px;
+}
+.trait-grid .pick {
+  display: block;
+  border-radius: 0;
+}
+.trait-grid .pick img {
+  display: block;
+  border-radius: 0;
+  background: #fff;
+}
+.trait-grid .pick:hover img {
+  outline-color: var(--fg);
+}
+.facts a.vchip {
+  color: inherit;
+  text-decoration: none;
+}
+.facts a.vchip span {
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+.facts a.vchip:hover span {
+  text-decoration-color: currentColor;
+}
+@media (max-width: 560px) {
+  .trait-head {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .trait-glyph {
+    width: 56px;
+    height: 56px;
+  }
+  .trait-glyph svg {
+    width: 38px;
+    height: 38px;
+  }
+  .trait-glyph .ink {
+    width: 34px;
+    height: 34px;
+  }
+  .trait-start {
+    grid-column: 1 / -1;
+  }
+  .trait-grid {
+    grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  }
+}
+
+/* Trait index (/weight): one tile per value with its count. */
+.trait-values {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--tile-gap, 12px);
+}
+.trait-value {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 14px;
+  align-items: center;
+  padding: 16px;
+  background: var(--surface);
+  color: var(--fg);
+  text-decoration: none;
+}
+.trait-value:hover { background: var(--empty); }
+.trait-value .trait-glyph { grid-row: span 2; }
+.trait-value .tv-name { font-weight: 600; font-size: 16px; }
+.trait-value .tv-count { font-size: 13px; }
+.trait-glyph.sm { width: 44px; height: 44px; }
+.trait-glyph.sm svg { width: 30px; height: 30px; }
+.trait-glyph.sm .ink { width: 26px; height: 26px; }
+@media (max-width: 560px) { .trait-values { grid-template-columns: repeat(2, minmax(0, 1fr)); } .trait-value { column-gap: 10px; padding: 12px; } }
+/* Exploring the wall full screen: the hero's words and buttons step aside. */
+.hero:has(.wall-frame.expanded) .hero-text { display: none; }
+
+/* Payment Time, typed: Start and End to the minute. On the create page and /time. */
+.win-inputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(172px, 1fr));
+  gap: 8px;
+}
+.win-inputs label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.win-inputs span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.win-inputs input {
+  height: 36px;
+  font: 400 14px var(--sans);
+}
+
+/* /time: the window's Stream, the mint's strip with two handles, then the same sections as a trait page. */
+.time-page .trait-head { grid-template-columns: minmax(0, 1fr) auto; }
+.time-page .trait-title p strong { color: var(--fg); font-weight: 600; }
+.time-stream {
+  position: relative;
+  height: 240px;
+  margin-top: 24px;
+}
+.time-stream canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+.time-scale {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: var(--muted);
+  pointer-events: none;
+}
+.time-strip {
+  position: relative;
+  height: 48px;
+  margin: 12px 0 0;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.time-strip canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.time-sel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--line);
+  pointer-events: none;
+}
+.time-strip.dragging { cursor: grabbing !important; }
+.time-handle {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 12px;
+  margin-left: -6px;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1.5px var(--fg);
+  cursor: ew-resize;
+  touch-action: none;
+}
+.time-handle::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 50%;
+  width: 2px;
+  height: 16px;
+  margin-top: -8px;
+  background: var(--fg);
+}
+/* A finger-sized target around the drawn handle. */
+.time-handle::before {
+  content: '';
+  position: absolute;
+  inset: -4px -12px;
+}
+.time-handle:focus { outline: none; }
+.time-handle:focus-visible { box-shadow: inset 0 0 0 1.5px var(--fg), 0 0 0 3px var(--line-strong); }
+.time-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px 24px;
+  margin-top: 16px;
+}
+.time-controls .win-inputs { flex: 1 1 360px; max-width: 460px; }
+.time-controls .win-presets button { height: 36px; padding: 0 12px; font-size: 13px; }
+.time-rule { margin: 4px 0 16px; }
+@media (max-width: 560px) {
+  .time-stream { height: 180px; }
+}
+/* Each handle sits outside its edge, so a one-minute window still shows both. */
+.time-handle[data-h='a'] { margin-left: -12px; }
+.time-handle[data-h='b'] { margin-left: 0; }
+/* ...so the strip sits a handle's width in from each side, and a window at either end keeps its handles in the column. */
+.time-strip { margin-inline: 12px; }
+/* Trait and time pages: Credit Unions and Credits as two tabs. */
+.pair-tabs { margin-bottom: 20px; }
+.pair .time-rule { margin: 0 0 16px; }
+.trait-section.pair { display: block; }
+
+/* Create: under a rule with a value set, a quiet link to those Credits (a new tab, so the draft stays). */
+.rule-see {
+  justify-self: start;
+  align-self: start;
+  font-size: 12px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.rule-see:hover {
+  color: var(--fg);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* /credits: the overview. A header, the mint drifting past as one strip, then a tile per trait. */
+.cr-strip {
+  position: relative;
+  display: block;
+  height: 190px;
+  margin: 16px 0 var(--tile-gap);
+  padding: 24px 0 22px;
+  color: var(--fg);
+  text-decoration: none;
+}
+.cr-strip canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+.cr-mint { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 16px; fill: var(--faint); }
+.cr-strip:hover .cr-mint { fill: var(--muted); }
+.cr-head-line { position: absolute; bottom: 0; width: 2px; height: 16px; margin-left: -1px; background: var(--fg); }
+.cr-now { position: absolute; top: 0; left: 0; color: var(--muted); pointer-events: none; }
+.cr-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-flow: row dense;
+  gap: var(--tile-gap);
+}
+.cr-tile {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 12px;
+  min-width: 0;
+  padding: 18px 20px 16px;
+  background: var(--surface);
+  color: var(--fg);
+  text-decoration: none;
+}
+.cr-tile:hover { background: var(--empty); }
+.cr-tile.wide { grid-column: span 2; }
+.cr-tile h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+.cr-fact { margin: 0; font-size: 13px; }
+.cr-pic { height: 108px; display: flex; align-items: flex-end; }
+.cr-hist { display: block; width: 100%; height: 72px; fill: var(--fg); shape-rendering: crispEdges; }
+.cr-hist .cold { fill: var(--faint); }
+.cr-cols { display: flex; align-items: flex-end; gap: 6px; width: 100%; height: 100%; }
+.cr-col { flex: 1 1 0; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; }
+.cr-col > .num { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.cr-bar { display: block; width: 100%; max-width: 40px; height: max(1px, calc(var(--f, 0) * 52px)); background: var(--fg); flex: none; }
+.cr-glyph { display: grid; place-items: center; width: 28px; height: 28px; flex: none; background: #fff; box-shadow: 0 0 0 1px var(--line-strong); }
+.cr-glyph svg { width: 22px; height: 22px; }
+.cr-glyph.die svg { outline: 1.2px solid #111; outline-offset: -2px; }
+.cr-cols.palette { gap: 4px; }
+.cr-cols.palette .cr-bar { max-width: none; height: calc(var(--f, 0) * 84px); overflow: hidden; background: none; }
+.cr-cols.palette .cr-bar .ink { display: block; width: 100%; height: 100%; box-shadow: inset 0 0 0 1px var(--line-strong); }
+.cr-letters { font-size: 10px; color: var(--muted); font-family: var(--mono, ui-monospace, monospace); }
+@media (max-width: 900px) {
+  .cr-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cr-tile.time { grid-column: auto; }
+}
+@media (max-width: 560px) {
+  .cr-tiles { grid-template-columns: 1fr; }
+  .cr-tile.wide { grid-column: auto; }
+  .cr-strip { height: 160px; }
+  .cr-letters { display: none; }
+  .cr-pic { height: 96px; }
+  .cr-cols { gap: 4px; }
+  .cr-cols.palette { gap: 2px; }
+}
+/* Member page: one line under the tabs saying what the tab lists. */
+#tab-body > .tab-note { margin: 0 0 20px; font-size: 14px; }
+/* The mark alone is the logo; "Credit Unions" leads the nav. */
+.logo .logo-word { display: none; }
+.logo .mark { width: 32px; height: auto; }
+/* The main nav reads in the old wordmark's voice: same size and weight, muted until current. */
+.main-nav a { font-size: 16px; font-weight: 600; letter-spacing: -0.02em; }
+.main-nav a[aria-current] { color: var(--fg); }
+@media (max-width: 480px) { .main-nav a { font-size: 15px; } }
+/* The mark sits close to the nav it leads. */
+.main-nav { margin-left: 4px; }
+/* The mark speaks the nav's language: full ink on the homepage, muted elsewhere, full again on hover. */
+.logo .mark { transition: opacity 150ms var(--ease); }
+.logo:not([aria-current]) .mark { opacity: 0.45; }
+.logo:hover .mark { opacity: 1; }
+/* Sort: one quiet menu button in the page bar, with the native picker underneath. */
+.sort-pick {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 32px 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  color: var(--fg);
+  font-size: 14px;
+  cursor: pointer;
+}
+.sort-pick svg { width: 16px; height: 16px; color: var(--muted); flex: none; }
+.sort-pick::after {
+  content: '';
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border: solid var(--muted);
+  border-width: 0 1.4px 1.4px 0;
+  translate: 0 -70%;
+  rotate: 45deg;
+  pointer-events: none;
+}
+.sort-pick:hover { background: var(--surface); }
+.sort-pick select {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  outline: none;
+}
+.sort-pick:focus-within { box-shadow: 0 0 0 2px var(--fg); }
+.sort-pick select:focus, .sort-pick select:focus-visible { outline: none; box-shadow: none; }
+.sort-pick select { width: auto; height: auto; box-shadow: none; background: none; font-size: 14px; }
+.sort-pick select:focus { box-shadow: none; }
+/* Calls to action in empty states are square, like the hero's. */
+.empty-state .btn { border-radius: 0; }
+
+/* One shape: every button and button-like control is square. */
+:root { --r: 0px; --r-lg: 0px; }
+.btn, button.btn, a.btn, .subtabs a, .subtabs button, .seg, .seg span, .sort-pick, .acct-menu, .acct-menu > a, .acct-menu > button,
+.theme, .wall-tools button, .wall-zoom, .wall-expand, .listing, .tile, .brush, .arr-tile, .win-presets button, input, select, textarea {
+  border-radius: 0;
+}
+.rule-chip, .chip, .tag, .pick, .created-link { border-radius: 0; }
+/* Hero: black is the headline, white is what you click. */
+.hero-text .wall-cta .btn.primary { background: #fff; color: #0a0a0a; font-weight: 600; }
+.hero-text .wall-cta .btn:hover { background: #ececea; }
+/* The signed-in account reads as a name, not a button: no box, a quiet hover. */
+.btn.acct { background: none; box-shadow: none; border: 0; padding: 0 6px; }
+.btn.acct:hover, .btn.acct[aria-expanded='true'] { background: var(--surface); }
+.wall-tools, .wall-tools *, .wall-modes, .wall-modes button, .wall-zoomrow, .wall-card, .wall-hover, .slot-tip, .pick-tip { border-radius: 0 !important; }
+/* FAQ rows: the + brightens with the row on hover, and stays bright while open. */
+.faq summary::after { transition: color 150ms var(--ease); }
+.faq summary:hover::after, .faq details[open] summary::after { color: var(--fg); }
+/* Expanded, the wall covers the whole screen, whatever height its band had on the page. */
+.hero .wall-frame.expanded, .wall-frame.expanded { height: auto; }

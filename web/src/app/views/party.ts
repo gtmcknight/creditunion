@@ -1,7 +1,7 @@
 import { parseAbi, parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi } from '../abi';
 import { canBatch, config, explorer, pub, send, sendBatch, session } from '../chain';
-import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, getSummary, hasLayout, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
+import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, forgetBatches, getBatch, getSummary, hasLayout, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { hydrate, pct, who } from '../ens';
 import { editionArt, examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
@@ -9,6 +9,7 @@ import { keyOf as layoutKey } from '../../shared/layout';
 import { Room, books, depositedKeys, keysOf, noRoomReason, type Books } from '../slots';
 import { $$, art, clock, errText, esc, eth, same, sheet, short, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
+import { go as navigate } from '../main';
 
 const CHUNK = 40; // Credits per transaction; keeps each one well under the block gas limit
 // One Credit sent straight to the party: the Batch records the sender as depositor, no approval needed.
@@ -70,11 +71,13 @@ type Mine = Awaited<ReturnType<typeof me>> | null;
 const shareUrl = (s: Ctx['s']) => `${location.origin}/union/${s.address}?s=${stamp(s.state, s.count, s.highBid)}`;
 
 let picks = new Set<string>();
-/// Which Add Credits tab is open, per credit union, so a live refresh doesn't flip it back.
+/// A Credit to preselect once its picker draws (the ?pick= link).
+let pickAsk: { at: string; id: string } | null = null;
+/// Which Add Credits tab is open, per Credit Union, so a live refresh doesn't flip it back.
 let addTab: { at: string; tab: string } | null = null;
 /// Transactions in flight on this page: live refreshes wait while one is.
 let busy = 0;
-/// The live-refresh timer for the credit union on screen (one at a time).
+/// The live-refresh timer for the Credit Union on screen (one at a time).
 let live: ReturnType<typeof setInterval> | null = null;
 const LIVE_MS = 12_000; // about one block
 
@@ -86,15 +89,27 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     if (!ours) throw 0;
     b = got;
   } catch {
-    app.innerHTML = `<section class="prose"><h1>Credit union not found</h1><p><a href="/unions">← Credit Unions</a></p></section>`;
+    app.innerHTML = `<section class="prose"><h1>Credit Union not found</h1><p><a href="/unions">← Credit Unions</a></p></section>`;
     return;
   }
   const account = session.account;
+  // /union/0x…?pick=123 (from a Credit's page): open on Your Credits with that one picked, if it fits.
+  const want = new URLSearchParams(location.search).get('pick');
+  if (want && /^\d{1,6}$/.test(want)) {
+    pickAsk = { at: address.toLowerCase(), id: want };
+    addTab = { at: address, tab: 'mine' };
+  }
+  if (location.search) history.replaceState(history.state, '', location.pathname);
+  const s = b.s;
+  const burned = s.state === 'Auction' || s.state === 'Settled';
+  // On a layout batch the sheet shows every Credit in the slot it will burn into, not in deposit order.
+  const slots = hasLayout(s.filter) ? Array.from({ length: 80 }, (_, i) => layoutSlot(s.filter, i)) : null;
+  // The value of the painted trait each Credit in was booked under (Batch.keyOf), read alongside the wallet's
+  // own reads rather than after them.
+  const keysRead = slots && !burned ? depositedKeys(s.address, b.ids).catch(() => null) : null;
   const m: Mine = account ? await me(address, account) : null;
   const myIds = new Set(b.ids.filter((_, i) => same(b.depositors[i], account)).map(String));
-  const s = b.s;
   const rules = filterRules(s.filter, s.allowlistSize, (i) => layoutSlot(s.filter, i));
-  const burned = s.state === 'Auction' || s.state === 'Settled';
   const depositors = new Set(b.depositors.map((d) => d.toLowerCase())).size;
 
   // Cells added since this browser last saw the batch drop in, in deposit order.
@@ -105,16 +120,13 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     sessionStorage.setItem(seenKey, String(s.count));
   } catch {}
 
-  // On a layout batch the sheet shows every Credit in the slot it will burn into, not in deposit order.
-  const slots = hasLayout(s.filter) ? Array.from({ length: 80 }, (_, i) => layoutSlot(s.filter, i)) : null;
   let placed: (bigint | null)[] | undefined;
-  // The value of the painted trait each Credit in was booked under (Batch.keyOf): places them, and tells the
-  // picker what room is left. Null when unread (the picker then falls back to the rules alone).
-  let keyed: Map<string, number> | null = null;
-  if (slots && !burned) {
+  // The keys place the Credits in, and tell the picker what room is left. Null when unread (the picker then
+  // falls back to the rules alone).
+  const keyed: Map<string, number> | null = keysRead ? await keysRead : null;
+  if (slots && keyed) {
     try {
-      keyed = await depositedKeys(s.address, b.ids);
-      placed = b.ids.length ? placeOnLayout(slots, b.ids, (id) => keyed!.get(id.toString()) ?? 0) : undefined;
+      placed = b.ids.length ? placeOnLayout(slots, b.ids, (id) => keyed.get(id.toString()) ?? 0) : undefined;
     } catch {}
   }
   // Painted slot chips count the spaces left, not what the sheet was painted with.
@@ -174,10 +186,17 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   // Chrome keeps a focus ring on <summary> after a mouse click; drop it for pointer use only.
   app.querySelectorAll<HTMLElement>('.more summary').forEach((el) => el.addEventListener('pointerup', () => setTimeout(() => el.blur(), 0)));
   fillGhosts(app);
+  // A Credit on the sheet opens its own page.
+  app.querySelector('.batch-art')?.addEventListener('click', (e) => {
+    const c = (e.target as HTMLElement).closest<HTMLElement>('.cell[data-id]');
+    if (!c) return;
+    if ((e as MouseEvent).metaKey || (e as MouseEvent).ctrlKey) window.open(`/credit/${c.dataset.id}`, '_blank');
+    else navigate(`/credit/${c.dataset.id}`);
+  });
   document.getElementById('share')?.addEventListener('click', async () => {
     const url = shareUrl(s);
     try {
-      if (navigator.share && matchMedia('(pointer: coarse)').matches) await navigator.share({ title: s.name || 'A credit union on creditunion.fun', url });
+      if (navigator.share && matchMedia('(pointer: coarse)').matches) await navigator.share({ title: s.name || 'A Credit Union on creditunion.fun', url });
       else {
         await navigator.clipboard.writeText(url);
         toast('Link copied', 'ok', 2500);
@@ -215,7 +234,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
 }
 
 /// Keep the page current while someone sits on it: every block or so, read the summary and redraw when the
-/// credit union changed (someone deposited, withdrew, bid, or it locked). Waits while the tab is hidden, a
+/// Credit Union changed (someone deposited, withdrew, bid, or it locked). Waits while the tab is hidden, a
 /// transaction is in flight or a dialog is open. New Credits drop in with the usual animation.
 function watchLive(app: HTMLElement, address: Address, s: Ctx['s'], rerender: () => void) {
   if (live) clearInterval(live);
@@ -234,6 +253,7 @@ function watchLive(app: HTMLElement, address: Address, s: Ctx['s'], rerender: ()
       if (`${stamp(n.state, n.count, n.highBid)}:${n.lockAt}:${n.state}` !== was) {
         clearInterval(live!);
         live = null;
+        forgetBatches(); // the lists should show it changed too
         await party(app, address, rerender);
       }
     } catch {}
@@ -247,7 +267,7 @@ function justJoined(address: string, n: number) {
   } catch {}
 }
 
-/// Congrats on a new credit union, or on joining one (`joined` = Credits just deposited), with its link and
+/// Congrats on a new Credit Union, or on joining one (`joined` = Credits just deposited), with its link and
 /// ways to pass it on.
 function openCreated(b: Ctx, placed?: (bigint | null)[], joined?: number) {
   const s = b.s;
@@ -255,15 +275,15 @@ function openCreated(b: Ctx, placed?: (bigint | null)[], joined?: number) {
   const name = s.name || 'Untitled';
   const left = 80 - s.count;
   const text = joined
-    ? `I joined ${name}, a credit union pooling 80 Credits into a Statement.${left > 0 ? ` ${left} to go.` : ''}`
-    : `Join my credit union: ${name}. 80 Credits make a Statement.`;
+    ? `I joined ${name}, a Credit Union pooling 80 Credits into a Statement.${left > 0 ? ` ${left} to go.` : ''}`
+    : `Join my Credit Union: ${name}. 80 Credits make a Statement.`;
   const x = `https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
   const d = document.createElement('dialog');
   d.className = 'created';
   d.innerHTML = `<form method="dialog">
     <div class="created-art">${sheet(b.ids, { size: 'sm', placed })}</div>
-    <div class="created-head"><h3>${joined ? 'You’re in' : 'Your credit union is live'}</h3><p class="muted">${joined ? `${joined} ${joined === 1 ? 'Credit' : 'Credits'} in ${esc(name)} · ${left > 0 ? `${left} to go` : 'full'}` : esc(name)}</p></div>
-    <input class="created-link" type="text" readonly value="${esc(url)}" aria-label="Credit union link">
+    <div class="created-head"><h3>${joined ? 'You’re in' : 'Your Credit Union is live'}</h3><p class="muted">${joined ? `${joined} ${joined === 1 ? 'Credit' : 'Credits'} in ${esc(name)} · ${left > 0 ? `${left} to go` : 'full'}` : esc(name)}</p></div>
+    <input class="created-link" type="text" readonly value="${esc(url)}" aria-label="Credit Union link">
     <div class="created-actions">
       <a class="btn primary" href="${esc(x)}" target="_blank" rel="noopener">Share on X</a>
       <button type="button" class="btn" id="created-copy">Copy link</button>
@@ -308,8 +328,11 @@ function split(s: Ctx['s']) {
 
 const fact = (k: string, v: string) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
 /// A rule row; hovering it lights the slots it governs on the sheet (every slot unless it's a layout row).
-const rule = (r: Rule) =>
-  `<span class="rule-chip" data-slots="${r.slots ? r.slots.join(',') : 'all'}">${r.swatch ? `<span class="swatches">${maskInks(r.swatch).map((c) => `<i style="background:${c}"></i>`).join('')}</span>` : ''}${esc(r.label)} <span class="num">${esc(r.value)}</span></span>`;
+/// A row with a trait page is a link to it.
+const rule = (r: Rule) => {
+  const tag = r.href ? 'a' : 'span';
+  return `<${tag} class="rule-chip"${r.href ? ` href="${esc(r.href)}"` : ''} data-slots="${r.slots ? r.slots.join(',') : 'all'}">${r.swatch ? `<span class="swatches">${maskInks(r.swatch).map((c) => `<i style="background:${c}"></i>`).join('')}</span>` : ''}${esc(r.label)} <span class="num">${esc(r.value)}</span></${tag}>`;
+};
 const link = (a: string) => {
   const u = explorer('address', a);
   return u ? `<a href="${u}" target="_blank" rel="noopener" class="mono">${short(a)} ↗</a>` : `<span class="mono">${short(a)}</span>`;
@@ -354,7 +377,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
   // Your Credits in this party as tiles: pick some to withdraw just those, or leave none picked to take all.
   const withdraw = (primary = false) =>
     myIds.size
-      ? `<div class="yours-in"><p class="small fit-row"><span>Yours in this credit union <span class="muted num">${myIds.size}</span></span><span id="w-actions"><button type="button" class="link small" id="w-clear" hidden>Clear</button></span></p>
+      ? `<div class="yours-in"><p class="small fit-row"><span>Yours in this Credit Union <span class="muted num">${myIds.size}</span></span><span id="w-actions"><button type="button" class="link small" id="w-clear" hidden>Clear</button></span></p>
         <div class="picker" id="w-picker">${[...myIds].map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="false" aria-label="Credit #${id}"><img src="${art(BigInt(id))}" alt="" loading="lazy"></button>`).join('')}</div>
         <button class="btn block${primary ? ' primary' : ''}" id="withdraw">Withdraw all ${plural(myIds.size)}</button></div>`
       : '';
@@ -622,14 +645,22 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
   if (s.state === 'Open' && m) drawPicker(b, m, keyed, run, txNote);
   if (b.ids.length) loadRatings(b, run, txNote);
   if (s.state === 'Open') {
+    // The Buy tab asks OpenSea for listings only once it's open.
+    let buying = false;
+    const buy = () => {
+      if (buying) return;
+      buying = true;
+      void bindBuy(b, !!m, run, txNote, keyed);
+    };
     document.querySelectorAll<HTMLButtonElement>('[data-add]').forEach((t) =>
       t.addEventListener('click', () => {
         document.querySelectorAll('[data-add]').forEach((x) => x.setAttribute('aria-selected', String(x === t)));
         document.querySelectorAll<HTMLElement>('[data-pane]').forEach((p) => (p.hidden = p.dataset.pane !== t.dataset.add));
         addTab = { at: s.address, tab: t.dataset.add! };
+        if (t.dataset.add === 'buy') buy();
       }),
     );
-    bindBuy(b, !!m, run, txNote, keyed);
+    if (document.querySelector('[data-add="buy"][aria-selected="true"]')) buy();
   }
 }
 
@@ -670,6 +701,11 @@ async function drawPicker(
     // Picks carried over from before a redraw: keep the ones that still land, in the order they were picked.
     const r = new Room(bk, room);
     picks = new Set([...picks].filter((p) => fits.some((f) => f.toString() === p) && r.take(keyOf(p))));
+    if (pickAsk?.at === s.address.toLowerCase()) {
+      const id = pickAsk.id;
+      pickAsk = null;
+      if (fits.some((f) => f.toString() === id) && r.take(keyOf(id))) picks.add(id);
+    }
   }
 
   // The rest of your Credits, folded underneath with why they don't fit.
@@ -680,7 +716,7 @@ async function drawPicker(
     off.set(why, [...(off.get(why) ?? []), id]);
   }
   const outside = m.owned.filter((id) => !inRules.has(id.toString()));
-  if (outside.length) off.set('Outside this credit union’s rules', outside);
+  if (outside.length) off.set('Outside this Credit Union’s rules', outside);
   const offCount = [...off.values()].reduce((n, x) => n + x.length, 0);
   const offTile = (id: bigint) => `<button type="button" class="pick off" data-id="${id}" aria-disabled="true" aria-label="Credit #${id}"><img src="${art(id)}" alt="" loading="lazy"></button>`;
   const fold = offCount
@@ -698,7 +734,7 @@ async function drawPicker(
     // Nothing to deposit: say so, and point at the other ways in.
     if (line)
       line.outerHTML = `<div class="empty-mine">
-        <p>${!m.owned.length ? 'You don’t hold any Credits yet.' : passing.length ? `None of your ${m.owned.length} Credits fit: the sheet has no slot left for them.` : `None of your ${m.owned.length} Credits fit this credit union’s rules.`}</p>
+        <p>${!m.owned.length ? 'You don’t hold any Credits yet.' : passing.length ? `None of your ${m.owned.length} Credits fit: the sheet has no slot left for them.` : `None of your ${m.owned.length} Credits fit this Credit Union’s rules.`}</p>
         <button type="button" class="btn block" data-go-buy>Buy Credits</button>
         ${config.chainId !== 1 ? '<a class="small" href="/mint">Mint test Credits</a>' : ''}
       </div>${fold}`;
@@ -706,7 +742,7 @@ async function drawPicker(
     el.remove();
     return;
   }
-  if (line) line.innerHTML = `<span><strong class="num">${most.length}</strong> of your ${m.owned.length} Credits fit this credit union.</span><span class="fit-actions" id="fit-actions"></span>`;
+  if (line) line.innerHTML = `<span><strong class="num">${most.length}</strong> of your ${m.owned.length} Credits fit this Credit Union.</span><span class="fit-actions" id="fit-actions"></span>`;
 
   el.innerHTML = fits
     .map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="${picks.has(id.toString())}" aria-label="Credit #${id}"><img src="${art(id)}" alt="" loading="lazy"></button>`)
@@ -811,6 +847,9 @@ async function drawPicker(
     });
     draw();
   };
+  // Scroll the picker (not the page) to the first pick, so a preselected Credit is in view.
+  const first = el.querySelector<HTMLElement>('.pick[aria-pressed="true"]');
+  if (first) el.scrollTop += first.getBoundingClientRect().top - el.getBoundingClientRect().top - 6;
   el.addEventListener('click', (e) => {
     const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.pick');
     if (!btn || btn.classList.contains('off')) return;
@@ -885,7 +924,7 @@ async function bindBuy(
   const tile = (id: string | number, src: string, price: string | null, source?: Source) =>
     `<div class="listing" data-id="${id}" title="Credit #${id}${source ? ` on ${SOURCES[source].name}` : ''}"><span class="art"><img src="${src}" alt="" loading="lazy" decoding="async">${price === null ? '' : `<button type="button" class="skip" aria-label="Skip Credit #${id}">×</button>`}</span><span class="price num">${source ? `<img class="src" src="${SOURCES[source].icon}" alt="${SOURCES[source].name}">` : ''}${price === null ? `#${id}` : `${minEth(BigInt(price))} ETH`}</span></div>`;
 
-  let listings: { id: string; price: string; source?: Source }[] = [];
+  let listings: { id: string; price: string; source?: Source; traits?: number }[] = [];
   // preview: no OpenSea key here, so edition Credits stand in. mainnetOnly: real mainnet listings and prices,
   // but this party is on a testnet and can't take them.
   let preview = false;
@@ -921,12 +960,11 @@ async function bindBuy(
   // Testnet showing mainnet listings: the testnet sheet can't judge mainnet Credits, so book them against its
   // free slots by their real traits (mainnet the worker already asks the batch's canTake).
   let slotKey: ((id: string) => number) | null = null;
-  if (mainnetOnly && hasLayout(b.s.filter) && keyed) {
-    try {
-      const t = new Uint32Array(await (await fetch('/edition-traits.bin')).arrayBuffer());
-      const trait = b.s.filter.layoutTrait ?? 0;
-      slotKey = (id) => layoutKey(trait, t[Number(id) - 1] ?? 0);
-    } catch {}
+  if (mainnetOnly && hasLayout(b.s.filter) && keyed && listings.every((l) => l.traits !== undefined)) {
+    // Each preview listing comes with its packed edition traits (worker/index.ts), so no edition file to read.
+    const t = new Map(listings.map((l) => [l.id, l.traits ?? 0]));
+    const trait = b.s.filter.layoutTrait ?? 0;
+    slotKey = (id) => layoutKey(trait, t.get(id) ?? 0);
   }
   const chosen = () => {
     const free = pool.filter((l) => !skipped.has(l.id));

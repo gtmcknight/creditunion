@@ -29,7 +29,7 @@ export function invalidateFit() {
   cache = null;
 }
 
-const weightOf = (r: Rated) => {
+export const weightOf = (r: Rated) => {
   const marks = r.traits.activeBits, cap = r.traits.palette.length * 64;
   if (marks * 256 >= 120 * cap && marks * 256 <= 136 * cap) return 'even';
   if (marks * 256 >= 112 * cap && marks * 256 <= 144 * cap) return 'lean';
@@ -42,9 +42,11 @@ export function fitsRules(s: Summary, id: bigint, r: Rated | undefined): boolean
   const f = s.filter;
   if (f.idFrom && id < f.idFrom) return false;
   if (f.idTo && id > f.idTo) return false;
-  const wantsTraits = f.palettes || f.prints || f.weights || f.eights || f.paidFrom || f.paidTo;
+  const wantsTraits = f.palettes || f.prints || f.weights || f.eights || f.paidFrom || f.paidTo || f.minScore || f.maxScore || f.bitsFrom || f.bitsTo;
   if (!wantsTraits) return true;
   if (!r) return false;
+  if (f.bitsFrom && r.traits.activeBits < f.bitsFrom) return false;
+  if (f.bitsTo && r.traits.activeBits > f.bitsTo) return false;
   if (f.paidFrom && r.paidAt < f.paidFrom) return false;
   if (f.paidTo && r.paidAt > f.paidTo) return false;
   if (f.palettes && !(f.palettes & (1 << paletteBit(r.traits.palette)))) return false;
@@ -59,8 +61,13 @@ export function fitsRules(s: Summary, id: bigint, r: Rated | undefined): boolean
 
 /// For each open batch, the ids of the wallet's Credits that could be deposited.
 export async function fitByBatch(list: Listed[], account = session.account): Promise<Map<Address, bigint[]>> {
-  const out = new Map<Address, bigint[]>();
   const { owned, traits } = await myTraits(account);
+  return fitIds(list, owned, traits);
+}
+
+/// For each open batch, which of `owned` it would take: rules, allowlist, and a painted sheet's free slots.
+export async function fitIds(list: Listed[], owned: bigint[], traits: Map<string, Rated>): Promise<Map<Address, bigint[]>> {
+  const out = new Map<Address, bigint[]>();
   if (!owned.length) return out;
   for (const { s } of list) {
     if (s.state !== 'Open') continue;

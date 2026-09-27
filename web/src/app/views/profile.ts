@@ -1,25 +1,31 @@
-import { go as navigate } from '../main';
 import type { Address } from 'viem';
 import { batchAbi } from '../abi';
-import { config, disconnect, explorer, pub, send, session } from '../chain';
+import { config, pub, send, session } from '../chain';
 import { listBatches, myCredits, type Listed } from '../data';
 import { hydrate, who } from '../ens';
 import { fillGhosts } from '../ghosts';
-import { art, errText, esc, eth, same, toast } from '../ui';
+import { art, errText, esc, eth, pageHead, same, toast } from '../ui';
 import { card, mineIn } from './lists';
 import { fitByBatch } from '../fit';
 
 type Due = { b: Listed; claim: bigint; owed: bigint };
 const TABS = ['Joined', 'Started', 'Can join', 'Credits'] as const;
 type Tab = (typeof TABS)[number];
+/// One plain line under each tab saying what it lists, for your own page or someone else's.
+const NOTES: Record<Tab, (own: boolean) => string> = {
+  Joined: (own) => `Credit Unions ${own ? 'you have' : 'they have'} deposited Credits into.`,
+  Started: (own) => `Credit Unions ${own ? 'you' : 'they'} started.`,
+  'Can join': (own) => `Open Credit Unions that ${own ? 'your' : 'their'} Credits fit, and how many of ${own ? 'yours' : 'theirs'} each can take.`,
+  Credits: (own) => `Every Credit ${own ? 'you hold' : 'they hold'}: in ${own ? 'your' : 'their'} wallet, and deposited in Credit Unions.`,
+};
 
 /// Your Credits, the batches you're in or opened, and anything you can collect. With `member`, anyone's page:
-/// their credit unions and Credits, read-only (your own address shows your own page).
+/// their Credit Unions and Credits, read-only (your own address shows your own page).
 export async function profile(app: HTMLElement, rerender: () => void, member?: Address) {
   const own = !member || same(member, session.account);
   const account = own ? session.account : member;
   if (!account) {
-    app.innerHTML = `<section class="narrow"><h1>Your Credits</h1><p class="lede">Connect to see your Credits and credit unions.</p><button class="btn primary" data-connect>Connect wallet</button></section>`;
+    app.innerHTML = `<section class="profile">${pageHead({ title: 'Your Credits', lede: 'Connect to see your Credits and Credit Unions.' })}<button class="btn primary" data-connect>Connect wallet</button></section>`;
     return;
   }
 
@@ -41,25 +47,9 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
       }),
     )
   ).filter((d) => d.claim > 0n || d.owed > 0n);
-  const total = dues.reduce((a, d) => a + d.claim + d.owed, 0n);
-  const ex = explorer('address', account);
 
-  app.innerHTML = `
-  <section class="profile">
-    <header class="profile-head">
-      ${who(account, 'lg')}
-      <div class="actions">${ex ? `<a class="btn sm" href="${ex}" target="_blank" rel="noopener">Explorer ↗</a>` : ''}${own ? '<button class="btn sm" id="disconnect">Disconnect</button>' : ''}</div>
-    </header>
-    <dl class="stats">
-      <div><dt>${own ? 'In your wallet' : 'In wallet'}</dt><dd class="num">${owned.length}</dd></div>
-      <div><dt>In credit unions</dt><dd class="num">${deposited}</dd></div>
-      ${own ? `<div><dt>To collect</dt><dd class="num">${total ? eth(total) : '0'}</dd></div>` : ''}
-    </dl>
-  </section>
-
-  ${
-    dues.length
-      ? `<section class="box">
+  const dueBox = dues.length
+    ? `<section class="box dues-box">
     <h3>Ready to collect</h3>
     <div class="dues">${dues
       .map(
@@ -71,22 +61,27 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
       )
       .join('')}</div>
   </section>`
-      : ''
-  }
+    : '';
 
-  <section class="member-tabs">
-    <div class="subtabs" role="tablist">${TABS.map(
-      (t) => `<button type="button" role="tab" data-tab="${t}" aria-selected="false">${t} <span class="num muted" id="n-${t.replace(' ', '-')}"></span></button>`,
-    ).join('')}</div>
+  app.innerHTML = `
+  <section class="profile">
+    ${pageHead({
+      title: who(account, 'lg'),
+      lede: `<span class="mono profile-addr">${account}</span>`,
+      label: 'Member',
+      tabs: TABS.map((t) => ({ label: `${t} <span class="num muted" id="n-${t.replace(' ', '-')}"></span>`, attrs: `data-tab="${t}"` })),
+    })}
+    ${dueBox}
     <div id="tab-body"></div>
   </section>`;
 
-  // Tabs: credit unions they started, joined, and could join with Credits they hold; then their Credits, in the
+  // Tabs: Credit Unions they started, joined, and could join with Credits they hold; then their Credits, in the
   // wallet and deposited. "Can join" needs every Credit's traits, so its count fills in when ready.
   const started = list.filter((b) => same(b.s.creator, account));
   const joined = list.filter((b) => mineIn(b, account).size > 0);
   const inUnions = joined.flatMap((b) => [...mineIn(b, account)].map((id) => ({ id: BigInt(id), b })));
   let canJoin: Listed[] | null = null;
+  let fits = new Map<string, bigint[]>();
   const count: Record<Tab, () => number | null> = {
     Started: () => started.length,
     Joined: () => joined.length,
@@ -99,13 +94,18 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
       .map(({ id, b }) => {
         const t = `Credit #${id}${b ? ` · in ${esc(b.s.name || 'Untitled')}` : ''}`;
         const img = `<img src="${art(id)}" alt="Credit #${id}" loading="lazy">`;
-        return b ? `<a class="pick" href="/union/${b.s.address}" title="${t}">${img}</a>` : `<span class="pick" title="${t}">${img}</span>`;
+        return `<a class="pick" href="/credit/${id}" title="${t}">${img}</a>`;
       })
       .join('')}</div>`;
   const body: Record<Tab, () => string> = {
-    Started: () => grid(started, own ? 'You haven’t started a credit union yet. <a href="/create">Start one</a>' : 'Hasn’t started a credit union yet.'),
-    Joined: () => grid(joined, own ? 'You’re not in any credit union yet. <a href="/unions">Browse credit unions</a>' : 'Not in any credit union yet.'),
-    'Can join': () => (canJoin === null ? '<p class="muted">Checking which Credits fit…</p>' : grid(canJoin, 'No open credit union takes these Credits right now.')),
+    Started: () => grid(started, own ? 'You haven’t started a Credit Union yet. <a href="/create">Start one</a>' : 'Hasn’t started a Credit Union yet.'),
+    Joined: () => grid(joined, own ? 'You’re not in any Credit Union yet. <a href="/unions">Browse Credit Unions</a>' : 'Not in any Credit Union yet.'),
+    'Can join': () =>
+      canJoin === null
+        ? '<p class="muted">Checking which Credits fit…</p>'
+        : canJoin.length
+          ? `<div class="grid">${canJoin.map((b) => card(b, fits.get(b.s.address), own ? 'yours' : 'theirs')).join('')}</div>`
+          : '<p class="muted">No open Credit Union takes these Credits right now.</p>',
     Credits: () =>
       `<div class="section-head"><h3>In wallet</h3><span class="muted num">${owned.length || ''}</span></div>${
         owned.length ? tiles([...owned].reverse().map((id) => ({ id }))) : `<p class="muted">None.${own && config.chainId !== 1 ? ' <a href="/mint">Mint test Credits →</a>' : ''}</p>`
@@ -120,7 +120,7 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
       if (el) el.textContent = n === null ? '' : String(n);
       app.querySelector(`[data-tab="${t}"]`)?.setAttribute('aria-selected', String(t === tab));
     }
-    at.innerHTML = body[tab]();
+    at.innerHTML = `<p class="muted tab-note">${NOTES[tab](own)}</p>${body[tab]()}`;
     hydrate(at);
     fillGhosts(at);
   };
@@ -134,14 +134,12 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
   fitByBatch(list.filter((b) => b.s.state === 'Open' && !mineIn(b, account).size), account).then((m) => {
     if (!at.isConnected) return;
     canJoin = list.filter((b) => m.has(b.s.address));
+    fits = m as Map<string, bigint[]>;
     draw();
   });
 
   hydrate(app);
-  document.getElementById('disconnect')?.addEventListener('click', () => {
-    disconnect();
-    navigate('/');
-  });
+
   app.querySelectorAll<HTMLButtonElement>('[data-collect]').forEach((btn) =>
     btn.addEventListener('click', async () => {
       const batch = btn.dataset.collect as Address;

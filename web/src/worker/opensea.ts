@@ -77,6 +77,19 @@ function usable(l: Json, credits: Address) {
   };
 }
 
+/// One Credit's cheapest usable listing, or null when it has none.
+export async function best(key: string, slug: string, credits: Address, id: number): Promise<{ price: bigint; seller: Address } | null> {
+  let r: Json;
+  try {
+    r = await os(key, `/listings/collection/${slug}/nfts/${id}/best`);
+  } catch (e) {
+    if (/OpenSea 404/.test((e as Error).message)) return null;
+    throw e;
+  }
+  const l = usable(r, credits);
+  return l && l.id === String(id) ? { price: l.price, seller: l.seller } : null;
+}
+
 /// The cheapest listings that fit, one per Credit, checked on-chain so a stale one cannot revert the sweep:
 /// the seller still owns it and still has Seaport (or OpenSea's conduit) approved, and no consideration
 /// goes to a contract other than OpenSea's fee wallet (a contract recipient could revert the whole fill).

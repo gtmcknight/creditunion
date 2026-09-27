@@ -119,7 +119,7 @@ function tip() {
     }
     if (cell === shown) return;
     shown = cell;
-    tipEl!.innerHTML = s ? card(s) : filled((cell as HTMLElement).dataset.id!, d!, (cell as HTMLElement).dataset.rating);
+    tipEl!.innerHTML = s ? card(s) : filled((cell as HTMLElement).dataset.id!, d!, (cell as HTMLElement).dataset.rating, !!cell.closest('.batch-art'));
     tipEl!.classList.add('compact');
     hydrate(tipEl!);
     place(cell.getBoundingClientRect());
@@ -148,13 +148,14 @@ function card({ want, f, fit }: Slot) {
 
 const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
 
-function filled(id: string, d: { by: Address; pos: number; early: boolean }, rating?: string) {
+/// `opens`: the cell is a link to the Credit's page (the Credit Union page's sheet), so say so.
+function filled(id: string, d: { by: Address; pos: number; early: boolean }, rating?: string, opens = false) {
   // A small row: the Credit, then which one, whose, and where it sits in deposit order.
   const you = same(d.by, session.account);
   return `<div class="filled"><img src="${art(BigInt(id))}" alt="">
     <div><p class="takes">#${Number(id).toLocaleString()} ${rating ? `<span class="muted">· rating ${rating}</span>` : ''}</p>
     <p class="muted small">${ordinal(d.pos)} in${d.early ? ` · ${pct(earlyShare(d.pos - 1))} of the payout` : ''}</p>
-    <p class="small">${you ? 'Yours' : who(d.by)}</p></div></div>`;
+    <p class="small">${you ? 'Yours' : who(d.by)}</p>${opens ? '<p class="muted small">Click to view</p>' : ''}</div></div>`;
 }
 
 /// Beside the cell, flipping to the other side or below when it would leave the viewport.

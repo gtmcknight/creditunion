@@ -114,11 +114,11 @@ async function draw() {
 }
 
 mkdirSync(pub('og'), { recursive: true });
-card('home', wall('time', 3), ['Join a credit union', 'to make a Statement together.'], 'Pool your Credits with other holders. At 80, burn, auction, split.');
+card('home', wall('time', 3), ['Join a Credit Union', 'to make a Statement together.'], 'Pool your Credits with other holders. At 80, burn, auction, split.');
 card('about', wall('density', 3), ['How it works'], 'One wallet nobody owns. Rules nobody can change.');
 card('auctions', wall('color', 3), ['Statements', 'at auction'], '24 hours from the first bid, split between the 80.');
-card('create', wall('time', 5, 40_000), ['Start a credit union'], 'Pick who joins and how the 80 are laid out.');
-card('party', wall('color', 5, 7), ['Join this credit union'], '80 Credits. One Statement. Split 80 ways.');
+card('create', wall('time', 5, 40_000), ['Start a Credit Union'], 'Pick who joins and how the 80 are laid out.');
+card('party', wall('color', 5, 7), ['Join this Credit Union'], '80 Credits. One Statement. Split 80 ways.');
 card('mint', wall('density', 5, 90_000), ['Mint test Credits'], 'Real Credits art, on testnet.');
 
 await draw();

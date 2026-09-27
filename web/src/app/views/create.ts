@@ -1,14 +1,18 @@
 import { go as navigate } from '../main';
+import { dice, printGlyph, swatch, weightGlyph } from '../glyphs';
 import { decodeEventLog, parseEther } from 'viem';
 import { creditsAbi, factoryAbi } from '../abi';
 import { canBatch, config, send, sendBatch, session } from '../chain';
 import { INK, maskInks, maskLabel } from '../traits';
 import { SPLITS, creatorFeeBps, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Rated } from '../data';
 import { paletteBit, TRAITS } from '../traits';
-import { $$, art, errText, esc, sheet, toast } from '../ui';
+import { $$, art, errText, esc, fromLocalInput, sheet, toast, toLocalInput } from '../ui';
 import { LAYOUT_TRAITS, keyOf, ruleFor, slotMark, slotName, type LayoutTrait } from '../../shared/layout';
+import { bitsPath, ratingPath, setPath, timePath } from '../../shared/trait';
 import { editionArt } from '../ghosts';
 import { Room, booksOf, noRoomReason } from '../slots';
+import { bin } from '../bins';
+import { TRAIT_KINDS, parseTrait } from '../../shared/trait';
 
 const CHUNK = 40;
 /// The layouts a new party can pick, by the contract's burn-order number (1 Mint time and 3 Creator's order are retired).
@@ -100,6 +104,7 @@ const INKS: Record<string, string> = { C: '#00B5E2', M: '#E4007C', Y: '#FFD100',
 const PRINTS = TRAITS.print; // Registered … Loose, in contract order
 const WEIGHTS = TRAITS.weight; // even lean sparse extreme
 const EIGHTS_MAX = 5;
+const BITS_LO = 16, BITS_HI = 160; // the fewest and most Bits any Credit in the edition has (public/bits.bin)
 
 type Minutes = [number, number][];
 
@@ -115,6 +120,8 @@ type Rules = {
   idTo: number;
   minScore: number; // ×10, 0 = any
   maxScore: number;
+  bitsFrom: number; // Jack's Bits, 0 = unbounded
+  bitsTo: number;
   list: number[];
 };
 
@@ -128,39 +135,9 @@ const weightOf = (r: Rated) => {
 
 // ---------------------------------------------------------------- glyphs
 
-const swatch = (p: string) => {
-  const inks = [...p].map((ch) => INKS[ch]);
-  const stops = inks.map((c, i) => `${c} ${(i / inks.length) * 100}% ${((i + 1) / inks.length) * 100}%`).join(', ');
-  return `<i class="ink" style="background:linear-gradient(90deg, ${stops})"></i>`;
-};
 
-/// A plate stack: Registered is one square; each misprint kind pushes plates further out of register.
-const printGlyph = (name: string) => {
-  const offsets: Record<string, [number, number][]> = {
-    Registered: [],
-    Nudge: [[1, 0]],
-    Slip: [[1.5, 0], [0, 1.5]],
-    Skew: [[1.5, 0], [-1.5, 1], [0, -1.5]],
-    Drift: [[3, 0], [0, 3]],
-    Loose: [[3, 1], [-2, 3], [1, -3], [-3, -1]],
-  };
-  const plates = ['#00B5E2', '#E4007C', '#FFD100', '#111111'];
-  const ghosts = (offsets[name] ?? []).map(([x, y], i) => `<rect x="${4 + x}" y="${4 + y}" width="16" height="16" fill="${plates[i]}" opacity=".85"/>`).join('');
-  return `<svg viewBox="0 0 24 24" aria-hidden="true">${ghosts}<rect x="4" y="4" width="16" height="16" fill="${offsets[name]?.length ? 'none' : '#111'}" stroke="#111" stroke-width="1.4"/></svg>`;
-};
 
-/// Weight as ink coverage: a 6×6 print with even about half inked, lean and sparse lighter, extreme nearly full.
-const WEIGHT_FILL: Record<string, number> = { even: 18, lean: 12, sparse: 6, extreme: 33 };
-const WEIGHT_ORDER = [14, 21, 3, 28, 9, 34, 0, 17, 25, 6, 31, 12, 19, 1, 26, 8, 33, 15, 22, 4, 29, 10, 35, 2, 18, 27, 7, 32, 13, 20, 5, 24, 11, 30, 16, 23];
-const weightGlyph = (name: string) =>
-  `<svg viewBox="0 0 24 24" aria-hidden="true">${WEIGHT_ORDER.slice(0, WEIGHT_FILL[name] ?? 0)
-    .map((k) => `<rect x="${3 + (k % 6) * 3}" y="${3 + Math.floor(k / 6) * 3}" width="3" height="3" fill="#111"/>`)
-    .join('')}<rect x="3" y="3" width="18" height="18" fill="none" stroke="#111" stroke-opacity=".25" stroke-width=".6"/></svg>`;
 
-/// The eights tile in miniature: a die face with one dot per 8, laid out like the tile's pips.
-const DICE: Record<number, [number, number][]> = { 0: [], 1: [[1, 1]], 2: [[0, 0], [2, 2]], 3: [[0, 0], [1, 1], [2, 2]], 4: [[0, 0], [2, 0], [0, 2], [2, 2]], 5: [[0, 0], [2, 0], [1, 1], [0, 2], [2, 2]] };
-const dice = (n: number) =>
-  `<svg viewBox="0 0 24 24" aria-hidden="true">${(DICE[n] ?? []).map(([x, y]) => `<circle cx="${6 + x * 6}" cy="${6 + y * 6}" r="2.2" fill="#111"/>`).join('')}</svg>`;
 
 /// Plates as a stack of offset inks: 1 is cyan alone, 4 is cyan, magenta, yellow and black overprinted.
 const platesGlyph = (n: number) => {
@@ -204,7 +181,7 @@ function markPaint(cell: HTMLElement, icon: string) {
 export async function create(app: HTMLElement) {
   if (!session.account) {
     app.innerHTML = `
-    <section class="narrow"><h1>Start a credit union</h1><p class="lede">Set the rules, add your Credits, invite everyone. At 80 they burn into a Statement and everyone in splits the sale.</p>
+    <section class="narrow"><h1>Start a Credit Union</h1><p class="lede">Set the rules, add your Credits, invite everyone. At 80 they burn into a Statement and everyone in splits the sale.</p>
     <button class="btn primary" data-connect>Connect wallet</button></section>`;
     return;
   }
@@ -217,7 +194,7 @@ export async function create(app: HTMLElement) {
     creatorFeeBps(),
     fetch('/minutes.json').then((r) => r.json() as Promise<Minutes>).catch(() => [] as Minutes),
   ]);
-  const rules: Rules = { palettes: 0, prints: 0, weights: 0, eights: 0, minuteFrom: -1, minuteTo: -1, idFrom: 0, idTo: 0, minScore: 0, maxScore: 0, list: [] };
+  const rules: Rules = { palettes: 0, prints: 0, weights: 0, eights: 0, minuteFrom: -1, minuteTo: -1, idFrom: 0, idTo: 0, minScore: 0, maxScore: 0, bitsFrom: 0, bitsTo: 0, list: [] };
   const artOf = (id: bigint) => (config.chainId === 1 ? art(id) : `/art/mainnet/${id}.svg`);
   let ghosts: { id: bigint; palette: number; t: number }[] = [];
   let view: 'rules' | 'credits' = 'credits'; // what the sheet shows (see drawPreview)
@@ -245,7 +222,7 @@ export async function create(app: HTMLElement) {
 
   // Title and one line across the top; under them the sheet (match count below it) and the form start level.
   app.innerHTML = `
-  <header class="create-head"><h1>Start a credit union</h1><p class="create-lede">Set the rules, add your Credits, invite everyone. At 80 they burn into a Statement and everyone in splits the sale. <a href="/">How it works →</a></p></header>
+  <header class="create-head"><h1>Start a Credit Union</h1><p class="create-lede">Set the rules, add your Credits, invite everyone. At 80 they burn into a Statement and everyone in splits the sale. <a href="/">How it works →</a></p></header>
   <section class="design">
     <div class="design-preview">
       <div id="preview">${sheet([])}</div>
@@ -265,22 +242,26 @@ export async function create(app: HTMLElement) {
       <section class="rule" data-tab="eights" data-pane="who"><div class="rule-head">Eights <span class="muted" id="eights-pick">Any</span></div>
         <p class="rule-desc">How many 8s are in its seed.</p>
         <div class="tiles eights" data-rule="eights">${Array.from({ length: EIGHTS_MAX + 1 }, (_, n) => `<button type="button" class="tile" data-bit="${n}" aria-pressed="false" title="${eightsChip(n)}">${eightsPips(n)}<span>${EIGHT_NAMES[n]}</span></button>`).join('')}</div>
+        <a class="rule-see" data-see="eights" target="_blank" rel="noopener" hidden>See these Credits →</a>
       </section>
 
       <section class="rule" data-tab="weight" data-pane="who"><div class="rule-head">Weight <span class="muted" id="weights-pick">Any</span></div>
         <p class="rule-desc">How much of it is inked.</p>
         <div class="tiles" data-rule="weights">${WEIGHTS.map((w, i) => `<button type="button" class="tile" data-bit="${i}" aria-pressed="false" title="${w}">${weightGlyph(w)}<span>${w}</span></button>`).join('')}</div>
+        <a class="rule-see" data-see="weights" target="_blank" rel="noopener" hidden>See these Credits →</a>
       </section>
 
       <section class="rule" data-tab="print" data-pane="who"><div class="rule-head">Print <span class="muted" id="prints-pick">Any</span></div>
         <p class="rule-desc">How far its inks slipped.</p>
         <div class="tiles" data-rule="prints">${PRINTS.map((p, i) => `<button type="button" class="tile" data-bit="${i}" aria-pressed="false" title="${p}">${printGlyph(p)}<span>${p}</span></button>`).join('')}</div>
+        <a class="rule-see" data-see="prints" target="_blank" rel="noopener" hidden>See these Credits →</a>
       </section>
 
 
       <section class="rule" data-tab="palette" data-pane="who"><div class="rule-head">Colors <span class="muted" id="palettes-pick">Any</span></div>
         <p class="rule-desc">Which inks it uses.</p>
         <div class="tiles palettes" data-rule="palettes">${PALETTE_ROWS.flat().map((p) => `<button type="button" class="tile" data-bit="${paletteBit(p)}" aria-pressed="false" title="${p}">${swatch(p)}<span>${p}</span></button>`).join('')}</div>
+        <a class="rule-see" data-see="palettes" target="_blank" rel="noopener" hidden>See these Credits →</a>
       </section>
 
       <section class="rule" data-tab="time" data-pane="who"><div class="rule-head">Payment Time <span id="win-text">Any time</span></div>
@@ -289,17 +270,29 @@ export async function create(app: HTMLElement) {
           <svg id="hist" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
           <div class="dual"><input type="range" id="win-from" min="0" max="${last}" value="0" aria-label="Window start"><input type="range" id="win-to" min="0" max="${last}" value="${last}" aria-label="Window end"></div>
         </div>
-        <div class="win-presets" id="win-presets"></div>
+        <div class="win-inputs"><label><span>Start</span><input type="datetime-local" id="win-start" step="60"></label><label><span>End</span><input type="datetime-local" id="win-end" step="60"></label></div>
         <p class="hint" id="win-count" hidden></p>
+        <a class="rule-see" data-see="time" target="_blank" rel="noopener" hidden>See these Credits →</a>
       </section>
 
       <section class="rule" data-tab="rating" data-pane="who"><div class="rule-head">Rating <span id="score-text">Any</span></div>
         <p class="rule-desc">Jack’s rating, 80 to 800.</p>
         <div class="timeline">
           <svg id="score-hist" viewBox="0 0 72 28" preserveAspectRatio="none" aria-hidden="true"></svg>
-          <div class="dual"><input type="range" id="min-score" min="80" max="800" step="1" value="80" aria-label="Lowest rating"><input type="range" id="max-score" min="80" max="800" step="1" value="800" aria-label="Highest rating"></div>
+          <div class="dual"><input type="range" id="min-score" min="80" max="800" step="0.1" value="80" aria-label="Lowest rating"><input type="range" id="max-score" min="80" max="800" step="0.1" value="800" aria-label="Highest rating"></div>
         </div>
         <div class="axis" id="score-axis">${[80, 200, 400, 600, 800].map((v) => `<button type="button" data-v="${v}" style="left:${((v - 80) / 720) * 100}%" aria-label="Move the nearest handle to ${v}">${v}</button>`).join('')}</div>
+        <a class="rule-see" data-see="rating" target="_blank" rel="noopener" hidden>See these Credits →</a>
+      </section>
+
+      <section class="rule" data-tab="bits" data-pane="who"><div class="rule-head">Bits <span id="bits-text">Any</span></div>
+        <p class="rule-desc">How many marks its plates set, ${BITS_LO} to ${BITS_HI}.</p>
+        <div class="timeline">
+          <svg id="bits-hist" viewBox="0 0 ${BITS_HI - BITS_LO + 1} 28" preserveAspectRatio="none" aria-hidden="true"></svg>
+          <div class="dual"><input type="range" id="min-bits" min="${BITS_LO}" max="${BITS_HI}" step="1" value="${BITS_LO}" aria-label="Fewest Bits"><input type="range" id="max-bits" min="${BITS_LO}" max="${BITS_HI}" step="1" value="${BITS_HI}" aria-label="Most Bits"></div>
+        </div>
+        <div class="axis" id="bits-axis">${[16, 40, 64, 88, 112, 136, 160].map((v) => `<button type="button" data-v="${v}" style="left:${((v - BITS_LO) / (BITS_HI - BITS_LO)) * 100}%" aria-label="Move the nearest handle to ${v}">${v}</button>`).join('')}</div>
+        <a class="rule-see" data-see="bits" target="_blank" rel="noopener" hidden>See these Credits →</a>
       </section>
 
       <section class="rule" data-tab="numbers" data-pane="who"><div class="rule-head">Token # <span class="muted" id="id-hint">Any</span></div>
@@ -352,7 +345,7 @@ export async function create(app: HTMLElement) {
 
       <div class="submit">
         <p class="gate-warn" id="warn" hidden></p>
-        <button class="btn primary block" id="go" disabled>Start credit union</button>
+        <button class="btn primary block" id="go" disabled>Start Credit Union</button>
         <p class="hint" id="why"></p>
       </div>
     </form>
@@ -383,6 +376,8 @@ export async function create(app: HTMLElement) {
     if (rules.idTo && Number(id) > rules.idTo) return false;
     if (rules.minScore && (!r || Math.round(r.score * 10) < rules.minScore)) return false;
     if (rules.maxScore && (!r || Math.round(r.score * 10) > rules.maxScore)) return false;
+    if (rules.bitsFrom && (!r || r.traits.activeBits < rules.bitsFrom)) return false;
+    if (rules.bitsTo && (!r || r.traits.activeBits > rules.bitsTo)) return false;
     if (!r) return !pal() && !rules.prints && !rules.weights && !rules.eights && rules.minuteFrom < 0 && rules.minuteTo < 0;
     if (pal() && !(pal() & (1 << paletteBit(r.traits.palette)))) return false;
     if (rules.prints && !(rules.prints & (1 << PRINTS.indexOf(r.traits.registration as (typeof PRINTS)[number])))) return false;
@@ -425,6 +420,7 @@ export async function create(app: HTMLElement) {
     if (rules.eights) parts.push(`Eights ${Array.from({ length: EIGHTS_MAX + 1 }, (_, n) => n).filter((n) => rules.eights & (1 << n)).join(', ')}`);
     if (rules.minuteFrom >= 0 || rules.minuteTo >= 0) parts.push(document.getElementById('win-text')!.textContent!.replace(/^/, 'Paid '));
     if (rules.minScore || rules.maxScore) parts.push(`Rating ${scoreLabel()}`);
+    if (rules.bitsFrom || rules.bitsTo) parts.push(`Bits ${bitsLabel()}`);
     if (rules.idFrom || rules.idTo) parts.push(rules.idFrom && rules.idTo ? `#${rules.idFrom}–${rules.idTo}` : rules.idFrom ? `#${rules.idFrom}+` : `up to #${rules.idTo}`);
     if (rules.list.length) parts.push(`${rules.list.length} listed`);
     return parts.length ? parts.join(' · ') : 'Any Credit';
@@ -437,9 +433,28 @@ export async function create(app: HTMLElement) {
   }
 
   /// The button says what it does: how many of your Credits go in.
-  const startLabel = () => (picks.size ? `Start credit union with ${picks.size} ${picks.size === 1 ? 'Credit' : 'Credits'}` : 'Start credit union');
+  const startLabel = () => (picks.size ? `Start Credit Union with ${picks.size} ${picks.size === 1 ? 'Credit' : 'Credits'}` : 'Start Credit Union');
+  /// Each rule with a value set links to those Credits in the explorer.
+  function drawSee() {
+    const href: Record<string, string> = {
+      palettes: rules.palettes ? setPath('palette', rules.palettes) : '',
+      eights: rules.eights ? setPath('eights', rules.eights) : '',
+      prints: rules.prints ? setPath('print', rules.prints) : '',
+      weights: rules.weights ? setPath('weight', rules.weights) : '',
+      time: minutes.length && (rules.minuteFrom >= 0 || rules.minuteTo >= 0) ? timePath(minutes[Math.max(0, rules.minuteFrom)][0], minutes[rules.minuteTo >= 0 ? rules.minuteTo : last][0] + 59) : '',
+      rating: rules.minScore || rules.maxScore ? ratingPath(rules.minScore, rules.maxScore) : '',
+      bits: rules.bitsFrom || rules.bitsTo ? bitsPath(rules.bitsFrom, rules.bitsTo) : '',
+    };
+    app.querySelectorAll<HTMLAnchorElement>('.rule-see').forEach((a) => {
+      const h = href[a.dataset.see!];
+      a.hidden = !h;
+      if (h) a.href = h;
+    });
+  }
+
   function refresh() {
     if (panesReady) applyPanes();
+    drawSee();
     const fit = owned.filter(qualifies);
     for (const id of [...picks]) if (!fit.some((f) => f.toString() === id)) picks.delete(id);
     // Keep the picks the sheet has room for, in the order picked; the rest of a value grey out once it's full.
@@ -459,7 +474,7 @@ export async function create(app: HTMLElement) {
       p.classList.toggle('off', !ok);
       const full = ok && !picks.has(id.toString()) && !room.fits(keyOfMine(id.toString()));
       p.classList.toggle('full', full);
-      p.title = full ? (room.n >= 80 ? 'A credit union holds 80' : bk ? noRoomReason(bk, keyOfMine(id.toString()), true) : '') : `Credit #${id}`;
+      p.title = full ? (room.n >= 80 ? 'A Credit Union holds 80' : bk ? noRoomReason(bk, keyOfMine(id.toString()), true) : '') : `Credit #${id}`;
       p.setAttribute('aria-pressed', String(picks.has(p.dataset.id!)));
       (ok ? on : offBox).append(p);
     }
@@ -476,14 +491,14 @@ export async function create(app: HTMLElement) {
     // The contract refuses rules that can never admit 80.
     const tooNarrow = rules.list.length && rules.list.length < 80 ? 'A named list needs at least 80 Credits.'
       : rules.idTo && rules.idTo - rules.idFrom + 1 < 80 ? 'A number range needs at least 80 numbers.' : '';
-    const short = eligible >= 0 && eligible < 80 ? `Only ${eligible} ${eligible === 1 ? 'Credit' : 'Credits'} can ever join, and a credit union needs 80. Widen the rules.` : '';
+    const short = eligible >= 0 && eligible < 80 ? `Only ${eligible} ${eligible === 1 ? 'Credit' : 'Credits'} can ever join, and a Credit Union needs 80. Widen the rules.` : '';
     const reason = tooNarrow || short || (n < min ? `Select at least ${min} of your qualifying Credits.` : n > 80 ? 'At most 80.' : over ? overText(over) : '');
     // One line under the button: what blocks it, else how it plays out.
     // What blocks Start sits above it as a warning; the line under it always says how it plays out.
     const warn = document.getElementById('warn')!;
     warn.textContent = reason;
     warn.hidden = !reason;
-    why.innerHTML = `${n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions. ` : ''}Free to start a credit union. Withdraw your Credits anytime until it fills and locks.<br>${Number(protocolBps) / 100}% protocol fee, only if it sells. Unofficial and experimental.`;
+    why.innerHTML = `${n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions. ` : ''}Free to start a Credit Union. Withdraw your Credits anytime until it fills and locks.<br>${Number(protocolBps) / 100}% protocol fee, only if it sells. Unofficial and experimental.`;
     go.disabled = !!reason;
     if (!go.dataset.busy) go.textContent = startLabel();
     drawSummary();
@@ -507,6 +522,8 @@ export async function create(app: HTMLElement) {
             idTo: rules.idTo,
             minScore: rules.minScore,
             maxScore: rules.maxScore,
+            bitsFrom: rules.bitsFrom,
+            bitsTo: rules.bitsTo,
             list: rules.list.slice(0, 200),
           }),
         });
@@ -530,7 +547,7 @@ export async function create(app: HTMLElement) {
         keySupply = new Map();
         const keys = [...new Set(layout.filter(Boolean))];
         if (keys.length) {
-          const base = { palettes: pal(), prints: rules.prints, weights: rules.weights, eights: rules.eights, minuteFrom: rules.minuteFrom, minuteTo: rules.minuteTo, idFrom: rules.idFrom, idTo: rules.idTo, minScore: rules.minScore, maxScore: rules.maxScore, list: rules.list.slice(0, 200) };
+          const base = { palettes: pal(), prints: rules.prints, weights: rules.weights, eights: rules.eights, minuteFrom: rules.minuteFrom, minuteTo: rules.minuteTo, idFrom: rules.idFrom, idTo: rules.idTo, minScore: rules.minScore, maxScore: rules.maxScore, bitsFrom: rules.bitsFrom, bitsTo: rules.bitsTo, list: rules.list.slice(0, 200) };
           await Promise.all(
             keys.map(async (k) => {
               const narrow = ruleFor(layoutTrait, k);
@@ -926,9 +943,11 @@ export async function create(app: HTMLElement) {
       for (let i = a; i <= b; i++) n += minutes[i][1];
       winCount.textContent = `${n.toLocaleString()} Credit${n === 1 ? '' : 's'}`;
     }
-    document.querySelectorAll<HTMLButtonElement>('#win-presets [data-i]').forEach((btn) =>
-      btn.setAttribute('aria-pressed', String(btn.dataset.i === 'any' ? any : Number(btn.dataset.i) === a && a === b)),
-    );
+    if (minutes.length) {
+      // Start is the first minute's start; End is where the last minute ends (exclusive), as the heading says.
+      startIn.value = toLocalInput(minutes[a][0]);
+      endIn.value = toLocalInput(minutes[b][0] + 60);
+    }
     drawHist();
   };
   from.addEventListener('input', () => {
@@ -941,22 +960,43 @@ export async function create(app: HTMLElement) {
     drawWindow();
     refresh();
   });
-  const presets = document.getElementById('win-presets')!;
-  const full = minutes.map((m, i) => [m, i] as const).filter(([m]) => m[1] === 80);
-  // Shortcuts to the minutes when exactly 80 Credits were paid for: one party's worth. Clearing is the row's ×.
-  presets.innerHTML = full.length
-    ? `<span class="muted small">80 paid in one minute:</span>${full
-        .map(([m, i]) => `<button type="button" data-i="${i}" title="Exactly 80 Credits were paid for in this minute">${fmtT.format(new Date(m[0] * 1000))}</button>`)
-        .join('')}`
-    : '';
-  presets.addEventListener('click', (e) => {
-    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-i]');
-    if (!btn) return;
-    if (btn.dataset.i === 'any') {
-      from.value = '0';
-      to.value = String(last);
-    } else from.value = to.value = btn.dataset.i!;
+  // Start and End, typed to the minute, move the handles; the handles fill them back in (drawWindow).
+  const startIn = document.getElementById('win-start') as HTMLInputElement;
+  const endIn = document.getElementById('win-end') as HTMLInputElement;
+  if (minutes.length) {
+    startIn.min = endIn.min = toLocalInput(minutes[0][0]);
+    startIn.max = endIn.max = toLocalInput(minutes[last][0] + 60);
+  }
+  /// The first minute that ends after `t`; the last minute that starts before `t`.
+  const firstFrom = (t: number) => {
+    const i = minutes.findIndex(([m]) => m + 59 >= t);
+    return i < 0 ? last : i;
+  };
+  const lastBefore = (t: number) => {
+    let i = last;
+    while (i > 0 && minutes[i][0] >= t) i--;
+    return i;
+  };
+  /// A window in unix seconds, snapped to the minutes (the ?from=&to= preset uses it too).
+  const setWindow = (a: number, b: number, keep: 'a' | 'b') => {
+    if (a > b) {
+      if (keep === 'a') b = a;
+      else a = b;
+    }
+    from.value = String(a);
+    to.value = String(b);
     drawWindow();
+  };
+  startIn.addEventListener('change', () => {
+    const t = fromLocalInput(startIn.value);
+    if (t === null) return drawWindow();
+    setWindow(firstFrom(t), Number(to.value), 'a');
+    refresh();
+  });
+  endIn.addEventListener('change', () => {
+    const t = fromLocalInput(endIn.value);
+    if (t === null) return drawWindow();
+    setWindow(Number(from.value), lastBefore(t), 'b');
     refresh();
   });
   drawWindow();
@@ -969,8 +1009,7 @@ export async function create(app: HTMLElement) {
   const scoreHist = document.getElementById('score-hist')!;
   const scoreBins = new Array(72).fill(0);
   let scorePeak = 1;
-  fetch('/scores.bin')
-    .then((r) => r.arrayBuffer())
+  bin('scores.bin')
     .then((buf) => {
       for (const s of new Uint16Array(buf)) if (s) scoreBins[Math.min(71, Math.floor((s / 10 - 80) / 10))]++;
       scorePeak = Math.max(1, ...scoreBins);
@@ -983,8 +1022,8 @@ export async function create(app: HTMLElement) {
   };
   const drawScore = () => {
     const lo = Number(minScoreEl.value), hi = Number(maxScoreEl.value);
-    rules.minScore = lo > 80 ? lo * 10 : 0;
-    rules.maxScore = hi < 800 ? hi * 10 : 0;
+    rules.minScore = lo > 80 ? Math.round(lo * 10) : 0;
+    rules.maxScore = hi < 800 ? Math.round(hi * 10) : 0;
     document.getElementById('score-text')!.textContent = scoreLabel();
     scoreHist.innerHTML = scoreBins
       .map((c, i) => {
@@ -1012,6 +1051,55 @@ export async function create(app: HTMLElement) {
   maxScoreEl.addEventListener('input', () => {
     if (Number(maxScoreEl.value) < Number(minScoreEl.value)) minScoreEl.value = maxScoreEl.value;
     drawScore();
+    refresh();
+  });
+
+  // ---------------------------------------------------------------- bits
+  const minBitsEl = document.getElementById('min-bits') as HTMLInputElement;
+  const maxBitsEl = document.getElementById('max-bits') as HTMLInputElement;
+  const bitsHist = document.getElementById('bits-hist')!;
+  const bitsBins = new Array(BITS_HI - BITS_LO + 1).fill(0);
+  let bitsPeak = 1;
+  bin('bits.bin')
+    .then((buf) => {
+      for (const b of new Uint16Array(buf)) if (b >= BITS_LO && b <= BITS_HI) bitsBins[b - BITS_LO]++;
+      bitsPeak = Math.max(1, ...bitsBins);
+      drawBits();
+    })
+    .catch(() => {});
+  const bitsLabel = () => {
+    const lo = rules.bitsFrom, hi = rules.bitsTo;
+    return lo && hi ? `${lo}–${hi}` : lo ? `${lo} and up` : hi ? `up to ${hi}` : 'Any';
+  };
+  const drawBits = () => {
+    const lo = Number(minBitsEl.value), hi = Number(maxBitsEl.value);
+    rules.bitsFrom = lo > BITS_LO ? lo : 0;
+    rules.bitsTo = hi < BITS_HI ? hi : 0;
+    document.getElementById('bits-text')!.textContent = bitsLabel();
+    bitsHist.innerHTML = bitsBins
+      .map((c, i) => {
+        const h = c ? Math.max(0.6, Math.sqrt(c / bitsPeak) * 26) : 0;
+        return `<rect x="${i}" y="${28 - h}" width="0.8" height="${h}" class="${i + BITS_LO >= lo && i + BITS_LO <= hi ? 'on' : ''}"/>`;
+      })
+      .join('');
+  };
+  document.getElementById('bits-axis')!.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-v]');
+    if (!b) return;
+    const v = Number(b.dataset.v), lo = Number(minBitsEl.value), hi = Number(maxBitsEl.value);
+    const useLo = v < lo || (v <= hi && Math.abs(v - lo) <= Math.abs(v - hi));
+    (useLo ? minBitsEl : maxBitsEl).value = String(v);
+    drawBits();
+    refresh();
+  });
+  minBitsEl.addEventListener('input', () => {
+    if (Number(minBitsEl.value) > Number(maxBitsEl.value)) maxBitsEl.value = minBitsEl.value;
+    drawBits();
+    refresh();
+  });
+  maxBitsEl.addEventListener('input', () => {
+    if (Number(maxBitsEl.value) < Number(minBitsEl.value)) minBitsEl.value = maxBitsEl.value;
+    drawBits();
     refresh();
   });
 
@@ -1157,8 +1245,8 @@ export async function create(app: HTMLElement) {
       maxScore: rules.maxScore,
       layout0: layout.slice(0, 64).reduce((acc, m, i) => acc | (BigInt(m) << BigInt(4 * i)), 0n),
       layout1: layout.slice(64).reduce((acc, m, i) => acc | (BigInt(m) << BigInt(4 * i)), 0n),
-      bitsFrom: 0, // Bits rule: supported by the contract, not offered here yet
-      bitsTo: 0,
+      bitsFrom: rules.bitsFrom,
+      bitsTo: rules.bitsTo,
       layoutTrait: layout.some(Boolean) ? layoutTrait : 0,
     };
     go.disabled = true;
@@ -1220,17 +1308,18 @@ export async function create(app: HTMLElement) {
 
   // Sections: who can join, layout, settings. Rules start hidden; you add the ones you want, and each
   // added rule can be removed (which also clears it).
-  const RULES: Record<string, string> = { eights: 'Eights', weight: 'Weight', print: 'Print', palette: 'Colors', time: 'Time', rating: 'Rating', numbers: 'Token' };
+  const RULES: Record<string, string> = { eights: 'Eights', weight: 'Weight', print: 'Print', palette: 'Colors', time: 'Time', rating: 'Rating', bits: 'Bits', numbers: 'Token' };
   const sections = [...app.querySelectorAll<HTMLElement>('.rule[data-pane]')];
   const added = new Set<string>();
   const isSet = (): Record<string, boolean> => ({
     palette: !!rules.palettes, print: !!rules.prints, weight: !!rules.weights, eights: !!rules.eights,
     time: rules.minuteFrom >= 0 || rules.minuteTo >= 0, numbers: !!(rules.idFrom || rules.idTo) || rules.list.length > 0, rating: rules.minScore > 0 || rules.maxScore > 0,
+    bits: rules.bitsFrom > 0 || rules.bitsTo > 0,
   });
   // Rules as one list, like a settings page: every rule is a row showing its value ("Any" when unset, a × to
   // clear it when set). Tapping a row opens its editor inside it; one open at a time.
   let tab = ''; // the open row, none to start
-  const PICK: Record<string, string> = { eights: 'eights-pick', weight: 'weights-pick', print: 'prints-pick', palette: 'palettes-pick', time: 'win-text', rating: 'score-text', numbers: 'id-hint' };
+  const PICK: Record<string, string> = { eights: 'eights-pick', weight: 'weights-pick', print: 'prints-pick', palette: 'palettes-pick', time: 'win-text', rating: 'score-text', bits: 'bits-text', numbers: 'id-hint' };
   const list = document.getElementById('add-rule')!;
   // Build the rows once and move each rule's editor into its row, so opening one never re-renders the others.
   for (const [k, l] of Object.entries(RULES)) {
@@ -1268,6 +1357,7 @@ export async function create(app: HTMLElement) {
     if (rules.prints) parts.push(`has a ${or(bitsOf(rules.prints, 6).map((i) => PRINTS[i]))} print`);
     if (rules.minuteFrom >= 0 || rules.minuteTo >= 0) parts.push(`was paid ${txt('win-text')}`);
     if (rules.minScore || rules.maxScore) parts.push(`is rated ${txt('score-text')}`);
+    if (rules.bitsFrom || rules.bitsTo) parts.push(`has ${txt('bits-text')} Bits`);
     if (rules.idFrom || rules.idTo || rules.list.length) parts.push(`is ${txt('id-hint')}`);
     return parts.length ? `A Credit can join if it ${parts.join(AND)}.` : 'Any Credit can join.';
   };
@@ -1283,7 +1373,7 @@ export async function create(app: HTMLElement) {
     let page = 0, shown = 0;
     const load = async () => {
       more.disabled = true;
-      const body = { palettes: pal(), prints: rules.prints, weights: rules.weights, eights: rules.eights, minuteFrom: rules.minuteFrom, minuteTo: rules.minuteTo, idFrom: rules.idFrom, idTo: rules.idTo, minScore: rules.minScore, maxScore: rules.maxScore, list: rules.list.slice(0, 200), page };
+      const body = { palettes: pal(), prints: rules.prints, weights: rules.weights, eights: rules.eights, minuteFrom: rules.minuteFrom, minuteTo: rules.minuteTo, idFrom: rules.idFrom, idTo: rules.idTo, minScore: rules.minScore, maxScore: rules.maxScore, bitsFrom: rules.bitsFrom, bitsTo: rules.bitsTo, list: rules.list.slice(0, 200), page };
       const r = (await (await fetch('/edition/match', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).json()) as { count?: number; sample?: number[] };
       const ids = r.sample ?? [];
       grid.insertAdjacentHTML('beforeend', ids.map((id) => `<figure title="Credit #${id}"><img src="${editionArt(id)}" alt="" loading="lazy" decoding="async"><figcaption class="num">#${id.toLocaleString()}</figcaption></figure>`).join(''));
@@ -1343,6 +1433,12 @@ export async function create(app: HTMLElement) {
       maxScoreEl.value = '800';
       drawScore();
     }
+    if (k === 'bits') {
+      rules.bitsFrom = rules.bitsTo = 0;
+      minBitsEl.value = String(BITS_LO);
+      maxBitsEl.value = String(BITS_HI);
+      drawBits();
+    }
     if (k === 'time') {
       rules.minuteFrom = rules.minuteTo = -1;
       from.value = '0';
@@ -1399,6 +1495,47 @@ export async function create(app: HTMLElement) {
       h.insertBefore(d, h.querySelector('span:not(.rule-title)'));
     }
   });
+  // A preset from a trait page: /create?weight=sparse, ?palette=CMYK, ?print=slip, ?eights=3 sets that rule and opens it.
+  const q = new URLSearchParams(location.search);
+  for (const kind of TRAIT_KINDS) {
+    const t = q.has(kind) ? parseTrait(kind, q.get(kind)!) : null;
+    if (!t) continue;
+    if (kind === 'palette') {
+      picked = rules.palettes = 1 << t.v;
+    } else if (kind === 'print') rules.prints = t.rules.prints!;
+    else if (kind === 'weight') rules.weights = t.rules.weights!;
+    else rules.eights = t.rules.eights!;
+    tab ||= kind;
+  }
+  // A window from /time: /create?from=<unix>&to=<unix> (to inclusive), snapped to the minutes.
+  const qf = Number(q.get('from')), qt = Number(q.get('to'));
+  if (minutes.length && qf > 0 && qt >= qf) {
+    setWindow(firstFrom(qf), lastBefore(qt + 1), 'a');
+    tab ||= 'time';
+  }
+  // A range from /rating or /bits: /create?minRating=443.1&maxRating=800, ?minBits=20&maxBits=40.
+  const num = (k: string) => (q.has(k) && q.get(k)!.trim() !== '' && Number.isFinite(Number(q.get(k))) ? Number(q.get(k)) : null);
+  const [qlo, qhi] = [num('minRating'), num('maxRating')];
+  if (qlo !== null || qhi !== null) {
+    const lo = Math.max(80, Math.min(800, Math.round((qlo ?? 80) * 10) / 10)), hi = Math.max(lo, Math.min(800, Math.round((qhi ?? 800) * 10) / 10));
+    minScoreEl.value = String(lo);
+    maxScoreEl.value = String(hi);
+    drawScore();
+    tab ||= 'rating';
+  }
+  const [blo, bhi] = [num('minBits'), num('maxBits')];
+  if (blo !== null || bhi !== null) {
+    const lo = Math.max(BITS_LO, Math.min(BITS_HI, Math.round(blo ?? BITS_LO))), hi = Math.max(lo, Math.min(BITS_HI, Math.round(bhi ?? BITS_HI)));
+    minBitsEl.value = String(lo);
+    maxBitsEl.value = String(hi);
+    drawBits();
+    tab ||= 'bits';
+  }
+  if (tab) {
+    syncTiles();
+    drawBrushes();
+  }
+
   panesReady = true;
   applyPanes();
 

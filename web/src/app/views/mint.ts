@@ -32,9 +32,9 @@ export async function mint(app: HTMLElement, rerender: () => void) {
         owned.length
           ? `<div class="picker lg static">${[...owned]
               .reverse()
-              .map((id) => `<span class="pick" title="Credit #${id}"><img src="${art(id)}" alt="Credit #${id}" loading="lazy"></span>`)
+              .map((id) => `<a class="pick" href="/credit/${id}" title="Credit #${id}"><img src="${art(id)}" alt="Credit #${id}" loading="lazy"></a>`)
               .join('')}</div>
-             <div class="actions"><a class="btn primary" href="/unions">Join a credit union</a><a class="btn" href="/create">Start a credit union</a></div>`
+             <div class="actions"><a class="btn primary" href="/unions">Join a Credit Union</a><a class="btn" href="/create">Start a Credit Union</a></div>`
           : '<p class="muted">None yet.</p>'
       }
     </div>`

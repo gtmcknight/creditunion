@@ -1,5 +1,5 @@
 import type { Address } from 'viem';
-import { chain, config, connect, explorer, loadConfig, onSession, restore, session, wallets } from './chain';
+import { chain, config, connect, disconnect, explorer, loadConfig, onSession, restore, session, wallets } from './chain';
 import { party } from './views/party';
 import { create } from './views/create';
 import { lists } from './views/lists';
@@ -9,12 +9,18 @@ import { hydrate, who } from './ens';
 import { mint } from './views/mint';
 import { previews } from './views/previews';
 import { profile } from './views/profile';
+import { credit } from './views/credit';
+import { traitPage } from './views/trait';
+import { timePage } from './views/time';
+import { creditsPage } from './views/credits';
+import { bitsPage, ratingPage } from './views/scale';
 import { esc, errText, toast } from './ui';
 
 const app = document.getElementById('app')!;
 let seq = 0;
 
-/// Real paths: / (how it works; /about too), /unions, /auctions, /create, /union/0x…, /mint, /me. Pages keep their old
+/// Real paths: / (how it works; /about too), /unions, /auctions, /credits, /create, /union/0x…, /credit/123, /mint, /me,
+/// trait pages /palette/CMYK, /eights/3, /print/slip, /weight/sparse, and /time?from=&to=, /rating, /bits. Pages keep their old
 /// internal names (party, parties). Old #/ links and old paths (/party, /parties, /new, /b, /docs, /how) still land.
 const LEGACY: Record<string, string> = { union: 'party', unions: 'parties', new: 'create', b: 'party', docs: 'about', how: 'about' };
 function pagePath(): string[] {
@@ -28,16 +34,19 @@ if (location.hash.startsWith('#/')) {
 }
 /// Navigate without a reload.
 export function go(path: string) {
-  if (path === location.pathname) return;
+  if (path === location.pathname + location.search) return;
   history.pushState(null, '', path);
   window.scrollTo({ top: 0 });
   route();
 }
 
+/// The Credits explorer: its landing, the trait indexes and pages, the range pages.
+const EXPLORER = new Set(['credits', 'palette', 'eights', 'print', 'weight', 'time', 'rating', 'bits']);
+
 async function route() {
   const run = ++seq;
   const [page, arg] = pagePath();
-  const current = page === 'party' ? 'parties' : page;
+  const current = page === 'party' ? 'parties' : EXPLORER.has(page) ? 'credits' : page === '' || page === 'about' ? 'home' : page;
   document.querySelectorAll<HTMLAnchorElement>('[data-nav]').forEach((a) => a.toggleAttribute('aria-current', a.dataset.nav === current));
   document.querySelectorAll<HTMLAnchorElement>('#account [data-nav]').forEach((a) =>
     a.classList.toggle('current', page === 'me'),
@@ -50,6 +59,12 @@ async function route() {
     else if (page === 'me') await profile(app, route);
     else if (page === 'member' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await profile(app, route, arg as Address);
     else if (page === 'create') await create(app);
+    else if (page === 'credit') await credit(app, arg ?? '');
+    else if (page === 'time') await timePage(app);
+    else if (page === 'rating') await ratingPage(app);
+    else if (page === 'bits') await bitsPage(app);
+    else if (page === 'credits') await creditsPage(app); // the explorer's overview: a tile per trait
+    else if (page === 'palette' || page === 'eights' || page === 'print' || page === 'weight') await traitPage(app, page, arg ?? '');
     else if (page === 'party' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await party(app, arg as Address, route);
     else if (page === 'parties' || page === 'auctions') await lists(app, page);
     else home(app);
@@ -85,10 +100,35 @@ function mobileWalletLinks() {
 function drawAccount() {
   const el = document.getElementById('account')!;
   el.innerHTML = session.account
-    ? `<a class="btn sm acct" href="/me" data-nav="me">${who(session.account)}</a>`
+    ? `<div class="acct-wrap"><button type="button" class="btn sm acct" data-nav="me" aria-haspopup="menu" aria-expanded="false">${who(session.account)}</button>
+      <div class="acct-menu" role="menu" hidden><a role="menuitem" href="/me">Profile</a><button type="button" role="menuitem" data-disconnect>Disconnect</button></div></div>`
     : `<button class="btn sm" data-connect>Connect</button>`;
   hydrate(el);
 }
+
+// The account button opens a small menu: Profile, Disconnect. Any click elsewhere, a pick, or Escape closes it.
+document.addEventListener('click', (e) => {
+  const t = e.target as HTMLElement;
+  const btn = t.closest<HTMLButtonElement>('.btn.acct');
+  const menu = document.querySelector<HTMLElement>('.acct-menu');
+  if (!menu) return;
+  if (btn) {
+    menu.hidden = !menu.hidden;
+    btn.setAttribute('aria-expanded', String(!menu.hidden));
+    return;
+  }
+  if (t.closest('[data-disconnect]')) {
+    disconnect();
+    go('/');
+  }
+  menu.hidden = true;
+  document.querySelector('.btn.acct')?.setAttribute('aria-expanded', 'false');
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const menu = document.querySelector<HTMLElement>('.acct-menu');
+  if (menu) menu.hidden = true;
+});
 
 async function openConnect() {
   window.dispatchEvent(new Event('eip6963:requestProvider'));
@@ -179,7 +219,7 @@ document.addEventListener('click', (e) => {
   if (url.origin !== location.origin || /^\/(rpc|ratings|edition|art|opensea|ens|config\.json)/.test(url.pathname)) return;
   e.preventDefault();
   document.querySelectorAll<HTMLDialogElement>('dialog[open]').forEach((d) => d.close());
-  go(url.pathname);
+  go(url.pathname + url.search);
 });
 
 // A mouse click on a nav link shouldn't leave a focus ring on it after the page changes.

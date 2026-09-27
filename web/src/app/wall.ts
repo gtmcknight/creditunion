@@ -6,13 +6,14 @@
 ///   Stream   the mint replayed: each second of payments a column, stacked as they landed.
 ///   One by one  one Credit at a time, large, with its number, second, inks and bits.
 /// A living band on the About page; Expand grows whatever view is on to the full window.
-/// Data: public/wall.bin (scripts/wall.ts: 32 bytes per Credit, a 4-bit CMYK mask per cell), plus
-/// edition-traits.bin (palette), bits.bin and times.bin (scripts/wall.ts) for the orders and captions.
+/// Data: public/wall.bin (scripts/wall.ts: 32 bytes per Credit, a 4-bit CMYK mask per cell) and times.bin, plus
+/// edition-traits.bin (palette) and bits.bin (scripts/wall.ts), read only once a view or caption needs them.
+import { bin, fetchBin } from './bins';
 
 /// Subtractive mixes as the contract's SVG draws them, indexed by the 4-bit CMYK mask (0 = paper).
 const PALETTE = ['#ffffff', '#00b5e2', '#e4007c', '#00006e', '#ffd100', '#009400', '#e40000', '#000000', '#111111', '#000c0f', '#0f0008', '#000007', '#110e00', '#000a00', '#0f0000', '#000000'];
 // RGBA packed little-endian for a Uint32 view of ImageData.
-const PAL32 = PALETTE.map((h) => (255 << 24) | (parseInt(h.slice(5, 7), 16) << 16) | (parseInt(h.slice(3, 5), 16) << 8) | parseInt(h.slice(1, 3), 16));
+export const PAL32 = PALETTE.map((h) => (255 << 24) | (parseInt(h.slice(5, 7), 16) << 16) | (parseInt(h.slice(3, 5), 16) << 8) | parseInt(h.slice(1, 3), 16));
 const LETTERS = 'CMYK';
 const inks = (m: number) => [...LETTERS].filter((_, b) => m & (1 << b)).join('');
 
@@ -36,22 +37,83 @@ const ICONS: Record<Mode, string> = {
   one: `<rect x="3" y="3" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5"/>` + sq(5.5, 5.5, 2.5) + sq(8, 8, 2.5),
 };
 
-type Edition = { cells: Uint8Array; palette: Uint8Array; bits: Uint16Array; times: Uint32Array; n: number };
+/// What every view reads: the prints and payment times. Palette and Bits load only for the views that show them.
+export type Edition = { cells: Uint8Array; times: Uint32Array; n: number; palette: Uint8Array | null; bits: Uint16Array | null };
+/// Payment times alone: all the mint's clock needs (index order is payment order).
+export type Mint = { times: Uint32Array; n: number };
+
+/// wall.bin whole, once it's in (so views that draw a stretch of the mint needn't ask for blocks).
+let fullCells: Uint8Array | null = null;
+export const loadCells = () => bin('wall.bin').then((b) => (fullCells = new Uint8Array(b)));
+export const loadTimes = () => bin('times.bin').then((b): Mint => { const times = new Uint32Array(b); return { times, n: times.length }; });
+let palette: Promise<Uint8Array> | null = null;
+export const loadPalette = () =>
+  (palette ??= bin('edition-traits.bin').then((b) => {
+    const traits = new Uint32Array(b);
+    const p = new Uint8Array(traits.length);
+    for (let i = 0; i < traits.length; i++) p[i] = traits[i] & 15; // same packing as worker/match.ts
+    return p;
+  })).catch((e) => {
+    palette = null;
+    throw e;
+  });
+export const loadBits = () => bin('bits.bin').then((b) => new Uint16Array(b));
+
 let edition: Promise<Edition> | null = null;
-const load = () =>
-  (edition ??= Promise.all([
-    fetch('/wall.bin').then((r) => r.arrayBuffer()),
-    fetch('/edition-traits.bin').then((r) => r.arrayBuffer()),
-    fetch('/bits.bin').then((r) => r.arrayBuffer()),
-    fetch('/times.bin').then((r) => r.arrayBuffer()),
-  ]).then(([w, t, b, ts]) => {
-    const cells = new Uint8Array(w);
-    const n = cells.length / 32;
-    const traits = new Uint32Array(t);
-    const palette = new Uint8Array(n);
-    for (let i = 0; i < n; i++) palette[i] = traits[i] & 15; // same packing as worker/match.ts
-    return { cells, palette, bits: new Uint16Array(b), times: new Uint32Array(ts), n };
-  }));
+export const loadEdition = () =>
+  (edition ??= Promise.all([loadCells(), loadTimes()]).then(([cells, { times }]) => ({ cells, times, n: cells.length / 32, palette: null, bits: null })));
+
+/// The prints a block at a time (wall/<k>.bin, WALL_BLOCK Credits each, cut at build by scripts/bins.mjs), for views
+/// that draw only a stretch of the mint. `cells` has wall.bin's layout and fills in as blocks land; `has(i)` says
+/// whether Credit index i's print is in; `need(i0, i1)` loads the blocks covering i0..i1-1.
+export const WALL_BLOCK = 4096;
+export type Prints = { cells: Uint8Array; has: (i: number) => boolean; need: (i0: number, i1: number) => Promise<void> };
+let prints: Prints | null = null;
+export function printsFor(n: number): Prints {
+  if (prints) return prints;
+  const got = new Uint8Array(Math.ceil(n / WALL_BLOCK));
+  const pending = new Map<number, Promise<void>>();
+  const p: Prints = {
+    cells: new Uint8Array(n * 32),
+    has: (i) => got[Math.floor(i / WALL_BLOCK)] === 1,
+    need: (i0, i1) => {
+      if (fullCells && p.cells !== fullCells) {
+        p.cells = fullCells;
+        got.fill(1);
+      }
+      const wait: Promise<void>[] = [];
+      for (let k = Math.max(0, Math.floor(i0 / WALL_BLOCK)); i1 > i0 && k <= Math.min(got.length - 1, Math.floor((i1 - 1) / WALL_BLOCK)); k++) {
+        if (got[k]) continue;
+        let q = pending.get(k);
+        if (!q) {
+          q = fetchBin(`wall/${k}.bin`, 'wall.bin')
+            .then((b) => {
+              p.cells.set(new Uint8Array(b), k * WALL_BLOCK * 32);
+              got[k] = 1;
+            })
+            .finally(() => pending.delete(k));
+          pending.set(k, q);
+        }
+        wait.push(q);
+      }
+      return Promise.all(wait).then(() => {});
+    },
+  };
+  return (prints = p);
+}
+
+/// Stream: index of the first Credit paid at or after a unix second (indexes are in payment order).
+export function paidAtOrAfter(e: Mint, t: number) {
+  let lo = 0, hi = e.n;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (e.times[mid] < t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+/// The mint's first and last payment, skipping Jack's two early Credits, weeks before the mint.
+export const mintSpan = (e: Mint) => ({ first: Math.min(2, e.n - 1), start: e.times[Math.min(2, e.n - 1)], end: e.times[e.n - 1] });
 
 /// Slot → Credit index for each mode. Ties fall back to payment order, so every order is stable.
 const orders = new Map<Mode, Uint32Array>();
@@ -59,15 +121,15 @@ function orderFor(e: Edition, mode: Mode) {
   let o = orders.get(mode);
   if (o) return o;
   const ids = Array.from({ length: e.n }, (_, i) => i);
-  if (mode === 'color') ids.sort((a, b) => e.palette[a] - e.palette[b] || a - b);
-  if (mode === 'density') ids.sort((a, b) => e.bits[a] - e.bits[b] || a - b);
+  if (mode === 'color') ids.sort((a, b) => e.palette![a] - e.palette![b] || a - b);
+  if (mode === 'density') ids.sort((a, b) => e.bits![a] - e.bits![b] || a - b);
   o = Uint32Array.from(ids);
   orders.set(mode, o);
   return o;
 }
 
 /// Draw one Credit at (x, y) in a Uint32 pixel buffer `w` wide, `k` pixels per cell.
-function tile(px: Uint32Array, w: number, h: number, cells: Uint8Array, id: number, x: number, y: number, k: number) {
+export function tile(px: Uint32Array, w: number, h: number, cells: Uint8Array, id: number, x: number, y: number, k: number) {
   for (let cell = 0; cell < 64; cell++) {
     const byte = cells[id * 32 + (cell >> 1)];
     const m = cell & 1 ? byte >> 4 : byte & 15;
@@ -111,7 +173,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
     </div>
   </figure>`;
   const cv = host.querySelector('canvas')!;
-  const e = await load().catch(() => null);
+  const e = await loadEdition().catch(() => null);
   if (!e || !cv.isConnected) return;
 
   const day = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -130,20 +192,22 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
 
   // Color: Credits of each palette, in payment order, one list per palette (1–15).
   const byPalette: number[][] = Array.from({ length: 16 }, () => []);
-  for (let i = 0; i < e.n; i++) byPalette[e.palette[i]].push(i);
-  const pals = byPalette.map((l, p) => [p, l] as const).filter(([, l]) => l.length).map(([p]) => p);
-  // Stream: first Credit paid at or after a unix second (ids are in payment order).
-  const atOrAfter = (t: number) => {
-    let lo = 0, hi = e.n;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (e.times[mid] < t) lo = mid + 1;
-      else hi = mid;
-    }
-    return lo;
-  };
-  const MINT_START = e.times[Math.min(2, e.n - 1)]; // skip Jack's two early Credits, weeks before the mint
-  const MINT_END = e.times[e.n - 1];
+  let pals: number[] = [];
+  /// Palette and Bits load the first time a view (or the paused hover card) shows them.
+  const needs = (m: Mode | 'card') =>
+    Promise.all([
+      (m === 'color' || m === 'one' || m === 'card') && !pals.length
+        ? loadPalette().then((p) => {
+            if (pals.length) return;
+            e.palette = p;
+            for (let i = 0; i < e.n; i++) byPalette[p[i]].push(i);
+            pals = byPalette.map((l, k) => [k, l] as const).filter(([, l]) => l.length).map(([k]) => k);
+          })
+        : null,
+      (m === 'density' || m === 'one' || m === 'card') && !e.bits ? loadBits().then((b) => void (e.bits ??= b)) : null,
+    ]);
+  const atOrAfter = (t: number) => paidAtOrAfter(e, t);
+  const { start: MINT_START, end: MINT_END } = mintSpan(e);
   const SPAN = Math.max(1, MINT_END - MINT_START);
   // Payments per minute across the mint, for the scrubber strip under Stream and One by one.
   const perMin = new Uint16Array(Math.ceil(SPAN / 60) + 1);
@@ -272,7 +336,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
         }
       }
       edge = order[Math.min(e.n - 1, (first % cols) * rows)];
-      nowEl.textContent = mode === 'time' ? `${when(edge)} · #${(edge + 1).toLocaleString()}` : `${e.bits[edge]} bits`;
+      nowEl.textContent = mode === 'time' ? `${when(edge)} · #${(edge + 1).toLocaleString()}` : `${e.bits![edge]} bits`;
     }
   };
 
@@ -322,7 +386,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
     }
     const cur = t < 0.5 ? i % e.n : (i + 1) % e.n;
     strip(e.times[cur]);
-    nowEl.textContent = `#${(cur + 1).toLocaleString()} · ${when(cur, true)} · ${inks(e.palette[cur])} · ${e.bits[cur]} bits`;
+    nowEl.textContent = `#${(cur + 1).toLocaleString()} · ${when(cur, true)} · ${inks(e.palette![cur])} · ${e.bits![cur]} bits`;
   };
 
   const frame = () => {
@@ -336,6 +400,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
     flush();
   };
 
+  let want: Mode = start; // the view last picked, which may still be loading
   const setMode = (m: Mode) => {
     mode = m;
     box.dataset.mode = m;
@@ -356,9 +421,15 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
     const b = (ev.target as HTMLElement).closest<HTMLButtonElement>('[data-mode]');
     if (!b) return;
     endMagic();
-    setMode(b.dataset.mode as Mode);
+    const m = (want = b.dataset.mode as Mode);
     host.querySelectorAll('[data-mode], [data-magic]').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
-    frame();
+    needs(m)
+      .then(() => {
+        if (want !== m || !cv.isConnected) return; // another view was picked while this one loaded
+        setMode(m);
+        frame();
+      })
+      .catch(() => {});
   });
   // Expand grows the live band itself to the window, so whatever view is on keeps running, just bigger.
   const frameEl = host.querySelector<HTMLElement>('.wall-frame')!;
@@ -414,6 +485,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
   };
   btn.addEventListener('click', toggle);
 
+  if (!(await needs(start).then(() => true, () => false)) || !cv.isConnected) return;
   setMode(start);
   size();
   frame();
@@ -438,6 +510,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
   const setPlaying = (on: boolean) => {
     playing = on;
     if (on) hide();
+    else void needs('card').catch(() => {}); // the hover card, ready before the pointer gets there
     pauseBtn.innerHTML = (on ? PAUSE : PLAY) + `<span>${on ? 'Pause' : 'Resume'}</span>`;
     pauseBtn.setAttribute('aria-label', on ? 'Pause' : 'Resume');
   };
@@ -490,6 +563,10 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
     card.style.top = `${Math.min(top + 16, r.height - 300)}px`;
     card.hidden = false;
     if (i === hovered) return;
+    if (!e.palette || !e.bits) {
+      void needs('card').catch(() => {});
+      return hide();
+    }
     hovered = i;
     card.innerHTML = `<img src="/art/mainnet/${i + 1}.svg" alt="">
       <strong>Credit #${(i + 1).toLocaleString()}</strong>

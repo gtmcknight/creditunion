@@ -5,7 +5,7 @@ import { fitByBatch } from '../fit';
 import { editionArt, examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
 import type { Address } from 'viem';
 import { describeFilter } from '../traits';
-import { clock, eth, esc, same, sheet, until } from '../ui';
+import { clock, eth, esc, pageHead, same, sheet, until } from '../ui';
 
 function status(s: Summary) {
   switch (s.state) {
@@ -68,7 +68,8 @@ export function mineIn(b: Listed, by = session.account) {
   return new Set(b.ids.filter((_, i) => same(b.depositors[i], by)).map(String));
 }
 
-export function card({ s, ids, depositors }: Listed, fit?: bigint[]) {
+/// `whose`: who the fit count is about ("yours" for the connected wallet, "theirs" on someone else's page).
+export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yours') {
   const f = describeFilter(s.filter, s.allowlistSize);
   const mine = mineIn({ s, ids, depositors });
   const room = 80 - s.count;
@@ -78,7 +79,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[]) {
   const cta = s.state === 'Open' ? 'Join' : live ? 'Bid' : '';
   const fits = fit?.length ?? 0;
   const fitText =
-    s.state !== 'Open' ? '' : mine.size ? `You’re in · ${mine.size}` : !session.account ? '' : fits ? `${fits} of yours fit` : '';
+    s.state !== 'Open' ? '' : mine.size ? `You’re in · ${mine.size}` : !session.account && !fit ? '' : fits ? `${fits} of ${whose} fit` : '';
   const state = s.state === 'Open' ? '' : `<span class="tag state ${s.state.toLowerCase()}">${s.state}</span>`;
   registerFilter(s.address, s.filter);
   registerDeposits(ids, depositors, s.split === 1);
@@ -97,6 +98,9 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[]) {
 }
 
 const PARTY_STATES = new Set(['Open', 'Full', 'Expired']);
+const STAGES = [['upcoming', 'Upcoming'], ['live', 'Live'], ['sold', 'Sold']] as const;
+type Stage = (typeof STAGES)[number][0];
+const stageOf = (b: Listed): Stage => (b.s.state === 'Full' ? 'upcoming' : b.s.state === 'Settled' ? 'sold' : 'live');
 export type HomeTab = 'parties' | 'auctions';
 
 
@@ -105,14 +109,22 @@ export type HomeTab = 'parties' | 'auctions';
 export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
   const head =
     tab === 'parties'
-      ? ['Credit Unions', 'Each credit union pools Credits toward 80. Join with ones that fit, and leave anytime before it fills.']
-      : ['Auctions', 'Every Statement a credit union makes is sold here. 24 hours from the first bid, split among its members.'];
+      ? ['Credit Unions', 'Each Credit Union pools Credits toward 80. Join with ones that fit, and leave anytime before it fills.']
+      : ['Auctions', 'Every Statement a Credit Union makes is sold here. 24 hours from the first bid, split among its members.'];
+  // One small menu, not a second row of tabs: a sort glyph, the current order, and the native picker.
+  const sort = `<label class="sort-pick"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10M1.5 10.5 4 13l2.5-2.5M12 13V3M9.5 5.5 12 3l2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><select name="sort" aria-label="Sort">${SORTS.map(([k, l]) => `<option value="${k}"${k === sortKey() ? ' selected' : ''}>${l}</option>`).join('')}</select></label>`;
   app.innerHTML = `
-  <header class="create-head"><h1>${head[0]}</h1><p class="create-lede">${head[1]}</p></header>
   <section class="home">
-    <div class="list-tools" id="sort-row" hidden>
-      <div class="seg sm" role="radiogroup" aria-label="Sort">${SORTS.map(([k, l]) => `<label><input type="radio" name="sort" value="${k}" ${k === sortKey() ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
-    </div>
+    ${pageHead({
+      title: head[0],
+      lede: head[1],
+      tabs:
+        tab === 'parties'
+          ? [{ label: 'For you <span class="num muted" id="n-you"></span>', attrs: 'data-view="you"' }, { label: 'All <span class="num muted" id="n-all"></span>', attrs: 'data-view="all"' }]
+          : STAGES.map(([k, l]) => ({ label: `${l} <span class="num muted" id="n-${k}"></span>`, attrs: `data-stage="${k}"` })),
+      tools: tab === 'parties' ? sort : undefined,
+      label: 'Show',
+    })}
     <div id="batches"><p class="muted">Loading from chain…</p></div>
   </section>`;
 
@@ -121,9 +133,13 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     const el = document.getElementById('batches');
     if (!el) return; // navigated away
     const parties = all.filter((b) => PARTY_STATES.has(b.s.state));
-    const auctions = all.filter((b) => !PARTY_STATES.has(b.s.state));
+    // Auctions: full ones waiting to burn (Upcoming), at auction (Live), and sold.
+    const auctions = all.filter((b) => b.s.state !== 'Open' && b.s.state !== 'Expired');
     const list = tab === 'parties' ? parties : auctions;
-    document.getElementById('sort-row')!.hidden = tab !== 'parties' || list.length < 4;
+    const bar = app.querySelector<HTMLElement>('.page-bar');
+    // For you / All: shown only when something is for you; until someone picks, For you leads when it has any.
+    let view: 'you' | 'all' | null = null;
+    let stage: Stage | null = null;
     let fit = new Map<Address, bigint[]>();
     const forYou = (b: Listed) =>
       !!session.account &&
@@ -134,15 +150,45 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       const mine = list.filter(forYou);
       const rest = list.filter((b) => !forYou(b));
       const titled = (title: string, items: Listed[]) => (items.length ? `<h2 class="group-title">${title} <span class="num">${items.length}</span></h2>${grid(items)}` : '');
-      const others =
-        tab === 'auctions'
-          ? titled('Live', rest.filter((b) => b.s.state !== 'Settled')) + titled('Completed', rest.filter((b) => b.s.state === 'Settled'))
-          : rest.length ? `${mine.length ? `<h2 class="group-title">All credit unions <span class="num">${rest.length}</span></h2>` : ''}${grid(rest)}` : '';
+      if (tab === 'parties') {
+        // For you always shows; signed out it opens on All and For you asks to connect.
+        const has = mine.length > 0;
+        const v = view ?? (has ? 'you' : 'all');
+        app.querySelectorAll<HTMLElement>('[data-stage]').forEach((b) =>
+      b.addEventListener('click', () => {
+        stage = b.dataset.stage as Stage;
+        draw();
+      }),
+    );
+    app.querySelectorAll<HTMLElement>('[data-view]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === v)));
+        const ny = document.getElementById('n-you'), na = document.getElementById('n-all');
+        if (ny) ny.textContent = session.account ? String(mine.length) : '';
+        if (na) na.textContent = String(list.length);
+        el.innerHTML = !list.length
+          ? `<div class="empty-state"><p>No Credit Unions yet.</p><a class="btn primary" href="/create">Start a Credit Union</a></div>`
+          : v === 'you' && !session.account
+            ? `<div class="empty-state"><p>Connect to see the Credit Unions you're invited to.</p><button class="btn primary" data-connect>Connect wallet</button></div>`
+            : v === 'you' && !mine.length
+              ? `<p class="muted">None of your Credits fit an open Credit Union right now.</p>`
+              : grid(v === 'you' ? mine : list);
+        hydrate(el);
+        fillGhosts(el);
+        return;
+      }
+      const staged = STAGES.map(([k]) => [k, list.filter((b) => stageOf(b) === k)] as const);
+      for (const [k, items] of staged) {
+        const n = document.getElementById(`n-${k}`);
+        if (n) n.textContent = String(items.length);
+      }
+      // Until someone picks, open on Live when there is any, else Upcoming, else Sold.
+      const pick = stage ?? (staged.find(([k, items]) => k === 'live' && items.length) ?? staged.find(([, items]) => items.length) ?? staged[1])[0];
+      app.querySelectorAll<HTMLElement>('[data-stage]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.stage === pick)));
+      const shown = staged.find(([k]) => k === pick)![1];
       el.innerHTML = !list.length
-        ? tab === 'parties'
-          ? `<div class="empty-state"><p>No credit unions yet.</p><a class="btn primary" href="/create">Start a credit union</a></div>`
-          : `<div class="grid"><div class="card placeholder" id="auction-placeholder">${sheet([], { size: 'sm' })}<div class="card-body"><strong>No auctions yet</strong><span class="muted small">When a credit union burns its 80, its Statement is auctioned here.</span></div></div></div>`
-        : titled('For you', mine) + others;
+        ? `<div class="grid"><div class="card placeholder" id="auction-placeholder">${sheet([], { size: 'sm' })}<div class="card-body"><strong>No auctions yet</strong><span class="muted small">When a Credit Union burns its 80, its Statement is auctioned here.</span></div></div></div>`
+        : shown.length
+          ? grid(shown)
+          : `<p class="muted">${pick === 'upcoming' ? 'No Credit Union is full right now.' : pick === 'live' ? 'Nothing at auction right now.' : 'Nothing sold yet.'}</p>`;
       hydrate(el);
       fillGhosts(el);
       // Empty Auctions: a greyed Statement of real edition Credits stands in for the first one.
@@ -152,6 +198,18 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
           ph.querySelector('.sheet')!.outerHTML = sheet([], { size: 'sm', ghosts: ids.slice(0, 80).map((id) => ({ id: BigInt(id), src: editionArt(id) })) });
         });
     };
+    app.querySelectorAll<HTMLElement>('[data-stage]').forEach((b) =>
+      b.addEventListener('click', () => {
+        stage = b.dataset.stage as Stage;
+        draw();
+      }),
+    );
+    app.querySelectorAll<HTMLElement>('[data-view]').forEach((b) =>
+      b.addEventListener('click', () => {
+        view = b.dataset.view as 'you' | 'all';
+        draw();
+      }),
+    );
     draw();
     if (session.account && tab === 'parties') {
       fitByBatch(parties).then((m) => {
@@ -159,7 +217,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         if (document.getElementById('batches') === el) draw();
       });
     }
-    document.querySelectorAll<HTMLInputElement>('input[name=sort]').forEach((r) =>
+    document.querySelectorAll<HTMLSelectElement>('select[name=sort]').forEach((r) =>
       r.addEventListener('change', () => {
         try {
           localStorage.setItem('cu-sort', r.value);
@@ -169,6 +227,6 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     );
   } catch (e) {
     const el = document.getElementById('batches');
-    if (el) el.innerHTML = `<p class="error">Couldn't read credit unions from chain. ${esc((e as Error).message)}</p>`;
+    if (el) el.innerHTML = `<p class="error">Couldn't read Credit Unions from chain. ${esc((e as Error).message)}</p>`;
   }
 }
