@@ -2531,7 +2531,14 @@ a.rule-chip:hover {
   font-size: 12px;
   color: var(--muted);
 }
-/* Where it's listed: a small mark before the price. */
+.listing .art-link {
+  display: block;
+}
+/* Where it's listed: a small mark before the price, linking to the listing. */
+.listing a.src {
+  display: flex;
+  flex: none;
+}
 .listing img.src {
   flex: none;
   width: 12px;
@@ -6391,7 +6398,7 @@ dialog.eligible::backdrop {
 .cr-glyph { display: grid; place-items: center; width: 28px; height: 28px; flex: none; background: #fff; box-shadow: 0 0 0 1px var(--line-strong); }
 .cr-glyph svg { width: 22px; height: 22px; }
 .cr-glyph.die svg { outline: 1.2px solid #111; outline-offset: -2px; }
-.cr-cols.palette { gap: 4px; }
+.cr-cols.palette { gap: 8px; }
 .cr-cols.palette .cr-bar { max-width: none; height: calc(var(--f, 0) * 84px); overflow: hidden; background: none; }
 .cr-cols.palette .cr-bar .ink { display: block; width: 100%; height: 100%; box-shadow: inset 0 0 0 1px var(--line-strong); }
 .cr-letters { font-size: 10px; color: var(--muted); font-family: var(--mono, ui-monospace, monospace); }
@@ -6406,7 +6413,7 @@ dialog.eligible::backdrop {
   .cr-letters { display: none; }
   .cr-pic { height: 96px; }
   .cr-cols { gap: 4px; }
-  .cr-cols.palette { gap: 2px; }
+  .cr-cols.palette { gap: 4px; }
 }
 /* Member page: one line under the tabs saying what the tab lists. */
 #tab-body > .tab-note { margin: 0 0 20px; font-size: 14px; }
@@ -6489,3 +6496,12 @@ dialog.eligible::backdrop {
 .faq summary:hover::after, .faq details[open] summary::after { color: var(--fg); }
 /* Expanded, the wall covers the whole screen, whatever height its band had on the page. */
 .hero .wall-frame.expanded, .wall-frame.expanded { height: auto; }
+
+/* Credit page: where it's listed, with the marketplace's mark. */
+.listed-on { display: flex; align-items: center; gap: 6px; }
+.listed-on img.src { width: 14px; height: 14px; }
+/* TokenWorks' mark is a black squircle: flip it light on dark so it doesn't vanish. */
+:root[data-theme='dark'] img.src[src$='strategy.svg'] { filter: invert(1); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) img.src[src$='strategy.svg'] { filter: invert(1); }
+}

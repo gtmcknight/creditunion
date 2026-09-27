@@ -921,10 +921,11 @@ async function bindBuy(
   const go = document.getElementById('buy-go') as HTMLButtonElement | null;
   if (!line || !grid || !out) return;
   const room = 80 - b.s.count;
-  const tile = (id: string | number, src: string, price: string | null, source?: Source) =>
-    `<div class="listing" data-id="${id}" title="Credit #${id}${source ? ` on ${SOURCES[source].name}` : ''}"><span class="art"><img src="${src}" alt="" loading="lazy" decoding="async">${price === null ? '' : `<button type="button" class="skip" aria-label="Skip Credit #${id}">×</button>`}</span><span class="price num">${source ? `<img class="src" src="${SOURCES[source].icon}" alt="${SOURCES[source].name}">` : ''}${price === null ? `#${id}` : `${minEth(BigInt(price))} ETH`}</span></div>`;
+  // The art opens the Credit's page; the source mark opens the listing on its marketplace.
+  const tile = (id: string | number, src: string, price: string | null, source?: Source, url?: string) =>
+    `<div class="listing" data-id="${id}"><span class="art"><a class="art-link" href="/credit/${id}" title="Credit #${id}"><img src="${src}" alt="Credit #${id}" loading="lazy" decoding="async"></a>${price === null ? '' : `<button type="button" class="skip" aria-label="Skip Credit #${id}" title="Skip">×</button>`}</span><span class="price num">${source ? `<a class="src" href="${esc(url ?? '#')}" target="_blank" rel="noopener" title="Credit #${id} on ${SOURCES[source].name}"><img class="src" src="${SOURCES[source].icon}" alt="${SOURCES[source].name}"></a>` : ''}${price === null ? `#${id}` : `${minEth(BigInt(price))} ETH`}</span></div>`;
 
-  let listings: { id: string; price: string; source?: Source; traits?: number }[] = [];
+  let listings: { id: string; price: string; source?: Source; url?: string; traits?: number }[] = [];
   // preview: no OpenSea key here, so edition Credits stand in. mainnetOnly: real mainnet listings and prices,
   // but this party is on a testnet and can't take them.
   let preview = false;
@@ -945,7 +946,7 @@ async function bindBuy(
   if (!grid.isConnected) return;
 
   // Pick how many; the cheapest that fit fill the row. A listing's × skips it and the next cheapest takes its place.
-  const pool: { id: string; price: string | null; source?: Source }[] = preview
+  const pool: { id: string; price: string | null; source?: Source; url?: string }[] = preview
     ? (await examples(b.s.filter)).map((id) => ({ id: String(id), price: null }))
     : listings;
   const skipped = new Set<string>();
@@ -977,7 +978,7 @@ async function bindBuy(
     q = null;
     const pick = chosen();
     grid.classList.toggle('preview', preview);
-    grid.innerHTML = pick.map((l) => tile(l.id, preview || mainnetOnly ? editionArt(Number(l.id)) : art(BigInt(l.id)), l.price, l.source)).join('');
+    grid.innerHTML = pick.map((l) => tile(l.id, preview || mainnetOnly ? editionArt(Number(l.id)) : art(BigInt(l.id)), l.price, l.source, l.url)).join('');
     const sub = pick.reduce((a, l) => a + (l.price ? BigInt(l.price) : 0n), 0n);
     const subEl = document.getElementById('buy-sub');
     if (subEl) subEl.textContent = pick.length && !preview ? eth(sub) : '';

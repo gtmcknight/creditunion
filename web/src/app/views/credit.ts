@@ -1,15 +1,15 @@
-import type { Address } from 'viem';
+import { parseAbi, type Address } from 'viem';
 import { dice, printGlyph, swatch, weightGlyph } from '../glyphs';
 /// A trait value with the same glyph the create page uses for it, linking to its trait page.
 const traitChip = (href: string, g: string, l: string) => `<a class="vchip" href="${href}">${g}<span>${l}</span></a>`;
 import { creditsAbi, factoryAbi } from '../abi';
-import { config, pub, session } from '../chain';
+import { config, pub, send, session } from '../chain';
 import { getBatch, listBatches, ratings, type Listed, type Rated } from '../data';
 import { hydrate, who } from '../ens';
 import { fitIds, weightOf } from '../fit';
 import { fillGhosts } from '../ghosts';
 import { maskInks, paletteBit } from '../traits';
-import { art, esc, eth, same } from '../ui';
+import { art, errText, esc, eth, same, toast } from '../ui';
 import { card } from './lists';
 
 /// Credits ever minted: the same numbers on every network.
@@ -122,12 +122,22 @@ async function drawFits(id: bigint, r: Rated | undefined, list: Listed[], mine: 
   fillGhosts(el);
 }
 
-/// OpenSea's best listing for this Credit. Where the site can't buy (testnets), the mainnet price shows as a
-/// preview with the button off. Not listed: nothing.
+/// Where each marketplace's mark and name come from (same as the Buy tab).
+const SOURCES = {
+  opensea: { name: 'OpenSea', icon: '/sources/opensea.svg' },
+  strategy: { name: 'CreditStrategy', icon: '/sources/strategy.svg' },
+  fwa: { name: 'FWA', icon: '/sources/fwa.png' },
+} as const;
+const buyAbi = parseAbi(['function sellTargetNFT(uint256 tokenId) payable', 'function buy(uint256 listingId, address recipient) payable']);
+
+/// This Credit's cheapest listing: OpenSea, CreditStrategy or FWA. CreditStrategy and FWA sell from their own
+/// contracts, so those buy right here; OpenSea's opens OpenSea. Where the site can't buy (testnets), the mainnet
+/// price shows as a preview with the button off. Not listed: nothing.
 async function drawBuy(n: number) {
   const el = document.getElementById('credit-buy');
   if (!el) return;
-  let d: { price?: string | null; preview?: boolean; url?: string };
+  type Offer = { price?: string | null; source?: keyof typeof SOURCES; contract?: Address | null; listingId?: string | null; preview?: boolean; url?: string };
+  let d: Offer;
   try {
     const res = await fetch(`/opensea/credit/${n}`);
     if (!res.ok) return;
@@ -135,14 +145,39 @@ async function drawBuy(n: number) {
   } catch {
     return;
   }
-  if (!d.price || !el.isConnected) return;
-  const price = eth(BigInt(d.price));
+  if (!d.price || !d.source || !SOURCES[d.source] || !el.isConnected) return;
+  const src = SOURCES[d.source];
+  const value = BigInt(d.price);
+  const inApp = !d.preview && !!d.contract && (d.source === 'strategy' || (d.source === 'fwa' && !!d.listingId));
+  const view = d.url ? `<a class="muted small" href="${esc(d.url)}" target="_blank" rel="noopener">View on ${src.name} ↗</a>` : '';
   el.className = 'box';
-  el.innerHTML = `<div class="box-head"><h3>Listed</h3><strong class="num">${price}</strong></div>
+  el.innerHTML = `<div class="box-head"><h3 class="listed-on"><img class="src" src="${src.icon}" alt="">Listed on ${src.name}</h3><strong class="num">${eth(value)}</strong></div>
     ${
-      d.preview || !d.url
-        ? `<button class="btn primary block" disabled>Buy</button><p class="muted small">Mainnet price, shown as a preview.</p>`
-        : `<a class="btn primary block" href="${esc(d.url)}" target="_blank" rel="noopener">Buy on OpenSea ↗</a>`
+      d.preview
+        ? `<button class="btn primary block" disabled>Buy</button><p class="muted small">Mainnet price, shown as a preview. ${view}</p>`
+        : inApp
+          ? `<button class="btn primary block" id="credit-buy-go">Buy · ${eth(value)}</button>${view}`
+          : `<a class="btn primary block" href="${esc(d.url ?? '#')}" target="_blank" rel="noopener">Buy on ${src.name} ↗</a>`
     }`;
   el.hidden = false;
+  const go = document.getElementById('credit-buy-go') as HTMLButtonElement | null;
+  go?.addEventListener('click', async () => {
+    const label = go.textContent ?? '';
+    go.disabled = true;
+    go.textContent = 'Buying…';
+    try {
+      await send(
+        d.source === 'strategy'
+          ? { address: d.contract!, abi: buyAbi, functionName: 'sellTargetNFT', args: [BigInt(n)], value }
+          : { address: d.contract!, abi: buyAbi, functionName: 'buy', args: [BigInt(d.listingId!), session.account!], value },
+        () => toast('Submitted. Waiting for confirmation…', 'info'),
+      );
+      toast(`Credit #${n.toLocaleString()} is yours.`, 'ok');
+      go.textContent = 'Bought';
+    } catch (e) {
+      toast(errText(e), 'err', 8000);
+      go.disabled = false;
+      go.textContent = label;
+    }
+  });
 }

@@ -4,6 +4,7 @@
 export type Card = { title: string; description: string; image: string };
 
 const SITE = 'Credit Union';
+const CARDS_V = 2;
 const CARDS: Record<string, Card> = {
   home: { title: 'Credit Union', description: 'Join a Credit Union to make a Statement together.', image: '/og/home.png' },
   parties: { title: 'Credit Unions', description: 'Credit Unions pooling Credits toward a Statement. Join one, leave any time before it fills.', image: '/og/party.png' },
@@ -38,7 +39,8 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').repl
 
 /// index.html with this route's head tags.
 export function withCard(html: Response, card: Card, url: URL): Response {
-  const image = `${url.origin}${card.image}`;
+  // `v` changes when the cards are redrawn, so sites that cached the old image by URL fetch the new one.
+  const image = `${url.origin}${card.image}${card.image.includes('?') ? '&' : '?'}v=${CARDS_V}`;
   const page = `${url.origin}${url.pathname}`;
   const tags = [
     ['property', 'og:site_name', SITE],

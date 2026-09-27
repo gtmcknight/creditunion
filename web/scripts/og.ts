@@ -86,6 +86,11 @@ function png(px: Uint8Array) {
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
+/// The site's pixel bank, as index.html draws it.
+const MARK = `<svg viewBox="0 0 9 8" fill="#0a0a0a" shape-rendering="crispEdges"><rect x="4" y="0" width="1" height="1"/><rect x="2" y="1" width="5" height="1"/><rect x="0" y="2" width="9" height="1"/>${[1, 3, 5, 7]
+  .map((x, i) => `<rect x="${x}" y="4" width="1" height="3"${i < 3 ? ` fill="${['#00b5e2', '#e4007c', '#ffd100'][i]}"` : ''}/>`)
+  .join('')}<rect x="0" y="7" width="9" height="1"/></svg>`;
+
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
 /// One card, like the home hero: the wall edge to edge, the headline on black bars fitted to each line, a line
@@ -104,7 +109,9 @@ async function draw() {
       .t span{display:block;width:fit-content;background:#0a0a0a;color:#fff;font-weight:600;font-size:64px;line-height:1;letter-spacing:-0.035em;padding:.16em .3em .2em}
       .t p{display:inline-block;margin:16px 0 0;background:#fff;color:#0a0a0a;font-size:26px;padding:10px 18px}
       .d{position:absolute;right:32px;bottom:32px;background:#fff;color:#0a0a0a;font-weight:600;font-size:22px;padding:8px 16px}
-    </style></head><body><div class="t">${c.title.map((t) => `<span>${esc(t)}</span>`).join('')}<p>${esc(c.line)}</p></div><div class="d">creditunion.fun</div></body></html>`);
+      .b{position:absolute;left:32px;top:32px;display:flex;align-items:center;gap:12px;background:#fff;color:#0a0a0a;font-weight:600;font-size:24px;letter-spacing:-0.01em;padding:12px 18px}
+      .b svg{width:36px;height:32px;display:block}
+    </style></head><body><div class="b">${MARK}Credit Union</div><div class="t">${c.title.map((t) => `<span>${esc(t)}</span>`).join('')}<p>${esc(c.line)}</p></div><div class="d">creditunion.fun</div></body></html>`);
     await page.evaluate(() => document.fonts.ready);
     const out = await page.screenshot({ type: 'png' });
     writeFileSync(pub(`og/${c.name}.png`), out);

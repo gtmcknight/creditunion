@@ -12,12 +12,12 @@ import { mainnet } from 'viem/chains';
 import { batchAbi, creditsAbi, creditArtAbi, factoryAbi } from '../app/abi';
 import { best, quote, scan, type Extra, type Listing } from './opensea';
 import { cacheStore, confirmListing, marketListings, type FwaListing } from './fwa';
-import { confirmStrategy, strategyListings } from './strategy';
+import { confirmStrategy, strategyAbi, strategyListings } from './strategy';
 import { ratings } from './ratings';
-import { load, match, predicate, type Rules } from './match';
+import { load, loadScores, match, predicate, type Rules } from './match';
 import { cardFor, creditCard, creditsCard, partyCard, rangeCard, timeCard, traitCard, withCard } from './og';
 import { parseTrait } from '../shared/trait';
-import { drawCredit, drawParty, sample, type PartyCard } from './card';
+import { drawCredit, drawParty, sample, type CreditFacts, type PartyCard } from './card';
 import { stamp } from '../shared/stamp';
 import { keyOf, ruleFor } from '../shared/layout';
 
@@ -310,7 +310,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       // slots without reading edition-traits.bin (478 KB) itself.
       const table = live ? null : await load(env.ASSETS, url.origin).catch(() => null);
       return Response.json(
-        { listings: listings.map((l) => ({ id: l.id, price: l.price, source: l.source, ...(table ? { traits: table[Number(l.id) - 1] ?? 0 } : {}) })), preview: !live },
+        { listings: listings.map((l) => ({ id: l.id, price: l.price, source: l.source, url: listingUrl(env, live, l), ...(table ? { traits: table[Number(l.id) - 1] ?? 0 } : {}) })), preview: !live },
         { headers: { 'cache-control': 'no-store' } },
       );
     } catch (e) {
@@ -374,11 +374,12 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
   }
 
-  // One Credit's best OpenSea listing, for its page. Without a Sweeper (testnets) it's the mainnet Credit of the
-  // same number, as a preview. Cached a minute per Credit, so a busy page costs OpenSea one call a minute.
+  // One Credit's cheapest listing (OpenSea, CreditStrategy or FWA), for its page. Without a Sweeper (testnets) it's
+  // the mainnet Credit of the same number, as a preview. Cached a minute per Credit, so a busy page costs OpenSea
+  // one call a minute.
   const listed = url.pathname.match(/^\/opensea\/credit\/(\d{1,6})$/);
   if (listed) {
-    if (!env.OPENSEA_API_KEY) return text('OpenSea is not configured', 501);
+    if (!env.OPENSEA_API_KEY && !offOpenSea(env)) return text('OpenSea is not configured', 501);
     if (!sameSite(req)) return text('forbidden', 403);
     const id = Number(listed[1]);
     if (!inSupply(id)) return text('no such credit', 404);
@@ -390,13 +391,39 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     if (hit) return hit;
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
     try {
-      const l = await best(env.OPENSEA_API_KEY, env.OPENSEA_SLUG, credits, id);
-      // A listing whose seller no longer holds the Credit is dead: say nothing.
-      const c = live ? client(env) : createPublicClient({ transport: http(env.ENS_RPC || 'https://eth.drpc.org', { timeout: 8_000 }) });
-      const holder = l ? await c.readContract({ address: credits, abi: creditsAbi, functionName: 'ownerOf', args: [BigInt(id)] }).catch(() => null) : null;
-      const price = l && holder && holder.toLowerCase() === l.seller.toLowerCase() ? l.price.toString() : null;
+      const main = mainClient(env);
+      const strategy = addrOrNull(env.STRATEGY);
+      const [os, held, fwa] = await Promise.all([
+        env.OPENSEA_API_KEY
+          ? best(env.OPENSEA_API_KEY, env.OPENSEA_SLUG, credits, id).then(async (l) => {
+              // A listing whose seller no longer holds the Credit is dead: say nothing.
+              if (!l) return null;
+              const c = live ? client(env) : createPublicClient({ transport: http(env.ENS_RPC || 'https://eth.drpc.org', { timeout: 8_000 }) });
+              const holder = await c.readContract({ address: credits, abi: creditsAbi, functionName: 'ownerOf', args: [BigInt(id)] }).catch(() => null);
+              return holder && holder.toLowerCase() === l.seller.toLowerCase() ? l.price : null;
+            })
+          : null,
+        strategy ? main.readContract({ address: strategy, abi: strategyAbi, functionName: 'nftForSale', args: [BigInt(id)] }).catch(() => 0n) : 0n,
+        fwaListings(env, url, ctx).then((ls) => ls.find((l) => l.id === String(id)) ?? null),
+      ]);
+      const offers: Listing[] = [];
+      if (os !== null) offers.push({ id: String(id), price: os.toString(), source: 'opensea' });
+      if (held > 0n) offers.push({ id: String(id), price: held.toString(), source: 'strategy' });
+      if (fwa) offers.push({ id: String(id), price: fwa.price, source: 'fwa', listingId: fwa.listingId });
+      offers.sort((a, b) => (BigInt(a.price) < BigInt(b.price) ? -1 : 1));
+      const l = offers[0];
       const res = Response.json(
-        { price, preview: !live, url: price ? `https://opensea.io/assets/ethereum/${credits.toLowerCase()}/${id}` : null },
+        l
+          ? {
+              price: l.price,
+              source: l.source,
+              // Where to buy it in-app: the strategy sells a held Credit itself; FWA's market by listing id.
+              contract: l.source === 'strategy' ? addrOrNull(env.STRATEGY) : l.source === 'fwa' ? addrOrNull(env.FWA_MARKET) : null,
+              listingId: l.listingId ?? null,
+              url: listingUrl(env, live, l),
+              preview: !live,
+            }
+          : { price: null, preview: !live },
         { headers: { 'cache-control': 'public, max-age=60' } },
       );
       ctx.waitUntil(cache.put(key, res.clone()));
@@ -549,11 +576,11 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const generic = () => env.ASSETS.fetch(new Request(new URL('/og/home.png', url)));
     if (!inSupply(id)) return generic();
     const cache = caches.default;
-    const key = new Request(`${url.origin}/og/credit/${id}.png`);
+    const key = new Request(`${url.origin}/og/credit/v2/${id}.png`); // v: the card's design
     const hit = await cache.match(key);
     if (hit) return hit;
     if (await limited(env.RL_MISC, req)) return generic();
-    const res = new Response(await drawCredit(env.ASSETS, url.origin, id), { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } });
+    const res = new Response(await drawCredit(env.ASSETS, url.origin, id, await creditFacts(env, url, id).catch(() => null)), { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } });
     ctx.waitUntil(cache.put(key, res.clone()));
     return res;
   }
@@ -595,6 +622,24 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   }
 
   return env.ASSETS.fetch(req);
+}
+
+/// What a Credit's card shows, from the edition's packed traits and score table.
+async function creditFacts(env: Env, url: URL, id: number): Promise<CreditFacts> {
+  const [table, sc] = await Promise.all([load(env.ASSETS, url.origin), loadScores(env.ASSETS, url.origin)]);
+  const t = table[id - 1] ?? 0;
+  const mine = sc[id - 1] ?? 0;
+  let above = 0;
+  for (let i = 0; i < sc.length; i++) if (sc[i] > mine) above++;
+  return {
+    palette: t & 15,
+    print: ['Registered', 'Nudge', 'Slip', 'Skew', 'Drift', 'Loose'][(t >> 4) & 7] ?? '–',
+    weight: ['even', 'lean', 'sparse', 'extreme'][(t >> 7) & 3],
+    eights: (t >> 9) & 31,
+    score: mine ? mine / 10 : null,
+    rank: mine ? above + 1 : null,
+    of: sc.length,
+  };
 }
 
 const STATE_NAMES = ['Open', 'Full', 'Expired', 'Auction', 'Settled'] as const;
@@ -734,6 +779,12 @@ const mainClient = (env: Env) =>
   createPublicClient({ chain: mainnet, transport: http(env.ENS_RPC || (env.CHAIN_ID === '1' ? rpcUrl(env) : 'https://ethereum-rpc.publicnode.com'), { timeout: 8_000 }) });
 
 type Fake = { id: string; price: string; source: 'fwa' | 'strategy' | 'opensea' };
+/// Where a listing can be seen on its own marketplace. OpenSea's is the Credit's item page (mainnet's on testnets).
+function listingUrl(env: Env, live: boolean, l: Pick<Listing, 'id' | 'source'>): string {
+  if (l.source === 'strategy') return `https://www.nftstrategy.fun/strategies/${(addrOrNull(env.STRATEGY) ?? '').toLowerCase()}`;
+  if (l.source === 'fwa') return 'https://fwa.fun';
+  return `https://opensea.io/assets/ethereum/${(live ? env.CREDITS : MAINNET_CREDITS).toLowerCase()}/${l.id}`;
+}
 const offOpenSea = (env: Env) => !!(addrOrNull(env.FWA_MARKET) || addrOrNull(env.STRATEGY));
 /// DEV_FAKE_LISTINGS, on localhost only: made-up listings to see both sources on the Buy tab without real ones.
 function devFake(env: Env, url: URL): Fake[] | null {

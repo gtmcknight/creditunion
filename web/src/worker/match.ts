@@ -4,7 +4,7 @@
 let table: Promise<Uint32Array> | null = null;
 let scores: Promise<Uint16Array> | null = null;
 
-async function loadScores(assets: Fetcher, origin: string) {
+export async function loadScores(assets: Fetcher, origin: string) {
   if (!scores) {
     scores = assets
       .fetch(new Request(`${origin}/scores.bin`))

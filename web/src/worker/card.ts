@@ -128,6 +128,20 @@ class Canvas {
   }
 }
 
+/// The site's pixel bank (index.html's .mark: roof, three inked columns and a black one, floor) and its name
+/// top left, the domain top right: the same header on every drawn card.
+const MARK: [number, number, number, number, [number, number, number]][] = [
+  [4, 0, 1, 1, INK], [2, 1, 5, 1, INK], [0, 2, 9, 1, INK],
+  [1, 4, 1, 3, MIX[1]], [3, 4, 1, 3, MIX[2]], [5, 4, 1, 3, MIX[4]], [7, 4, 1, 3, INK],
+  [0, 7, 9, 1, INK],
+];
+function header(c: Canvas) {
+  const s = 4, x = 48, y = 36;
+  for (const [mx, my, w, h, col] of MARK) c.rect(x + mx * s, y + my * s, w * s, h * s, col);
+  c.text(LABEL, 'Credit Union', x + 9 * s + 14, y + 8 * s - 4, INK);
+  c.text(LABEL, 'creditunion.fun', W - 48 - c.width(LABEL, 'creditunion.fun'), y + 8 * s - 4, MUTED);
+}
+
 export type PartyCard = {
   name: string;
   state: 'Open' | 'Full' | 'Expired' | 'Auction' | 'Settled';
@@ -148,8 +162,9 @@ export async function drawParty(fetcher: Fetcher, origin: string, p: PartyCard):
   const { cells, faces } = await load(fetcher, origin);
   const c = new Canvas(faces);
 
-  // The sheet: 8 across, 10 down, as the Statement is laid out.
-  const k = 6, T = 8 * k, gap = 6, sx = 48, sy = 48;
+  header(c);
+  // The sheet: 8 across, 10 down, as the Statement is laid out, under the header.
+  const k = 5, T = 8 * k, gap = 5, sx = 48, sy = 137;
   for (let slot = 0; slot < 80; slot++) {
     const x = sx + (slot % 8) * (T + gap), y = sy + Math.floor(slot / 8) * (T + gap);
     const id = p.ids[slot];
@@ -163,20 +178,21 @@ export async function drawParty(fetcher: Fetcher, origin: string, p: PartyCard):
     }
   }
 
-  const x0 = 522, colW = 630;
+  const x0 = 464, colW = 688;
   const now = Date.now() / 1000;
   const live = p.state === 'Auction' && p.highBid > 0n && now < p.auctionEnd;
   const label =
     p.state === 'Settled' ? 'Sold'
     : p.state === 'Auction' ? (p.highBid > 0n ? (live ? 'At auction' : 'Auction ended') : 'At auction')
-    : p.state === 'Full' ? 'Full Credit Union'
-    : 'Credit Union';
-  c.text(LABEL, label, x0, 92, MUTED);
+    : p.state === 'Full' ? 'Full'
+    : p.state === 'Expired' ? 'Expired'
+    : 'Open to join';
+  c.text(LABEL, label, x0, 176, MUTED);
 
   const name = c.wrap(TITLE, p.name || 'Untitled', colW, 2);
-  name.forEach((l, i) => c.text(TITLE, l, x0, 166 + i * 72, INK));
+  name.forEach((l, i) => c.text(TITLE, l, x0, 250 + i * 72, INK));
 
-  const statY = 452;
+  const statY = 474;
   if (p.state === 'Open' || p.state === 'Full' || p.state === 'Expired') {
     const w = c.text(BIG, String(p.count), x0, statY, INK);
     c.text(BIG, '/80', x0 + w + 4, statY, FAINT);
@@ -197,15 +213,25 @@ export async function drawParty(fetcher: Fetcher, origin: string, p: PartyCard):
     c.text(BODY, sub, x0, statY + 50, MUTED);
   }
 
-  c.text(LABEL, 'creditunion.fun', x0, H - 44, INK);
   return png(c.px);
 }
 
-/// One Credit, large on the left from the edition's cells, its number on the right.
-export async function drawCredit(fetcher: Fetcher, origin: string, id: number): Promise<Uint8Array> {
+export type CreditFacts = {
+  palette: number; // CMYK mask, C=1 M=2 Y=4 K=8
+  eights: number;
+  print: string;
+  weight: string;
+  score: number | null; // the official rating, e.g. 612.3
+  rank: number | null;
+  of: number;
+};
+
+/// One Credit: the header, its art large on the left, its number and traits on the right.
+export async function drawCredit(fetcher: Fetcher, origin: string, id: number, f: CreditFacts | null): Promise<Uint8Array> {
   const { cells, faces } = await load(fetcher, origin);
   const c = new Canvas(faces);
-  const k = 66, T = 8 * k, sx = 51, sy = 51;
+  header(c);
+  const k = 58, T = 8 * k, sx = 48, sy = 118;
   c.rect(sx - 1, sy - 1, T + 2, T + 2, TRACK);
   c.rect(sx, sy, T, T, rgb('#ffffff'));
   if (id <= cells.length / 32)
@@ -213,10 +239,29 @@ export async function drawCredit(fetcher: Fetcher, origin: string, id: number): 
       const m = (cells[(id - 1) * 32 + (cell >> 1)] >> ((cell & 1) * 4)) & 15;
       if (m) c.rect(sx + (cell % 8) * k, sy + Math.floor(cell / 8) * k, k, k, MIX[m]);
     }
-  const x0 = 660;
-  c.text(LABEL, 'Credit', x0, 92, MUTED);
-  c.text(TITLE, `#${id.toLocaleString('en-US')}`, x0, 166, INK);
-  c.text(LABEL, 'creditunion.fun', x0, H - 44, INK);
+
+  const x0 = 576, col2 = x0 + 300;
+  c.text(LABEL, 'Credit', x0, 176, MUTED);
+  c.text(BIG, `#${id.toLocaleString('en-US')}`, x0, 272, INK);
+  if (!f) return png(c.px);
+
+  // Six facts in two columns, label over value, the last row's baseline level with the art's foot.
+  const fact = (x: number, y: number, label: string, value: string, lead = 0) => {
+    c.text(LABEL, label, x, y, MUTED);
+    c.text(BODY, value, x + lead, y + 40, INK);
+  };
+  // Palette: its inks as swatches, then the letters.
+  const inks = [1, 2, 4, 8].filter((b) => f.palette & b);
+  inks.forEach((b, i) => {
+    c.rect(x0 + i * 28, 368 - 22, 22, 22, MIX[b]);
+    if (b === 8) c.rect(x0 + i * 28, 368 - 22, 22, 22, rgb('#111111'));
+  });
+  fact(x0, 328, 'Palette', inks.map((b) => 'CMYK'[Math.log2(b)]).join(''), inks.length * 28 + 6);
+  fact(col2, 328, 'Eights', f.eights ? `${f.eights}×8` : 'None');
+  fact(x0, 434, 'Print', f.print);
+  fact(col2, 434, 'Weight', f.weight.charAt(0).toUpperCase() + f.weight.slice(1));
+  fact(x0, 540, 'Rating', f.score === null ? '–' : f.score.toFixed(1));
+  fact(col2, 540, 'Rank', f.rank === null ? '–' : `${f.rank.toLocaleString('en-US')} of ${f.of.toLocaleString('en-US')}`);
   return png(c.px);
 }
 

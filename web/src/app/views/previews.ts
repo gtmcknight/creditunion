@@ -27,7 +27,7 @@ export async function previews(app: HTMLElement) {
   const parties = await listBatches()
     .then((all) => all.map((b) => `/union/${b.s.address}`))
     .catch(() => [] as string[]);
-  const routes = ['/', '/unions', '/auctions', '/create', '/about', ...(parties.length ? parties : ['/union/0x0000000000000000000000000000000000000000']), '/mint', '/me'];
+  const routes = ['/', '/unions', '/auctions', '/create', '/about', ...(parties.length ? parties : ['/union/0x0000000000000000000000000000000000000000']), '/credits', '/credit/3', '/credit/10982', '/mint', '/me'];
   const cards = await Promise.all(routes.map(read));
   const grid = document.getElementById('og-grid');
   if (!grid) return;

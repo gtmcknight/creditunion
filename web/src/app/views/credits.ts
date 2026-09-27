@@ -64,8 +64,9 @@ const TILES: Tile[] = [
     draw: (f, total) => {
       const shares = f.palette.map(([, c]) => c / total);
       const avg = shares.reduce((s, x) => s + x, 0) / shares.length;
+      // The 15 palettes split almost evenly, so every bar is the same height; each one's count is in its tooltip.
       const cols = `<div class="cr-cols bare palette">${f.palette
-        .map(([p, c]) => `<div class="cr-col" title="${p} · ${n(c)}"><i class="cr-bar swatch" style="--f:${(c / Math.max(...f.palette.map((x) => x[1]))).toFixed(4)}">${swatch(p)}</i><span class="cr-letters">${p}</span></div>`)
+        .map(([p, c]) => `<div class="cr-col" title="${p} · ${n(c)}"><i class="cr-bar swatch" style="--f:1">${swatch(p)}</i><span class="cr-letters">${p}</span></div>`)
         .join('')}</div>`;
       return [cols, `${f.palette.length} palettes, about ${(avg * 100).toFixed(1)}% each`];
     },
