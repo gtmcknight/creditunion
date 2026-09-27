@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {Sweeper} from "../src/Sweeper.sol";
+import {ICreditStrategy} from "../src/interfaces/ICreditStrategy.sol";
 import {IFWAMarket} from "../src/interfaces/IFWAMarket.sol";
 import {IAssembler} from "../src/interfaces/IAssembler.sol";
 import {ICredits} from "../src/interfaces/ICredits.sol";
@@ -41,7 +42,7 @@ contract SweeperForkTest is Test {
 
         // minOpen 1 so a single real holder can open a test batch
         factory = new BatchFactory(CREDITS, IRatings(address(0)), IAssembler(address(0)), address(this), fee, 100, 0, 1);
-        sweeper = new Sweeper(SEAPORT, factory, 100, IFWAMarket(address(0)));
+        sweeper = new Sweeper(SEAPORT, factory, 100, IFWAMarket(address(0)), ICreditStrategy(address(0)));
 
         // Find live Credits: one for the creator, three to move to our seller.
         uint256 id = 1000;

@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {BatchFactory} from "./BatchFactory.sol";
 import {ICredits} from "./interfaces/ICredits.sol";
+import {ICreditStrategy} from "./interfaces/ICreditStrategy.sol";
 import {IFWAMarket} from "./interfaces/IFWAMarket.sol";
 import {
     AdvancedOrder,
@@ -16,8 +17,8 @@ import {
 } from "./interfaces/ISeaport.sol";
 
 /// @title Sweeper
-/// @notice One transaction: buy listed Credits on Seaport (OpenSea's exchange) and on FWA's marketplace, then
-///         deposit them into a batch in the buyer's name. Pay the listings plus the fee; unused ETH comes back.
+/// @notice One transaction: buy listed Credits on Seaport (OpenSea's exchange), FWA's marketplace and from
+///         CreditStrategy, then deposit them into a batch in the buyer's name. Pay the listings plus the fee; unused ETH comes back.
 ///         Nothing is held between transactions. No owner, no admin.
 contract Sweeper is ReentrancyGuardTransient {
     uint256 public constant MAX_FEE_BPS = 500;
@@ -29,6 +30,9 @@ contract Sweeper is ReentrancyGuardTransient {
     ISeaport public immutable seaport;
     /// @notice FWA's marketplace (FWAMarketplace). Zero where it isn't deployed; FWA buys then revert.
     IFWAMarket public immutable fwa;
+    /// @notice CreditStrategy (nftstrategy.fun), which sells the Credits it holds. Zero where it isn't deployed;
+    ///         strategy buys then revert.
+    ICreditStrategy public immutable strategy;
     BatchFactory public immutable factory;
     ICredits public immutable credits;
     address public immutable feeRecipient;
@@ -47,6 +51,8 @@ contract Sweeper is ReentrancyGuardTransient {
     error NotAFWACredit(uint256 fwaIndex);
     error Underpaid();
     error NotDelivered(uint256 id);
+    error NoStrategy();
+    error NotACreditStrategy();
 
     /// @notice One FWA listing to buy, at the price it was quoted. A listing whose price changed has a new id,
     ///         so the old one reads as gone and is skipped.
@@ -55,9 +61,15 @@ contract Sweeper is ReentrancyGuardTransient {
         uint256 price;
     }
 
+    /// @notice One Credit CreditStrategy holds, at the price it was quoted. A Credit sold or repriced since is skipped.
+    struct StrategyListing {
+        uint256 tokenId;
+        uint256 price;
+    }
+
     event FeeSet(uint256 feeBps);
 
-    constructor(ISeaport seaport_, BatchFactory factory_, uint256 feeBps_, IFWAMarket fwa_) {
+    constructor(ISeaport seaport_, BatchFactory factory_, uint256 feeBps_, IFWAMarket fwa_, ICreditStrategy strategy_) {
         if (feeBps_ > MAX_FEE_BPS) revert FeeTooHigh();
         feeBps = feeBps_;
         emit FeeSet(feeBps_);
@@ -65,6 +77,8 @@ contract Sweeper is ReentrancyGuardTransient {
         fwa = fwa_;
         factory = factory_;
         credits = factory_.credits();
+        if (address(strategy_) != address(0) && strategy_.collection() != address(credits)) revert NotACreditStrategy();
+        strategy = strategy_;
         feeRecipient = factory_.feeRecipient();
         credits.setApprovalForAll(address(factory_), true);
     }
@@ -88,37 +102,43 @@ contract Sweeper is ReentrancyGuardTransient {
         nonReentrant
         returns (uint256[] memory ids)
     {
-        return _sweep(batch, orders, new FWAListing[](0), minBought, maxFeeBps);
+        return _sweep(batch, orders, new FWAListing[](0), new StrategyListing[](0), minBought, maxFeeBps);
     }
 
-    /// @notice `sweep`, plus listings on FWA's marketplace. FWA listings are bought first, each at exactly its
-    ///         quoted price; one that is gone, repriced or listed this block is skipped like a sold Seaport listing.
+    /// @notice `sweep`, plus listings on FWA's marketplace and Credits CreditStrategy holds. Those are bought first,
+    ///         each at exactly its quoted price; one that is gone, repriced or (on FWA) listed this block is skipped
+    ///         like a sold Seaport listing.
     /// @param fwaListings FWA listings of Credits, each with the price it was quoted at.
-    function sweepWithFWA(
+    /// @param strategyListings Credits CreditStrategy holds, each with the price it was quoted at.
+    function sweepAll(
         address batch,
         AdvancedOrder[] calldata orders,
         FWAListing[] calldata fwaListings,
+        StrategyListing[] calldata strategyListings,
         uint256 minBought,
         uint256 maxFeeBps
     ) external payable nonReentrant returns (uint256[] memory ids) {
-        return _sweep(batch, orders, fwaListings, minBought, maxFeeBps);
+        return _sweep(batch, orders, fwaListings, strategyListings, minBought, maxFeeBps);
     }
 
     function _sweep(
         address batch,
         AdvancedOrder[] calldata orders,
         FWAListing[] memory fwaListings,
+        StrategyListing[] memory strategyListings,
         uint256 minBought,
         uint256 maxFeeBps
     ) internal returns (uint256[] memory ids) {
         if (!factory.isBatch(batch)) revert NotBatch();
         if (feeBps > maxFeeBps) revert FeeChanged(feeBps);
         uint256 m = fwaListings.length;
+        uint256 s = strategyListings.length;
         if (m != 0 && address(fwa) == address(0)) revert NoFWA();
+        if (s != 0 && address(strategy) == address(0)) revert NoStrategy();
 
-        ids = new uint256[](orders.length + m);
+        ids = new uint256[](orders.length + m + s);
         uint256 bought;
-        // What the listings cost: FWA's exact prices (it takes exactly the price or reverts), then Seaport's own
+        // What the listings cost: FWA's and the strategy's exact prices (each takes exactly the price or reverts), then Seaport's own
         // record of what it paid out. Never a balance delta, so ETH pushed at this contract by a seller or royalty
         // wallet mid-call cannot distort it.
         uint256 spent;
@@ -129,6 +149,14 @@ contract Sweeper is ReentrancyGuardTransient {
             if (got) {
                 ids[bought++] = id;
                 spent += price;
+            }
+        }
+        for (uint256 i; i < s; ++i) {
+            StrategyListing memory l = strategyListings[i];
+            if (l.price > msg.value - spent) revert Underpaid();
+            if (_buyStrategy(l.tokenId, l.price)) {
+                ids[bought++] = l.tokenId;
+                spent += l.price;
             }
         }
         if (orders.length != 0) {
@@ -167,6 +195,18 @@ contract Sweeper is ReentrancyGuardTransient {
         }
         if (credits.ownerOf(l.tokenId) != address(this)) revert NotDelivered(l.tokenId);
         return (true, l.tokenId);
+    }
+
+    /// @dev One Credit from CreditStrategy, to this contract. Skipped (false) if it is sold, repriced, or the
+    ///      strategy refuses the sale.
+    function _buyStrategy(uint256 id, uint256 price) internal returns (bool) {
+        if (price == 0 || strategy.nftForSale(id) != price) return false;
+        try strategy.sellTargetNFT{value: price}(id) {}
+        catch {
+            return false;
+        }
+        if (credits.ownerOf(id) != address(this)) revert NotDelivered(id);
+        return true;
     }
 
     /// @dev Seaport's partial-fill path with `value`; appends what filled to `ids` from `bought` on.

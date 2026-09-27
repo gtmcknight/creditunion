@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {Sweeper} from "../src/Sweeper.sol";
+import {ICreditStrategy} from "../src/interfaces/ICreditStrategy.sol";
 import {IFWAMarket} from "../src/interfaces/IFWAMarket.sol";
 import {ICredits} from "../src/interfaces/ICredits.sol";
 import {MockAssembler} from "../src/mocks/MockAssembler.sol";
@@ -89,7 +90,7 @@ contract SweeperFWATest is Test {
         );
         market = new MockFWAMarket();
         seaport = new MockSeaport(credits);
-        sweeper = new Sweeper(ISeaport(address(seaport)), factory, 100, IFWAMarket(address(market)));
+        sweeper = new Sweeper(ISeaport(address(seaport)), factory, 100, IFWAMarket(address(market)), ICreditStrategy(address(0)));
         credits.mint(alice, 10); // 1..10
         credits.mint(bob, 20); // 11..30
         other.mint(bob, 1);
@@ -144,7 +145,7 @@ contract SweeperFWATest is Test {
 
         vm.prank(carol);
         uint256[] memory ids =
-            sweeper.sweepWithFWA{value: 5 ether}(address(batch), new AdvancedOrder[](0), fwa, 2, 100);
+            sweeper.sweepAll{value: 5 ether}(address(batch), new AdvancedOrder[](0), fwa, new Sweeper.StrategyListing[](0), 2, 100);
 
         assertEq(ids.length, 2);
         assertEq(ids[0], 11);
@@ -167,7 +168,7 @@ contract SweeperFWATest is Test {
         uint256 value = sweeper.quote(2.5 ether);
 
         vm.prank(carol);
-        uint256[] memory ids = sweeper.sweepWithFWA{value: value}(address(batch), _orders(11, 2, 1 ether), fwa, 3, 100);
+        uint256[] memory ids = sweeper.sweepAll{value: value}(address(batch), _orders(11, 2, 1 ether), fwa, new Sweeper.StrategyListing[](0), 3, 100);
 
         assertEq(ids.length, 3);
         assertEq(ids[0], 20); // FWA first, then Seaport in order
@@ -197,8 +198,8 @@ contract SweeperFWATest is Test {
         uint256 value = sweeper.quote(4 ether);
 
         vm.prank(carol);
-        uint256[] memory ids = sweeper.sweepWithFWA{value: value}(
-            address(batch), new AdvancedOrder[](0), fwa, 1, 100
+        uint256[] memory ids = sweeper.sweepAll{value: value}(
+            address(batch), new AdvancedOrder[](0), fwa, new Sweeper.StrategyListing[](0), 1, 100
         );
         assertEq(ids.length, 2);
         assertEq(ids[0], 11);
@@ -215,7 +216,7 @@ contract SweeperFWATest is Test {
         fwa[0] = _fwa(a, 2 ether);
         vm.prank(carol);
         vm.expectRevert(abi.encodeWithSelector(Sweeper.TooFewBought.selector, 0));
-        sweeper.sweepWithFWA{value: 3 ether}(address(batch), new AdvancedOrder[](0), fwa, 1, 100);
+        sweeper.sweepAll{value: 3 ether}(address(batch), new AdvancedOrder[](0), fwa, new Sweeper.StrategyListing[](0), 1, 100);
     }
 
     function test_MinBoughtCountsBothMarkets() public {
@@ -226,9 +227,9 @@ contract SweeperFWATest is Test {
         fwa[0] = _fwa(a, 1 ether);
         vm.prank(carol);
         vm.expectRevert(abi.encodeWithSelector(Sweeper.TooFewBought.selector, 2));
-        sweeper.sweepWithFWA{value: 4 ether}(address(batch), _orders(11, 2, 1 ether), fwa, 3, 100);
+        sweeper.sweepAll{value: 4 ether}(address(batch), _orders(11, 2, 1 ether), fwa, new Sweeper.StrategyListing[](0), 3, 100);
         vm.prank(carol);
-        uint256[] memory ids = sweeper.sweepWithFWA{value: 4 ether}(address(batch), _orders(11, 2, 1 ether), fwa, 2, 100);
+        uint256[] memory ids = sweeper.sweepAll{value: 4 ether}(address(batch), _orders(11, 2, 1 ether), fwa, new Sweeper.StrategyListing[](0), 2, 100);
         assertEq(ids.length, 2);
     }
 
@@ -240,7 +241,7 @@ contract SweeperFWATest is Test {
         fwa[0] = _fwa(a, 1 ether);
         vm.prank(carol);
         vm.expectRevert(abi.encodeWithSelector(Sweeper.NotAFWACredit.selector, 0));
-        sweeper.sweepWithFWA{value: 2 ether}(address(batch), new AdvancedOrder[](0), fwa, 1, 100);
+        sweeper.sweepAll{value: 2 ether}(address(batch), new AdvancedOrder[](0), fwa, new Sweeper.StrategyListing[](0), 1, 100);
     }
 
     function test_UnderpaidReverts() public {
@@ -252,7 +253,7 @@ contract SweeperFWATest is Test {
         fwa[1] = _fwa(b, 1 ether);
         vm.prank(carol);
         vm.expectRevert(Sweeper.Underpaid.selector);
-        sweeper.sweepWithFWA{value: 1.5 ether}(address(batch), new AdvancedOrder[](0), fwa, 1, 100);
+        sweeper.sweepAll{value: 1.5 ether}(address(batch), new AdvancedOrder[](0), fwa, new Sweeper.StrategyListing[](0), 1, 100);
     }
 
     /// The market refusing a buy (its withdraw-only switch) skips the listing instead of reverting everything.
@@ -264,7 +265,7 @@ contract SweeperFWATest is Test {
         Sweeper.FWAListing[] memory fwa = new Sweeper.FWAListing[](1);
         fwa[0] = _fwa(a, 1 ether);
         vm.prank(carol);
-        uint256[] memory ids = sweeper.sweepWithFWA{value: 3 ether}(address(batch), _orders(11, 1, 1 ether), fwa, 1, 100);
+        uint256[] memory ids = sweeper.sweepAll{value: 3 ether}(address(batch), _orders(11, 1, 1 ether), fwa, new Sweeper.StrategyListing[](0), 1, 100);
         assertEq(ids.length, 1);
         assertEq(ids[0], 11);
         assertEq(credits.ownerOf(20), address(market));
@@ -280,16 +281,16 @@ contract SweeperFWATest is Test {
         fwa[0] = _fwa(a, 1 ether);
         vm.prank(carol);
         vm.expectRevert(abi.encodeWithSelector(Sweeper.FeeChanged.selector, 300));
-        sweeper.sweepWithFWA{value: 2 ether}(address(batch), new AdvancedOrder[](0), fwa, 1, 100);
+        sweeper.sweepAll{value: 2 ether}(address(batch), new AdvancedOrder[](0), fwa, new Sweeper.StrategyListing[](0), 1, 100);
     }
 
     function test_NoMarketConfiguredReverts() public {
-        Sweeper plain = new Sweeper(ISeaport(address(seaport)), factory, 100, IFWAMarket(address(0)));
+        Sweeper plain = new Sweeper(ISeaport(address(seaport)), factory, 100, IFWAMarket(address(0)), ICreditStrategy(address(0)));
         Sweeper.FWAListing[] memory fwa = new Sweeper.FWAListing[](1);
         fwa[0] = _fwa(1, 1 ether);
         vm.prank(carol);
         vm.expectRevert(Sweeper.NoFWA.selector);
-        plain.sweepWithFWA{value: 2 ether}(address(batch), new AdvancedOrder[](0), fwa, 1, 100);
+        plain.sweepAll{value: 2 ether}(address(batch), new AdvancedOrder[](0), fwa, new Sweeper.StrategyListing[](0), 1, 100);
     }
 
     /// The old entry point is unchanged: Seaport only.

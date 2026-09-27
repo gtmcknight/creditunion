@@ -2502,12 +2502,6 @@ input[type='datetime-local'] {
 .listing {
   display: grid;
   gap: 4px;
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
 }
 .listing .art {
   /* The whole artwork, as OpenSea and jack.art show it: white border and the eights colour bar included. */
@@ -2524,23 +2518,18 @@ input[type='datetime-local'] {
   width: 100%;
 }
 .listing .price {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
   color: var(--muted);
 }
-/* Where it's listed: a small mark in the art's corner (on the Credit's white border). */
-.listing .art {
-  position: relative;
-}
+/* Where it's listed: a small mark before the price. */
 .listing img.src {
-  position: absolute;
-  left: 3px;
-  bottom: 3px;
-  width: 14px;
-  height: 14px;
+  flex: none;
+  width: 12px;
+  height: 12px;
   object-fit: contain;
-}
-.listing:hover .art {
-  box-shadow: 0 0 0 1px var(--fg);
 }
 .listing[aria-pressed='true'] .art {
   box-shadow: 0 0 0 2px var(--fg);
@@ -2556,18 +2545,36 @@ input[type='datetime-local'] {
   opacity: 0.5;
 }
 
-/* Tap a listing to skip it: a quiet × on hover says so. */
-.listing:not([disabled]) .art {
+/* A listing's × (top right, on hover; always there on touch) skips it. */
+.listing .art {
   position: relative;
 }
-.listing:not([disabled]):hover .art::after {
-  content: '×';
+.listing .skip {
   position: absolute;
   top: 2px;
-  right: 4px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: #fff;
+  color: #0a0a0a;
+  font: inherit;
   font-size: 14px;
   line-height: 1;
-  color: #0a0a0a;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms var(--ease);
+}
+.listing:hover .skip,
+.listing .skip:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .listing .skip {
+    opacity: 1;
+  }
 }
 
 .buy-head {

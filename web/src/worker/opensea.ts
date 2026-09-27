@@ -6,6 +6,9 @@ const API = 'https://api.opensea.io/api/v2';
 const PAGES = 5; // up to 500 listings scanned for filtered batches
 const CONCURRENCY = 4;
 const TAKE_CHUNK = 25; // listings per canTake call
+/// Off-OpenSea listings (FWA, CreditStrategy) checked against a batch per scan, cheapest first. The strategy alone
+/// holds thousands, and each chunk is a canTake call.
+const EXTRA_CHECKS = 1_000;
 const SEAPORT = '0x0000000000000068f116a894984e2db1123eb395';
 /// OpenSea's conduit for its own conduit key; any other key is resolved through the ConduitController.
 const OS_CONDUIT_KEY = '0x0000007b02230091a7ed01230072f7006a004d60a8d4e71d599b8104250f0000';
@@ -15,14 +18,16 @@ const OS_FEES = '0x0000a26b00c1f0df003000390027140000faa719';
 
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-/// A listing that fits: on OpenSea (a Seaport order, by hash) or on FWA's marketplace (by listing id).
-export type Listing = { id: string; price: string; source: 'opensea' | 'fwa'; hash?: string; protocol?: string; listingId?: string };
-/// An FWA listing handed to the scan: already confirmed live on-chain.
-export type Extra = { id: string; price: string; listingId: string };
+export type Source = 'opensea' | 'fwa' | 'strategy';
+/// A listing that fits: on OpenSea (a Seaport order, by hash), on FWA's marketplace (by listing id) or held by
+/// CreditStrategy (by Credit id).
+export type Listing = { id: string; price: string; source: Source; hash?: string; protocol?: string; listingId?: string };
+/// A listing off OpenSea handed to the scan, just read on-chain: FWA (with its listing id) or CreditStrategy.
+export type Extra = { id: string; price: string; source: 'fwa' | 'strategy'; listingId?: string };
 type Cand = {
   id: string;
   price: bigint;
-  source: 'opensea' | 'fwa';
+  source: Source;
   hash?: string;
   protocol?: string;
   listingId?: string;
@@ -75,9 +80,9 @@ function usable(l: Json, credits: Address) {
 /// The cheapest listings that fit, one per Credit, checked on-chain so a stale one cannot revert the sweep:
 /// the seller still owns it and still has Seaport (or OpenSea's conduit) approved, and no consideration
 /// goes to a contract other than OpenSea's fee wallet (a contract recipient could revert the whole fill).
-/// `extra` FWA listings join in price order: each OpenSea page takes the ones priced within it, and whatever is
-/// left joins once OpenSea runs out. With extras, an OpenSea outage (or no key) leaves the FWA ones; without
-/// them it throws as before.
+/// `extra` listings (FWA, CreditStrategy) join in price order: each OpenSea page takes the ones priced within it,
+/// and whatever is left joins once OpenSea runs out. With extras, an OpenSea outage (or no key) leaves those;
+/// without them it throws as before.
 export async function scan(o: {
   key?: string;
   slug: string;
@@ -101,7 +106,8 @@ export async function scan(o: {
     return codeMemo.get(a)!;
   };
   const byPrice = (a: { price: bigint }, b: { price: bigint }) => (a.price < b.price ? -1 : a.price > b.price ? 1 : 0);
-  let extras: Cand[] = (o.extra ?? []).map((e) => ({ id: e.id, price: BigInt(e.price), source: 'fwa' as const, listingId: e.listingId })).sort(byPrice);
+  let extras: Cand[] = (o.extra ?? []).map((e) => ({ id: e.id, price: BigInt(e.price), source: e.source, listingId: e.listingId })).sort(byPrice);
+  let extraBudget = EXTRA_CHECKS;
   let osDone = !o.key && !o.fakeOpenSea;
   let next = '';
   for (let page = 0; picked.length < o.max && (!osDone || extras.length); page++) {
@@ -116,7 +122,7 @@ export async function scan(o: {
           r = await os(o.key!, `/listings/collection/${o.slug}/best?limit=100${next ? `&next=${encodeURIComponent(next)}` : ''}`);
         } catch (e) {
           if (!extras.length) throw e;
-          console.warn('[scan] OpenSea unavailable, FWA only:', (e as Error).message.slice(0, 80));
+          console.warn('[scan] OpenSea unavailable, other markets only:', (e as Error).message.slice(0, 80));
         }
         fresh = ((r?.listings ?? []) as Json[])
           .map((l) => usable(l, o.credits))
@@ -126,15 +132,17 @@ export async function scan(o: {
         if (!r || !next || page + 1 >= PAGES) osDone = true;
       }
     }
-    // FWA listings priced within this page join it; all the rest once OpenSea is done.
+    // Extras priced within this page join it; the rest once OpenSea is done, up to the check budget.
     const top = fresh.reduce((m, c) => (c.price > m ? c.price : m), -1n);
-    const join = osDone ? extras : extras.filter((e) => e.price <= top);
+    const join = (osDone ? extras : extras.filter((e) => e.price <= top)).slice(0, extraBudget);
+    extraBudget -= join.length;
     extras = osDone ? [] : extras.filter((e) => e.price > top);
     fresh = [...join, ...fresh].filter((c) => !seen.has(c.id) && !!seen.add(c.id)).sort(byPrice);
     // Ask the batch in small chunks, with what's already picked booked first, so a painted sheet's slots fill in
     // price order and the scan keeps going past Credits it has no room for. Chunks keep each call's gas modest.
+    // Enough that fit (with room for OpenSea ones failing liveness) ends the page early.
     const fits: boolean[] = [];
-    for (let i = 0; i < fresh.length; i += TAKE_CHUNK) {
+    for (let i = 0; i < fresh.length && picked.length + fits.filter(Boolean).length < o.max + TAKE_CHUNK; i += TAKE_CHUNK) {
       const chunk = fresh.slice(i, i + TAKE_CHUNK).map((c) => BigInt(c.id));
       const lead = picked.map((l) => BigInt(l.id)).concat(fresh.slice(0, i).filter((_, j) => fits[j]).map((c) => BigInt(c.id)));
       const ok = await o.take([...lead, ...chunk]).catch(() => null);
@@ -144,8 +152,8 @@ export async function scan(o: {
       fresh.map(async (c, i) => {
         // Cheapest first: most listings don't fit, so the liveness calls run only for those that do.
         if (!fits[i]) return false;
-        // FWA listings are custodial and were just read from the market; the dev stand-ins have nothing to check.
-        if (c.source === 'fwa' || o.fakeOpenSea) return true;
+        // FWA and strategy listings are custodial and were just read on-chain; the dev stand-ins have nothing to check.
+        if (c.source !== 'opensea' || o.fakeOpenSea) return true;
         const [live, contracts] = await Promise.all([
           o.live(BigInt(c.id), c.seller!, c.operator!).catch(() => false),
           Promise.all(c.recipients!.map(isContract)),
@@ -157,9 +165,9 @@ export async function scan(o: {
       if (!ok[i]) continue;
       const c = fresh[i];
       picked.push(
-        c.source === 'fwa'
-          ? { id: c.id, price: c.price.toString(), source: 'fwa', listingId: c.listingId }
-          : { id: c.id, price: c.price.toString(), source: 'opensea', hash: c.hash, protocol: c.protocol },
+        c.source === 'opensea'
+          ? { id: c.id, price: c.price.toString(), source: 'opensea', hash: c.hash, protocol: c.protocol }
+          : { id: c.id, price: c.price.toString(), source: c.source, listingId: c.listingId },
       );
     }
   }

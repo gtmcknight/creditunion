@@ -19,7 +19,9 @@
     "FALLBACK_RPC": "https://ethereum-sepolia-rpc.publicnode.com",
     // FWA (fwa.fun), mainnet only: its marketplace is a second Buy Credits source; FWA_POOL is the pool /spin sells.
     "FWA_MARKET": "0x2b019cfb591988d28c64c4f4be6a24b1592bbf25",
-    "FWA_POOL": "0xfac9af47a396ec1085d3940e2ed16e9b11c62a10"
+    "FWA_POOL": "0xfac9af47a396ec1085d3940e2ed16e9b11c62a10",
+    // CreditStrategy (nftstrategy.fun), mainnet only: the Credits it holds for sale are a third Buy Credits source.
+    "STRATEGY": "0x8e607209899b5d12bd3167a6cd0e8e11feb053d6"
   },
   // Sepolia: SWEEPER stays zero (OpenSea can't list the mock Credits), which hides buy-in.
   // Mainnet addresses go here after DeployMainnet.

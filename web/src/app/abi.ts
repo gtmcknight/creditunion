@@ -2590,6 +2590,11 @@ export const sweeperAbi = [
         "name": "fwa_",
         "type": "address",
         "internalType": "contract IFWAMarket"
+      },
+      {
+        "name": "strategy_",
+        "type": "address",
+        "internalType": "contract ICreditStrategy"
       }
     ],
     "stateMutability": "nonpayable"
@@ -2720,6 +2725,19 @@ export const sweeperAbi = [
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "strategy",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract ICreditStrategy"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -2900,7 +2918,7 @@ export const sweeperAbi = [
   },
   {
     "type": "function",
-    "name": "sweepWithFWA",
+    "name": "sweepAll",
     "inputs": [
       {
         "name": "batch",
@@ -3073,6 +3091,23 @@ export const sweeperAbi = [
         ]
       },
       {
+        "name": "strategyListings",
+        "type": "tuple[]",
+        "internalType": "struct Sweeper.StrategyListing[]",
+        "components": [
+          {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "price",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
         "name": "minBought",
         "type": "uint256",
         "internalType": "uint256"
@@ -3176,6 +3211,11 @@ export const sweeperAbi = [
   },
   {
     "type": "error",
+    "name": "NoStrategy",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "NotACredit",
     "inputs": [
       {
@@ -3184,6 +3224,11 @@ export const sweeperAbi = [
         "internalType": "uint256"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "NotACreditStrategy",
+    "inputs": []
   },
   {
     "type": "error",

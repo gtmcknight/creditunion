@@ -11,6 +11,7 @@ import {Sweeper} from "../src/Sweeper.sol";
 import {IAssembler} from "../src/interfaces/IAssembler.sol";
 import {ICredits} from "../src/interfaces/ICredits.sol";
 import {ISeaport} from "../src/interfaces/ISeaport.sol";
+import {ICreditStrategy} from "../src/interfaces/ICreditStrategy.sol";
 import {IFWAMarket} from "../src/interfaces/IFWAMarket.sol";
 import {MockStatement} from "../src/mocks/MockStatement.sol";
 import {TestCredits} from "../src/mocks/TestCredits.sol";
@@ -33,7 +34,7 @@ contract DeployTestnet is Script {
         BatchFactory factory = new BatchFactory(ICredits(address(credits)), IRatings(address(ratings)), staged ? IAssembler(address(0)) : asm, staged ? msg.sender : address(0), feeTo, 200, 0, 1
         );
         // Seaport 1.6 has the same address on Sepolia; buy-in only matters where OpenSea lists these.
-        Sweeper sweeper = new Sweeper(ISeaport(0x0000000000000068F116a894984e2DB1123eB395), factory, 200, IFWAMarket(address(0))); // FWA is mainnet only
+        Sweeper sweeper = new Sweeper(ISeaport(0x0000000000000068F116a894984e2DB1123eB395), factory, 200, IFWAMarket(address(0)), ICreditStrategy(address(0))); // FWA is mainnet only
         vm.stopBroadcast();
 
         console.log("CREDITS", address(credits));

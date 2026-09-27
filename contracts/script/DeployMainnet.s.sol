@@ -10,6 +10,7 @@ import {Sweeper} from "../src/Sweeper.sol";
 import {IAssembler} from "../src/interfaces/IAssembler.sol";
 import {ICredits} from "../src/interfaces/ICredits.sol";
 import {ISeaport} from "../src/interfaces/ISeaport.sol";
+import {ICreditStrategy} from "../src/interfaces/ICreditStrategy.sol";
 import {IFWAMarket} from "../src/interfaces/IFWAMarket.sol";
 
 /// @notice Mainnet, in two stages.
@@ -28,6 +29,7 @@ import {IFWAMarket} from "../src/interfaces/IFWAMarket.sol";
 contract DeployMainnet is Script {
     ICredits constant CREDITS = ICredits(0x97630aA70AB14ed9883B41dAfccBc11349723043);
     ISeaport constant SEAPORT = ISeaport(0x0000000000000068F116a894984e2DB1123eB395); // Seaport 1.6
+    ICreditStrategy constant CREDIT_STRATEGY = ICreditStrategy(0x8e607209899b5d12Bd3167a6CD0E8E11FEB053d6); // nftstrategy.fun
     IFWAMarket constant FWA_MARKET = IFWAMarket(0x2b019Cfb591988D28C64C4f4be6a24b1592BBF25); // FWAMarketplace
 
     function run() external {
@@ -45,7 +47,7 @@ contract DeployMainnet is Script {
         BatchFactory factory = new BatchFactory(
             CREDITS, IRatings(ratingsAddr), assembler, setter, feeTo, vm.envOr("PROTOCOL_FEE_BPS", uint256(200)), vm.envOr("CREATOR_FEE_BPS", uint256(0)), 1
         );
-        Sweeper sweeper = new Sweeper(SEAPORT, factory, vm.envOr("SWEEP_FEE_BPS", uint256(200)), FWA_MARKET);
+        Sweeper sweeper = new Sweeper(SEAPORT, factory, vm.envOr("SWEEP_FEE_BPS", uint256(200)), FWA_MARKET, CREDIT_STRATEGY);
         vm.stopBroadcast();
         console.log("RATINGS", ratingsAddr);
         console.log("FACTORY", address(factory));

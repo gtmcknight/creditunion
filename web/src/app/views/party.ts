@@ -464,10 +464,11 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
 const BUY_COUNTS = [1, 5, 10];
 
 /// Where a listing is: shown as a small mark on its tile.
-type Source = 'opensea' | 'fwa';
+type Source = 'opensea' | 'fwa' | 'strategy';
 const SOURCES: Record<Source, { name: string; icon: string }> = {
   opensea: { name: 'OpenSea', icon: '/sources/opensea.svg' },
   fwa: { name: 'FWA', icon: '/sources/fwa.png' },
+  strategy: { name: 'CreditStrategy', icon: '/sources/strategy.svg' },
 };
 
 function buyPane(connected: boolean) {
@@ -476,7 +477,7 @@ function buyPane(connected: boolean) {
     <div class="listings" id="listings">${'<span class="listing skel" aria-hidden="true"><span class="art"></span><span class="price"></span></span>'.repeat(5)}</div>
     <div id="buy-quote" class="quote small"></div>
     ${connected || !config.sweeper ? `<button class="btn primary block" id="buy-go" disabled>Buy</button>` : '<button class="btn primary block" data-connect>Connect to buy</button>'}
-    <p class="muted small buy-source">The cheapest listings on OpenSea and FWA that fit, bought and deposited in one transaction.</p>
+    <p class="muted small buy-source">The cheapest Credits that fit on OpenSea, FWA and CreditStrategy, bought and deposited in one transaction.</p>
 `;
 }
 
@@ -820,7 +821,8 @@ async function drawPicker(
   sync();
 }
 
-/// OpenSea listings come as signed orders (orders/ids/prices); FWA listings by id and price. `total` is both.
+/// OpenSea listings come as signed orders (orders/ids/prices); FWA listings by listing id and price; CreditStrategy's
+/// by Credit id and price. `total` is all of them.
 type Quote = {
   orders: unknown[];
   ids: string[];
@@ -828,9 +830,10 @@ type Quote = {
   total: string;
   expires?: number | null;
   fwa?: { listingId: string; id: string; price: string }[];
+  strategy?: { id: string; price: string }[];
   error?: string;
 };
-const quotedCount = (q: Quote) => q.ids.length + (q.fwa?.length ?? 0);
+const quotedCount = (q: Quote) => q.ids.length + (q.fwa?.length ?? 0) + (q.strategy?.length ?? 0);
 let quotedFeeBps = 0n; // the Sweeper's rate at quote time; the sweep reverts if it has been raised since
 
 /// The orders are what gets sent to the chain; the ids/prices/total are what gets shown. Make sure they agree,
@@ -856,6 +859,10 @@ function checkQuote(q: Quote) {
     if (!/^\d+$/.test(f.listingId) || !/^\d+$/.test(f.id) || !/^\d+$/.test(f.price)) throw new Error('Bad quote.');
     sum += BigInt(f.price);
   }
+  for (const f of q.strategy ?? []) {
+    if (!/^\d+$/.test(f.id) || !/^\d+$/.test(f.price)) throw new Error('Bad quote.');
+    sum += BigInt(f.price);
+  }
   if (sum !== BigInt(q.total)) throw new Error('Bad quote.');
 }
 
@@ -876,7 +883,7 @@ async function bindBuy(
   if (!line || !grid || !out) return;
   const room = 80 - b.s.count;
   const tile = (id: string | number, src: string, price: string | null, source?: Source) =>
-    `<button type="button" class="listing" data-id="${id}" aria-pressed="false" title="Credit #${id}${source ? ` on ${SOURCES[source].name}` : ''}${price === null ? '' : ' · tap to skip'}"${price === null ? ' disabled' : ''}><span class="art"><img src="${src}" alt="" loading="lazy" decoding="async">${source ? `<img class="src" src="${SOURCES[source].icon}" alt="${SOURCES[source].name}">` : ''}</span><span class="price num">${price === null ? `#${id}` : `${minEth(BigInt(price))} ETH`}</span></button>`;
+    `<div class="listing" data-id="${id}" title="Credit #${id}${source ? ` on ${SOURCES[source].name}` : ''}"><span class="art"><img src="${src}" alt="" loading="lazy" decoding="async">${price === null ? '' : `<button type="button" class="skip" aria-label="Skip Credit #${id}">×</button>`}</span><span class="price num">${source ? `<img class="src" src="${SOURCES[source].icon}" alt="${SOURCES[source].name}">` : ''}${price === null ? `#${id}` : `${minEth(BigInt(price))} ETH`}</span></div>`;
 
   let listings: { id: string; price: string; source?: Source }[] = [];
   // preview: no OpenSea key here, so edition Credits stand in. mainnetOnly: real mainnet listings and prices,
@@ -898,7 +905,7 @@ async function bindBuy(
   }
   if (!grid.isConnected) return;
 
-  // Pick how many; the cheapest that fit fill the row. Tap one to skip it and the next cheapest takes its place.
+  // Pick how many; the cheapest that fit fill the row. A listing's × skips it and the next cheapest takes its place.
   const pool: { id: string; price: string | null; source?: Source }[] = preview
     ? (await examples(b.s.filter)).map((id) => ({ id: String(id), price: null }))
     : listings;
@@ -952,7 +959,7 @@ async function bindBuy(
   };
   document.querySelectorAll('input[name=buy-n]').forEach((r) => r.addEventListener('change', draw));
   grid.addEventListener('click', (e) => {
-    const t = (e.target as HTMLElement).closest<HTMLElement>('.listing');
+    const t = (e.target as HTMLElement).closest('.skip')?.closest<HTMLElement>('.listing');
     if (!t || preview) return;
     skipped.add(t.dataset.id!);
     draw();
@@ -1011,9 +1018,10 @@ async function bindBuy(
     stopTimer();
     await run(go, 'Buying…', async () => {
       const fwa = (quote.fwa ?? []).map((f) => ({ listingId: BigInt(f.listingId), price: BigInt(f.price) }));
+      const strategy = (quote.strategy ?? []).map((f) => ({ tokenId: BigInt(f.id), price: BigInt(f.price) }));
       await send(
-        fwa.length
-          ? { address: config.sweeper!, abi: sweeperAbi, functionName: 'sweepWithFWA', args: [batch, quote.orders, fwa, 1n, quotedFeeBps], value }
+        fwa.length || strategy.length
+          ? { address: config.sweeper!, abi: sweeperAbi, functionName: 'sweepAll', args: [batch, quote.orders, fwa, strategy, 1n, quotedFeeBps], value }
           : { address: config.sweeper!, abi: sweeperAbi, functionName: 'sweep', args: [batch, quote.orders, 1n, quotedFeeBps], value },
         txNote,
       );
