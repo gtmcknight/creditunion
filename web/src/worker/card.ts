@@ -1,7 +1,9 @@
 /// Per-party link cards, drawn in the worker: the party's own sheet of Credits on the left (its deposits, with
 /// the empty slots waiting), its name and where it stands on the right. Pixels are set by hand and packed as a
 /// PNG, with text from pre-rendered Geist glyphs (public/og/font.bin, scripts/og-font.py), so there is no image
-/// library or font engine in the worker. Credit art comes from public/wall.bin (scripts/wall.ts).
+/// library or font engine in the worker. Credits are drawn exactly as their contract draws them (print.ts, misprints
+/// included); public/wall.bin's registered grid (scripts/wall.ts) is the fallback when the chain can't be read.
+import { MIXES, type Rect } from './print';
 
 const W = 1200, H = 630;
 
@@ -158,24 +160,47 @@ const eth = (wei: bigint) => {
   return `${s} ETH`;
 };
 
-export async function drawParty(fetcher: Fetcher, origin: string, p: PartyCard): Promise<Uint8Array> {
+/// Paints a print's rects at `s` px per 10 canvas units, cropped to [from, to) of its 320-unit canvas. Every edge in
+/// a Credit sits on the 10-unit grid, so edges are rounded the same way everywhere and a cell keeps one width.
+function paint(c: Canvas, rects: Rect[], x: number, y: number, s: number, from = 0, to = 320) {
+  const at = (o: number, u: number) => Math.round(o + ((u - from) / 10) * s);
+  for (const [rx, ry, rw, rh, col] of rects) {
+    const x0 = Math.max(rx, from), y0 = Math.max(ry, from), x1 = Math.min(rx + rw, to), y1 = Math.min(ry + rh, to);
+    if (x0 >= x1 || y0 >= y1) continue;
+    const px = at(x, x0), py = at(y, y0);
+    c.rect(px, py, at(x, x1) - px, at(y, y1) - py, [col >> 16, (col >> 8) & 255, col & 255]);
+  }
+}
+
+/// The registered grid from wall.bin, for when the chain can't be read: no slips, no eight marks.
+function gridPrint(cells: Uint8Array, id: number): Rect[] | null {
+  if (!id || id > cells.length / 32) return null;
+  const out: Rect[] = [[0, 0, 320, 320, 0xffffff], [80, 80, 160, 160, 0xffffff]];
+  for (let cell = 0; cell < 64; cell++) {
+    const m = (cells[(id - 1) * 32 + (cell >> 1)] >> ((cell & 1) * 4)) & 15;
+    if (m) out.push([80 + (cell % 8) * 20, 80 + Math.floor(cell / 8) * 20, 20, 20, MIXES[m]]);
+  }
+  return out;
+}
+
+/// `prints[i]` is p.ids[i] as its contract draws it, or null to fall back to wall.bin.
+export async function drawParty(fetcher: Fetcher, origin: string, p: PartyCard, prints: (Rect[] | null)[]): Promise<Uint8Array> {
   const { cells, faces } = await load(fetcher, origin);
   const c = new Canvas(faces);
 
   header(c);
-  // The sheet: 8 across, 10 down, as the Statement is laid out, under the header.
-  const k = 5, T = 8 * k, gap = 5, sx = 48, sy = 137;
+  // The sheet: 8 across, 10 down, as the Statement is laid out, under the header. A slot is the middle 200 of a
+  // Credit's 320 units at 2 px a 10 (a registered grid is 32 px); the widest misprints' slipped plates reach 20
+  // units past that, so their ink hangs up to 4 px into the gap, as a misprint does. Paper is the card's white, so
+  // only ink is drawn, except on the one Credit printed on black (five eights).
+  const T = 40, gap = 5, sx = 48, sy = 137;
   for (let slot = 0; slot < 80; slot++) {
     const x = sx + (slot % 8) * (T + gap), y = sy + Math.floor(slot / 8) * (T + gap);
     const id = p.ids[slot];
-    if (!id || id > cells.length / 32) {
-      c.rect(x, y, T, T, SLOT);
-      continue;
-    }
-    for (let cell = 0; cell < 64; cell++) {
-      const m = (cells[(id - 1) * 32 + (cell >> 1)] >> ((cell & 1) * 4)) & 15;
-      if (m) c.rect(x + (cell % 8) * k, y + Math.floor(cell / 8) * k, k, k, MIX[m]);
-    }
+    const art = id ? (prints[slot] ?? gridPrint(cells, id)) : null;
+    if (!art) c.rect(x, y, T, T, SLOT);
+    else if (art[0][4] !== 0xffffff) paint(c, art, x, y, 2, 60, 260);
+    else paint(c, art.slice(2), x - 4, y - 4, 2, 40, 280);
   }
 
   const x0 = 464, colW = 688;
@@ -226,19 +251,17 @@ export type CreditFacts = {
   of: number;
 };
 
-/// One Credit: the header, its art large on the left, its number and traits on the right.
-export async function drawCredit(fetcher: Fetcher, origin: string, id: number, f: CreditFacts | null): Promise<Uint8Array> {
+/// One Credit: the header, its art large on the left, whole (paper, print and eight marks, 1.45 px a canvas unit,
+/// as its contract draws it: `print`, or wall.bin's grid when that's null), its number and traits on the right.
+export async function drawCredit(fetcher: Fetcher, origin: string, id: number, f: CreditFacts | null, print: Rect[] | null): Promise<Uint8Array> {
   const { cells, faces } = await load(fetcher, origin);
   const c = new Canvas(faces);
   header(c);
-  const k = 58, T = 8 * k, sx = 48, sy = 118;
+  const T = 464, sx = 48, sy = 118;
   c.rect(sx - 1, sy - 1, T + 2, T + 2, TRACK);
-  c.rect(sx, sy, T, T, rgb('#ffffff'));
-  if (id <= cells.length / 32)
-    for (let cell = 0; cell < 64; cell++) {
-      const m = (cells[(id - 1) * 32 + (cell >> 1)] >> ((cell & 1) * 4)) & 15;
-      if (m) c.rect(sx + (cell % 8) * k, sy + Math.floor(cell / 8) * k, k, k, MIX[m]);
-    }
+  const art = print ?? gridPrint(cells, id);
+  if (art) paint(c, art, sx, sy, 14.5);
+  else c.rect(sx, sy, T, T, rgb('#ffffff'));
 
   const x0 = 576, col2 = x0 + 300;
   c.text(LABEL, 'Credit', x0, 176, MUTED);

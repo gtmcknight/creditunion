@@ -7,7 +7,7 @@
 ///   /opensea/credit/:id  one Credit's best OpenSea listing price (mainnet's, as a preview, on testnets)
 ///   /ens/:address  primary ENS name (always from mainnet), cached a day
 /// Every response carries the security headers in `secure()`.
-import { createPublicClient, http, type Address, parseAbiItem } from 'viem';
+import { createPublicClient, hexToBytes, http, type Address, type Hex, parseAbiItem } from 'viem';
 import { mainnet } from 'viem/chains';
 import { batchAbi, creditsAbi, creditArtAbi, factoryAbi } from '../app/abi';
 import { best, quote, scan, type Extra, type Listing } from './opensea';
@@ -18,6 +18,7 @@ import { load, loadScores, match, predicate, type Rules } from './match';
 import { cardFor, creditCard, creditsCard, partyCard, rangeCard, timeCard, traitCard, withCard } from './og';
 import { parseTrait } from '../shared/trait';
 import { drawCredit, drawParty, sample, type CreditFacts, type PartyCard } from './card';
+import { printOf, type Rect } from './print';
 import { stamp } from '../shared/stamp';
 import { keyOf, ruleFor } from '../shared/layout';
 
@@ -576,11 +577,13 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const generic = () => env.ASSETS.fetch(new Request(new URL('/og/home.png', url)));
     if (!inSupply(id)) return generic();
     const cache = caches.default;
-    const key = new Request(`${url.origin}/og/credit/v2/${id}.png`); // v: the card's design
+    const key = new Request(`${url.origin}/og/credit/v3/${id}.png`); // v: the card's design
     const hit = await cache.match(key);
     if (hit) return hit;
     if (await limited(env.RL_MISC, req)) return generic();
-    const res = new Response(await drawCredit(env.ASSETS, url.origin, id, await creditFacts(env, url, id).catch(() => null)), { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } });
+    const [facts, [print]] = await Promise.all([creditFacts(env, url, id).catch(() => null), printsFor(env, [id])]);
+    // Drawn from the chain it's exact for good; the wall.bin fallback is cached briefly so a later read replaces it.
+    const res = new Response(await drawCredit(env.ASSETS, url.origin, id, facts, print), { headers: { 'content-type': 'image/png', 'cache-control': `public, max-age=${print ? 86400 : 300}` } });
     ctx.waitUntil(cache.put(key, res.clone()));
     return res;
   }
@@ -665,6 +668,37 @@ async function readParty(env: Env, batch: Address): Promise<PartyCard> {
   };
 }
 
+const MULTICALL3: Address = '0xcA11bde05977b3631167028862bE2a173976CA11'; // same address on every chain
+
+/// Link cards draw each Credit exactly as its contract does (print.ts): its seed and payment second, for every id
+/// in one multicall, so a full sheet costs one subrequest. null where a Credit has no seed or the read failed; the
+/// card then falls back to wall.bin. `real`: the mainnet edition (made-up sample cards) on any network.
+async function printsFor(env: Env, ids: number[], real = false): Promise<(Rect[] | null)[]> {
+  const want = ids.filter((id) => inSupply(id));
+  if (!want.length) return ids.map(() => null);
+  const main = real && env.CHAIN_ID !== '1';
+  const address = main ? MAINNET_CREDITS : env.CREDITS;
+  try {
+    const res = await (main ? mainClient(env) : client(env)).multicall({
+      contracts: want.flatMap((id) => [
+        { address, abi: creditsAbi, functionName: 'seedOf', args: [BigInt(id)] } as const,
+        { address, abi: creditsAbi, functionName: 'timestampOf', args: [BigInt(id)] } as const,
+      ]),
+      allowFailure: true,
+      multicallAddress: MULTICALL3,
+    });
+    const byId = new Map<number, Promise<Rect[] | null>>();
+    want.forEach((id, i) => {
+      const seed = res[2 * i], ts = res[2 * i + 1];
+      const ok = seed.status === 'success' && ts.status === 'success' && !/^0x0+$/.test(String(seed.result));
+      byId.set(id, ok ? printOf(hexToBytes(seed.result as Hex), Number(ts.result)) : Promise.resolve(null));
+    });
+    return await Promise.all(ids.map((id) => byId.get(id) ?? null));
+  } catch {
+    return ids.map(() => null);
+  }
+}
+
 /// /og/party/<address>.png and /og/sample/<kind>.png. Party cards are cached a minute: they change as it fills.
 /// Cached by path plus the `s` stamp only, so made-up query strings can't force a redraw.
 async function linkCard(req: Request, env: Env, url: URL, ctx: ExecutionContext, kind: string, key: string): Promise<Response> {
@@ -680,7 +714,7 @@ async function linkCard(req: Request, env: Env, url: URL, ctx: ExecutionContext,
   else if (/^0x[0-9a-fA-F]{40}$/.test(key) && (await isBatch(env, url, key.toLowerCase() as Address))) p = await readParty(env, key as Address).catch(() => null);
   else p = null;
   if (!p) return generic();
-  const body = await drawParty(env.ASSETS, url.origin, p);
+  const body = await drawParty(env.ASSETS, url.origin, p, await printsFor(env, p.ids, kind === 'sample'));
   const res = new Response(body, { headers: { 'content-type': 'image/png', 'cache-control': `public, max-age=${kind === 'sample' ? 3600 : 60}` } });
   ctx.waitUntil(cache.put(cacheKey, res.clone()));
   return res;

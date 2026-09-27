@@ -4,7 +4,7 @@
 export type Card = { title: string; description: string; image: string };
 
 const SITE = 'Credit Union';
-const CARDS_V = 2;
+const CARDS_V = 3;
 const CARDS: Record<string, Card> = {
   home: { title: 'Credit Union', description: 'Join a Credit Union to make a Statement together.', image: '/og/home.png' },
   parties: { title: 'Credit Unions', description: 'Credit Unions pooling Credits toward a Statement. Join one, leave any time before it fills.', image: '/og/party.png' },
