@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {Batch, IRatings} from "../../src/Batch.sol";
 import {BatchFactory} from "../../src/BatchFactory.sol";
 import {Sweeper} from "../../src/Sweeper.sol";
+import {IFWAMarket} from "../../src/interfaces/IFWAMarket.sol";
 import {MockAssembler} from "../../src/mocks/MockAssembler.sol";
 import {ICredits} from "../../src/interfaces/ICredits.sol";
 import {ISeaport} from "../../src/interfaces/ISeaport.sol";
@@ -27,7 +28,7 @@ contract AuditSweeperTest is Test {
         credits = new MockCredits();
         statement = new MockStatement(ICredits(address(credits)));
         factory = new BatchFactory(ICredits(address(credits)), IRatings(address(0)), new MockAssembler(statement), address(0), fee, 100, 0, 10);
-        sweeper = new Sweeper(ISeaport(makeAddr("seaport")), factory, 100);
+        sweeper = new Sweeper(ISeaport(makeAddr("seaport")), factory, 100, IFWAMarket(address(0)));
         credits.mint(alice, 50); // ids 1..50
         credits.mint(bob, 50); // ids 51..100
         for (uint256 i; i < 3; ++i) {

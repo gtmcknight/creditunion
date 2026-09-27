@@ -5,6 +5,7 @@ import {Test, stdError} from "forge-std/Test.sol";
 import {Batch, IRatings} from "../../src/Batch.sol";
 import {BatchFactory} from "../../src/BatchFactory.sol";
 import {Sweeper} from "../../src/Sweeper.sol";
+import {IFWAMarket} from "../../src/interfaces/IFWAMarket.sol";
 import {Ratings, DataStore} from "../../src/Ratings.sol";
 import {RatingsDeploy} from "../../script/DeployRatings.s.sol";
 import {MockAssembler} from "../../src/mocks/MockAssembler.sol";
@@ -199,7 +200,7 @@ contract Adversarial2Test is Test {
     /// When every quoted listing fills, a raised fee makes the sweep revert (the AUDIT.md claim holds).
     function test_SweepFeeRaise_AllFill_Reverts() public {
         MockSeaport seaport = new MockSeaport(credits);
-        Sweeper sweeper = new Sweeper(ISeaport(address(seaport)), factory, 100);
+        Sweeper sweeper = new Sweeper(ISeaport(address(seaport)), factory, 100, IFWAMarket(address(0)));
         vm.prank(bob);
         credits.setApprovalForAll(address(seaport), true);
         vm.prank(alice);
@@ -218,7 +219,7 @@ contract Adversarial2Test is Test {
     /// listings silently covered the new rate). The buyer passes the rate they were quoted.
     function test_SweepFeeRaise_PartialFill_Reverts() public {
         MockSeaport seaport = new MockSeaport(credits);
-        Sweeper sweeper = new Sweeper(ISeaport(address(seaport)), factory, 100);
+        Sweeper sweeper = new Sweeper(ISeaport(address(seaport)), factory, 100, IFWAMarket(address(0)));
         vm.prank(bob);
         credits.setApprovalForAll(address(seaport), true);
         vm.prank(alice);

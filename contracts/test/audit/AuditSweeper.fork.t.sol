@@ -5,6 +5,7 @@ import {Test, stdError} from "forge-std/Test.sol";
 import {Batch, IRatings} from "../../src/Batch.sol";
 import {BatchFactory} from "../../src/BatchFactory.sol";
 import {Sweeper} from "../../src/Sweeper.sol";
+import {IFWAMarket} from "../../src/interfaces/IFWAMarket.sol";
 import {IAssembler} from "../../src/interfaces/IAssembler.sol";
 import {ICredits} from "../../src/interfaces/ICredits.sol";
 import {
@@ -69,7 +70,7 @@ contract AuditSweeperForkTest is Test {
         zoneSigner = vm.addr(zoneSignerKey);
 
         factory = new BatchFactory(CREDITS, IRatings(address(0)), IAssembler(address(0)), address(this), fee, 100, 0, 1);
-        sweeper = new Sweeper(SEAPORT, factory, 100);
+        sweeper = new Sweeper(SEAPORT, factory, 100, IFWAMarket(address(0)));
 
         // Live Credits: one for the creator, four to the seller.
         uint256 id = 1000;
