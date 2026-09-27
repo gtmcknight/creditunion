@@ -456,7 +456,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       const raw = await readBody(req, 16_000);
       if (raw === null) return text('too large', 413);
       const b = JSON.parse(raw) as { listings?: unknown };
-      if (!Array.isArray(b.listings) || !b.listings.length || b.listings.length > FOR_SALE) throw 0;
+      if (!Array.isArray(b.listings) || !b.listings.length || b.listings.length > MAX_SWEEP) throw 0;
       ls = b.listings.map((x) => {
         const l = x as Record<string, unknown>;
         const id = String(l.id), price = String(l.price), source = String(l.source);
@@ -999,8 +999,10 @@ function openseaTrait(t: NonNullable<ReturnType<typeof parseTrait>>): { traitTyp
 /// today, as a guard.
 const RANGE_DEPTH = 150;
 
-/// Credits in a For sale row, and the most one sweep takes.
+/// Credits in a For sale row.
 const FOR_SALE = 10;
+/// The most Credits one sweep takes.
+const MAX_SWEEP = 20;
 /// Listed Credits per page of /opensea/listed (before a trait filters them).
 const LISTED_CHUNK = 60;
 const offOpenSea = (env: Env) => !!(addrOrNull(env.FWA_MARKET) || addrOrNull(env.STRATEGY));

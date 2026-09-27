@@ -20,9 +20,9 @@ export const sourceMark = (id: string | number, source: Source, url?: string) =>
 
 type Listed = { id: string; price: string; source: Source; url?: string; hash?: string; protocol?: string; listingId?: string };
 
-const COUNTS = [1, 5, 10];
+const COUNTS = [1, 5, 10, 20];
 /// The most one sweep takes (the worker's quote allows as many).
-const MAX_SWEEP = 10;
+const MAX_SWEEP = 20;
 /// Buying runs where the Sweeper is deployed (mainnet); elsewhere the prices are mainnet's, as a preview.
 const canBuy = (preview?: boolean) => !preview && !!config.sweeper;
 
@@ -99,7 +99,8 @@ export const priceTag = (l: Listed) =>
 /// (up to MAX_SWEEP). The picked are outlined in `grid` wherever they are; the button carries their total.
 /// `mark()` re-outlines after the grid changes.
 export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement) {
-  const counts = COUNTS.filter((c, i) => c <= sale.ls.length || i === 0 || COUNTS[i - 1] < sale.ls.length);
+  // Every count shows even while listings are still paging in; a count picks as many as are found so far.
+  const counts = COUNTS;
   // Nothing picked to start: tap Credits, or 1 / 5 / 10 for the cheapest that many.
   const picked = new Set<string>();
   host.innerHTML = `<span class="muted">Sweep</span><div class="jb-sort" role="radiogroup" aria-label="How many">${counts
