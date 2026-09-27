@@ -6,7 +6,7 @@
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/rpc", "/bids/*", "/ratings", "/edition/*", "/art/*", "/config.json", "/opensea/*", "/ens/*", "/owner/*", "/", "/parties", "/about", "/about/*", "/auctions", "/create", "/unions", "/union/*", "/party/*", "/b/*", "/mint", "/og", "/og/party/*", "/og/sample/*", "/me", "/member/*", "/spin", "/fwa/*"]
+    "run_worker_first": ["/rpc", "/bids/*", "/ratings", "/edition/*", "/art/*", "/config.json", "/opensea/*", "/ens/*", "/owner/*", "/", "/parties", "/about", "/about/*", "/auctions", "/create", "/unions", "/union/*", "/party/*", "/b/*", "/mint", "/og", "/og/party/*", "/og/sample/*", "/me", "/member/*"]
   },
   // Public config served at /config.json. Secrets: `wrangler secret put RPC_URL` and `wrangler secret put OPENSEA_API_KEY`.
   "vars": {
@@ -17,9 +17,8 @@
     "RATINGS": "0xB30a87D84817458Fcd5EE438A748fE2CdD74C52e",
     "OPENSEA_SLUG": "credits",
     "FALLBACK_RPC": "https://ethereum-sepolia-rpc.publicnode.com",
-    // FWA (fwa.fun), mainnet only: its marketplace is a second Buy Credits source; FWA_POOL is the pool /spin sells.
+    // FWA (fwa.fun), mainnet only: its marketplace is a second Buy Credits source.
     "FWA_MARKET": "0x2b019cfb591988d28c64c4f4be6a24b1592bbf25",
-    "FWA_POOL": "0xfac9af47a396ec1085d3940e2ed16e9b11c62a10",
     // CreditStrategy (nftstrategy.fun), mainnet only: the Credits it holds for sale are a third Buy Credits source.
     "STRATEGY": "0x8e607209899b5d12bd3167a6cd0e8e11feb053d6"
   },

@@ -4,14 +4,12 @@
 ///   /art/...       a Credit's art, read from Jack's art contract and cached forever (art never changes)
 ///   /opensea/quote cheapest listings that fit a batch (OpenSea as signed Seaport orders, FWA, CreditStrategy)
 ///   /ens/:address  primary ENS name (always from mainnet), cached a day
-///   /fwa/pool      the Spin page's FWA pool: what's in it, the odds of a Credit, the price of a spin (mainnet)
-///   /fwa/spin      where one spin transaction stands (mainnet)
 /// Every response carries the security headers in `secure()`.
 import { createPublicClient, http, type Address, parseAbiItem } from 'viem';
 import { mainnet } from 'viem/chains';
 import { batchAbi, creditsAbi, creditArtAbi, factoryAbi } from '../app/abi';
 import { quote, scan, type Extra, type Listing } from './opensea';
-import { cacheStore, confirmListing, marketListings, readPool, readSpin, type FwaListing } from './fwa';
+import { cacheStore, confirmListing, marketListings, type FwaListing } from './fwa';
 import { confirmStrategy, strategyListings } from './strategy';
 import { ratings } from './ratings';
 import { load, match, predicate, type Rules } from './match';
@@ -43,8 +41,6 @@ interface Env {
   RL_ART?: RateLimit;
   /// FWA's marketplace on mainnet: a second Buy Credits source. Empty to turn it off.
   FWA_MARKET?: string;
-  /// The FWA pool the Spin page sells spins of (mainnet). Empty hides the page's Spin button.
-  FWA_POOL?: string;
   /// CreditStrategy (nftstrategy.fun) on mainnet: the Credits it holds for sale are a third Buy Credits source.
   /// Empty to turn it off.
   STRATEGY?: string;
@@ -204,7 +200,6 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         sweeper: env.OPENSEA_API_KEY && !/^0x0+$/.test(env.SWEEPER ?? '0x0') ? env.SWEEPER : null,
         ratings: env.RATINGS && !/^0x0+$/.test(env.RATINGS) ? env.RATINGS : null,
         fwaMarket: addrOrNull(env.FWA_MARKET),
-        fwaPool: addrOrNull(env.FWA_POOL),
       },
       { headers: { 'cache-control': 'public, max-age=60' } },
     );
@@ -351,41 +346,6 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       const strategy = strategyLive.map((l) => ({ id: l.id, price: l.price }));
       const total = [...fwa, ...strategy].reduce((a, l) => a + BigInt(l.price), BigInt(os.total));
       return Response.json({ ...os, total: total.toString(), fwa, strategy }, { headers: { 'cache-control': 'no-store' } });
-    } catch (e) {
-      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
-    }
-  }
-
-  // The Spin page's pool, on mainnet whatever chain the site is on. Cached briefly: it moves with gas and spins.
-  if (url.pathname === '/fwa/pool') {
-    const pool = addrOrNull(env.FWA_POOL);
-    if (!pool) return text('no pool configured', 501);
-    if (!sameSite(req)) return text('forbidden', 403);
-    const cache = caches.default;
-    const key = new Request(`${url.origin}/fwa/pool/${pool.toLowerCase()}`);
-    const hit = await cache.match(key);
-    if (hit) return hit;
-    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
-    try {
-      const p = await readPool(mainClient(env), pool, MAINNET_CREDITS, cacheStore(url.origin));
-      const res = Response.json(p, { headers: { 'cache-control': 'public, max-age=12' } });
-      ctx.waitUntil(cache.put(key, res.clone()));
-      return res;
-    } catch (e) {
-      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
-    }
-  }
-
-  // /fwa/spin?tx=0x…: a spin transaction on the configured pool, and what each draw in it landed.
-  if (url.pathname === '/fwa/spin') {
-    const pool = addrOrNull(env.FWA_POOL);
-    if (!pool) return text('no pool configured', 501);
-    if (!sameSite(req)) return text('forbidden', 403);
-    const tx = url.searchParams.get('tx') ?? '';
-    if (!/^0x[0-9a-fA-F]{64}$/.test(tx)) return text('bad request', 400);
-    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
-    try {
-      return Response.json(await readSpin(mainClient(env), pool, MAINNET_CREDITS, tx as `0x${string}`), { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
     }

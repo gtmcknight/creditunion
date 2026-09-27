@@ -5961,33 +5961,3 @@ dialog.eligible::backdrop {
   .hero-text .wall-cta { gap: 6px; }
   .hero-text .wall-cta .btn { height: 40px; padding: 0 12px; font-size: 14px; }
 }
-
-/* ---------------------------------------------------------------- spin */
-
-.spin-out {
-  display: grid;
-  gap: 10px;
-  font-size: 14px;
-}
-.won-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 8px;
-}
-.won-list li {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.won-list li span {
-  flex: 1;
-  min-width: 0;
-}
-.won-list img {
-  width: 56px;
-  height: 56px;
-  background: #fff;
-  box-shadow: 0 0 0 1px var(--line);
-}

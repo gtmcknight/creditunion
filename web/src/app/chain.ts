@@ -17,9 +17,8 @@ export type Config = {
   factory: Address;
   sweeper: Address | null;
   ratings: Address | null;
-  /// FWA on mainnet: its marketplace (a Buy Credits source) and the pool the Spin page sells.
+  /// FWA's marketplace on mainnet, a Buy Credits source.
   fwaMarket?: Address | null;
-  fwaPool?: Address | null;
 };
 
 const CHAINS: Record<number, Chain> = { 1: mainnet, 11155111: sepolia, 31337: foundry };

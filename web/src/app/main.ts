@@ -9,13 +9,12 @@ import { hydrate, who } from './ens';
 import { mint } from './views/mint';
 import { previews } from './views/previews';
 import { profile } from './views/profile';
-import { spin } from './views/spin';
 import { esc, errText, toast } from './ui';
 
 const app = document.getElementById('app')!;
 let seq = 0;
 
-/// Real paths: / (how it works; /about too), /unions, /auctions, /create, /spin, /union/0x…, /mint, /me. Pages keep their old
+/// Real paths: / (how it works; /about too), /unions, /auctions, /create, /union/0x…, /mint, /me. Pages keep their old
 /// internal names (party, parties). Old #/ links and old paths (/party, /parties, /new, /b, /docs, /how) still land.
 const LEGACY: Record<string, string> = { union: 'party', unions: 'parties', new: 'create', b: 'party', docs: 'about', how: 'about' };
 function pagePath(): string[] {
@@ -51,7 +50,6 @@ async function route() {
     else if (page === 'me') await profile(app, route);
     else if (page === 'member' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await profile(app, route, arg as Address);
     else if (page === 'create') await create(app);
-    else if (page === 'spin') await spin(app);
     else if (page === 'party' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await party(app, arg as Address, route);
     else if (page === 'parties' || page === 'auctions') await lists(app, page);
     else home(app);
@@ -178,7 +176,7 @@ document.addEventListener('click', (e) => {
   const a = (e.target as HTMLElement).closest?.('a');
   if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || a.target) return;
   const url = new URL(a.href, location.href);
-  if (url.origin !== location.origin || /^\/(rpc|ratings|edition|art|opensea|fwa|ens|config\.json)/.test(url.pathname)) return;
+  if (url.origin !== location.origin || /^\/(rpc|ratings|edition|art|opensea|ens|config\.json)/.test(url.pathname)) return;
   e.preventDefault();
   document.querySelectorAll<HTMLDialogElement>('dialog[open]').forEach((d) => d.close());
   go(url.pathname);
