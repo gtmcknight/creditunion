@@ -6348,9 +6348,11 @@ dialog.eligible::backdrop {
 /* Expanded, the wall covers the whole screen, whatever height its band had on the page. */
 .hero .wall-frame.expanded, .wall-frame.expanded { height: auto; }
 
-/* Credit page: where it's listed, with the marketplace's mark. */
-.listed-on { display: flex; align-items: center; gap: 6px; }
-.listed-on img.src { width: 14px; height: 14px; }
+/* Credit page: Buy sits right under the facts, past the rule that closes them, as close as a row's own padding. */
+.credit-page #credit-buy { margin-top: -24px; padding-top: 16px; }
+/* A link that's there to be found, not followed: the text's own colour, underlined only on hover. */
+a.quiet { color: inherit; text-decoration: none; }
+a.quiet:hover { text-decoration: underline; text-underline-offset: 3px; }
 /* TokenWorks' mark is a black squircle: flip it light on dark so it doesn't vanish. */
 :root[data-theme='dark'] img.src[src$='strategy.svg'] { filter: invert(1); }
 @media (prefers-color-scheme: dark) {
@@ -6373,16 +6375,12 @@ dialog.eligible::backdrop {
 
 /* A trait's page, reduced: a breadcrumb with the sections beside it, the trait's values as a row of glyphs, one
    line of counts and links, one line of controls as words, then the grid. */
-.jb-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px; margin: 8px 0 24px; }
-.jb-crumb { display: flex; gap: 8px; align-items: baseline; font-size: 22px; letter-spacing: -0.01em; }
+/* The Credits pages' title (in .page-head, like every section page): where you are as a crumb, at the h1's size. */
+.jb-crumb { display: flex; gap: 8px; align-items: center; font-size: 28px; font-weight: 500; line-height: 32px; letter-spacing: -0.02em; }
 .jb-crumb a { padding: 0; margin: 0; color: var(--muted); text-decoration: none; font-size: inherit; }
 .jb-crumb a:hover { color: var(--fg); }
 .jb-crumb span { color: var(--faint); }
 .jb-crumb b { font-weight: inherit; color: var(--fg); } /* current by colour, not weight: the words never move */
-.jb-kinds { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 14px; }
-.jb-kinds a { color: var(--muted); text-decoration: none; }
-.jb-kinds a:hover, .jb-kinds a[aria-current] { color: var(--fg); }
-.jb-kinds a[aria-current] { text-decoration: underline; text-underline-offset: 4px; }
 .jb-values { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
 .jb-values a { display: block; opacity: 0.45; transition: opacity 120ms var(--ease); }
 .jb-values a:hover, .jb-values a[aria-current], .jb-values.all a { opacity: 1; }
@@ -6443,16 +6441,13 @@ dialog.eligible::backdrop {
 /* The centre nav is quiet: regular weight, the current page by ink alone. */
 .main-nav a { font-weight: 400; letter-spacing: -0.01em; }
 
-/* One line box for every crumb and section link, so the header sits at the same height on every page. */
-.jb-head { align-items: center; min-height: 32px; }
-.jb-crumb { align-items: center; line-height: 32px; }
+/* One line box for every part of the crumb, so the title sits at the same height on every page. */
 .jb-crumb > * { line-height: 32px; display: inline-block; }
-.jb-kinds a { line-height: 20px; }
 .jb-crumb a { min-height: 0; height: 32px; }
 
-/* A Credit tile still loading, the same shape as what replaces it. */
+/* A Credit tile still loading, the same shape as what replaces it: the square, then two lines (number, price). */
 .cc.skel .cc-art { aspect-ratio: 1; background: var(--empty); }
-.cc.skel .cc-cap { height: 19px; }
+.cc.skel .cc-cap { height: 39px; height: calc(2lh + 2px); } /* the price line runs 2px taller for its mark */
 
 .cc-cap { padding: 0 2px; } /* number and price sit just inside the square's edges */
 

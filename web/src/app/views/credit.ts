@@ -246,16 +246,19 @@ async function drawOffer(el: HTMLElement, n: number, d: Offer & { price: string;
   const bps = viaSweeper ? await sweepFee() : 0n;
   if (!el.isConnected) return;
   const inApp = viaSweeper || (!d.preview && !!d.contract && (d.source === 'strategy' || (d.source === 'fwa' && !!d.listingId)));
-  const view = d.url ? `<a class="muted small" href="${esc(d.url)}" target="_blank" rel="noopener">View on ${src.name} ↗</a>` : '';
+  // Where it's listed, linked for anyone who wants to check, but quietly: buying here is the point.
+  const where = `Listed on ${d.url ? `<a class="quiet" href="${esc(d.url)}" target="_blank" rel="noopener">${src.name}</a>` : src.name}.`;
+  const fee = bps ? `a ${Number(bps) / 100}% fee` : '';
+  const total = value + (value * bps) / 10_000n;
+  // Just Buy, the price in it as the wallet will ask it; where it's listed, in the line under it.
   el.className = 'box';
-  el.innerHTML = `<div class="box-head"><h3 class="listed-on"><img class="src" src="${src.icon}" alt="">Listed on ${src.name}</h3><strong class="num">${eth(value)}</strong></div>
-    ${
-      d.preview
-        ? `<button class="btn primary block" disabled>Buy</button><p class="muted small">Mainnet price, shown as a preview. ${view}</p>`
-        : inApp
-          ? `${session.account ? `<button class="btn primary block" id="credit-buy-go">Buy · ${eth(value + (value * bps) / 10_000n)}</button>` : connectToBuy(true)}<p class="muted small">${bps ? `Includes the ${Number(bps) / 100}% fee. ` : ''}${view}</p>`
-          : `<a class="btn primary block" href="${esc(d.url ?? '#')}" target="_blank" rel="noopener">Buy on ${src.name} ↗</a>`
-    }`;
+  el.innerHTML = d.preview
+    ? `<button class="btn primary block" disabled>Buy · ${eth(value)}</button><p class="muted small">Mainnet price, shown as a preview. ${where}</p>`
+    : !inApp
+      ? `<a class="btn primary block" href="${esc(d.url ?? '#')}" target="_blank" rel="noopener">Buy on ${src.name} · ${eth(value)} ↗</a>`
+      : session.account
+        ? `<button class="btn primary block" id="credit-buy-go">Buy · ${eth(total)}</button><p class="muted small">${where}${fee ? ` Price includes ${fee}.` : ''}</p>`
+        : `${connectToBuy(true)}<p class="muted small">${eth(total)}${fee ? `, including ${fee}` : ''}. ${where}</p>`;
   el.hidden = false;
   const go = document.getElementById('credit-buy-go') as HTMLButtonElement | null;
   // Bought: back to the union you came from with this Credit picked to deposit, else this page again, now yours.

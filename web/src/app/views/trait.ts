@@ -1,5 +1,5 @@
 import { hasLayout, layoutSlot, listBatches, type Listed } from '../data';
-import { YOURS, listedPager, live, priceTag, relist, sweepControls } from '../forsale';
+import { YOURS, listedPager, live, priceTag, relist, sweepControls, sweepWaiting } from '../forsale';
 import { hydrate } from '../ens';
 import { editionArt, fillGhosts } from '../ghosts';
 import { dice, printGlyph, swatch, weightGlyph } from '../glyphs';
@@ -113,7 +113,8 @@ export async function traitPage(app: HTMLElement, kind: string, raw: string) {
     const d = (await res.json()) as { count: number; sample: number[] };
     return { ids: d.sample, total: d.count };
   });
-  await grid.start();
+  // Not awaited: the page shows at once (the router fades it in when this returns), the grid filling in behind.
+  void grid.start();
 }
 
 /// The Buy row's markup: the heading, Sweep beside it, then the grid and its Show more.
@@ -168,7 +169,14 @@ export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => 
   const behind = () => !!(where.rules);
   // Listed Credits found since the last look, onto the grid: at its end, or (behind) at the end of the listed run
   // at its head, moved there if the rest already drew them.
+  const unskel = () => grid.querySelectorAll(':scope > .skel').forEach((el) => el.remove());
+  // The Buy row (heading and Sweep): up while listings load, and while any are listed.
+  const row = (on: boolean) => {
+    if (heading) heading.hidden = !on;
+    host.hidden = !on;
+  };
   const place = () => {
+    unskel();
     for (; placed < listed.items.length; placed++) {
       const id = listed.items[placed].id;
       if (!behind()) {
@@ -181,7 +189,7 @@ export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => 
       else grid.insertAdjacentHTML('beforeend', cell(Number(id)));
     }
     if (listed.items.length && !sweep) sweep = sweepControls(host, listed.sale, grid);
-    if (heading) heading.hidden = !listed.items.length;
+    row(!!listed.items.length);
     sweep?.mark();
   };
   const inView = () => more.getBoundingClientRect().top < innerHeight + 600;
@@ -201,6 +209,7 @@ export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => 
       }
       const d = await rest(page);
       if (!grid.isConnected || my !== gen) return;
+      unskel();
       grid.insertAdjacentHTML('beforeend', d.ids.filter((id) => !listed.sale.byId.has(String(id)) && !listed.sale.mine.has(String(id))).map(cell).join(''));
       sweep?.mark();
       shown += d.ids.length;
@@ -233,7 +242,7 @@ export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => 
     relist(grid, listed.sale, [...fresh.items, ...past], (l) => creditCell(Number(l.id), priceTag(l)), sweep);
     placed = listed.items.length;
     if (listed.items.length && !sweep) sweep = sweepControls(host, listed.sale, grid);
-    if (heading) heading.hidden = !listed.items.length;
+    row(!!listed.items.length);
   });
   return {
     async start(next?: Where) {
@@ -241,29 +250,39 @@ export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => 
       if (next) (where = next), (listed = listedPager(next));
       page = shown = placed = 0;
       sweep = null;
-      host.innerHTML = '';
-      if (heading) heading.hidden = true;
-      grid.innerHTML = '';
+      // Loading: the Buy row as it will be and a screenful of grey tiles, so nothing moves when listings land.
+      sweepWaiting(host);
+      row(true);
+      grid.innerHTML = creditSkel.repeat(SKELS);
       more.hidden = true;
-      if (behind()) {
-        await load();
-        while (!listed.done && my === gen && grid.isConnected) {
-          await reading(listed.fill(listed.items.length + 1, 1));
-          if (my !== gen || !grid.isConnected) return;
-          place();
+      try {
+        if (behind()) {
+          await load();
+          while (!listed.done && my === gen && grid.isConnected) {
+            await reading(listed.fill(listed.items.length + 1, 1));
+            if (my !== gen || !grid.isConnected) return;
+            place();
+          }
+          return;
         }
-        return;
+        await reading(listed.fill(FIRST, 1)); // a first look (one request)
+        if (my !== gen || !grid.isConnected) return; // drawn again meanwhile: that drawing owns it now
+        place();
+        await load();
+      } catch {
+        if (my === gen && grid.isConnected && !grid.querySelector('.cc:not(.skel)')) grid.innerHTML = '<p class="error">Couldn’t load Credits.</p>';
       }
-      await reading(listed.fill(FIRST, 1)); // a first look (one request)
-      if (my !== gen || !grid.isConnected) return; // drawn again meanwhile: that drawing owns it now
-      place();
-      await load();
     },
   };
 }
 
 /// Credits as a grid, each its art over its number (and price when it's listed), linking to its page.
 export const creditTiles = (ids: number[]) => ids.map((id) => creditCell(id)).join('');
+/// A Credit tile still loading, the same shape as the one that replaces it.
+export const creditSkel = '<div class="cc skel" aria-hidden="true"><span class="cc-art"></span><span class="cc-cap"></span></div>';
+/// Loading tiles a grid of Credits shows before its first listings land: about a screenful.
+const SKELS = 24;
+
 /// One Credit tile for every grid of Credits: its art (to its page), then its number and, when listed, its price.
 /// `title`: the art's tooltip (where it is, on a member's page).
 export const creditCell = (id: number, price = '', { title = '' } = {}) =>
@@ -330,22 +349,22 @@ function valuesOf(kind: TraitKind): TraitValue[] {
   return raw.map((v) => parseTrait(kind, v)!).filter(Boolean);
 }
 
-/// The Credits explorer's header on every page of it: where you are as a breadcrumb (Credits / Palette / C), and
-/// its sections beside it as words (the trait indexes, then Time, Rating, Bits), the current one underlined.
-/// `value`: a trait value's name, the crumb's end. "Credits" is every Credit (/credits).
+/// The Credits pages' header, opening the way every section page does (pageHead): the title, here where you are as
+/// a breadcrumb (Credits / Palette / C, or Credits / #123 on a Credit's page), at the h1's size and place, then the
+/// sections as the same tabs, the current one lit (none on a Credit's page). `value`: the crumb's end.
 export const creditsHead = (current: string, value?: string) => {
   const sections: [string, string][] = [...TRAIT_KINDS.map((k): [string, string] => [k, valuesOf(k)[0].label]), ['time', 'Time'], ['rating', 'Rating'], ['bits', 'Bits']];
   const label = sections.find(([k]) => k === current)?.[1] ?? '';
-  // /credits and a single Credit (current 'credit') sit right under Credits, with no tab lit.
   const crumb =
     current === 'credits'
       ? '<b>Credits</b>'
       : !label
         ? `<a href="/credits">Credits</a><span>/</span><b>${esc(value ?? '')}</b>`
         : `<a href="/credits">Credits</a><span>/</span>${value ? `<a href="/${current}">${esc(label)}</a><span>/</span><b>${esc(value)}</b>` : `<b>${esc(label)}</b>`}`;
-  return `<header class="jb-head">
+  const tabs: [string, string][] = [['credits', 'All'], ...sections];
+  return `<header class="page-head">
       <nav class="jb-crumb" aria-label="Where">${crumb}</nav>
-      <nav class="jb-kinds" aria-label="Credits by">${sections.map(([k, l]) => `<a href="/${k}"${k === current ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</nav>
+      <div class="page-bar"><nav class="subtabs" aria-label="Credits by">${tabs.map(([k, l]) => `<a href="/${k}"${k === current ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</nav></div>
     </header>`;
 };
 

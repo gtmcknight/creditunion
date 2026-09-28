@@ -267,6 +267,12 @@ export function listedPager(where: { trait?: string; rules?: Record<string, numb
 export const priceTag = (l: Listed, up = false) =>
   `<span class="cc-price num${up ? ' up' : ''}" title="On ${SOURCES[l.source].name}"><img class="src" src="${SOURCES[l.source].icon}" alt="${SOURCES[l.source].name}">${minEth(BigInt(l.price))}</span>`;
 
+/// Sweep's row before its listings are in: the same shape, with nothing to drag yet, so nothing moves when they land.
+export function sweepWaiting(host: HTMLElement) {
+  host.classList.add('buy-row');
+  host.innerHTML = `${sweepRow('sale', 0, 0, 0)}${canBuy() && !session.account ? connectToBuy() : '<button class="btn primary" disabled>Buy</button>'}`;
+}
+
 /// Sweep: drag the slider to take the cheapest that many (up to MAX_SWEEP), or tap listed Credits' squares to pick
 /// them one by one. The picked are outlined in `grid` wherever they are; the button carries their total.
 /// `mark()` re-outlines after the grid changes (and lets the slider reach listings that paged in since).

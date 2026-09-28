@@ -7,7 +7,7 @@ import { hydrate, pct, who } from '../ens';
 import { examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
 import { Room, books, depositedKeys, keysOf, noRoomReason, type Books } from '../slots';
 import { MAX_SWEEP, buying, checkQuote, connectToBuy, live as keepLive, minEth, priceTag, relist, sweepControls, sweepRow, type Listed, type Quote, type Sale } from '../forsale';
-import { creditCell } from './trait';
+import { creditCell, creditSkel } from './trait';
 import { activityFold } from './live';
 import { $$, art, clock, errText, esc, eth, openModal, same, setRange, sheet, short, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
@@ -505,14 +505,11 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
   </div>`;
 }
 
-/// A Credit still loading on the Buy tab.
-const SKEL = '<div class="cc skel" aria-hidden="true"><span class="cc-art"></span><span class="cc-cap"></span></div>';
-
 function buyPane(connected: boolean) {
   // As on /credits: how many and what it comes to, then the Credits to pick from; then the button, as on the
   // Deposit tab.
   return `<div class="buy-row" id="buy-act">${sweepRow('sale', 0, MAX_SWEEP, 0)}</div>
-    <div class="trait-grid listings" id="listings">${SKEL.repeat(MAX_SWEEP)}</div>
+    <div class="trait-grid listings" id="listings">${creditSkel.repeat(MAX_SWEEP)}</div>
     ${connected || !config.sweeper ? `<button class="btn primary block" id="buy-go" disabled>Buy &amp; deposit</button>` : connectToBuy(true)}
     <p class="muted small buy-source">One transaction buys the Credits you pick (OpenSea, FWA, CreditStrategy) and deposits them here in your name.</p>
 `;
