@@ -10,13 +10,13 @@
   },
   // Public config served at /config.json. Secrets: `wrangler secret put RPC_URL` and `wrangler secret put OPENSEA_API_KEY`.
   "vars": {
-    "CHAIN_ID": "11155111",
-    "CREDITS": "0xE4aD1a00Eef1E0A8c31544b12D9D7D3B3D377C12",
-    "FACTORY": "0x990D3865550E98C70572Fddb20F03C1F1502eD6A",
-    "SWEEPER": "0x0000000000000000000000000000000000000000",
-    "RATINGS": "0xB30a87D84817458Fcd5EE438A748fE2CdD74C52e",
+    "CHAIN_ID": "1",
+    "CREDITS": "0x97630aA70AB14ed9883B41dAfccBc11349723043",
+    "FACTORY": "0xcb06f9076e5fbF3cB052086b1EE7C0F3836aa051",
+    "SWEEPER": "0x7b93309A12e05944Ab821470615983A4A2AC9799",
+    "RATINGS": "0x61Ca63cDE107CE7e32785c0d89904fE58f9d371d",
     "OPENSEA_SLUG": "credits",
-    "FALLBACK_RPC": "https://ethereum-sepolia-rpc.publicnode.com",
+    "FALLBACK_RPC": "https://ethereum-rpc.publicnode.com",
     // FWA (fwa.fun), mainnet only: its marketplace is a second Buy Credits source.
     "FWA_MARKET": "0x2b019cfb591988d28c64c4f4be6a24b1592bbf25",
     // CreditStrategy (nftstrategy.fun), mainnet only: the Credits it holds for sale are a third Buy Credits source.
