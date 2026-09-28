@@ -5,9 +5,8 @@ import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligib
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { hydrate, pct, who } from '../ens';
 import { examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
-import { keyOf as layoutKey } from '../../shared/layout';
 import { Room, books, depositedKeys, keysOf, noRoomReason, type Books } from '../slots';
-import { MAX_SWEEP, checkQuote, connectToBuy, minEth, priceTag, sweepFee, sweepRow, sweepTotal, type Quote, type Source } from '../forsale';
+import { MAX_SWEEP, buying, checkQuote, connectToBuy, live as keepLive, minEth, priceTag, relist, sweepControls, sweepRow, type Listed, type Quote, type Sale } from '../forsale';
 import { creditCell } from './trait';
 import { activityFold } from './live';
 import { $$, art, clock, errText, esc, eth, openModal, same, setRange, sheet, short, toast, until } from '../ui';
@@ -506,12 +505,16 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
   </div>`;
 }
 
+/// A Credit still loading on the Buy tab.
+const SKEL = '<div class="cc skel" aria-hidden="true"><span class="cc-art"></span><span class="cc-cap"></span></div>';
+
 function buyPane(connected: boolean) {
-  // How many and what it comes to, as on every Buy; the Credits; then the button, as on the Deposit tab.
-  return `<div class="buy-row">${sweepRow('buy', 1, MAX_SWEEP, 1)}</div>
-    <div class="trait-grid listings" id="listings">${'<div class="cc skel" aria-hidden="true"><span class="cc-art"></span><span class="cc-cap"></span></div>'.repeat(8)}</div>
+  // As on /credits: how many and what it comes to, then the Credits to pick from; then the button, as on the
+  // Deposit tab.
+  return `<div class="buy-row" id="buy-act">${sweepRow('sale', 0, MAX_SWEEP, 0)}</div>
+    <div class="trait-grid listings" id="listings">${SKEL.repeat(MAX_SWEEP)}</div>
     ${connected || !config.sweeper ? `<button class="btn primary block" id="buy-go" disabled>Buy &amp; deposit</button>` : connectToBuy(true)}
-    <p class="muted small buy-source">One transaction buys the cheapest Credits that fit (OpenSea, FWA, CreditStrategy) and deposits them here in your name.</p>
+    <p class="muted small buy-source">One transaction buys the Credits you pick (OpenSea, FWA, CreditStrategy) and deposits them here in your name.</p>
 `;
 }
 
@@ -662,7 +665,7 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
     const buy = () => {
       if (buying) return;
       buying = true;
-      void bindBuy(b, !!m, run, txNote, keyed);
+      void bindBuy(b, !!m, run, txNote);
     };
     document.querySelectorAll<HTMLButtonElement>('[data-add]').forEach((t) =>
       t.addEventListener('click', () => {
@@ -687,21 +690,16 @@ function drawToGo(s: Ctx['s']) {
   el.innerHTML = `${room} to go · <button type="button" class="link" id="finish">Buy now</button>`;
   el.querySelector('#finish')!.addEventListener('click', () => {
     const tab = document.querySelector<HTMLButtonElement>('[data-add="buy"]');
-    if (tab?.getAttribute('aria-selected') !== 'true') {
-      buyMost = true; // taken up when the Buy tab first loads its listings
-      tab?.click();
-    }
-    // Loaded already (open now, or opened before): its slider goes to the most now.
-    const range = document.getElementById('buy-n') as HTMLInputElement | null;
-    if (range && document.querySelector('#listings .cc:not(.skel)')) {
-      buyMost = false;
+    if (tab?.getAttribute('aria-selected') !== 'true') tab?.click();
+    const range = document.querySelector<HTMLInputElement>('#buy-act #sale-n');
+    if (range && !document.querySelector('#listings .skel')) {
       range.value = range.max;
       range.dispatchEvent(new Event('input', { bubbles: true }));
-    }
+    } else buyMost = true; // still loading: taken up when the listings land
     document.querySelector('[data-pane="buy"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
 }
-/// The next Buy tab to open starts at the most one buy takes (Buy the rest).
+/// Buy now, clicked while the Buy tab's listings load: its slider goes to the most once they're in.
 let buyMost = false;
 
 async function drawPicker(
@@ -763,11 +761,10 @@ async function drawPicker(
   if (outside.length) off.set('Outside this Credit Union’s rules', outside);
   const offCount = [...off.values()].reduce((n, x) => n + x.length, 0);
   const offTile = (id: bigint) => `<button type="button" class="pick off" data-id="${id}" aria-disabled="true" aria-label="Credit #${id}"><img src="${art(id)}" alt="" loading="lazy"></button>`;
-  const fold = offCount
-    ? `<details class="picker-off" id="picker-off-wrap"><summary class="muted small">${offCount} of yours ${offCount === 1 ? 'doesn’t' : 'don’t'} fit</summary>${[...off]
-        .map(([why, ids]) => `<p class="small off-why" data-why>${esc(why)} <span class="muted num">${ids.length}</span></p><div class="picker" data-off>${ids.map(offTile).join('')}</div>`)
-        .join('')}</details>`
-    : '';
+  const fold = (summary: string) =>
+    `<details class="picker-off" id="picker-off-wrap">${summary}${[...off]
+      .map(([why, ids]) => `<p class="small off-why" data-why>${esc(why)} <span class="muted num">${ids.length}</span></p><div class="picker" data-off>${ids.map(offTile).join('')}</div>`)
+      .join('')}</details>`;
 
   const line = document.getElementById('fit-line');
   const mineCount = document.getElementById('n-mine');
@@ -775,14 +772,14 @@ async function drawPicker(
   // Nothing of yours fits: lead with buying.
   if (!fits.length) document.querySelector<HTMLButtonElement>('[data-add="buy"]:not([aria-selected="true"])')?.click();
   if (!fits.length) {
-    // Nothing to deposit: say so, and point at the other ways in.
+    // Nothing to deposit (Buy is the tab beside): one line, which opens on why each of yours doesn't fit.
+    const mint = config.chainId !== 1 ? ' <a href="/mint">Mint test Credits</a>' : '';
     if (line)
-      line.outerHTML = `<div class="empty-mine">
-        <p>${!m.owned.length ? 'You don’t hold any Credits yet.' : passing.length ? `None of your ${m.owned.length} Credits fit: the sheet has no slot left for them.` : `None of your ${m.owned.length} Credits fit this Credit Union’s rules.`}</p>
-        <button type="button" class="btn block" data-go-buy>Buy Credits</button>
-        ${config.chainId !== 1 ? '<a class="small" href="/mint">Mint test Credits</a>' : ''}
-      </div>${fold}`;
-    document.querySelector('[data-go-buy]')?.addEventListener('click', () => document.querySelector<HTMLButtonElement>('[data-add="buy"]')?.click());
+      line.outerHTML = offCount
+        ? fold(`<summary class="small" id="fit-none"><strong class="num">0</strong> of your ${m.owned.length} Credits fit this Credit Union.</summary>`) + (mint && `<p class="small">${mint}</p>`)
+        : `<p class="small" id="fit-none">You don’t hold any Credits yet.${mint}</p>`;
+    const foldEl = document.getElementById('picker-off-wrap');
+    if (foldEl) pickTips(foldEl, [...off.values()].flat());
     el.remove();
     return;
   }
@@ -791,7 +788,7 @@ async function drawPicker(
   el.innerHTML = fits
     .map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="${picks.has(id.toString())}" aria-label="Credit #${id}"><img src="${art(id)}" alt="" loading="lazy"></button>`)
     .join('');
-  if (fold) el.insertAdjacentHTML('afterend', fold);
+  if (offCount) el.insertAdjacentHTML('afterend', fold(`<summary class="muted small">${offCount} of yours ${offCount === 1 ? 'doesn’t' : 'don’t'} fit</summary>`));
   pickTips(el, fits);
   const foldEl = document.getElementById('picker-off-wrap');
   if (foldEl) pickTips(foldEl, [...off.values()].flat());
@@ -913,30 +910,23 @@ const quotedPrices = (q: Quote) =>
     ...(q.strategy ?? []).map((f) => [f.id, BigInt(f.price)] as const),
   ]);
 
-/// The Buy tab: drag for how many and the cheapest listings that fit fill in, with prices. One click gets a signed
-/// price for exactly those and opens the wallet. Where buy-in is off (testnets), it previews edition Credits, disabled.
+/// The Buy tab, as on /credits: the cheapest Credits that fit, as many as one buy takes. Drag for the cheapest that
+/// many, or tap Credits to pick them, up to what's left to fill. One click gets a signed price for exactly those and
+/// opens the wallet. Where buy-in is off (testnets), it previews edition Credits, disabled.
 async function bindBuy(
   b: Ctx,
   connected: boolean,
   run: (btn: HTMLElement | null, label: string, fn: () => Promise<unknown>, ok: string) => Promise<void>,
   txNote: (h: string) => void,
-  keyed: Map<string, number> | null,
 ) {
   const batch = b.s.address;
   const line = document.getElementById('buy-line');
   const grid = document.getElementById('listings');
+  const host = document.getElementById('buy-act');
   const go = document.getElementById('buy-go') as HTMLButtonElement | null;
-  if (!line || !grid) return;
-  const room = 80 - b.s.count;
-  // Credits whose price went up at the last click: their new price shows in red until the next.
-  const rose = new Set<string>();
-  // The Credits tile of every grid: the art opens the Credit's page, the price's mark the listing, × skips it.
-  const tile = (l: { id: string; price: string | null; source?: Source; url?: string }) =>
-    l.price === null || !l.source
-      ? creditCell(Number(l.id))
-      : creditCell(Number(l.id), priceTag({ id: l.id, price: l.price, source: l.source, url: l.url }, rose.has(l.id)), { skip: true });
+  if (!line || !grid || !host) return;
 
-  let listings: { id: string; price: string; source?: Source; url?: string; traits?: number }[] = [];
+  let listings: Listed[] = [];
   // preview: no OpenSea key here, so edition Credits stand in. mainnetOnly: real mainnet listings and prices,
   // but this party is on a testnet and can't take them.
   let preview = false;
@@ -956,75 +946,64 @@ async function bindBuy(
   }
   if (!grid.isConnected) return;
 
-  // Pick how many; the cheapest that fit fill the row. A listing's × skips it and the next cheapest takes its place.
-  const pool: { id: string; price: string | null; source?: Source; url?: string }[] = preview
-    ? (await examples(b.s.filter)).map((id) => ({ id: String(id), price: null }))
-    : listings;
-  const skipped = new Set<string>();
-  // The slider reaches as far as there are open slots and listings (the cheapest that many fill the row).
-  const range = document.getElementById('buy-n') as HTMLInputElement | null;
-  if (range) setRange(range, Math.min(buyMost ? MAX_SWEEP : Number(range.value), room, pool.length || 1), Math.min(MAX_SWEEP, room, pool.length || 1));
-  buyMost = false;
-  const want = () => Math.min(Number(range?.value ?? 1), room, MAX_SWEEP);
-  let feeBps = 200n;
-  void sweepFee().then((b) => {
-    feeBps = b;
-    if (grid.isConnected) draw();
-  });
-  // Testnet showing mainnet listings: the testnet sheet can't judge mainnet Credits, so book them against its
-  // free slots by their real traits (mainnet the worker already asks the batch's canTake).
-  let slotKey: ((id: string) => number) | null = null;
-  if (mainnetOnly && hasLayout(b.s.filter) && keyed && listings.every((l) => l.traits !== undefined)) {
-    // Each preview listing comes with its packed edition traits (worker/index.ts), so no edition file to read.
-    const t = new Map(listings.map((l) => [l.id, l.traits ?? 0]));
-    const trait = b.s.filter.layoutTrait ?? 0;
-    slotKey = (id) => layoutKey(trait, t.get(id) ?? 0);
+  if (preview) {
+    // Nothing priced to pick from: Credits that fit, to show what's here.
+    grid.classList.add('preview');
+    grid.innerHTML = (await examples(b.s.filter)).slice(0, MAX_SWEEP).map((id) => creditCell(Number(id))).join('');
+    const range = host.querySelector<HTMLInputElement>('#sale-n');
+    if (range) setRange(range, 0, 0);
+    line.hidden = true;
+    return;
   }
-  const chosen = () => {
-    const free = pool.filter((l) => !skipped.has(l.id));
-    if (!slotKey) return free.slice(0, want());
-    const r = new Room(books(b.s.filter, keyed!.values()), Math.min(want(), room));
-    return free.filter((l) => r.take(slotKey!(l.id)));
+  const shown = listings.slice(0, MAX_SWEEP);
+  const sale: Sale = { ls: [...shown], preview: mainnetOnly, byId: new Map(shown.map((l) => [l.id, l])), all: shown, mine: new Set() };
+  // Credits whose price went up at the last click: their new price shows in red until the next.
+  const rose = new Set<string>();
+  const tile = (l: Listed) => creditCell(Number(l.id), priceTag(l, rose.has(l.id)));
+  const tiles = () => {
+    grid.innerHTML = sale.ls.map(tile).join('');
   };
-  const draw = () => {
-    const pick = chosen();
-    grid.classList.toggle('preview', preview);
-    grid.innerHTML = pick.map(tile).join('');
-    // The price with the Sweeper's fee in, as the wallet will ask.
-    const totalEl = document.getElementById('buy-total');
-    if (totalEl) totalEl.innerHTML = preview ? '' : sweepTotal(pick.reduce((a, l) => a + (l.price ? BigInt(l.price) : 0n), 0n), feeBps, pick.length);
-    line.textContent = (preview || mainnetOnly
-      ? '' // testnet: the banner already says it's a preview
-      : !pool.length
-        ? 'No listings fit right now.'
-        : pick.length < want()
-          ? `Only ${pick.length} listed that fit.`
-          : '') + ' ';
-    line.hidden = !line.textContent.trim();
-    if (go) {
-      go.disabled = preview || mainnetOnly || !pick.length || !connected;
-      go.textContent = pick.length && !preview ? `Buy & deposit ${pick.length}` : 'Buy & deposit';
-    }
+  tiles();
+  // Testnet: the banner already says it's a preview.
+  line.textContent = shown.length || mainnetOnly ? '' : 'No listings fit right now. ';
+  line.hidden = !line.textContent;
+  let chosen: () => Listed[] = () => [];
+  const label = () => {
+    if (!go) return;
+    const n = chosen().length;
+    go.disabled = mainnetOnly || !n || !connected;
+    go.textContent = n ? `Buy & deposit ${n}` : 'Buy & deposit';
   };
-  range?.addEventListener('input', () => {
-    setRange(range);
-    draw();
+  const ctl = sweepControls(host, sale, grid, { button: false, cap: 80 - b.s.count, onPick: label });
+  chosen = ctl.chosen;
+  label();
+  const range = host.querySelector<HTMLInputElement>('#sale-n');
+  if (buyMost && range) {
+    range.value = range.max;
+    range.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  buyMost = false;
+  // Live: the listings that fit, read again every 20 s (the worker's scan of them is cached 30 s). The cheapest that
+  // many show, and any you picked stay while they're listed.
+  keepLive(grid, async () => {
+    const r = await fetch(`/opensea/listings?batch=${batch}`);
+    const d = r.ok ? ((await r.json()) as { listings?: Listed[]; error?: string }) : null;
+    if (!d?.listings || d.error || !grid.isConnected) return;
+    const picked = new Set(ctl.chosen().map((l) => l.id));
+    relist(grid, sale, d.listings.filter((l, i) => i < MAX_SWEEP || picked.has(l.id)), tile, ctl);
+    line.textContent = sale.ls.length || mainnetOnly ? '' : 'No listings fit right now. ';
+    line.hidden = !line.textContent;
   });
-  grid.addEventListener('click', (e) => {
-    const t = (e.target as HTMLElement).closest('.skip')?.closest<HTMLElement>('.cc');
-    if (!t || preview) return;
-    skipped.add(t.dataset.id!);
-    draw();
-  });
-  draw();
-  if (!go || !connected || preview || mainnetOnly) return;
+  if (!go || !connected || mainnetOnly) return;
 
   // One click: a fresh signed price for exactly these (OpenSea's is good for ~90 s), then the wallet. Listings
   // sold since drop out; the wallet shows the total, the Sweeper's fee included.
   go.addEventListener('click', async () => {
-    const picked = chosen();
+    const picked = ctl.chosen();
     if (!picked.length) return;
     let repriced = false;
+    let newFee = ctl.fee();
+    buying.n++;
     await run(go, 'Buying…', async () => {
       const r = await fetch(`/opensea/quote?batch=${batch}&ids=${picked.map((l) => l.id).join(',')}`);
       const q = (await r.json()) as Quote;
@@ -1037,15 +1016,23 @@ async function bindBuy(
       // Never ask the wallet for more than the page shows. A Credit relisted higher since the page loaded (or a
       // raised fee) stops here: the tiles and total take the new prices, and the next click pays what they show.
       const now = quotedPrices(q);
-      const shown = new Map(picked.map((l) => [l.id, BigInt(l.price ?? 0)]));
-      const sub = [...now.keys()].reduce((a, id) => a + (shown.get(id) ?? 0n), 0n);
-      const up = [...now].filter(([id, p]) => !shown.has(id) || p > shown.get(id)!).map(([id]) => id);
-      if (up.length || value > sub + (sub * feeBps) / 10_000n) {
-        for (const l of pool) if (now.has(l.id)) l.price = String(now.get(l.id));
-        for (const l of picked) if (!now.has(l.id)) skipped.add(l.id); // sold since: the next cheapest takes its place
+      const was = new Map(picked.map((l) => [l.id, BigInt(l.price)]));
+      const sub = [...now.keys()].reduce((a, id) => a + (was.get(id) ?? 0n), 0n);
+      const up = [...now].filter(([id, p]) => !was.has(id) || p > was.get(id)!).map(([id]) => id);
+      if (up.length || value > sub + (sub * ctl.fee()) / 10_000n) {
+        // Relisted higher: the new price, in red. Sold since: off the grid, and out of the picks.
+        for (const l of picked) {
+          const p = now.get(l.id);
+          if (p !== undefined) l.price = String(p);
+          else {
+            sale.byId.delete(l.id);
+            const i = sale.ls.indexOf(l);
+            if (i >= 0) sale.ls.splice(i, 1);
+          }
+        }
         rose.clear();
         up.forEach((id) => rose.add(id));
-        feeBps = fee;
+        newFee = fee;
         repriced = true;
         throw new Error('Prices went up since this page loaded. Check the new total, then buy.');
       }
@@ -1061,7 +1048,12 @@ async function bindBuy(
       if (n < picked.length) toast(`${picked.length - n} sold before you got to them.`, 'info', 8000);
       justJoined(batch, n);
     }, '');
-    if (repriced) draw(); // after run() puts the button back, so it takes the new count
+    buying.n--;
+    // After run() puts the button back, so it takes the new count.
+    if (repriced) {
+      tiles();
+      ctl.setFee(newFee);
+    }
   });
 }
 

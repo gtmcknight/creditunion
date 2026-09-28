@@ -400,28 +400,6 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
   }
 
-  // The cheapest Credits for sale across OpenSea, CreditStrategy and FWA, for /credits and trait pages
-  // (?trait=palette/K). Mainnet's listings on testnets. Cached a minute per trait.
-  if (url.pathname === '/opensea/forsale') {
-    if (!env.OPENSEA_API_KEY && !offOpenSea(env)) return text('OpenSea is not configured', 501);
-    if (!sameSite(req)) return text('forbidden', 403);
-    const raw = url.searchParams.get('trait') ?? '';
-    const tm = raw.match(/^(palette|eights|print|weight)\/([^/]{1,16})$/);
-    const trait = tm ? parseTrait(tm[1], tm[2]) : null;
-    if (raw && !trait) return text('bad trait', 400);
-    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
-    try {
-      const live = hasSweeper(env);
-      const listings = await forSale(env, url, ctx, trait);
-      return Response.json(
-        { listings: listings.map((l) => ({ ...l, url: listingUrl(env, live, l) })), preview: !live },
-        { headers: { 'cache-control': 'no-store' } },
-      );
-    } catch (e) {
-      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
-    }
-  }
-
   // Every Credit for sale, cheapest first, a chunk at a time (?trait=palette/K&c=<cursor>): OpenSea's listings page
   // by page with CreditStrategy's and FWA's merged in by price, then whatever of those is left. Shown as listed;
   // a sweep's quote re-checks each one.
@@ -482,7 +460,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         if (out.length >= LISTED_CHUNK) break;
         if (cur.i - start >= LISTED_CHUNK * 4) continue; // a long run at one price: keep going on the rest
         if (cur.d || pages >= (rules ? 10 : 5)) break; // unfiltered for a range, so read further
-        const pg = await bestPage(env.OPENSEA_API_KEY!, env.OPENSEA_SLUG, credits, cur.n, trait ? openseaTrait(trait) : undefined);
+        const pg = await bestPageCached(env, url, ctx, credits, cur.n, trait ? openseaTrait(trait) : undefined);
         pages++;
         out.push(...pg.items.filter((l) => ok(Number(l.id))));
         const top = pg.items.reduce((m, l) => (BigInt(l.price) > m ? BigInt(l.price) : m), BigInt(cur.w));
@@ -532,8 +510,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   }
 
   // One Credit's cheapest listing (OpenSea, CreditStrategy or FWA), for its page. Without a Sweeper (testnets) it's
-  // the mainnet Credit of the same number, as a preview. Cached a minute per Credit, so a busy page costs OpenSea
-  // one call a minute.
+  // the mainnet Credit of the same number, as a preview. Cached 20 s per Credit (its page reads it again every
+  // 20 s), so a busy page costs OpenSea one call per 20 s.
   const listed = url.pathname.match(/^\/opensea\/credit\/(\d{1,6})$/);
   if (listed) {
     if (!env.OPENSEA_API_KEY && !offOpenSea(env)) return text('OpenSea is not configured', 501);
@@ -584,7 +562,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
               preview: !live,
             }
           : { price: null, preview: !live },
-        { headers: { 'cache-control': 'public, max-age=60' } },
+        { headers: { 'cache-control': 'public, max-age=20' } },
       );
       ctx.waitUntil(cache.put(key, res.clone()));
       return res;
@@ -783,7 +761,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   // Each party page costs RPC reads, so it is rate limited; over the limit, or not one of ours, it gets the generic card.
   const creditId = url.pathname.match(/^\/credit\/(\d{1,6})$/)?.[1];
   if (card && creditId && inSupply(Number(creditId))) card = creditCard(Number(creditId));
-  // The Credits overview: the edition's real count.
+  // /credits: the edition's real count.
   if (card && url.pathname.replace(/\/$/, '') === '/credits') card = (await load(env.ASSETS, url.origin).then((t) => creditsCard(t.length)).catch(() => null)) ?? card;
   // A trait page (/weight/sparse): its name and how many Credits in the edition have it.
   const traitAt = req.method === 'GET' ? url.pathname.match(/^\/(palette|eights|print|weight)\/([^/]+)\/?$/) : null;
@@ -1121,35 +1099,16 @@ async function quoteListings(env: Env, url: URL, listings: Listing[]) {
   return { ...os, total: total.toString(), fwa, strategy };
 }
 
-/// The cheapest Credits for sale anywhere, of one trait or of all, cached a minute per trait (the full listings,
-/// with what a quote needs).
-async function forSale(env: Env, url: URL, ctx: ExecutionContext, trait: ReturnType<typeof parseTrait>): Promise<Listing[]> {
+/// One page of OpenSea's cheapest listings, cached 15 s: every live grid reads its head again every 20 s, so any
+/// number of people watching one costs OpenSea a call per page every 15 s.
+async function bestPageCached(env: Env, url: URL, ctx: ExecutionContext, credits: Address, next: string, trait?: { traitType: string; value: string }) {
   const cache = caches.default;
-  const key = new Request(`${url.origin}/opensea/forsale/v2/${trait ? `${trait.kind}/${trait.slug}` : 'all'}`);
+  const key = new Request(`${url.origin}/opensea/best/v1/${credits.toLowerCase()}/${trait ? `${encodeURIComponent(trait.traitType)}/${encodeURIComponent(trait.value)}` : 'all'}?next=${encodeURIComponent(next)}`);
   const hit = await cache.match(key);
-  if (hit) return hit.json<Listing[]>();
-  const live = hasSweeper(env);
-  const credits = live ? env.CREDITS : MAINNET_CREDITS;
-  const c = live ? client(env) : createPublicClient({ transport: http(env.ENS_RPC || 'https://eth.drpc.org', { timeout: 8_000 }) });
-  const ok = trait ? await predicate(env.ASSETS, url.origin, trait.rules) : () => true;
-  const listings = (
-    await scan({
-      key: env.OPENSEA_API_KEY,
-      slug: env.OPENSEA_SLUG,
-      credits,
-      ...(await extras(env, url, ctx)),
-      max: FOR_SALE,
-      take: async (ids) => ids.map((id) => ok(Number(id))),
-      live: (id, seller, operator) =>
-        Promise.all([
-          c.readContract({ address: credits, abi: creditsAbi, functionName: 'ownerOf', args: [id] }),
-          c.readContract({ address: credits, abi: creditsAbi, functionName: 'isApprovedForAll', args: [seller, operator] }),
-        ]).then(([o, a]) => o.toLowerCase() === seller.toLowerCase() && a),
-      hasCode: (a) => c.getCode({ address: a }).then((code) => !!code && code !== '0x'),
-    })
-  ).slice(0, FOR_SALE);
-  ctx.waitUntil(cache.put(key, Response.json(listings, { headers: { 'cache-control': 'public, max-age=60' } })));
-  return listings;
+  if (hit) return hit.json<Awaited<ReturnType<typeof bestPage>>>();
+  const pg = await bestPage(env.OPENSEA_API_KEY!, env.OPENSEA_SLUG, credits, next, trait);
+  ctx.waitUntil(cache.put(key, Response.json(pg, { headers: { 'cache-control': 'public, max-age=15' } })));
+  return pg;
 }
 
 /// Where a listing can be seen on its own marketplace. OpenSea's is the Credit's item page (mainnet's on testnets).
@@ -1170,8 +1129,6 @@ function openseaTrait(t: NonNullable<ReturnType<typeof parseTrait>>): { traitTyp
 /// today, as a guard.
 const RANGE_DEPTH = 150;
 
-/// Credits in a For sale row.
-const FOR_SALE = 10;
 /// The most Credits one sweep takes.
 const MAX_SWEEP = 24;
 /// Listed Credits per page of /opensea/listed (before a trait filters them).

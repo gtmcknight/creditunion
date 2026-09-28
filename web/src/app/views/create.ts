@@ -10,7 +10,7 @@ import { $$, art, errText, esc, fromUtcInput, openModal, sameUtcDay, sheet, toas
 import { LAYOUT_TRAITS, keyOf, ruleFor, slotMark, slotName, type LayoutTrait } from '../../shared/layout';
 import { bitsPath, ratingPath, setPath, timePath } from '../../shared/trait';
 import { editionArt } from '../ghosts';
-import { listedPager, priceTag, sweepControls, sweepToWallet } from '../forsale';
+import { listedPager, live, priceTag, relist, sweepControls, sweepToWallet, type Listed as Listing } from '../forsale';
 import { creditCell } from './trait';
 import { Room, booksOf, noRoomReason } from '../slots';
 import { bin } from '../bins';
@@ -400,18 +400,32 @@ export async function create(app: HTMLElement) {
       buyer = null;
       return;
     }
-    const key = JSON.stringify(listedRules());
+    const want = listedRules();
+    const key = JSON.stringify(want);
     if (key === buyFor) return;
     buyFor = key;
-    const pager = listedPager({ rules: listedRules() });
+    const pager = listedPager({ rules: want });
     await pager.fill(8, 3);
     if (buyFor !== key || !el.isConnected) return;
     const ls = pager.sale.ls.slice(0, 8);
     el.hidden = !ls.length;
     if (!ls.length) return;
+    const tile = (l: Listing) => creditCell(Number(l.id), priceTag(l));
     el.innerHTML = `<div class="jb"><div class="jb-sweep" id="cb-act"></div>
-      <div class="trait-grid" id="cb-grid">${ls.map((l) => creditCell(Number(l.id), priceTag(l))).join('')}</div></div>`;
-    buyer = sweepControls(el.querySelector<HTMLElement>('#cb-act')!, { ...pager.sale, ls }, el.querySelector<HTMLElement>('#cb-grid')!, { button: false, onPick: () => refresh() });
+      <div class="trait-grid" id="cb-grid">${ls.map(tile).join('')}</div></div>`;
+    const grid = el.querySelector<HTMLElement>('#cb-grid')!;
+    const sale = { ...pager.sale, ls, all: [...ls] };
+    const mine = sweepControls(el.querySelector<HTMLElement>('#cb-act')!, sale, grid, { button: false, onPick: () => refresh() });
+    buyer = mine;
+    // Live: the cheapest eight again every 20 s, and any you picked stay while they're listed.
+    live(grid, async () => {
+      if (buyFor !== key) return;
+      const fresh = listedPager({ rules: want });
+      await fresh.fill(8, 3);
+      if (buyFor !== key || !grid.isConnected || (!fresh.items.length && !fresh.done)) return;
+      const picked = new Set(mine.chosen().map((l) => l.id));
+      relist(grid, sale, fresh.sale.ls.filter((l, i) => i < 8 || picked.has(l.id)), tile, mine);
+    });
   }
   /// Bought here: into the picker, picked.
   async function gotCredits(ids: string[]) {

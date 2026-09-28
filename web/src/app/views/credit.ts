@@ -14,7 +14,7 @@ import { card } from './lists';
 import { creditsHead } from './trait';
 import { processOf } from '../../shared/credits';
 import { eightsName } from '../../shared/trait';
-import { SOURCES, connectToBuy, justBought, rememberBought, sweepFee, sweepToWallet, type Source } from '../forsale';
+import { SOURCES, buying, connectToBuy, justBought, live, rememberBought, sweepFee, sweepToWallet, type Source } from '../forsale';
 
 /// Credits ever minted: the same numbers on every network.
 const SUPPLY = 122_154;
@@ -202,22 +202,44 @@ async function drawFits(id: bigint, r: Rated | undefined, list: Listed[], mine: 
 
 const buyAbi = parseAbi(['function sellTargetNFT(uint256 tokenId) payable', 'function buy(uint256 listingId, address recipient) payable']);
 
+type Offer = { price?: string | null; source?: Source; contract?: Address | null; listingId?: string | null; hash?: string | null; protocol?: string | null; preview?: boolean; url?: string };
+
 /// This Credit's cheapest listing: OpenSea, CreditStrategy or FWA, all bought right here. CreditStrategy and FWA sell
 /// from their own contracts; an OpenSea order goes through the Sweeper, like a sweep of one (its 2% fee). Where the site can't buy (testnets), the mainnet
-/// price shows as a preview with the button off. Not listed: nothing.
+/// price shows as a preview with the button off. Not listed: nothing. Live: read again every 20 s, so a sale, a
+/// new listing or a new price shows here too.
 async function drawBuy(n: number) {
   const el = document.getElementById('credit-buy');
   if (!el) return;
-  type Offer = { price?: string | null; source?: Source; contract?: Address | null; listingId?: string | null; hash?: string | null; protocol?: string | null; preview?: boolean; url?: string };
-  let d: Offer;
-  try {
-    const res = await fetch(`/opensea/credit/${n}`);
-    if (!res.ok) return;
-    d = await res.json();
-  } catch {
-    return;
-  }
-  if (!d.price || !d.source || !SOURCES[d.source] || !el.isConnected || justBought(n)) return;
+  const read = async (): Promise<Offer | null> => {
+    try {
+      const res = await fetch(`/opensea/credit/${n}`, { cache: 'no-store' });
+      return res.ok ? ((await res.json()) as Offer) : null;
+    } catch {
+      return null;
+    }
+  };
+  // What the box says (price, where, and how it's bought), so a live read redraws it only when that changes.
+  const say = (d: Offer | null) => (d?.price && d.source ? `${d.price}:${d.source}:${d.listingId ?? ''}:${d.hash ?? ''}` : '');
+  let said = '';
+  const draw = async (d: Offer | null) => {
+    said = say(d);
+    if (!d?.price || !d.source || !SOURCES[d.source] || justBought(n)) {
+      el.hidden = true;
+      el.innerHTML = '';
+      return;
+    }
+    await drawOffer(el, n, { ...d, price: d.price, source: d.source });
+  };
+  await draw(await read());
+  live(el, async () => {
+    const d = await read();
+    if (d && el.isConnected && say(d) !== said) await draw(d);
+  });
+}
+
+/// The listing's box: where it's listed, its price, and Buy (in-app where the site can buy it, else on its market).
+async function drawOffer(el: HTMLElement, n: number, d: Offer & { price: string; source: Source }) {
   const src = SOURCES[d.source];
   const value = BigInt(d.price);
   const viaSweeper = !d.preview && d.source === 'opensea' && !!d.hash && !!d.protocol && !!config.sweeper;
@@ -259,6 +281,7 @@ async function drawBuy(n: number) {
     const label = go.textContent ?? '';
     go.disabled = true;
     go.textContent = 'Buying…';
+    buying.n++;
     try {
       await send(
         d.source === 'strategy'
@@ -277,6 +300,8 @@ async function drawBuy(n: number) {
       go.classList.remove('busy');
       go.disabled = false;
       go.textContent = label;
+    } finally {
+      buying.n--;
     }
   });
 }

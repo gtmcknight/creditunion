@@ -15,7 +15,7 @@ const CARDS: Record<string, Card> = {
   mint: { title: 'Mint test Credits · Credit Union', description: 'Real Credits art on testnet, to try a Credit Union end to end.', image: '/og/mint.png' },
   me: { title: 'Your Credit Unions', description: 'Your Credits in Credit Unions, and what they’re worth.', image: '/og/home.png' },
   member: { title: 'Member · Credit Union', description: 'Their Credit Unions and Credits.', image: '/og/home.png' },
-  credits: { title: 'Credits · Credit Union', description: 'Every Credit by its traits: palette, eights, print, weight, time, rating and Bits.', image: '/og/home.png' },
+  credits: { title: 'Credits · Credit Union', description: 'Every Credit, the ones for sale first, cheapest first.', image: '/og/home.png' },
   credit: { title: 'Credit · Credit Union', description: 'A Credit: its rating, its owner, and the Credit Unions it fits.', image: '/og/home.png' },
   time: { title: 'Time · Credit Union', description: 'Pick a stretch of the mint and see every Credit paid in it.', image: '/og/home.png' },
   rating: { title: 'Rating · Credit Union', description: 'Pick a range of ratings and see every Credit in it.', image: '/og/home.png' },
@@ -124,9 +124,9 @@ export function traitCard(name: string, count: number | null): Card {
   return { title: `${name} · Credit Union`, description, image: '/og/home.png' };
 }
 
-/// The Credits overview's card: how many Credits the edition holds.
+/// /credits' card: how many Credits the edition holds.
 export function creditsCard(count: number): Card {
-  return { ...CARDS.credits, description: `${count.toLocaleString('en-US')} Credits by trait: Palette, Eights, Print, Weight, Time, Rating and Bits.` };
+  return { ...CARDS.credits, description: `All ${count.toLocaleString('en-US')} Credits, the ones for sale first, cheapest first.` };
 }
 
 /// A /time window's card: how many Credits were paid in it.

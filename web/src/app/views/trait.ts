@@ -1,5 +1,5 @@
 import { hasLayout, layoutSlot, listBatches, type Listed } from '../data';
-import { YOURS, listedPager, priceTag, sweepControls } from '../forsale';
+import { YOURS, listedPager, live, priceTag, relist, sweepControls } from '../forsale';
 import { hydrate } from '../ens';
 import { editionArt, fillGhosts } from '../ghosts';
 import { dice, printGlyph, swatch, weightGlyph } from '../glyphs';
@@ -9,6 +9,16 @@ import facts from 'virtual:credits-facts';
 import { card } from './lists';
 
 const SUPPLY = 122_154;
+
+/// The edition's counts, made at build from the edition files (scripts/bins.mjs; the same table /edition/match
+/// reads), so pages have them with no data file to read.
+export type Facts = {
+  n: number; // Credits in the edition
+  palette: [string, number][]; // mask letters, count
+  eights: number[]; // Credits with 0..5 eights
+  print: number[];
+  weight: number[];
+};
 /// Listed Credits to have in hand before drawing a page of them.
 const FIRST = 36;
 const RULE_KEY = { palette: 'palettes', eights: 'eights', print: 'prints', weight: 'weights' } as const;
@@ -44,20 +54,20 @@ export function takes({ s }: Listed, t: TraitValue) {
 
 /// A trait value's page (/palette/C): how many Credits have it, the open Credit Unions that take it, and every
 /// Credit with it, cheapest listed first. The trait's own page (/palette) is the same with no value picked: every
-/// Credit, every value's glyph a way in.
+/// Credit, every value's glyph a way in. /credits is every Credit too, with no trait to pick by.
 export async function traitPage(app: HTMLElement, kind: string, raw: string) {
-  if (!(TRAIT_KINDS as readonly string[]).includes(kind)) {
+  const all = kind === 'credits';
+  if (!all && !(TRAIT_KINDS as readonly string[]).includes(kind)) {
     app.innerHTML = `<section class="prose"><h1>Not found</h1></section>`;
     return;
   }
   const k = kind as TraitKind;
-  const t = raw ? parseTrait(kind, raw) : null;
+  const t = raw && !all ? parseTrait(kind, raw) : null;
   if (raw && !t) {
     app.innerHTML = `<section class="prose"><h1>Not found</h1><p class="muted">No such ${esc(kind)}.</p></section>`;
     return;
   }
   if (t && location.pathname !== traitPath(t)) history.replaceState(null, '', traitPath(t) + location.search);
-  const label = valuesOf(k)[0].label;
   const saleKey = t ? `${t.kind}/${t.slug}` : undefined;
 
   const start = t ? `/create?${t.kind}=${encodeURIComponent(t.slug)}` : '/create';
@@ -66,10 +76,14 @@ export async function traitPage(app: HTMLElement, kind: string, raw: string) {
   const count = !t ? facts.n : t.kind === 'palette' ? (facts.palette.find(([p]) => p === t.name)?.[1] ?? 0) : facts[t.kind][t.v - 1] ?? 0;
   app.innerHTML = `
   <section class="trait-page jb">
-    ${creditsHead(k, t?.name)}
-    <nav class="jb-values ${k}${t ? '' : ' all'}" aria-label="${esc(label)}">${valuesOf(k)
-      .map((v) => `<a href="${traitPath(v)}" title="${esc(v.name)}"${v.slug === t?.slug ? ' aria-current="page"' : ''}><span class="trait-glyph ${v.kind}">${traitGlyph(v)}</span></a>`)
-      .join('')}</nav>
+    ${creditsHead(kind, t?.name)}
+    ${
+      all
+        ? ''
+        : `<nav class="jb-values ${k}${t ? '' : ' all'}" aria-label="${esc(valuesOf(k)[0].label)}">${valuesOf(k)
+            .map((v) => `<a href="${traitPath(v)}" title="${esc(v.name)}"${v.slug === t?.slug ? ' aria-current="page"' : ''}><span class="trait-glyph ${v.kind}">${traitGlyph(v)}</span></a>`)
+            .join('')}</nav>`
+    }
     <p class="jb-line num"><b>${count.toLocaleString()} ${count === 1 ? 'Credit' : 'Credits'}</b>${t ? `<span class="muted">${pct(count)} of ${SUPPLY.toLocaleString()}</span>` : ''}
       <a class="jb-link" href="${start}">Start a Credit Union${t ? ' for them' : ''}</a>
       <a class="jb-link" id="jb-unions" href="/unions${t ? `?${t.kind}=${encodeURIComponent(t.slug)}` : ''}" hidden></a></p>
@@ -124,8 +138,9 @@ export async function unionsLink(app: HTMLElement, test: (b: Listed) => boolean,
 /// The Buy row and grid every Credits page shares: the Buy heading and Sweep over one grid, every listed Credit
 /// first (cheapest first, paged in from /opensea/listed a request or two at a time), then the rest of these
 /// Credits from `rest(page)`, leaving out the listed ones. Each step draws what it has at once and the next loads
-/// as the grid's end comes into view, so nothing waits on a slow listing search. `start()` again (after `where`
-/// changes) redraws it. Needs .jb-buy, #sale-act, #trait-grid and #trait-more inside `app`.
+/// as the grid's end comes into view, so nothing waits on a slow listing search. The listed ones stay live, as on a
+/// marketplace's own page. `start()` again (after `where` changes) redraws it. Needs .jb-buy, #sale-act, #trait-grid
+/// and #trait-more inside `app`.
 export type Where = { trait?: string; rules?: Record<string, number> };
 export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => Promise<{ ids: number[]; total: number }>) {
   const grid = app.querySelector<HTMLElement>('#trait-grid')!;
@@ -133,8 +148,18 @@ export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => 
   const heading = app.querySelector<HTMLElement>('.jb-buy');
   const host = app.querySelector<HTMLElement>('#sale-act')!;
   let listed = listedPager(where);
-  let sweep: { mark: () => void } | null = null;
+  let sweep: ReturnType<typeof sweepControls> | null = null;
   let page = 0, shown = 0, gen = 0, placed = 0;
+  // Listings being read for the grid: the live read waits till they're in.
+  let loading = 0;
+  const reading = async (p: Promise<void>) => {
+    loading++;
+    try {
+      await p;
+    } finally {
+      loading--;
+    }
+  };
   const cell = (id: number) =>
     creditCell(id, listed.sale.mine.has(String(id)) ? YOURS : listed.sale.byId.has(String(id)) ? priceTag(listed.sale.byId.get(String(id))!) : '');
   // A range (rules) can't be searched quickly (OpenSea can't filter it), so its Credits draw at once and the listed
@@ -163,6 +188,7 @@ export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => 
   const load = async () => {
     const my = gen;
     more.disabled = true;
+    loading++;
     try {
       // While listings last: the next listed Credits.
       if (!listed.done && !behind()) {
@@ -186,6 +212,7 @@ export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => 
     } catch {
       if (!page && grid.isConnected) grid.innerHTML = '<p class="error">Couldn’t load Credits.</p>';
     } finally {
+      loading--;
       more.disabled = false;
       // Still at the end of the grid (a short step, or a search that found little): keep going.
       if (my === gen && grid.isConnected && !more.hidden && inView()) setTimeout(() => void load());
@@ -193,6 +220,21 @@ export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => 
   };
   more.addEventListener('click', () => void load());
   new IntersectionObserver((es) => es.some((e) => e.isIntersecting) && !more.hidden && !more.disabled && void load(), { rootMargin: '600px' }).observe(more);
+  // Live: every 20 s the cheapest listed Credits (one read's worth) are read again and what changed moves into place.
+  // Dearer ones already shown stay as they were read: at or past the read's dearest, where it may have stopped.
+  live(grid, async () => {
+    const my = gen;
+    if (loading) return;
+    const fresh = listedPager(where);
+    await fresh.fill(1, 1);
+    if (my !== gen || loading || !grid.isConnected || (!fresh.items.length && !fresh.done)) return; // the read failed
+    const top = fresh.done ? null : fresh.items.reduce((m, l) => (BigInt(l.price) > m ? BigInt(l.price) : m), 0n);
+    const past = top === null ? [] : listed.sale.ls.filter((l) => BigInt(l.price) >= top && !fresh.sale.byId.has(l.id));
+    relist(grid, listed.sale, [...fresh.items, ...past], (l) => creditCell(Number(l.id), priceTag(l)), sweep);
+    placed = listed.items.length;
+    if (listed.items.length && !sweep) sweep = sweepControls(host, listed.sale, grid);
+    if (heading) heading.hidden = !listed.items.length;
+  });
   return {
     async start(next?: Where) {
       const my = ++gen;
@@ -206,13 +248,13 @@ export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => 
       if (behind()) {
         await load();
         while (!listed.done && my === gen && grid.isConnected) {
-          await listed.fill(listed.items.length + 1, 1);
+          await reading(listed.fill(listed.items.length + 1, 1));
           if (my !== gen || !grid.isConnected) return;
           place();
         }
         return;
       }
-      await listed.fill(FIRST, 1); // a first look (one request)
+      await reading(listed.fill(FIRST, 1)); // a first look (one request)
       if (my !== gen || !grid.isConnected) return; // drawn again meanwhile: that drawing owns it now
       place();
       await load();
@@ -223,10 +265,9 @@ export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => 
 /// Credits as a grid, each its art over its number (and price when it's listed), linking to its page.
 export const creditTiles = (ids: number[]) => ids.map((id) => creditCell(id)).join('');
 /// One Credit tile for every grid of Credits: its art (to its page), then its number and, when listed, its price.
-/// `skip`: an × on the art that drops it from a buy (a union's Buy tab), in place of tap-to-pick. `title`: the art's
-/// tooltip (where it is, on a member's page).
-export const creditCell = (id: number, price = '', { skip = false, title = '' } = {}) =>
-  `<div class="cc${price ? ' listed' : ''}" data-id="${id}"><a class="cc-art" href="/credit/${id}"${title ? ` title="${esc(title)}"` : price && !skip ? ' title="Tap to pick for a sweep"' : ''}><img src="${editionArt(id)}" alt="Credit #${id}" loading="lazy" decoding="async"></a>${skip ? `<button type="button" class="skip" aria-label="Skip Credit #${id}" title="Skip">×</button>` : ''}<span class="cc-cap"><a class="num" href="/credit/${id}">#${id.toLocaleString('en-US')}</a>${price}</span></div>`;
+/// `title`: the art's tooltip (where it is, on a member's page).
+export const creditCell = (id: number, price = '', { title = '' } = {}) =>
+  `<div class="cc${price ? ' listed' : ''}" data-id="${id}"><a class="cc-art" href="/credit/${id}"${title ? ` title="${esc(title)}"` : price ? ' title="Tap to pick for a sweep"' : ''}><img src="${editionArt(id)}" alt="Credit #${id}" loading="lazy" decoding="async"></a><span class="cc-cap"><a class="num" href="/credit/${id}">#${id.toLocaleString('en-US')}</a>${price}</span></div>`;
 
 
 /// The two lists under a time window or range, as tabs: the open Credit Unions that take these Credits, and the
@@ -289,13 +330,13 @@ function valuesOf(kind: TraitKind): TraitValue[] {
   return raw.map((v) => parseTrait(kind, v)!).filter(Boolean);
 }
 
-/// The Credits explorer's header on every page of it: Overview, the trait indexes, then Time, Rating, Bits.
 /// The Credits explorer's header on every page of it: where you are as a breadcrumb (Credits / Palette / C), and
-/// its sections beside it as words, the current one underlined. `value`: a trait value's name, the crumb's end.
+/// its sections beside it as words (the trait indexes, then Time, Rating, Bits), the current one underlined.
+/// `value`: a trait value's name, the crumb's end. "Credits" is every Credit (/credits).
 export const creditsHead = (current: string, value?: string) => {
-  const sections: [string, string][] = [['credits', 'Overview'], ...TRAIT_KINDS.map((k): [string, string] => [k, valuesOf(k)[0].label]), ['time', 'Time'], ['rating', 'Rating'], ['bits', 'Bits']];
+  const sections: [string, string][] = [...TRAIT_KINDS.map((k): [string, string] => [k, valuesOf(k)[0].label]), ['time', 'Time'], ['rating', 'Rating'], ['bits', 'Bits']];
   const label = sections.find(([k]) => k === current)?.[1] ?? '';
-  // A single Credit (current 'credit') sits right under Credits, with no tab lit.
+  // /credits and a single Credit (current 'credit') sit right under Credits, with no tab lit.
   const crumb =
     current === 'credits'
       ? '<b>Credits</b>'

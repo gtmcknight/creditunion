@@ -4,7 +4,7 @@
 //   - wall.bin cut into blocks of WALL_BLOCK Credits (wall/<k>.bin), for views that draw only a stretch of the mint;
 //   - a brotli and a gzip copy of each (<file>.br, <file>.gz) next to it in the build, which the Worker hands out
 //     as they are: Cloudflare doesn't compress application/octet-stream, and wall.bin alone is 3.9 MB;
-//   - the /credits tiles' numbers, counted once here (virtual:credits-facts) so that page reads no data file for them.
+//   - the edition's counts by trait, made once here (virtual:credits-facts) so pages read no data file for them.
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { promisify } from 'node:util';
@@ -53,11 +53,11 @@ export function bins() {
   };
 }
 
-/// Everything the /credits tiles show (views/credits.ts Facts), from the same files /edition/match reads.
+/// How many Credits the edition holds, and how many have each trait value (views/trait.ts Facts), from the same
+/// files /edition/match reads.
 function facts(read) {
-  const own = (f) => { const b = read(f); return b.buffer.slice(b.byteOffset, b.byteOffset + b.length); };
-  const u32 = (f) => new Uint32Array(own(f)), u16 = (f) => new Uint16Array(own(f));
-  const traits = u32('edition-traits.bin'), times = u32('times.bin'), bits = u16('bits.bin'), sc = u16('scores.bin');
+  const b = read('edition-traits.bin');
+  const traits = new Uint32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.length));
   const n = read('wall.bin').length / 32;
   const pal = new Array(16).fill(0), eights = new Array(6).fill(0), print = new Array(6).fill(0), weight = new Array(4).fill(0);
   for (const v of traits) {
@@ -70,44 +70,5 @@ function facts(read) {
   const palette = [1, 2, 3, 4]
     .flatMap((k) => Array.from({ length: 15 }, (_, i) => i + 1).filter((m) => [0, 1, 2, 3].filter((b) => m & (1 << b)).length === k))
     .map((m) => [[...'CMYK'].filter((_, b) => m & (1 << b)).join(''), pal[m]]);
-  // wall.ts mintSpan: skip Jack's two early Credits, weeks before the mint.
-  const first = Math.min(2, n - 1), start = times[first], end = times[n - 1];
-  const perHour = new Array(Math.ceil((end - start + 1) / 3600)).fill(0);
-  const perMin = new Map();
-  for (let i = first; i < n; i++) {
-    perHour[Math.floor((times[i] - start) / 3600)]++;
-    const m = Math.floor(times[i] / 60);
-    perMin.set(m, (perMin.get(m) ?? 0) + 1);
-  }
-  const rating = new Array(72).fill(0);
-  for (const t of sc) rating[Math.min(71, Math.max(0, Math.floor((t - 800) / 100)))]++;
-  const sorted = Uint16Array.from(sc).sort();
-  let lo = 65535, hi = 0;
-  for (const b of bits) (lo = Math.min(lo, b)), (hi = Math.max(hi, b));
-  const bitCounts = new Array(hi - lo + 1).fill(0);
-  for (const b of bits) bitCounts[b - lo]++;
-  return {
-    n,
-    palette,
-    eights,
-    print,
-    weight,
-    perHour,
-    hours: (end - start) / 3600,
-    busiest: Math.max(...perMin.values()),
-    rating,
-    top1: sorted[Math.max(0, sorted.length - Math.round(sorted.length / 100))],
-    // The rating at each 0.5% of rank, lowest to highest: the curve the Rating tile draws.
-    ratingCurve: Array.from({ length: 201 }, (_, k) => sorted[Math.min(sorted.length - 1, Math.round((k / 200) * (sorted.length - 1)))]),
-    // Where each ink count's Credits sit in Bits (their median), for the Bits tile's labels.
-    bitsByInks: [1, 2, 3, 4].map((k) => {
-      const v = [];
-      for (let i = 0; i < traits.length; i++) if (traits[i] && [0, 1, 2, 3].filter((b) => traits[i] & (1 << b)).length === k) v.push(bits[i]);
-      v.sort((x, y) => x - y);
-      return v[v.length >> 1] ?? 0;
-    }),
-    bits: bitCounts,
-    bitsLo: lo,
-    bitsHi: hi,
-  };
+  return { n, palette, eights, print, weight };
 }

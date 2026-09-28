@@ -217,11 +217,11 @@ async function withdrawAll(b) {
 
 /// The Add Credits box once the picker has settled: fit line, offered ids, and the fold's groups.
 async function readPicker(page) {
-  await page.waitForFunction(() => document.querySelector('#fit-line strong') || document.querySelector('.empty-mine'), null, { timeout: 90_000 });
+  await page.waitForFunction(() => document.querySelector('#fit-line strong') || document.querySelector('#fit-none'), null, { timeout: 90_000 });
   await page.click('[data-add="mine"]').catch(() => {});
   return page.evaluate(() => {
     const fit = Number(document.querySelector('#fit-line strong')?.textContent ?? 0);
-    const line = (document.querySelector('#fit-line') ?? document.querySelector('.empty-mine p'))?.textContent?.trim() ?? '';
+    const line = (document.querySelector('#fit-line') ?? document.querySelector('#fit-none'))?.textContent?.trim() ?? '';
     const offered = [...document.querySelectorAll('#picker .pick')].map((p) => p.dataset.id);
     const groups = [];
     for (const why of document.querySelectorAll('#picker-off-wrap [data-why]')) {

@@ -13,7 +13,6 @@ import { profile } from './views/profile';
 import { credit } from './views/credit';
 import { traitPage } from './views/trait';
 import { timePage } from './views/time';
-import { creditsPage } from './views/credits';
 import { bitsPage, ratingPage } from './views/scale';
 import { esc, errText, openModal, toast, utc } from './ui';
 import { factoryAbi } from './abi';
@@ -74,8 +73,7 @@ async function route() {
     else if (page === 'time') await timePage(app);
     else if (page === 'rating') await ratingPage(app);
     else if (page === 'bits') await bitsPage(app);
-    else if (page === 'credits') await creditsPage(app); // the explorer's overview: a tile per trait
-    else if (page === 'palette' || page === 'eights' || page === 'print' || page === 'weight') await traitPage(app, page, arg ?? '');
+    else if (page === 'credits' || page === 'palette' || page === 'eights' || page === 'print' || page === 'weight') await traitPage(app, page, arg ?? '');
     else if (page === 'party' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await party(app, arg as Address, route);
     else if (page === 'parties' || page === 'auctions') await lists(app, page);
     else home(app);

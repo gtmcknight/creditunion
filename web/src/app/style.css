@@ -2485,8 +2485,9 @@ a.rule-chip:hover {
 [data-pane][hidden] {
   display: none;
 }
+/* Two rows of the Buy tab's Credits, and the top of a third so it reads as scrolling. */
 .listings {
-  max-height: 380px;
+  max-height: 270px;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 3px;
@@ -2510,35 +2511,8 @@ a.rule-chip:hover {
   cursor: default;
   opacity: 0.5;
 }
-/* A tile's × (top right, on hover; always there on touch) skips it. */
 .cc {
   position: relative;
-}
-.cc .skip {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 0;
-  background: #fff;
-  color: #0a0a0a;
-  font: inherit;
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 120ms var(--ease);
-}
-.cc:hover .skip,
-.cc .skip:focus-visible {
-  opacity: 1;
-}
-@media (hover: none) {
-  .cc .skip {
-    opacity: 1;
-  }
 }
 /* Relisted higher since the page loaded: the Buy click stopped on it. */
 .cc-price.up,
@@ -3551,20 +3525,6 @@ a.rule-chip:hover {
 }
 .og-sample figcaption {
   font-size: 13px;
-  color: var(--muted);
-}
-
-/* Add Credits: nothing of yours to deposit. */
-.empty-mine {
-  display: grid;
-  justify-items: center;
-  gap: 12px;
-  padding: 28px 0 8px;
-  text-align: center;
-}
-.empty-mine p {
-  margin: 0;
-  font-size: 14px;
   color: var(--muted);
 }
 
@@ -6269,68 +6229,6 @@ dialog.eligible::backdrop {
   text-underline-offset: 3px;
 }
 
-/* /credits: the overview. A header, the mint drifting past as one strip, then a tile per trait. */
-.cr-strip {
-  position: relative;
-  display: block;
-  height: 190px;
-  margin: 16px 0 var(--tile-gap);
-  padding: 24px 0 22px;
-  color: var(--fg);
-  text-decoration: none;
-}
-.cr-strip canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
-.cr-mint { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 16px; fill: var(--faint); }
-.cr-strip:hover .cr-mint { fill: var(--muted); }
-.cr-head-line { position: absolute; bottom: 0; width: 2px; height: 16px; margin-left: -1px; background: var(--fg); }
-.cr-now { position: absolute; top: 0; left: 0; color: var(--muted); pointer-events: none; }
-.cr-tiles {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-auto-flow: row dense;
-  gap: var(--tile-gap);
-}
-.cr-tile {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  gap: 12px;
-  min-width: 0;
-  padding: 18px 20px 16px;
-  background: var(--surface);
-  color: var(--fg);
-  text-decoration: none;
-}
-.cr-tile:hover { background: var(--empty); }
-.cr-tile.wide { grid-column: span 2; }
-.cr-tile h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
-.cr-fact { margin: 0; font-size: 13px; }
-.cr-pic { height: 108px; display: flex; align-items: flex-end; }
-.cr-hist { display: block; width: 100%; height: 72px; fill: var(--fg); shape-rendering: crispEdges; }
-.cr-hist .cold { fill: var(--faint); }
-.cr-cols { display: flex; align-items: flex-end; gap: 6px; width: 100%; height: 100%; }
-.cr-col { flex: 1 1 0; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; }
-.cr-col > .num { font-size: 11px; color: var(--muted); white-space: nowrap; }
-.cr-bar { display: block; width: 100%; max-width: 40px; height: max(1px, calc(var(--f, 0) * 52px)); background: var(--fg); flex: none; }
-.cr-glyph { display: grid; place-items: center; width: 28px; height: 28px; flex: none; background: #fff; box-shadow: 0 0 0 1px var(--line-strong); }
-.cr-glyph svg { width: 22px; height: 22px; }
-.cr-glyph.die svg { outline: 1.2px solid #111; outline-offset: -2px; }
-.cr-cols.palette { gap: 8px; }
-.cr-cols.palette .cr-bar { max-width: none; height: calc(var(--f, 0) * 84px); overflow: hidden; background: none; }
-.cr-cols.palette .cr-bar .ink { display: block; width: 100%; height: 100%; box-shadow: inset 0 0 0 1px var(--line-strong); }
-.cr-letters { font-size: 10px; color: var(--muted); font-family: var(--mono, ui-monospace, monospace); }
-@media (max-width: 900px) {
-  .cr-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .cr-tile.time { grid-column: auto; }
-}
-@media (max-width: 560px) {
-  .cr-tiles { grid-template-columns: 1fr; }
-  .cr-tile.wide { grid-column: auto; }
-  .cr-strip { height: 160px; }
-  .cr-letters { display: none; }
-  .cr-pic { height: 96px; }
-  .cr-cols { gap: 4px; }
-  .cr-cols.palette { gap: 4px; }
-}
 /* Member page: one line under the tabs saying what the tab lists. */
 #tab-body > .tab-note { margin: 0 0 20px; font-size: 14px; }
 /* The mark alone is the logo; "Credit Unions" leads the nav. */
@@ -6542,18 +6440,9 @@ dialog.eligible::backdrop {
 .jb-tabs button .num { display: inline; font-weight: 400; color: var(--muted); }
 .jb-tabs button[aria-selected='true'] { color: var(--fg); text-decoration: underline; text-underline-offset: 6px; }
 
-/* /credits: the Buy block sits in the page like a trait page's, not sticky, with room before the tiles. */
-.jb-controls.static { position: static; margin: 0 0 16px; padding: 0; background: none; box-shadow: none; }
-.cr-buy .jb-line { margin: 12px 0 0; }
-
 /* The centre nav is quiet: regular weight, the current page by ink alone. */
 .main-nav a { font-weight: 400; letter-spacing: -0.01em; }
 
-/* /credits: every block a grey tile like the trait tiles below: Buy first, then the mint, then the traits. */
-.cr-box { margin: 16px 0 var(--tile-gap); padding: 18px 20px 20px; background: var(--surface); border-radius: var(--r); }
-.cr-box + .cr-box { margin-top: 0; }
-.cr-strip-box .cr-strip { margin: 0; }
-.cr-buy .trait-grid { margin-bottom: 0; }
 /* One line box for every crumb and section link, so the header sits at the same height on every page. */
 .jb-head { align-items: center; min-height: 32px; }
 .jb-crumb { align-items: center; line-height: 32px; }
@@ -6561,62 +6450,10 @@ dialog.eligible::backdrop {
 .jb-kinds a { line-height: 20px; }
 .jb-crumb a { min-height: 0; height: 32px; }
 
-/* /credits Time tile: a title, the moment shown, play/pause; the mint along the bottom scrubs. */
-.cr-strip-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
-.cr-strip-head h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
-.cr-strip-head h2 a { color: inherit; text-decoration: none; }
-.cr-strip-head h2 a:hover { text-decoration: underline; text-underline-offset: 4px; }
-.cr-play { align-self: center; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; }
-.cr-play:hover { color: var(--fg); }
-.cr-play svg { width: 12px; height: 12px; fill: currentColor; }
-.cr-play[aria-pressed='true'] .play, .cr-play[aria-pressed='false'] .pause { display: none; }
-.cr-strip-box .cr-strip { height: 260px; padding: 0; }
-.cr-strip-box .cr-mint { z-index: 1; height: 28px; cursor: ew-resize; touch-action: none; } /* over the stacks' feet */
-.cr-strip-box .cr-head-line { z-index: 2; height: 28px; }
-.cr-strip-head .cr-now { position: static; }
-.cr-strip-head .cr-now { margin-left: auto; } /* the moment shown sits right, beside play/pause */
-/* The Time tile, final: the whole mint as a faint silhouette behind (80% of the tile), the stacks standing on a
-   16px band along the bottom, and that band is the scrubber, a thin track with a small marker for where you are. */
-.cr-strip-box .cr-strip canvas { position: relative; z-index: 1; height: calc(100% - 16px); pointer-events: none; }
-.cr-strip-box .cr-mint { z-index: 0; bottom: 16px; height: calc(90% - 16px); fill: var(--fg); fill-opacity: 0.12; pointer-events: none; cursor: default; }
-.cr-strip-box .cr-strip:hover .cr-mint { fill: var(--fg); }
-.cr-scrub { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; height: 16px; cursor: ew-resize; touch-action: none; }
-.cr-scrub::before { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px; background: var(--line-strong); }
-.cr-strip-box .cr-scrub .cr-head-line { position: absolute; top: 2px; bottom: auto; width: 3px; height: 12px; margin-left: -1.5px; border-radius: 2px; background: var(--fg); }
-/* The strip fills the whole tile, the title row laid over its top, so the silhouette can stand 80% of the tile. */
-.cr-strip-box { position: relative; }
-.cr-strip-head { position: absolute; top: 18px; left: 20px; right: 20px; z-index: 4; margin: 0; }
-.cr-strip-box .cr-strip { height: 300px; }
-
-/* /credits tiles on six columns: a tile spans two, a wide one four, the last row's two halves three each. */
-.cr-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-.cr-tile { grid-column: span 2; }
-.cr-tile.wide { grid-column: span 4; }
-.cr-tile.half { grid-column: span 3; }
-@media (max-width: 900px) { .cr-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .cr-tile, .cr-tile.half { grid-column: span 1; } .cr-tile.wide { grid-column: span 2; } }
-@media (max-width: 560px) { .cr-tiles { grid-template-columns: 1fr; } .cr-tile, .cr-tile.half, .cr-tile.wide { grid-column: auto; } }
-.cr-curve { shape-rendering: auto; }
-.cr-humps { position: relative; width: 100%; padding-bottom: 18px; }
-.cr-hump { position: absolute; bottom: 0; translate: -50% 0; font-size: 11px; color: var(--muted); white-space: nowrap; }
-
-/* Skeletons the same shape as what replaces them. */
-.skel-bar { display: inline-block; width: 60%; height: 12px; border-radius: 2px; background: var(--empty); vertical-align: middle; }
-.jb-sweep .skel-bar { height: 44px; }
+/* A Credit tile still loading, the same shape as what replaces it. */
 .cc.skel .cc-art { aspect-ratio: 1; background: var(--empty); }
 .cc.skel .cc-cap { height: 19px; }
-.jb-line .skel-bar { height: 22px; }
 
-/* Rating as a ruler: a faint track lowest to highest, the top 1% in ink, three marks labelled above it. */
-.cr-ruler { position: relative; width: 100%; height: 84px; }
-.cr-ruler-track { position: absolute; left: 0; right: 0; bottom: 22px; height: 10px; background: var(--faint); }
-.cr-ruler-top { position: absolute; right: 0; bottom: 22px; height: 10px; background: var(--fg); }
-.cr-ruler-mark { position: absolute; bottom: 36px; translate: -50% 0; display: grid; justify-items: center; font-size: 11px; color: var(--muted); white-space: nowrap; }
-.cr-ruler-mark::after { content: ''; width: 1px; height: 8px; margin-top: 3px; background: var(--fg); }
-.cr-ruler-mark b { font-size: 15px; font-weight: 600; color: var(--fg); }
-.cr-ruler-end { position: absolute; bottom: 0; translate: -50% 0; font-size: 11px; color: var(--muted); }
-.cr-ruler-end:first-of-type { translate: 0 0; }
-.cr-ruler-end:last-of-type { translate: -100% 0; }
-.cr-ruler-mark.last { translate: calc(-100% + 1px) 0; justify-items: end; } /* the top 1% sits at the right edge: its label reads leftward */
 .cc-cap { padding: 0 2px; } /* number and price sit just inside the square's edges */
 
 /* ---------------------------------------------------------------- sweep slider (trait pages, a union's Buy tab) */

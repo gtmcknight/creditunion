@@ -43,7 +43,7 @@ export const minEth = (wei: bigint) => (Number(wei) / 1e18).toFixed(4).replace(/
 export const sourceMark = (id: string | number, source: Source, url?: string) =>
   `<a class="src" href="${esc(url ?? '#')}" target="_blank" rel="noopener" title="Credit #${id} on ${SOURCES[source].name}"><img class="src" src="${SOURCES[source].icon}" alt="${SOURCES[source].name}"></a>`;
 
-type Listed = { id: string; price: string; source: Source; url?: string; hash?: string; protocol?: string; listingId?: string };
+export type Listed = { id: string; price: string; source: Source; url?: string; hash?: string; protocol?: string; listingId?: string };
 
 /// The most one buy takes, on every Buy (the worker's quote allows as many).
 export const MAX_SWEEP = 24;
@@ -70,19 +70,154 @@ export const sweepFee = () =>
     ? (pub.readContract({ address: config.sweeper, abi: sweeperAbi, functionName: 'feeBps' }) as Promise<bigint>).catch(() => DEFAULT_FEE_BPS)
     : Promise.resolve(DEFAULT_FEE_BPS));
 
-/// /credits: the eight cheapest Credits for sale anywhere, laid out like a trait page's grid with the same Buy row
-/// (tap to pick, or 1 / 5 / 10), and a way through to all of them. It replaces the page's skeleton of the same
-/// shape, so nothing moves when it lands; nothing listed hides it.
-export async function drawForSale(el: HTMLElement) {
-  const sale = await loadSale();
-  if (!el.isConnected) return;
-  if (!sale) return void (el.hidden = true); // nothing listed: the skeleton goes
-  const show = sale.all.slice(0, 8);
-  el.innerHTML = `<div class="jb-controls static"><h2 class="jb-buy">Buy Credits</h2><div class="jb-sweep" id="fs-act"></div></div>
-    <div class="trait-grid" id="fs-grid">${show.map((l) => (sale.mine.has(l.id) ? creditCell(Number(l.id), YOURS) : creditCell(Number(l.id), priceTag(l)))).join('')}</div>
-    <p class="jb-line"><a class="jb-link" href="/palette">Every Credit for sale, cheapest first →</a></p>`;
-  sweepControls(el.querySelector<HTMLElement>('#fs-act')!, { ...sale, ls: show.filter((l) => !sale.mine.has(l.id)) }, el.querySelector<HTMLElement>('#fs-grid')!);
-  el.hidden = false;
+/// Buys in flight on this page (a price being checked, or the wallet open): live views hold still till they're done.
+export const buying = { n: 0 };
+
+/// How often a live view reads its listings again.
+const LIVE_MS = 20_000;
+
+/// Keeps a view of listings live, the way a marketplace's own page is: `tick` every LIVE_MS while the page is in
+/// front (and at once on coming back to it after longer), one at a time, and none while a buy is in flight or a
+/// slider is held. A pointer moving over `el` (on its way to a tap) puts it off a moment, so nothing moves under it.
+/// Stops for good once `el` has left the page.
+export function live(el: HTMLElement, tick: () => Promise<void>) {
+  let running = false;
+  let last = Date.now();
+  let touched = 0;
+  let again: ReturnType<typeof setTimeout> | null = null;
+  const near = () => (touched = Date.now());
+  el.addEventListener('pointermove', near, { passive: true });
+  el.addEventListener('pointerdown', near, { passive: true });
+  const run = async () => {
+    if (!el.isConnected) return stop();
+    if (running || document.hidden || buying.n || document.querySelector('.sweep-range input:active')) return;
+    if (Date.now() - touched < 1500) {
+      again ??= setTimeout(() => {
+        again = null;
+        void run();
+      }, 2000);
+      return;
+    }
+    running = true;
+    last = Date.now();
+    try {
+      await tick();
+    } catch (e) {
+      console.warn('[live]', e);
+    } finally {
+      running = false;
+    }
+  };
+  const timer = setInterval(() => void run(), LIVE_MS);
+  const back = () => {
+    if (!document.hidden && Date.now() - last >= LIVE_MS) void run();
+  };
+  const stop = () => {
+    clearInterval(timer);
+    if (again) clearTimeout(again);
+    document.removeEventListener('visibilitychange', back);
+  };
+  document.addEventListener('visibilitychange', back);
+}
+
+/// Ease-out for tiles that move or arrive (leaving is quicker, and eases in).
+const EASE = 'cubic-bezier(0.23, 1, 0.32, 1)';
+const fromHtml = (html: string) => {
+  const t = document.createElement('template');
+  t.innerHTML = html.trim();
+  return t.content.firstElementChild as HTMLElement;
+};
+
+/// Brings `grid`'s listed run (its tiles for sale, and any just bought here) to `next`, cheapest first, the way a
+/// marketplace's live page moves: a Credit that left the market fades out where it stood, a new listing fades in at
+/// its place, a changed price takes the old one's place, and every tile that shifts glides to where it lands. Tiles
+/// of Credits not for sale keep their order behind the run. Off screen (or with reduced motion) things just move.
+/// Returns the ids that left.
+export function reflow(grid: HTMLElement, next: Listed[], cell: (l: Listed) => string): string[] {
+  const motion = !document.hidden && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const inRun = (el: Element) => el.classList.contains('listed') || el.classList.contains('got');
+  const kids = [...grid.children].filter((el): el is HTMLElement => el instanceof HTMLElement && el.classList.contains('cc'));
+  const want = new Map(next.map((l) => [l.id, l]));
+  // First: where every tile is, and which part of the grid is on screen (a scrolling grid shows only its box).
+  const g = grid.getBoundingClientRect();
+  const top = Math.max(0, g.top), bottom = Math.min(innerHeight, g.bottom);
+  const onScreen = (r: DOMRect) => r.bottom > top && r.top < bottom;
+  const first = new Map(kids.map((el) => [el, el.getBoundingClientRect()]));
+
+  // Left the market: out of the flow at once, fading where it stood.
+  const gone: string[] = [];
+  for (const el of kids) {
+    if (!inRun(el) || want.has(el.dataset.id!)) continue;
+    gone.push(el.dataset.id!);
+    const r = first.get(el)!;
+    first.delete(el);
+    el.classList.remove('listed', 'got', 'sel');
+    if (!motion || !onScreen(r)) {
+      el.remove();
+      continue;
+    }
+    if (getComputedStyle(grid).position === 'static') grid.style.position = 'relative';
+    Object.assign(el.style, {
+      position: 'absolute',
+      left: `${r.left - g.left - grid.clientLeft + grid.scrollLeft}px`,
+      top: `${r.top - g.top - grid.clientTop + grid.scrollTop}px`,
+      width: `${r.width}px`,
+      margin: '0',
+      pointerEvents: 'none',
+    });
+    const out = el.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(0.94)' }], { duration: 180, easing: 'ease-in', fill: 'forwards' });
+    void out.finished.then(() => el.remove(), () => el.remove());
+  }
+
+  // Then the run in its new order, ahead of the first tile that isn't for sale. A Credit that was on the grid as not
+  // for sale and is listed now moves into the run; a changed price replaces the old one.
+  const at = new Map(kids.filter((el) => inRun(el) && want.has(el.dataset.id!)).map((el) => [el.dataset.id!, el]));
+  for (const l of next) if (!at.has(l.id)) grid.querySelector(`:scope > .cc[data-id="${l.id}"]`)?.remove();
+  if (next.length) grid.querySelector(':scope > p')?.remove(); // "No Credit here."
+  const arrived = new Set<HTMLElement>();
+  const run = next.map((l) => {
+    const had = at.get(l.id);
+    const now = fromHtml(cell(l));
+    if (!had) {
+      arrived.add(now);
+      return now;
+    }
+    const price = had.querySelector('.cc-price'), fresh = now.querySelector('.cc-price');
+    if (price && fresh && price.outerHTML !== fresh.outerHTML) {
+      price.replaceWith(fresh);
+      if (motion) fresh.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 400, easing: EASE });
+    }
+    return had;
+  });
+  const behind = [...grid.children].find((el) => el instanceof HTMLElement && el.classList.contains('cc') && !inRun(el) && el.style.position !== 'absolute') ?? null;
+  for (const el of run) grid.insertBefore(el, behind);
+  if (!motion) return gone;
+
+  // Last: every tile that moved plays from where it was; new ones fade in.
+  for (const [el, r] of first) {
+    if (!el.isConnected) continue;
+    const n = el.getBoundingClientRect();
+    const dx = r.left - n.left, dy = r.top - n.top;
+    if ((!dx && !dy) || (!onScreen(r) && !onScreen(n))) continue;
+    el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 320, easing: EASE });
+  }
+  for (const el of arrived)
+    if (onScreen(el.getBoundingClientRect())) el.animate([{ opacity: 0, transform: 'scale(0.94)' }, { opacity: 1, transform: 'none' }], { duration: 260, delay: 80, easing: EASE, fill: 'backwards' });
+  return gone;
+}
+
+/// One live step for a grid with Sweep: `next` onto the grid and into `sale` (bought ones stay in `mine`), then
+/// Sweep's marks and total. A Credit you'd picked that left the market is said so.
+export function relist(grid: HTMLElement, sale: Sale, next: Listed[], cell: (l: Listed) => string, sweep: { mark: () => void; chosen: () => Listed[] } | null) {
+  const had = new Set(sweep?.chosen().map((l) => l.id));
+  const gone = reflow(grid, next, cell);
+  sale.ls = next.filter((l) => !sale.mine.has(l.id));
+  sale.byId.clear();
+  for (const l of sale.ls) sale.byId.set(l.id, l);
+  sale.all.splice(0, sale.all.length, ...next);
+  sweep?.mark();
+  const lost = gone.filter((id) => had.has(id)).length;
+  if (lost) toast(lost === 1 ? 'A Credit you picked is no longer for sale.' : `${lost} Credits you picked are no longer for sale.`, 'info');
 }
 
 /// `ls`/`byId`: what can be bought. `all`: the listings in grid order, including `mine`, bought on this page.
@@ -127,19 +262,6 @@ export function listedPager(where: { trait?: string; rules?: Record<string, numb
   return self;
 }
 
-/// The cheapest Credits for sale of one trait (`palette/K`), or null when none are or they can't be read.
-export async function loadSale(trait?: string): Promise<Sale | null> {
-  try {
-    const res = await fetch(`/opensea/forsale${trait ? `?trait=${encodeURIComponent(trait)}` : ''}`);
-    if (!res.ok) return null;
-    const d = (await res.json()) as { listings?: Listed[]; preview?: boolean };
-    const ls = (d.listings ?? []).filter((l) => SOURCES[l.source] && !justBought(l.id));
-    return ls.length ? { ls, preview: !!d.preview, byId: new Map(ls.map((l) => [l.id, l])), all: [...ls], mine: new Set() } : null;
-  } catch {
-    return null;
-  }
-}
-
 /// A listed Credit's price under its number: the marketplace's mark, then the price. `up`: it rose since the page
 /// loaded (a union's Buy stopped on it), shown in red.
 export const priceTag = (l: Listed, up = false) =>
@@ -148,16 +270,19 @@ export const priceTag = (l: Listed, up = false) =>
 /// Sweep: drag the slider to take the cheapest that many (up to MAX_SWEEP), or tap listed Credits' squares to pick
 /// them one by one. The picked are outlined in `grid` wherever they are; the button carries their total.
 /// `mark()` re-outlines after the grid changes (and lets the slider reach listings that paged in since).
-/// `button: false` leaves the buying to the page (the create page buys and opens in one go); it reads `chosen()`
-/// and hears every change through `onPick`.
-export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement, o: { button?: boolean; onPick?: () => void } = {}) {
+/// `button: false` leaves the buying to the page (the create page buys and opens in one go, a union's Buy tab
+/// deposits too); it reads `chosen()` and hears every change through `onPick`. `cap`: at most this many (a union's
+/// open slots).
+export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement, o: { button?: boolean; cap?: number; onPick?: () => void } = {}) {
   // Nothing picked to start: drag, or tap Credits.
   const picked = new Set<string>();
+  const cap = Math.min(MAX_SWEEP, o.cap ?? MAX_SWEEP);
+  const most = () => Math.min(cap, sale.ls.length);
   // The price sits between the slider and the button and moves as you drag; the button carries the count.
   const signedOut = canBuy(sale.preview) && !session.account;
   host.classList.add('buy-row');
   const button = o.button === false ? '' : signedOut ? connectToBuy() : `<button class="btn primary" id="sale-go"${canBuy(sale.preview) ? '' : ' disabled title="Mainnet prices, shown as a preview"'}>Buy</button>`;
-  host.innerHTML = `${sweepRow('sale', 0, Math.min(MAX_SWEEP, sale.ls.length), 0)}${button}`;
+  host.innerHTML = `${sweepRow('sale', 0, most(), 0)}${button}`;
   const totalEl = host.querySelector<HTMLElement>('#sale-total')!;
   const range = host.querySelector<HTMLInputElement>('#sale-n')!;
   const go = host.querySelector<HTMLButtonElement>('#sale-go');
@@ -192,7 +317,9 @@ export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement, 
     mark();
   });
   const mark = () => {
-    setRange(range, picked.size, Math.min(MAX_SWEEP, sale.ls.length));
+    // Only Credits still for sale stay picked (one bought or sold since drops out).
+    for (const id of picked) if (!sale.byId.has(id)) picked.delete(id);
+    setRange(range, picked.size, most());
     grid.querySelectorAll<HTMLElement>('.cc').forEach((c) => c.classList.toggle('sel', picked.has(c.dataset.id!)));
     // What the wallet will ask: the listings plus the Sweeper's fee (sweepToWallet reads the exact quote on click).
     totalEl.innerHTML = sweepTotal(chosen().reduce((a, l) => a + BigInt(l.price), 0n), bps, picked.size, 'Drag or tap Credits');
@@ -213,12 +340,21 @@ export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement, 
     if (!id || !sale.byId.has(id)) return;
     e.preventDefault();
     if (picked.has(id)) picked.delete(id);
-    else if (picked.size >= MAX_SWEEP) return toast(`Up to ${MAX_SWEEP} in one sweep.`, 'info');
+    else if (picked.size >= cap) return toast(cap < MAX_SWEEP ? `Only ${cap} to go.` : `Up to ${MAX_SWEEP} in one sweep.`, 'info');
     else picked.add(id);
     mark();
   });
   mark();
-  return { mark, chosen };
+  // `fee()`: the fee the total shows; `setFee` when the Sweeper's changed.
+  return {
+    mark,
+    chosen,
+    fee: () => bps,
+    setFee: (b: bigint) => {
+      bps = b;
+      mark();
+    },
+  };
 }
 
 /// OpenSea listings come as signed orders (orders/ids/prices); FWA listings by listing id and price; CreditStrategy's
@@ -272,6 +408,7 @@ export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement, on
   const label = btn.textContent ?? '';
   btn.disabled = true;
   btn.textContent = 'Pricing…';
+  buying.n++;
   try {
     const r = await fetch('/opensea/buyquote', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ listings: picked }) });
     const q = (await r.json()) as Quote;
@@ -320,5 +457,7 @@ export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement, on
     btn.disabled = false;
     btn.textContent = label;
     return null;
+  } finally {
+    buying.n--;
   }
 }

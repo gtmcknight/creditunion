@@ -130,7 +130,7 @@ export function home(app: HTMLElement) {
       nav: 'Who joins',
       title: 'Deposit',
       figure: FAMILY.invited,
-      body: `<p>Pick exactly which Credits get in: any Credit, or only ones with the <a href="/credits">traits</a> you choose.</p>`,
+      body: `<p>Pick exactly which Credits get in: any Credit, or only ones with the <a href="/palette">traits</a> you choose.</p>`,
     },
     {
       id: 'order',
