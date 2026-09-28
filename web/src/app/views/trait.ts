@@ -222,8 +222,11 @@ export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => 
 
 /// Credits as a grid, each its art over its number (and price when it's listed), linking to its page.
 export const creditTiles = (ids: number[]) => ids.map((id) => creditCell(id)).join('');
-export const creditCell = (id: number, price = '') =>
-  `<div class="cc${price ? ' listed' : ''}" data-id="${id}"><a class="cc-art" href="/credit/${id}"${price ? ' title="Tap to pick for a sweep"' : ''}><img src="${editionArt(id)}" alt="Credit #${id}" loading="lazy" decoding="async"></a><span class="cc-cap"><a class="num" href="/credit/${id}">#${id.toLocaleString('en-US')}</a>${price}</span></div>`;
+/// One Credit tile for every grid of Credits: its art (to its page), then its number and, when listed, its price.
+/// `skip`: an × on the art that drops it from a buy (a union's Buy tab), in place of tap-to-pick. `title`: the art's
+/// tooltip (where it is, on a member's page).
+export const creditCell = (id: number, price = '', { skip = false, title = '' } = {}) =>
+  `<div class="cc${price ? ' listed' : ''}" data-id="${id}"><a class="cc-art" href="/credit/${id}"${title ? ` title="${esc(title)}"` : price && !skip ? ' title="Tap to pick for a sweep"' : ''}><img src="${editionArt(id)}" alt="Credit #${id}" loading="lazy" decoding="async"></a>${skip ? `<button type="button" class="skip" aria-label="Skip Credit #${id}" title="Skip">×</button>` : ''}<span class="cc-cap"><a class="num" href="/credit/${id}">#${id.toLocaleString('en-US')}</a>${price}</span></div>`;
 
 
 /// The two lists under a time window or range, as tabs: the open Credit Unions that take these Credits, and the

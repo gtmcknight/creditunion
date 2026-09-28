@@ -1,5 +1,5 @@
 import type { Address } from 'viem';
-import { chain, config, connect, disconnect, explorer, loadConfig, onSession, restore, session, wallets } from './chain';
+import { chain, config, connect, disconnect, explorer, loadConfig, onSession, pub, restore, session, wallets } from './chain';
 import { party } from './views/party';
 import { create } from './views/create';
 import { lists } from './views/lists';
@@ -15,7 +15,8 @@ import { traitPage } from './views/trait';
 import { timePage } from './views/time';
 import { creditsPage } from './views/credits';
 import { bitsPage, ratingPage } from './views/scale';
-import { esc, errText, openModal, toast } from './ui';
+import { esc, errText, openModal, toast, utc } from './ui';
+import { factoryAbi } from './abi';
 
 const app = document.getElementById('app')!;
 let seq = 0;
@@ -65,7 +66,7 @@ async function route() {
     if (page === '' || page === 'about') home(app);
     else if (page === 'mint') await mint(app, route);
     else if (page === 'og') await previews(app);
-    else if (page === 'live') await live(app);
+    else if (page === 'activity' || page === 'live') await live(app);
     else if (page === 'me') await profile(app, route);
     else if (page === 'member' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await profile(app, route, arg as Address);
     else if (page === 'create') await create(app);
@@ -81,8 +82,22 @@ async function route() {
   } catch (e) {
     if (run === seq) app.innerHTML = `<section class="prose"><h1>Something went wrong</h1><p class="error">${esc(errText(e))}</p></section>`;
   }
-  if (run === seq) requestAnimationFrame(() => app.classList.add('in'));
+  if (run !== seq) return;
+  requestAnimationFrame(() => app.classList.add('in'));
+  // The tab says where you are: the page's heading (or, in the Credits explorer, its crumb: "Palette Y"), then the
+  // site. Home is the site alone. It follows the heading when that changes (an address becoming its ENS name).
+  const text = (e: Element | null) => (e?.textContent ?? '').replace(/\s+/g, ' ').trim();
+  const title = () => {
+    const crumb = [...app.querySelectorAll('.jb-crumb a, .jb-crumb b')].map(text);
+    const name = page === '' || page === 'about' ? '' : text(app.querySelector('h1')) || (crumb.length > 1 ? crumb.slice(1).join(' ') : crumb[0] ?? '');
+    document.title = name && name !== 'Credit Union' ? `${name} · Credit Union` : 'Credit Union';
+  };
+  title();
+  headWatch?.disconnect();
+  const h1 = app.querySelector('h1');
+  if (h1) (headWatch = new MutationObserver(title)).observe(h1, { subtree: true, childList: true, characterData: true });
 }
+let headWatch: MutationObserver | null = null;
 
 /// Test networks only: a banner above the header so shared links are unmistakably the preview.
 function drawTestnet() {
@@ -90,6 +105,23 @@ function drawTestnet() {
   const el = document.getElementById('testnet')!;
   el.hidden = false;
   el.innerHTML = `<span><strong>Testnet</strong> · ${esc(chain.name)}</span><a href="/mint">Mint test Credits →</a>`;
+}
+
+/// Burn day: from the moment the burn adapter is proposed until it's on, a bar above the header with when burning
+/// turns on (the 30-minute notice in contracts/ADAPTER.md), so members who don't trust it know to leave in time.
+async function drawNotice() {
+  const zero = '0x0000000000000000000000000000000000000000';
+  const read = (functionName: 'assembler' | 'pendingAssembler' | 'pendingUntil') => pub.readContract({ address: config.factory, abi: factoryAbi, functionName });
+  const got = await Promise.all([read('assembler'), read('pendingAssembler'), read('pendingUntil')]).catch(() => null);
+  if (!got) return;
+  const [active, next, until] = got as [Address, Address, bigint];
+  if (active !== zero || next === zero) return;
+  const at = Number(until) * 1000;
+  const when = at > Date.now() ? `${utc({ month: 'short', day: 'numeric' }).format(new Date(at))} at ${utc({ hour: '2-digit', minute: '2-digit' }).format(new Date(at))} UTC` : 'any minute now';
+  const link = explorer('address', next);
+  const el = document.getElementById('notice')!;
+  el.innerHTML = `<span><strong>Burning starts ${when}.</strong> Full Credit Unions then count down 5 minutes and lock for an hour. You can withdraw until they lock.</span>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">The burn contract ↗</a>` : ''}`;
+  el.hidden = false;
 }
 
 /// Phone browsers have no wallet inside them: open this page in a wallet's own browser instead.
@@ -232,6 +264,10 @@ document.addEventListener('click', (e) => {
   go(url.pathname + url.search);
 });
 
+// A slider dragged with the pointer keeps no focus ring; one moved with the keyboard shows it.
+document.addEventListener('pointerdown', (e) => (e.target as HTMLElement).closest?.('.sweep-range input')?.setAttribute('data-pointer', ''), true);
+document.addEventListener('keydown', (e) => (e.target as HTMLElement).closest?.('.sweep-range input')?.removeAttribute('data-pointer'), true);
+
 // A mouse click on a nav link shouldn't leave a focus ring on it after the page changes.
 document.addEventListener('click', (e) => {
   const a = (e.target as HTMLElement).closest?.('header a');
@@ -247,6 +283,7 @@ document.addEventListener('click', (e) => {
     return;
   }
   drawTestnet();
+  void drawNotice();
   document.getElementById('magic-eye')?.addEventListener('click', () => import('./magic').then((m) => m.openMagic()));
   const factoryUrl = explorer('address', config.factory);
   if (factoryUrl) document.getElementById('foot-contract')?.setAttribute('href', factoryUrl);

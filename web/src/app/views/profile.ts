@@ -4,19 +4,21 @@ import { config, pub, send, session } from '../chain';
 import { listBatches, myCredits, type Listed } from '../data';
 import { hydrate, who } from '../ens';
 import { fillGhosts } from '../ghosts';
-import { art, errText, esc, eth, pageHead, same, toast } from '../ui';
+import { errText, esc, eth, pageHead, same, toast } from '../ui';
 import { card, mineIn } from './lists';
-import { fitByBatch } from '../fit';
+import { creditCell } from './trait';
+import { activityItems, activityOf } from './live';
 
 type Due = { b: Listed; claim: bigint; owed: bigint };
-const TABS = ['Joined', 'Started', 'Can join', 'Credits'] as const;
+/// The site's own sections, as they touch this wallet.
+const TABS = ['Unions', 'Auctions', 'Credits', 'Activity'] as const;
 type Tab = (typeof TABS)[number];
 /// One plain line under each tab saying what it lists, for your own page or someone else's.
 const NOTES: Record<Tab, (own: boolean) => string> = {
-  Joined: (own) => `Credit Unions ${own ? 'you have' : 'they have'} deposited Credits into.`,
-  Started: (own) => `Credit Unions ${own ? 'you' : 'they'} started.`,
-  'Can join': (own) => `Open Credit Unions that ${own ? 'your' : 'their'} Credits fit, and how many of ${own ? 'yours' : 'theirs'} each can take.`,
+  Unions: (own) => `Credit Unions ${own ? 'you are' : 'they are'} in.`,
+  Auctions: (own) => `Statements from Credit Unions ${own ? 'you were' : 'they were'} in, and auctions ${own ? 'you lead' : 'they lead'}.`,
   Credits: (own) => `Every Credit ${own ? 'you hold' : 'they hold'}: in ${own ? 'your' : 'their'} wallet, and deposited in Credit Unions.`,
+  Activity: (own) => `What ${own ? 'you have' : 'they have'} done on Credit Union, newest first.`,
 };
 
 /// Your Credits, the batches you're in or opened, and anything you can collect. With `member`, anyone's page:
@@ -75,44 +77,38 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
     <div id="tab-body"></div>
   </section>`;
 
-  // Tabs: Credit Unions they started, joined, and could join with Credits they hold; then their Credits, in the
-  // wallet and deposited. "Can join" needs every Credit's traits, so its count fills in when ready.
-  const started = list.filter((b) => same(b.s.creator, account));
-  const joined = list.filter((b) => mineIn(b, account).size > 0);
+  // Tabs: Credit Unions they're in (starting one means depositing into it; one they started and since left stays
+  // listed) while they fill; the Statements those became, at auction or sold, and auctions they lead; their
+  // Credits, in the wallet and deposited; what they've done.
+  const joined = list.filter((b) => mineIn(b, account).size > 0 || same(b.s.creator, account));
+  const selling = (b: Listed) => b.s.state === 'Auction' || b.s.state === 'Settled';
+  const filling = joined.filter((b) => !selling(b));
+  const auctions = list.filter((b) => selling(b) && (joined.includes(b) || same(b.s.highBidder, account)));
   const inUnions = joined.flatMap((b) => [...mineIn(b, account)].map((id) => ({ id: BigInt(id), b })));
-  let canJoin: Listed[] | null = null;
-  let fits = new Map<string, bigint[]>();
+  // What they've done, from the site-wide feed; the tab's count fills in when it's read (undefined while it is,
+  // null if it couldn't be).
+  let activity: Awaited<ReturnType<typeof activityOf>> | undefined;
   const count: Record<Tab, () => number | null> = {
-    Started: () => started.length,
-    Joined: () => joined.length,
-    'Can join': () => canJoin?.length ?? null,
+    Unions: () => filling.length,
+    Auctions: () => auctions.length,
     Credits: () => owned.length + inUnions.length,
+    Activity: () => activity?.length ?? null,
   };
   const grid = (bs: Listed[], empty: string) => (bs.length ? `<div class="grid">${bs.map((b) => card(b)).join('')}</div>` : `<p class="muted">${empty}</p>`);
+  // The explorer's tile, as every grid of Credits: art, number; where it sits in a union, on hover.
   const tiles = (xs: { id: bigint; b?: Listed }[]) =>
-    `<div class="picker lg static wallet-grid">${xs
-      .map(({ id, b }) => {
-        const t = `Credit #${id}${b ? ` · in ${esc(b.s.name || 'Untitled')}` : ''}`;
-        const img = `<img src="${art(id)}" alt="Credit #${id}" loading="lazy">`;
-        return `<a class="pick" href="/credit/${id}" title="${t}">${img}</a>`;
-      })
-      .join('')}</div>`;
+    `<div class="trait-grid">${xs.map(({ id, b }) => creditCell(Number(id), '', { title: `Credit #${id}${b ? ` · in ${b.s.name || 'Untitled'}` : ''}` })).join('')}</div>`;
   const body: Record<Tab, () => string> = {
-    Started: () => grid(started, own ? 'You haven’t started a Credit Union yet. <a href="/create">Start one</a>' : 'Hasn’t started a Credit Union yet.'),
-    Joined: () => grid(joined, own ? 'You’re not in any Credit Union yet. <a href="/unions">Browse Credit Unions</a>' : 'Not in any Credit Union yet.'),
-    'Can join': () =>
-      canJoin === null
-        ? '<p class="muted">Checking which Credits fit…</p>'
-        : canJoin.length
-          ? `<div class="grid">${canJoin.map((b) => card(b, fits.get(b.s.address), own ? 'yours' : 'theirs')).join('')}</div>`
-          : '<p class="muted">No open Credit Union takes these Credits right now.</p>',
+    Unions: () => grid(filling, own ? 'You’re not in any Credit Union yet. <a href="/unions">Browse Credit Unions</a>' : 'Not in any Credit Union yet.'),
+    Auctions: () => grid(auctions, own ? 'None of your Credit Unions has made a Statement yet.' : 'None of their Credit Unions has made a Statement yet.'),
     Credits: () =>
       `<div class="section-head"><h3>In wallet</h3><span class="muted num">${owned.length || ''}</span></div>${
         owned.length ? tiles([...owned].reverse().map((id) => ({ id }))) : `<p class="muted">None.${own && config.chainId !== 1 ? ' <a href="/mint">Mint test Credits →</a>' : ''}</p>`
       }<div class="section-head"><h3>Deposited</h3><span class="muted num">${inUnions.length || ''}</span></div>${inUnions.length ? tiles(inUnions) : '<p class="muted">None.</p>'}`,
+    Activity: () => (activity === undefined ? '<p class="muted">Loading…</p>' : `<ol class="live-list fold-list">${activityItems(activity, { member: true })}</ol>`),
   };
   const at = document.getElementById('tab-body')!;
-  let tab: Tab = joined.length ? 'Joined' : started.length ? 'Started' : 'Credits';
+  let tab: Tab = filling.length || !auctions.length ? 'Unions' : 'Auctions';
   const draw = () => {
     for (const t of TABS) {
       const n = count[t]();
@@ -131,11 +127,9 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
     }),
   );
   draw();
-  fitByBatch(list.filter((b) => b.s.state === 'Open' && !mineIn(b, account).size), account).then((m) => {
-    if (!at.isConnected) return;
-    canJoin = list.filter((b) => m.has(b.s.address));
-    fits = m as Map<string, bigint[]>;
-    draw();
+  void activityOf({ member: account }).then((rows) => {
+    activity = rows;
+    if (at.isConnected) draw();
   });
 
   hydrate(app);

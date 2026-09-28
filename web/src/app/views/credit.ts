@@ -14,7 +14,7 @@ import { card } from './lists';
 import { creditsHead } from './trait';
 import { processOf } from '../../shared/credits';
 import { eightsName } from '../../shared/trait';
-import { SOURCES, justBought, rememberBought, sweepFee, sweepToWallet, type Source } from '../forsale';
+import { SOURCES, connectToBuy, justBought, rememberBought, sweepFee, sweepToWallet, type Source } from '../forsale';
 
 /// Credits ever minted: the same numbers on every network.
 const SUPPLY = 122_154;
@@ -231,7 +231,7 @@ async function drawBuy(n: number) {
       d.preview
         ? `<button class="btn primary block" disabled>Buy</button><p class="muted small">Mainnet price, shown as a preview. ${view}</p>`
         : inApp
-          ? `<button class="btn primary block" id="credit-buy-go">Buy · ${eth(value + (value * bps) / 10_000n)}</button><p class="muted small">${bps ? `Includes the ${Number(bps) / 100}% fee. ` : ''}${view}</p>`
+          ? `${session.account ? `<button class="btn primary block" id="credit-buy-go">Buy · ${eth(value + (value * bps) / 10_000n)}</button>` : connectToBuy(true)}<p class="muted small">${bps ? `Includes the ${Number(bps) / 100}% fee. ` : ''}${view}</p>`
           : `<a class="btn primary block" href="${esc(d.url ?? '#')}" target="_blank" rel="noopener">Buy on ${src.name} ↗</a>`
     }`;
   el.hidden = false;

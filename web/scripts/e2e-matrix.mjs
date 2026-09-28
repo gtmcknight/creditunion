@@ -103,7 +103,7 @@ async function site(m) {
     name: 'creditunion-e2e',
     main: join(WEB, 'src', 'worker', 'index.ts'),
     compatibility_date: '2026-09-01',
-    assets: { binding: 'ASSETS', not_found_handling: 'single-page-application', run_worker_first: JSON.parse(readFileSync(join(WEB, 'wrangler.jsonc'), 'utf8').replace(/^\s*\/\/.*$/gm, '')).assets.run_worker_first },
+    assets: { binding: 'ASSETS', not_found_handling: 'single-page-application', run_worker_first: JSON.parse(readFileSync(join(WEB, 'wrangler.jsonc'), 'utf8').replace(/("(?:[^"\\]|\\.)*")|\/\/[^\n]*/g, (_, str) => str ?? '')).assets.run_worker_first },
     vars: { CHAIN_ID: '31337', CREDITS: m.credits, FACTORY: m.factory, RATINGS: m.ratings, SWEEPER: '0x0000000000000000000000000000000000000000', OPENSEA_SLUG: 'credits', RPC_URL: RPC, FALLBACK_RPC: RPC },
   };
   const path = join(OUT, 'wrangler.json');
@@ -151,6 +151,25 @@ async function browser() {
 }
 
 const toasts = (page) => page.evaluate(() => window.__toasts.splice(0));
+/// A landed deposit opens the "You're in" card (it replaced the Deposited toast); it's closed before going on.
+async function waitJoined(page, ms = 90_000) {
+  const seen = [];
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    for (const t of await toasts(page)) {
+      seen.push(t);
+      if (t.kind === 'err') throw new Error(`toast error: ${t.text}`);
+    }
+    if (await page.$('dialog.created[open]')) {
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('dialog.created', { state: 'detached', timeout: 5_000 }).catch(() => {});
+      return seen;
+    }
+    await sleep(200);
+  }
+  throw new Error(`no You're in card (saw ${seen.map((t) => t.text).join(' | ')})`);
+}
+
 async function waitToast(page, re, ms = 90_000) {
   const seen = [];
   const end = Date.now() + ms;
@@ -278,7 +297,7 @@ async function testParty(page, p) {
       const bundle = await canTake(b, picked.map(BigInt));
       if (bundle.some((x) => !x)) err('the picked bundle does not all land (canTake)');
       await page.click('#deposit');
-      const seen = await waitToast(page, /^Deposited\.$/, 180_000).catch((e) => (err(e.message), []));
+      const seen = await waitJoined(page, 180_000).catch((e) => (err(e.message), []));
       if (seen.some((t) => /Skipping|no slot/i.test(t.text))) err(`deposit fell back to skipping: ${seen.map((t) => t.text).join(' | ')}`);
       const after = await countOf(b);
       r.deposit = after === r.before + picked.length ? `ok +${picked.length}` : `FAIL ${r.before}→${after}`;
@@ -295,7 +314,8 @@ async function testParty(page, p) {
         if (ui.fit !== exp2) err(`after deposit the fit line says ${ui.fit}, contract takes ${exp2}`);
       } else r.refresh = 'ok full';
 
-      // Withdraw a subset through the page: pick 2 of yours, Withdraw 2.
+      // Withdraw a subset through the page: pick 2 of yours, Withdraw 2. An open union keeps it in its own tab.
+      if (await page.$('[data-add="withdraw"]')) await page.click('[data-add="withdraw"]');
       await page.waitForSelector('#w-picker .pick', { timeout: 60_000 });
       const w = await page.$$eval('#w-picker .pick', (xs) => xs.slice(0, 2).map((x) => x.dataset.id));
       for (const id of w) await page.click(`#w-picker .pick[data-id="${id}"]`);
@@ -339,7 +359,7 @@ async function createFlow(page, c) {
     const before = Number(await pub.readContract({ address: MANIFEST.factory, abi: factoryAbi, functionName: 'batchCount' }));
     if (await page.$eval('#go', (x) => x.disabled)) throw new Error(`Start is disabled: ${await page.textContent('#warn')}`);
     await page.click('#go');
-    await page.waitForURL(/\/party\/0x/, { timeout: 180_000 }).catch(async () => {
+    await page.waitForURL(/\/(union|party)\/0x/, { timeout: 180_000 }).catch(async () => {
       const t = await toasts(page);
       throw new Error(`no party page (${t.map((x) => x.text).join(' | ') || 'no toast'})`);
     });

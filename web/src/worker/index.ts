@@ -1,13 +1,17 @@
 /// Credit Union's Worker. It holds no state and signs nothing. Its jobs:
 ///   /config.json   chain id and contract addresses for the app
 ///   /rpc           read-only JSON-RPC proxy to our contracts (and Credits' art) only (keeps the provider key private)
+///   /unions.json   every Credit Union, summary and slots, one cached multicall for all visitors
+///   /passes        which of a wallet's Credits a Credit Union takes, in one multicall
+///   /activity.json what wallets have done on the site, newest first (the Activity page)
 ///   /art/...       a Credit's art, read from Jack's art contract and cached forever (art never changes)
 ///   /*.bin         the edition's data files, precompressed at build and cached by the browser until they change
 ///   /opensea/quote cheapest listings that fit a batch (OpenSea as signed Seaport orders, FWA, CreditStrategy)
 ///   /opensea/credit/:id  one Credit's best OpenSea listing price (mainnet's, as a preview, on testnets)
 ///   /ens/:address  primary ENS name (always from mainnet), cached a day
-/// Every response carries the security headers in `secure()`.
-import { createPublicClient, hexToBytes, http, type Address, type Hex, parseAbiItem } from 'viem';
+/// Every response carries the security headers in `secure()` (headers.ts; the build copies them into _headers for
+/// what the asset layer serves on its own).
+import { createPublicClient, fallback, hexToBytes, http, type Address, type Hex, parseAbiItem } from 'viem';
 import { mainnet } from 'viem/chains';
 import { batchAbi, creditsAbi, creditArtAbi, factoryAbi } from '../app/abi';
 import { best, bestPage, quote, scan, type Extra, type Listing } from './opensea';
@@ -21,6 +25,9 @@ import { drawCredit, drawUnion, sample, type CreditFacts, type UnionCard } from 
 import { printOf, type Rect } from './print';
 import { readActivity } from './activity';
 import { keyOf, ruleFor } from '../shared/layout';
+import { ALWAYS, CSP, HSTS } from './headers';
+import { fromJson, toJson } from '../shared/json';
+import { keep, type Kept } from './keeper';
 
 interface RateLimit {
   limit(o: { key: string }): Promise<{ success: boolean }>;
@@ -39,6 +46,10 @@ interface Env {
   FALLBACK_RPC: string;
   /// Mainnet RPC for ENS when the app runs on another chain. Defaults to RPC_URL on mainnet.
   ENS_RPC?: string;
+  /// The keeper's private key (keeper.ts), a secret. Unset: the keeper does nothing.
+  KEEPER_KEY?: string;
+  /// The most the keeper pays for gas, in gwei (base fee); above it, it waits.
+  KEEPER_MAX_GWEI?: string;
   RL_RPC?: RateLimit;
   RL_QUOTE?: RateLimit;
   RL_MISC?: RateLimit;
@@ -65,7 +76,7 @@ const RPC_METHODS = new Set([
 const MAX_RPC_BODY = 64_000;
 const MAINNET_CREDITS: Address = '0x97630aA70AB14ed9883B41dAfccBc11349723043';
 const MAX_RPC_BATCH = 50;
-/// The mainnet factory's deploy block (contracts/DEPLOY.md); /activity scans from here.
+/// The mainnet factory's deploy block (contracts/DEPLOY.md); /activity.json scans from here.
 const ACTIVITY_FROM = 26_072_342n;
 /// Credits ever minted; ids outside 1..SUPPLY are refused before any RPC.
 const SUPPLY = 122_154;
@@ -75,37 +86,25 @@ const inSupply = (id: number) => Number.isInteger(id) && id >= 1 && id <= SUPPLY
 const OLD_HOSTS = new Set(['creditunion.party', 'eighty.fun', 'www.eighty.fun', 'eighty.rhps.fun']);
 const SITE_HOST = 'creditunion.fun';
 const rpcUrl = (env: Env) => env.RPC_URL || env.FALLBACK_RPC;
+/// The public node behind the paid RPC, for when the paid key is over its limit, refused or down.
+const hasFallback = (env: Env) => !!env.RPC_URL && !!env.FALLBACK_RPC && env.RPC_URL !== env.FALLBACK_RPC;
+const rpcTransport = (env: Env) =>
+  hasFallback(env) ? fallback([http(env.RPC_URL, { timeout: 8_000 }), http(env.FALLBACK_RPC, { timeout: 8_000 })]) : http(rpcUrl(env), { timeout: 8_000 });
 /// Listing scans in progress, per batch, so a burst of quotes costs one scan.
 const inflight = new Map<string, Promise<Awaited<ReturnType<typeof scan>>>>();
 // No request batching here: viem's batch scheduler is shared across concurrent requests in one isolate, and a
 // promise resolved in another request's context is cancelled when that request ends (the Worker then "hangs").
-const client = (env: Env) => createPublicClient({ transport: http(rpcUrl(env), { timeout: 8_000 }) });
+const client = (env: Env) => createPublicClient({ transport: rpcTransport(env) });
 const isDev = (url: URL) => url.hostname === 'localhost' || url.hostname === '127.0.0.1';
-
-const CSP = [
-  "default-src 'self'",
-  "script-src 'self' https://static.cloudflareinsights.com", // Cloudflare Web Analytics beacon
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com", // inline style attributes size the sheets
-  'font-src https://fonts.gstatic.com',
-  "img-src 'self' data: https://metadata.ens.domains",
-  "connect-src 'self' https://cloudflareinsights.com",
-  "frame-ancestors 'none'",
-  "base-uri 'none'",
-  "object-src 'none'",
-  "form-action 'self'",
-].join('; ');
 
 /// Responses whose body is already compressed (serveBin): passed on as they are, not encoded again.
 const precompressed = new WeakSet<Response>();
 
 function secure(res: Response, url: URL) {
   const h = new Headers(res.headers);
-  h.set('x-frame-options', 'DENY');
-  h.set('x-content-type-options', 'nosniff');
-  h.set('referrer-policy', 'strict-origin-when-cross-origin');
-  h.set('permissions-policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  for (const [k, v] of ALWAYS) h.set(k, v);
   if (!isDev(url)) {
-    h.set('strict-transport-security', 'max-age=31536000; includeSubDomains');
+    h.set('strict-transport-security', HSTS);
     if (!h.has('content-security-policy')) h.set('content-security-policy', CSP);
   }
   return new Response(res.body, { status: res.status, headers: h, encodeBody: precompressed.has(res) ? 'manual' : 'automatic' });
@@ -197,24 +196,79 @@ export default {
     }
     return secure(res, url);
   },
+
+  // Every minute: the keeper (keeper.ts), once KEEPER_KEY is set.
+  async scheduled(_event, env, ctx) {
+    if (!env.KEEPER_KEY) return;
+    ctx.waitUntil(
+      keep({
+        key: env.KEEPER_KEY,
+        chainId: Number(env.CHAIN_ID),
+        factory: env.FACTORY as Address,
+        maxGwei: Number(env.KEEPER_MAX_GWEI) || 20,
+        transport: rpcTransport(env),
+        unions: () => unionList(env) as Promise<Kept[]>,
+      }).catch((e) => console.error('[keeper] run failed', safeError(e))),
+    );
+  },
 } satisfies ExportedHandler<Env>;
 
+/// Chain and addresses for the app: at /config.json, and written into every page the Worker serves (#config).
+const publicConfig = (env: Env) => ({
+  chainId: Number(env.CHAIN_ID),
+  credits: env.CREDITS,
+  factory: env.FACTORY,
+  sweeper: env.OPENSEA_API_KEY && !/^0x0+$/.test(env.SWEEPER ?? '0x0') ? env.SWEEPER : null,
+  ratings: env.RATINGS && !/^0x0+$/.test(env.RATINGS) ? env.RATINGS : null,
+  fwaMarket: addrOrNull(env.FWA_MARKET),
+});
+
 async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): Promise<Response> {
-  if (url.pathname === '/config.json') {
-    return Response.json(
-      {
-        chainId: Number(env.CHAIN_ID),
-        credits: env.CREDITS,
-        factory: env.FACTORY,
-        sweeper: env.OPENSEA_API_KEY && !/^0x0+$/.test(env.SWEEPER ?? '0x0') ? env.SWEEPER : null,
-        ratings: env.RATINGS && !/^0x0+$/.test(env.RATINGS) ? env.RATINGS : null,
-        fwaMarket: addrOrNull(env.FWA_MARKET),
-      },
-      { headers: { 'cache-control': 'public, max-age=60' } },
-    );
-  }
+  if (url.pathname === '/config.json') return Response.json(publicConfig(env), { headers: { 'cache-control': 'public, max-age=60' } });
 
   if (url.pathname === '/rpc') return rpc(req, env, url);
+
+  // Every Credit Union with its summary and slots, one cached read for everyone (the lists, profiles, Credit pages).
+  if (url.pathname === '/unions.json') {
+    if (req.method !== 'GET' || !sameSite(req)) return text('forbidden', 403);
+    const fresh = url.searchParams.has('fresh'); // after the reader's own transaction: skip the cache
+    if (fresh && (await limited(env.RL_MISC, req))) return text('slow down', 429);
+    return unionsJson(env, url, ctx, fresh);
+  }
+
+  // Which of a wallet's Credits a Credit Union would take (Batch.passes), all in one multicall: a holder of
+  // hundreds would otherwise make hundreds of RPC calls per page.
+  if (url.pathname === '/passes') {
+    if (req.method !== 'POST' || !sameSite(req)) return text('forbidden', 403);
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    let batch: string, ids: bigint[];
+    try {
+      const raw = await readBody(req, 64_000);
+      if (raw === null) return text('too large', 413);
+      const b = JSON.parse(raw) as { batch?: unknown; ids?: unknown };
+      batch = String(b.batch ?? '').toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(batch) || !Array.isArray(b.ids) || b.ids.length > 2000) throw 0; // the biggest wallet holds 1,348
+      ids = b.ids.map((x) => {
+        if (typeof x !== 'string' || !/^\d{1,6}$/.test(x) || !inSupply(Number(x))) throw 0;
+        return BigInt(x);
+      });
+    } catch {
+      return text('bad request', 400);
+    }
+    // Each ~50 Credits is one eth_call upstream: counted against the RPC limit like /rpc's calls.
+    if (await limited(env.RL_RPC, req, Math.ceil(ids.length / 50))) return text('slow down', 429);
+    if (!(await isBatch(env, url, batch as Address))) return text('not a batch', 404);
+    try {
+      const c = client(env);
+      const contracts = ids.map((id) => ({ address: batch as Address, abi: batchAbi, functionName: 'passes', args: [id] }) as const);
+      const res = hasMulticall(env)
+        ? await c.multicall({ contracts, allowFailure: false, multicallAddress: MULTICALL3, batchSize: 8_192 })
+        : await Promise.all(contracts.map((x) => c.readContract(x)));
+      return Response.json({ ok: res }, { headers: { 'cache-control': 'no-store' } });
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
+  }
 
   // Data files; any other .bin (og/font.bin) is the plain asset, as before these came through here.
   if (url.pathname.endsWith('.bin')) {
@@ -539,10 +593,13 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
   }
 
-  // /activity: what wallets have done on the site, newest first (activity.ts). Fifteen seconds per colo.
-  if (url.pathname === '/activity') {
+  // The Activity page moved from /live: old links land on it.
+  if (url.pathname === '/live') return Response.redirect(`${url.origin}/activity${url.search}`, 301);
+
+  // /activity.json: what wallets have done on the site, newest first (activity.ts). Fifteen seconds per colo.
+  if (url.pathname === '/activity.json') {
     const cache = caches.default;
-    const key = new Request(`${url.origin}/activity`);
+    const key = new Request(`${url.origin}/activity.json`);
     const hit = await cache.match(key);
     if (hit) return hit;
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
@@ -712,8 +769,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     if (hit) return hit;
     if (await limited(env.RL_MISC, req)) return generic();
     const [facts, [print]] = await Promise.all([creditFacts(env, url, id).catch(() => null), printsFor(env, [id])]);
-    // Drawn from the chain it's exact for good; the wall.bin fallback is cached briefly so a later read replaces it.
-    const res = new Response(await drawCredit(env.ASSETS, url.origin, id, facts, print), { headers: { 'content-type': 'image/png', 'cache-control': `public, max-age=${print ? 86400 : 300}` } });
+    // Drawn from the chain it's exact for good. Without the chain there is no exact art (wall.bin keeps only the
+    // registered grid: no misprints, paper or marks), and sites keep the first image they fetch, so the site's card.
+    if (!print) return generic();
+    const res = new Response(await drawCredit(env.ASSETS, url.origin, id, facts, print), { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } });
     ctx.waitUntil(cache.put(key, res.clone()));
     return res;
   }
@@ -745,16 +804,25 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     card = (await match(env.ASSETS, url.origin, rules, 1).then((m) => rangeCard(rating ? 'rating' : 'bits', m.count, show(lo), show(hi))).catch(() => null)) ?? card;
   }
   if (card && party && !(await limited(env.RL_MISC, req)) && (await isBatch(env, url, party.toLowerCase() as Address))) {
-    const p = await readParty(env, party as Address).catch(() => null);
+    const p = await readParty(env, party as Address, url, ctx).catch(() => null);
     if (p) card = partyCard(party, p.name, ruleLine(p.filter, p.allowlistSize));
   }
   if (card) {
     const shell = await env.ASSETS.fetch(new Request(new URL('/', url), req));
-    if (shell.ok && (shell.headers.get('content-type') ?? '').includes('text/html')) return withCard(shell, card, url);
+    if (shell.ok && (shell.headers.get('content-type') ?? '').includes('text/html')) return withCard(shell, card, url, bootHead(env, url));
     return shell;
   }
 
   return env.ASSETS.fetch(req);
+}
+
+/// Pages that read the union list: it starts loading alongside the scripts instead of after them.
+const LISTS = /^\/(unions|parties|auctions|me|member|credit|credits|palette|eights|print|weight|time|rating|bits|og|create)(\/|$)/;
+/// Into every page's head: the app's config, so the first draw doesn't wait on /config.json, and on pages that
+/// list Credit Unions a preload of the union index.
+function bootHead(env: Env, url: URL) {
+  const config = `<script type="application/json" id="config">${JSON.stringify(publicConfig(env)).replace(/</g, '\\u003c')}</script>`;
+  return LISTS.test(url.pathname) ? `${config}\n  <link rel="preload" href="/unions.json" as="fetch" crossorigin="anonymous">` : config;
 }
 
 /// What a Credit's card shows, from the edition's packed traits and score table.
@@ -776,16 +844,69 @@ async function creditFacts(env: Env, url: URL, id: number): Promise<CreditFacts>
 }
 
 
-/// What a link card needs from a Credit Union: only what never changes, its name and its rule.
+/// What a link card needs from a Credit Union: only what never changes, its name and its rule. Kept for good.
 type UnionFacts = { name: string; filter: Filter; allowlistSize: number };
-async function readParty(env: Env, batch: Address): Promise<UnionFacts> {
+async function readParty(env: Env, batch: Address, url?: URL, ctx?: ExecutionContext): Promise<UnionFacts> {
+  const key = url && new Request(`${url.origin}/union-facts/v1/${batch.toLowerCase()}`);
+  const hit = key && (await caches.default.match(key));
+  if (hit) return fromJson(await hit.text()) as UnionFacts;
   const s = (await client(env).readContract({ address: batch, abi: batchAbi, functionName: 'summary' })) as unknown as {
     name: string;
     filter: Filter;
     allowlistSize: bigint;
   };
   // names are the creator's; cards and tags show at most 64 characters
-  return { name: [...s.name].slice(0, 64).join(''), filter: s.filter, allowlistSize: Number(s.allowlistSize) };
+  const facts = { name: [...s.name].slice(0, 64).join(''), filter: s.filter, allowlistSize: Number(s.allowlistSize) };
+  if (key) ctx?.waitUntil(caches.default.put(key, new Response(toJson(facts), { headers: { 'cache-control': 'public, max-age=31536000, immutable' } })));
+  return facts;
+}
+
+/// Every Credit Union, newest first, with its summary (Batch.summary, bigints as { "$n": "…" }) and slots: two
+/// calls per union in one Multicall3 pass, cached a few seconds for everyone. `fresh` (after the reader's own
+/// transaction) reads the chain now and refreshes the cache for everyone else.
+const UNIONS_S = 10;
+async function unionsJson(env: Env, url: URL, ctx: ExecutionContext, fresh: boolean): Promise<Response> {
+  try {
+    return new Response(await unionsBody(env, url, ctx, fresh), { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${UNIONS_S}` } });
+  } catch (e) {
+    return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+  }
+}
+async function unionsBody(env: Env, url: URL, ctx: ExecutionContext, fresh = false): Promise<string> {
+  const key = new Request(`${url.origin}/unions.json/v1`);
+  const hit = fresh ? null : await caches.default.match(key);
+  if (hit) return hit.text();
+  const body = await readUnions(env);
+  ctx.waitUntil(caches.default.put(key, new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${UNIONS_S}` } })));
+  return body;
+}
+
+async function readUnions(env: Env): Promise<string> {
+  return toJson({ at: Math.floor(Date.now() / 1000), unions: await unionList(env) });
+}
+async function unionList(env: Env) {
+  const c = client(env);
+  const n = Number(await c.readContract({ address: env.FACTORY as Address, abi: factoryAbi, functionName: 'batchCount' }));
+  const pages = await Promise.all(
+    Array.from({ length: Math.ceil(n / 500) }, (_, k) =>
+      c.readContract({ address: env.FACTORY as Address, abi: factoryAbi, functionName: 'batches', args: [BigInt(k * 500), 500n] }),
+    ),
+  );
+  const addrs = pages.flat() as Address[];
+  const contracts = addrs.flatMap((a) => [
+    { address: a, abi: batchAbi, functionName: 'summary' } as const,
+    { address: a, abi: batchAbi, functionName: 'slots' } as const,
+  ]);
+  const res = hasMulticall(env)
+    ? await c.multicall({ contracts, allowFailure: true, multicallAddress: MULTICALL3, batchSize: 8_192 }) // ~25 unions a call: a full one's slots cost ~350k gas to read
+    : await Promise.all(contracts.map((x) => c.readContract(x).then((result) => ({ status: 'success' as const, result }), () => ({ status: 'failure' as const, result: undefined }))));
+  const unions = addrs.flatMap((address, i) => {
+    const [s, sl] = [res[2 * i], res[2 * i + 1]];
+    if (s.status !== 'success' || sl.status !== 'success') return [];
+    const [ids, depositors] = sl.result as readonly [readonly bigint[], readonly Address[]];
+    return [{ address, summary: s.result, ids: ids.map(Number), depositors }];
+  });
+  return unions;
 }
 
 /// A rule as the matcher's Rules, to pick the card's wall.
@@ -804,6 +925,8 @@ async function admitted(env: Env, url: URL, rules: Record<string, number>): Prom
 }
 
 const MULTICALL3: Address = '0xcA11bde05977b3631167028862bE2a173976CA11'; // same address on every chain
+/// A fresh local anvil chain (31337) has no Multicall3: reads there go one by one.
+const hasMulticall = (env: Env) => env.CHAIN_ID !== '31337';
 
 /// Link cards draw each Credit exactly as its contract does (print.ts): its seed and payment second, for every id
 /// in one multicall, so a full sheet costs one subrequest. null where a Credit has no seed or the read failed; the
@@ -850,7 +973,7 @@ async function linkCard(req: Request, env: Env, url: URL, ctx: ExecutionContext,
       const x = sample(key);
       if (x) u = { name: x.name, ids: await admitted(env, url, x.rules) };
     } else if (/^0x[0-9a-fA-F]{40}$/.test(key) && (await isBatch(env, url, key.toLowerCase() as Address))) {
-      const p = await readParty(env, key as Address);
+      const p = await readParty(env, key as Address, url, ctx);
       u = { name: p.name, ids: await admitted(env, url, rulesOf(p.filter)) };
     }
   } catch {
@@ -935,11 +1058,13 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
     if (ok.some((x) => !x)) return text('target not allowed', 403);
   }
   if (refused) return refused;
-  const upstream = await fetch(rpcUrl(env), {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(Array.isArray(parsed) ? clean : clean[0]),
-  });
+  const payload = JSON.stringify(Array.isArray(parsed) ? clean : clean[0]);
+  const post = (to: string) => fetch(to, { method: 'POST', headers: { 'content-type': 'application/json' }, body: payload }).catch(() => null);
+  // The paid key over its limit, refused or down: the public node answers instead, so pages and pre-send
+  // simulations keep working.
+  let upstream = await post(rpcUrl(env));
+  if ((!upstream || [401, 403, 429].includes(upstream.status) || upstream.status >= 500) && hasFallback(env)) upstream = await post(env.FALLBACK_RPC);
+  if (!upstream) return text('upstream unavailable', 502);
   return new Response(upstream.body, {
     status: upstream.status,
     headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
@@ -953,7 +1078,10 @@ const addrOrNull = (a?: string) => (a && /^0x[0-9a-fA-F]{40}$/.test(a) && !/^0x0
 /// Mainnet reads (FWA). ENS_RPC when set; publicnode otherwise, which (unlike drpc's free tier) honours an eth_call's
 /// gas price, needed to price FWA's randomness fee.
 const mainClient = (env: Env) =>
-  createPublicClient({ chain: mainnet, transport: http(env.ENS_RPC || (env.CHAIN_ID === '1' ? rpcUrl(env) : 'https://ethereum-rpc.publicnode.com'), { timeout: 8_000 }) });
+  createPublicClient({
+    chain: mainnet,
+    transport: env.ENS_RPC ? http(env.ENS_RPC, { timeout: 8_000 }) : env.CHAIN_ID === '1' ? rpcTransport(env) : http('https://ethereum-rpc.publicnode.com', { timeout: 8_000 }),
+  });
 
 type Fake = { id: string; price: string; source: 'fwa' | 'strategy' | 'opensea' };
 /// A price for exactly these listings, ready for the Sweeper: OpenSea's as signed Seaport orders (the Sweeper as

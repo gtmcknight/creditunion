@@ -31,7 +31,9 @@ const makePublic = (c: Chain) =>
   createPublicClient({ chain: c, transport: http('/rpc', { batch: { wait: 16, batchSize: 40 } }) });
 
 export async function loadConfig() {
-  config = await (await fetch('/config.json')).json();
+  // Written into the page by the Worker (#config); pages the asset layer serves on its own ask for it.
+  const inline = document.getElementById('config')?.textContent;
+  config = inline ? JSON.parse(inline) : await (await fetch('/config.json')).json();
   chain = CHAINS[config.chainId] ?? { ...foundry, id: config.chainId };
   pub = makePublic(chain);
 }
@@ -122,7 +124,12 @@ export async function send(
   try {
     const hash = await session.wallet.writeContract({ ...request, chain } as never);
     onHash?.(hash);
-    const receipt = await pub.waitForTransactionReceipt({ hash });
+    // No time limit: a slow transaction is still pending, and calling it failed would invite a second one. A
+    // speed-up in the wallet lands as this one; a cancel, or another transaction on its nonce, doesn't.
+    let replaced = '';
+    const receipt = await pub.waitForTransactionReceipt({ hash, timeout: 0, onReplaced: (r) => void (replaced = r.reason) });
+    if (replaced === 'cancelled') throw new Error('Cancelled in wallet.');
+    if (replaced === 'replaced') throw new Error('Replaced by another transaction in your wallet.');
     if (receipt.status !== 'success') throw new Error('Transaction reverted.');
     return receipt;
   } finally {

@@ -4,11 +4,13 @@ import { canBatch, config, explorer, pub, send, sendBatch, session } from '../ch
 import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, forgetBatches, getBatch, getSummary, hasLayout, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { hydrate, pct, who } from '../ens';
-import { editionArt, examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
+import { examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
 import { keyOf as layoutKey } from '../../shared/layout';
 import { Room, books, depositedKeys, keysOf, noRoomReason, type Books } from '../slots';
-import { checkQuote, minEth, sourceMark, sweepFee, type Quote, type Source } from '../forsale';
-import { $$, art, clock, errText, esc, eth, openModal, rangeHtml, same, setRange, sheet, short, toast, until } from '../ui';
+import { MAX_SWEEP, checkQuote, connectToBuy, minEth, priceTag, sweepFee, sweepRow, sweepTotal, type Quote, type Source } from '../forsale';
+import { creditCell } from './trait';
+import { activityFold } from './live';
+import { $$, art, clock, errText, esc, eth, openModal, same, setRange, sheet, short, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
 import { go as navigate } from '../main';
 
@@ -84,15 +86,17 @@ const LIVE_MS = 12_000; // about one block
 
 export async function party(app: HTMLElement, address: Address, rerender: () => void) {
   let b: Ctx;
-  try {
-    // Only parties our factory made: any contract can answer summary() with a made-up party.
-    const [ours, got] = await Promise.all([pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'isBatch', args: [address] }), getBatch(address)]);
-    if (!ours) throw 0;
-    b = got;
-  } catch {
-    app.innerHTML = `<section class="prose"><h1>Credit Union not found</h1><p><a href="/unions">← Credit Unions</a></p></section>`;
+  // Only parties our factory made: any contract can answer summary() with a made-up party. A read that fails
+  // (the network, a rate limit) says so, rather than that the Credit Union doesn't exist.
+  const [ours, got] = await Promise.all([
+    pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'isBatch', args: [address] }).catch(() => null),
+    getBatch(address).catch(() => null),
+  ]);
+  if (!ours || !got) {
+    app.innerHTML = `<section class="prose"><h1>${ours === false ? 'Credit Union not found' : 'Couldn’t load this Credit Union'}</h1><p>${ours === false ? '' : 'Refresh to try again. '}<a href="/unions">← Credit Unions</a></p></section>`;
     return;
   }
+  b = got;
   const account = session.account;
   // /union/0x…?pick=123 (from a Credit's page): open on Your Credits with that one picked, if it fits.
   const want = new URLSearchParams(location.search).get('pick');
@@ -154,7 +158,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         s.state === 'Open' || s.state === 'Full' || s.state === 'Expired'
           ? `<div class="progress">
           <div class="slots" aria-hidden="true">${Array.from({ length: 80 }, (_, i) => `<i${i < s.count ? ' class="in"' : ''}></i>`).join('')}</div>
-          <div class="row small"><span class="num">${s.count} of 80 Credits in${depositors ? ` · <button type="button" class="link" id="depositors-btn">${depositors} ${depositors === 1 ? 'member' : 'members'}</button>` : ''}</span><span class="muted num">${s.state === 'Open' ? `${80 - s.count} to go` : s.state === 'Full' ? stage(s) : 'Expired'}</span></div>
+          <div class="row small"><span class="num">${s.count} of 80 Credits in${depositors ? ` · <button type="button" class="link" id="depositors-btn">${depositors} ${depositors === 1 ? 'member' : 'members'}</button>` : ''}</span><span class="muted num" id="to-go">${s.state === 'Open' ? `${80 - s.count} to go` : s.state === 'Full' ? stage(s) : 'Expired'}</span></div>
         </div>`
           : ''
       }
@@ -170,6 +174,10 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         <summary><span>Bids</span><span class="muted small" id="bids-count">…</span></summary>
         <ol class="bid-list" id="bid-list"><li class="muted small">Loading…</li></ol>
       </details>` : ''}
+      <details class="more" id="activity">
+        <summary><span>Activity</span><span class="muted small num" id="activity-count"></span></summary>
+        <ol class="live-list fold-list" id="activity-list"><li class="muted live-empty">Loading…</li></ol>
+      </details>
       <details class="more">
         <summary><span>Details</span><span class="muted small">${ARRANGEMENTS[s.arrangement] ?? 'Deposit order'} · ${s.split === 1 ? 'Early bird' : 'Equal'} payout</span></summary>
         <dl class="facts">
@@ -189,6 +197,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   hydrate(app);
   document.getElementById('depositors-btn')?.addEventListener('click', () => openDepositors(b, account ?? null));
   loadBids(s.address, account ?? null);
+  void activityFold(s.address);
   // Chrome keeps a focus ring on <summary> after a mouse click; drop it for pointer use only.
   app.querySelectorAll<HTMLElement>('.more summary').forEach((el) => el.addEventListener('pointerup', () => setTimeout(() => el.blur(), 0)));
   fillGhosts(app);
@@ -382,7 +391,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
   // Your Credits in this party as tiles: pick some to withdraw just those, or leave none picked to take all.
   const withdraw = (primary = false) =>
     myIds.size
-      ? `<div class="yours-in"><p class="small fit-row"><span>Yours in this Credit Union <span class="muted num">${myIds.size}</span></span><span id="w-actions"><button type="button" class="link small" id="w-clear" hidden>Clear</button></span></p>
+      ? `<div class="yours-in"><p class="small fit-row"><span><strong class="num">${myIds.size}</strong> of your Credits ${myIds.size === 1 ? 'is' : 'are'} in this Credit Union.</span><span id="w-actions"><button type="button" class="link small" id="w-clear" hidden>Clear</button></span></p>
         <div class="picker" id="w-picker">${[...myIds].map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="false" aria-label="Credit #${id}"><img src="${art(BigInt(id))}" alt="" loading="lazy"></button>`).join('')}</div>
         <button class="btn block${primary ? ' primary' : ''}" id="withdraw">Withdraw all ${plural(myIds.size)}</button></div>`
       : '';
@@ -473,7 +482,12 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
   }
 
   const hasMin = s.highBid > 0n || s.minBid > 1n;
-  const net = (s.highBid * 99n) / 100n / 80n;
+  // What settling now would pay you, as Batch.settle splits it: the bid less the protocol and creator fees, over
+  // 80 shares (Equal) or 12,640 units (Early bird, where your positions weigh 237 - 2i units each).
+  const early = s.split === 1;
+  const myUnits = early ? b.ids.reduce((n, id, i) => (myIds.has(String(id)) ? n + 237n - 2n * BigInt(i) : n), 0n) : BigInt(m?.shares ?? 0);
+  const perUnit = (s.highBid - (s.highBid * BigInt(s.protocolFeeBps)) / 10_000n - (s.highBid * BigInt(s.creatorFeeBps)) / 10_000n) / (early ? 12_640n : 80n);
+  const myShare = early ? sharePct(Number(myUnits) / 12_640) : `${m?.shares ?? 0}/80`;
   return `<div class="box">
     <div class="bid-now">
       <div><span>${s.highBid ? 'Current bid' : hasMin ? 'Reserve' : 'Opening bid'}</span><strong class="num">${s.highBid ? eth(s.highBid) : hasMin ? eth(s.minBid) : 'Any'}</strong><em class="sub">${s.highBid ? `by ${who(s.highBidder, 'sm', true)}` : 'The clock starts at the first bid.'}</em></div>
@@ -487,20 +501,17 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
              <p class="small muted">${hasMin ? `Min ${minEth(s.minBid)}. ` : ''}Outbid ETH returns instantly. Credit Union is unofficial and experimental, so use it at your own risk.</p>`
           : connect
     }
-    ${m?.shares ? `<p class="small">Your share <strong class="num">${m.shares}/80</strong>${s.highBid ? ` · <span class="num">≈${eth(net * BigInt(m.shares))}</span> now` : ''}</p>` : ''}
+    ${m?.shares ? `<p class="small">Your share <strong class="num">${myShare}</strong>${s.highBid ? ` · <span class="num">≈${eth(perUnit * myUnits)}</span> now` : ''}</p>` : ''}
     ${owed}
   </div>`;
 }
 
-const MAX_BUY = 24; // the most one sweep takes, as on trait pages
-
-
 function buyPane(connected: boolean) {
-  // How many and the running total on one line; the Credits; then one button that carries the price.
-  return `<div class="buy-head">${rangeHtml('buy-n', 1, MAX_BUY, 1, false)}<span class="sweep-total num" id="buy-sub"></span></div>
-    <div class="listings" id="listings">${'<span class="listing skel" aria-hidden="true"><span class="art"></span><span class="price"></span></span>'.repeat(5)}</div>
-    ${connected || !config.sweeper ? `<button class="btn primary block" id="buy-go" disabled>Buy &amp; deposit</button>` : '<button class="btn primary block" data-connect>Connect to buy</button>'}
-    <p class="muted small buy-source">One transaction buys the cheapest Credits that fit (OpenSea, FWA, CreditStrategy) and deposits them here in your name. <span id="buy-fee">2%</span> fee.</p>
+  // How many and what it comes to, as on every Buy; the Credits; then the button, as on the Deposit tab.
+  return `<div class="buy-row">${sweepRow('buy', 1, MAX_SWEEP, 1)}</div>
+    <div class="trait-grid listings" id="listings">${'<div class="cc skel" aria-hidden="true"><span class="cc-art"></span><span class="cc-cap"></span></div>'.repeat(8)}</div>
+    ${connected || !config.sweeper ? `<button class="btn primary block" id="buy-go" disabled>Buy &amp; deposit</button>` : connectToBuy(true)}
+    <p class="muted small buy-source">One transaction buys the cheapest Credits that fit (OpenSea, FWA, CreditStrategy) and deposits them here in your name.</p>
 `;
 }
 
@@ -662,8 +673,36 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
       }),
     );
     if (document.querySelector('[data-add="buy"][aria-selected="true"]')) buy();
+    drawToGo(s);
   }
 }
+
+/// "72 to go · Buy now": Buy now opens the Buy tab with its slider at the most one buy takes; the rest takes as many
+/// buys as it needs. Where buying isn't on (testnets), just what's left.
+function drawToGo(s: Ctx['s']) {
+  const el = document.getElementById('to-go');
+  if (!el || s.state !== 'Open') return;
+  const room = 80 - s.count;
+  if (!config.sweeper || room <= 0) return void (el.textContent = `${room} to go`);
+  el.innerHTML = `${room} to go · <button type="button" class="link" id="finish">Buy now</button>`;
+  el.querySelector('#finish')!.addEventListener('click', () => {
+    const tab = document.querySelector<HTMLButtonElement>('[data-add="buy"]');
+    if (tab?.getAttribute('aria-selected') !== 'true') {
+      buyMost = true; // taken up when the Buy tab first loads its listings
+      tab?.click();
+    }
+    // Loaded already (open now, or opened before): its slider goes to the most now.
+    const range = document.getElementById('buy-n') as HTMLInputElement | null;
+    if (range && document.querySelector('#listings .cc:not(.skel)')) {
+      buyMost = false;
+      range.value = range.max;
+      range.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    document.querySelector('[data-pane="buy"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+}
+/// The next Buy tab to open starts at the most one buy takes (Buy the rest).
+let buyMost = false;
 
 async function drawPicker(
   b: Ctx,
@@ -676,7 +715,11 @@ async function drawPicker(
   const el = document.getElementById('picker');
   if (!el) return;
   const room = 80 - s.count;
-  const passing = await eligible(s.address, m.owned);
+  const passing = await eligible(s.address, m.owned).catch(() => null);
+  if (!passing) {
+    if (el.isConnected) el.innerHTML = `<p class="muted small">Couldn’t check your Credits against this Credit Union right now. Refresh to try again.</p>`;
+    return;
+  }
   // A painted sheet takes a Credit only while a slot of its value (or an open slot) is free: read each Credit's
   // value as the batch will (Batch._keyOf) and the slot books as they stand. Unreadable: the rules alone, and
   // the deposit's test run below still drops any Credit without a slot.
@@ -862,6 +905,13 @@ async function drawPicker(
 }
 
 const quotedCount = (q: Quote) => q.ids.length + (q.fwa?.length ?? 0) + (q.strategy?.length ?? 0);
+/// What a quote charges for each Credit in it, by id: OpenSea's orders, FWA's listings and CreditStrategy's.
+const quotedPrices = (q: Quote) =>
+  new Map<string, bigint>([
+    ...q.ids.map((id, i) => [id, BigInt(q.prices[i])] as const),
+    ...(q.fwa ?? []).map((f) => [f.id, BigInt(f.price)] as const),
+    ...(q.strategy ?? []).map((f) => [f.id, BigInt(f.price)] as const),
+  ]);
 
 /// The Buy tab: drag for how many and the cheapest listings that fit fill in, with prices. One click gets a signed
 /// price for exactly those and opens the wallet. Where buy-in is off (testnets), it previews edition Credits, disabled.
@@ -878,9 +928,13 @@ async function bindBuy(
   const go = document.getElementById('buy-go') as HTMLButtonElement | null;
   if (!line || !grid) return;
   const room = 80 - b.s.count;
-  // The art opens the Credit's page; the source mark opens the listing on its marketplace.
-  const tile = (id: string | number, src: string, price: string | null, source?: Source, url?: string) =>
-    `<div class="listing" data-id="${id}"><span class="art"><a class="art-link" href="/credit/${id}" title="Credit #${id}"><img src="${src}" alt="Credit #${id}" loading="lazy" decoding="async"></a>${price === null ? '' : `<button type="button" class="skip" aria-label="Skip Credit #${id}" title="Skip">×</button>`}</span><span class="price num">${source ? sourceMark(id, source, url) : ''}${price === null ? `#${id}` : `${minEth(BigInt(price))} ETH`}</span></div>`;
+  // Credits whose price went up at the last click: their new price shows in red until the next.
+  const rose = new Set<string>();
+  // The Credits tile of every grid: the art opens the Credit's page, the price's mark the listing, × skips it.
+  const tile = (l: { id: string; price: string | null; source?: Source; url?: string }) =>
+    l.price === null || !l.source
+      ? creditCell(Number(l.id))
+      : creditCell(Number(l.id), priceTag({ id: l.id, price: l.price, source: l.source, url: l.url }, rose.has(l.id)), { skip: true });
 
   let listings: { id: string; price: string; source?: Source; url?: string; traits?: number }[] = [];
   // preview: no OpenSea key here, so edition Credits stand in. mainnetOnly: real mainnet listings and prices,
@@ -909,13 +963,12 @@ async function bindBuy(
   const skipped = new Set<string>();
   // The slider reaches as far as there are open slots and listings (the cheapest that many fill the row).
   const range = document.getElementById('buy-n') as HTMLInputElement | null;
-  if (range) setRange(range, Math.min(Number(range.value), room, pool.length || 1), Math.min(MAX_BUY, room, pool.length || 1));
-  const want = () => Math.min(Number(range?.value ?? 1), room, MAX_BUY);
+  if (range) setRange(range, Math.min(buyMost ? MAX_SWEEP : Number(range.value), room, pool.length || 1), Math.min(MAX_SWEEP, room, pool.length || 1));
+  buyMost = false;
+  const want = () => Math.min(Number(range?.value ?? 1), room, MAX_SWEEP);
   let feeBps = 200n;
-  const feeEl = document.getElementById('buy-fee');
   void sweepFee().then((b) => {
     feeBps = b;
-    if (feeEl) feeEl.textContent = `${Number(b) / 100}%`;
     if (grid.isConnected) draw();
   });
   // Testnet showing mainnet listings: the testnet sheet can't judge mainnet Credits, so book them against its
@@ -936,12 +989,10 @@ async function bindBuy(
   const draw = () => {
     const pick = chosen();
     grid.classList.toggle('preview', preview);
-    grid.innerHTML = pick.map((l) => tile(l.id, preview || mainnetOnly ? editionArt(Number(l.id)) : art(BigInt(l.id)), l.price, l.source, l.url)).join('');
-    const sub = pick.reduce((a, l) => a + (l.price ? BigInt(l.price) : 0n), 0n);
+    grid.innerHTML = pick.map(tile).join('');
     // The price with the Sweeper's fee in, as the wallet will ask.
-    const subEl = document.getElementById('buy-sub');
-    const pay = sub + (sub * feeBps) / 10_000n;
-    if (subEl) subEl.textContent = pick.length && !preview ? `${(Number(pay) / 1e18).toFixed(4)} ETH` : '';
+    const totalEl = document.getElementById('buy-total');
+    if (totalEl) totalEl.innerHTML = preview ? '' : sweepTotal(pick.reduce((a, l) => a + (l.price ? BigInt(l.price) : 0n), 0n), feeBps, pick.length);
     line.textContent = (preview || mainnetOnly
       ? '' // testnet: the banner already says it's a preview
       : !pool.length
@@ -960,7 +1011,7 @@ async function bindBuy(
     draw();
   });
   grid.addEventListener('click', (e) => {
-    const t = (e.target as HTMLElement).closest('.skip')?.closest<HTMLElement>('.listing');
+    const t = (e.target as HTMLElement).closest('.skip')?.closest<HTMLElement>('.cc');
     if (!t || preview) return;
     skipped.add(t.dataset.id!);
     draw();
@@ -973,6 +1024,7 @@ async function bindBuy(
   go.addEventListener('click', async () => {
     const picked = chosen();
     if (!picked.length) return;
+    let repriced = false;
     await run(go, 'Buying…', async () => {
       const r = await fetch(`/opensea/quote?batch=${batch}&ids=${picked.map((l) => l.id).join(',')}`);
       const q = (await r.json()) as Quote;
@@ -982,6 +1034,21 @@ async function bindBuy(
         pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'quote', args: [BigInt(q.total)] }),
         pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'feeBps' }),
       ])) as [bigint, bigint];
+      // Never ask the wallet for more than the page shows. A Credit relisted higher since the page loaded (or a
+      // raised fee) stops here: the tiles and total take the new prices, and the next click pays what they show.
+      const now = quotedPrices(q);
+      const shown = new Map(picked.map((l) => [l.id, BigInt(l.price ?? 0)]));
+      const sub = [...now.keys()].reduce((a, id) => a + (shown.get(id) ?? 0n), 0n);
+      const up = [...now].filter(([id, p]) => !shown.has(id) || p > shown.get(id)!).map(([id]) => id);
+      if (up.length || value > sub + (sub * feeBps) / 10_000n) {
+        for (const l of pool) if (now.has(l.id)) l.price = String(now.get(l.id));
+        for (const l of picked) if (!now.has(l.id)) skipped.add(l.id); // sold since: the next cheapest takes its place
+        rose.clear();
+        up.forEach((id) => rose.add(id));
+        feeBps = fee;
+        repriced = true;
+        throw new Error('Prices went up since this page loaded. Check the new total, then buy.');
+      }
       const fwa = (q.fwa ?? []).map((f) => ({ listingId: BigInt(f.listingId), price: BigInt(f.price) }));
       const strategy = (q.strategy ?? []).map((f) => ({ tokenId: BigInt(f.id), price: BigInt(f.price) }));
       await send(
@@ -994,6 +1061,7 @@ async function bindBuy(
       if (n < picked.length) toast(`${picked.length - n} sold before you got to them.`, 'info', 8000);
       justJoined(batch, n);
     }, '');
+    if (repriced) draw(); // after run() puts the button back, so it takes the new count
   });
 }
 

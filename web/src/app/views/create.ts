@@ -4,7 +4,7 @@ import { decodeEventLog, parseEther } from 'viem';
 import { creditsAbi, factoryAbi } from '../abi';
 import { canBatch, config, send, sendBatch, session } from '../chain';
 import { INK, maskInks, maskLabel } from '../traits';
-import { SPLITS, creatorFeeBps, factoryRatings, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Rated } from '../data';
+import { SPLITS, creatorFeeBps, factoryRatings, isApproved, listBatches, minOpen, myCredits, protocolFeeBps, ratings, type Listed, type Rated, type Summary } from '../data';
 import { paletteBit, TRAITS } from '../traits';
 import { $$, art, errText, esc, fromUtcInput, openModal, sameUtcDay, sheet, toast, toUtcInput, utc } from '../ui';
 import { LAYOUT_TRAITS, keyOf, ruleFor, slotMark, slotName, type LayoutTrait } from '../../shared/layout';
@@ -187,7 +187,7 @@ export async function create(app: HTMLElement) {
     return;
   }
 
-  const [owned, approved, min, protocolBps, creatorBps, table, minutes] = await Promise.all([
+  const [owned, approved, min, protocolBps, creatorBps, table, minutes, unions] = await Promise.all([
     myCredits(session.account),
     isApproved(session.account),
     minOpen(),
@@ -195,6 +195,7 @@ export async function create(app: HTMLElement) {
     creatorFeeBps(),
     factoryRatings(),
     fetch('/minutes.json').then((r) => r.json() as Promise<Minutes>).catch(() => [] as Minutes),
+    listBatches().catch(() => [] as Listed[]),
   ]);
   const rules: Rules = { palettes: 0, prints: 0, weights: 0, eights: 0, minuteFrom: -1, minuteTo: -1, idFrom: 0, idTo: 0, minScore: 0, maxScore: 0, bitsFrom: 0, bitsTo: 0, list: [] };
   const artOf = (id: bigint) => (config.chainId === 1 ? art(id) : `/art/mainnet/${id}.svg`);
@@ -346,6 +347,7 @@ export async function create(app: HTMLElement) {
 
 
       <div class="submit">
+        <p class="hint" id="same" hidden></p>
         <p class="gate-warn" id="warn" hidden></p>
         <button class="btn primary block" id="go" disabled>Start Credit Union</button>
         <p class="hint" id="why"></p>
@@ -454,8 +456,41 @@ export async function create(app: HTMLElement) {
     });
   }
 
+  /// The rules as the factory takes them (Batch.Filter).
+  function filterOf() {
+    return {
+      palettes: pal(),
+      prints: rules.prints,
+      weights: rules.weights,
+      eights: rules.eights,
+      paidFrom: BigInt(rules.minuteFrom >= 0 ? minutes[rules.minuteFrom][0] : 0),
+      paidTo: BigInt(rules.minuteTo >= 0 ? minutes[rules.minuteTo][0] + 59 : 0),
+      idFrom: BigInt(rules.idFrom),
+      idTo: BigInt(rules.idTo),
+      minScore: rules.minScore,
+      maxScore: rules.maxScore,
+      layout0: layout.slice(0, 64).reduce((acc, m, i) => acc | (BigInt(m) << BigInt(4 * i)), 0n),
+      layout1: layout.slice(64).reduce((acc, m, i) => acc | (BigInt(m) << BigInt(4 * i)), 0n),
+      bitsFrom: rules.bitsFrom,
+      bitsTo: rules.bitsTo,
+      layoutTrait: layout.some(Boolean) ? layoutTrait : 0,
+    };
+  }
+  /// An open Credit Union that already takes exactly these Credits, so a second one doesn't split them.
+  const sameAs = (f: ReturnType<typeof filterOf>, g: Summary['filter']) =>
+    (['palettes', 'prints', 'weights', 'eights', 'minScore', 'maxScore', 'bitsFrom', 'bitsTo', 'layoutTrait'] as const).every((k) => Number(f[k]) === Number(g[k])) &&
+    (['paidFrom', 'paidTo', 'idFrom', 'idTo', 'layout0', 'layout1'] as const).every((k) => BigInt(f[k]) === BigInt(g[k]));
+  function drawSame() {
+    const el = document.getElementById('same')!;
+    const f = filterOf();
+    const twin = rules.list.length ? null : unions.find(({ s }) => s.state === 'Open' && s.count < 80 && !s.allowlistSize && sameAs(f, s.filter));
+    el.hidden = !twin;
+    if (twin) el.innerHTML = `<a href="/union/${twin.s.address}">${esc(twin.s.name || 'Untitled')}</a> already takes these Credits, ${twin.s.count} of 80 in.`;
+  }
+
   function refresh() {
     if (panesReady) applyPanes();
+    drawSame();
     drawSee();
     const fit = owned.filter(qualifies);
     for (const id of [...picks]) if (!fit.some((f) => f.toString() === id)) picks.delete(id);
@@ -1247,23 +1282,7 @@ export async function create(app: HTMLElement) {
     const arr = chosen === 4 && !layout.some(Boolean) ? 0 : chosen; // Painted with nothing painted burns in deposit order
     const split = Number((app.querySelector('input[name=split]:checked') as HTMLInputElement).value);
     const ids = [...picks].map(BigInt);
-    const f = {
-      palettes: pal(),
-      prints: rules.prints,
-      weights: rules.weights,
-      eights: rules.eights,
-      paidFrom: BigInt(rules.minuteFrom >= 0 ? minutes[rules.minuteFrom][0] : 0),
-      paidTo: BigInt(rules.minuteTo >= 0 ? minutes[rules.minuteTo][0] + 59 : 0),
-      idFrom: BigInt(rules.idFrom),
-      idTo: BigInt(rules.idTo),
-      minScore: rules.minScore,
-      maxScore: rules.maxScore,
-      layout0: layout.slice(0, 64).reduce((acc, m, i) => acc | (BigInt(m) << BigInt(4 * i)), 0n),
-      layout1: layout.slice(64).reduce((acc, m, i) => acc | (BigInt(m) << BigInt(4 * i)), 0n),
-      bitsFrom: rules.bitsFrom,
-      bitsTo: rules.bitsTo,
-      layoutTrait: layout.some(Boolean) ? layoutTrait : 0,
-    };
+    const f = filterOf();
     go.disabled = true;
     go.dataset.busy = '1'; // progress labels below own the button until this finishes
     try {

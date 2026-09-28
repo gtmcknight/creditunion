@@ -45,8 +45,20 @@ export const sourceMark = (id: string | number, source: Source, url?: string) =>
 
 type Listed = { id: string; price: string; source: Source; url?: string; hash?: string; protocol?: string; listingId?: string };
 
-/// The most one sweep takes (the worker's quote allows as many).
-const MAX_SWEEP = 24;
+/// The most one buy takes, on every Buy (the worker's quote allows as many).
+export const MAX_SWEEP = 24;
+
+/// Every Buy the same: a slider for how many, with the count beside it (the button can't always say it: signed out
+/// it asks to connect), then what the wallet will ask, fee in (sweepTotal fills it). On phones the slider takes its
+/// own line. `key` names the parts: #<key>-n, #<key>-total.
+export const sweepRow = (key: string, min: number, max: number, value: number) =>
+  `${rangeHtml(`${key}-n`, min, max, value)}<span class="sweep-total num" id="${key}-total"></span>`;
+export const sweepTotal = (sum: bigint, bps: bigint, n: number, hint = '') =>
+  n
+    ? `<span>${(Number(sum + (sum * bps) / 10_000n) / 1e18).toFixed(4)} ETH</span>${bps ? `<span class="muted small">incl. ${Number(bps) / 100}% fee</span>` : ''}`
+    : hint && `<span class="muted">${hint}</span>`;
+/// Signed out, every Buy button connects first.
+export const connectToBuy = (block = false) => `<button class="btn primary${block ? ' block' : ''}" data-connect>Connect to buy</button>`;
 /// Buying runs where the Sweeper is deployed (mainnet); elsewhere the prices are mainnet's, as a preview.
 const canBuy = (preview?: boolean) => !preview && !!config.sweeper;
 /// The Sweeper's fee on every buy, read once, so the price says it before the wallet does. Where there's no
@@ -128,9 +140,10 @@ export async function loadSale(trait?: string): Promise<Sale | null> {
   }
 }
 
-/// A listed Credit's price under its number: the marketplace's mark, then the price.
-export const priceTag = (l: Listed) =>
-  `<span class="cc-price num" title="On ${SOURCES[l.source].name}"><img class="src" src="${SOURCES[l.source].icon}" alt="${SOURCES[l.source].name}">${minEth(BigInt(l.price))}</span>`;
+/// A listed Credit's price under its number: the marketplace's mark, then the price. `up`: it rose since the page
+/// loaded (a union's Buy stopped on it), shown in red.
+export const priceTag = (l: Listed, up = false) =>
+  `<span class="cc-price num${up ? ' up' : ''}" title="On ${SOURCES[l.source].name}"><img class="src" src="${SOURCES[l.source].icon}" alt="${SOURCES[l.source].name}">${minEth(BigInt(l.price))}</span>`;
 
 /// Sweep: drag the slider to take the cheapest that many (up to MAX_SWEEP), or tap listed Credits' squares to pick
 /// them one by one. The picked are outlined in `grid` wherever they are; the button carries their total.
@@ -139,12 +152,14 @@ export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement) 
   // Nothing picked to start: drag, or tap Credits.
   const picked = new Set<string>();
   // The price sits between the slider and the button and moves as you drag; the button carries the count.
-  host.innerHTML = `<span class="muted">Sweep</span>${rangeHtml('sale-n', 0, Math.min(MAX_SWEEP, sale.ls.length), 0, false)}<span class="sweep-total num" id="sale-total"></span><button class="btn primary" id="sale-go"${canBuy(sale.preview) ? '' : ' disabled title="Mainnet prices, shown as a preview"'}>Buy</button>`;
+  const signedOut = canBuy(sale.preview) && !session.account;
+  host.classList.add('buy-row');
+  host.innerHTML = `${sweepRow('sale', 0, Math.min(MAX_SWEEP, sale.ls.length), 0)}${signedOut ? connectToBuy() : `<button class="btn primary" id="sale-go"${canBuy(sale.preview) ? '' : ' disabled title="Mainnet prices, shown as a preview"'}>Buy</button>`}`;
   const totalEl = host.querySelector<HTMLElement>('#sale-total')!;
   const range = host.querySelector<HTMLInputElement>('#sale-n')!;
-  const go = host.querySelector<HTMLButtonElement>('#sale-go')!;
+  const go = host.querySelector<HTMLButtonElement>('#sale-go');
   const chosen = () => sale.ls.filter((l) => picked.has(l.id)); // in price order
-  go.addEventListener('click', async () => {
+  go?.addEventListener('click', async () => {
     if (!picked.size) return;
     const mine = [...picked];
     const cells = () => mine.map((id) => grid.querySelector<HTMLElement>(`.cc[data-id="${id}"]`)).filter((c): c is HTMLElement => !!c);
@@ -177,11 +192,8 @@ export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement) 
     setRange(range, picked.size, Math.min(MAX_SWEEP, sale.ls.length));
     grid.querySelectorAll<HTMLElement>('.cc').forEach((c) => c.classList.toggle('sel', picked.has(c.dataset.id!)));
     // What the wallet will ask: the listings plus the Sweeper's fee (sweepToWallet reads the exact quote on click).
-    const total = chosen().reduce((a, l) => a + BigInt(l.price), 0n);
-    const pay = total + (total * bps) / 10_000n;
-    totalEl.innerHTML = picked.size
-      ? `<span>${(Number(pay) / 1e18).toFixed(4)} ETH</span>${bps ? `<span class="muted small">incl. ${Number(bps) / 100}% fee</span>` : ''}`
-      : '<span class="muted">Drag or tap Credits</span>';
+    totalEl.innerHTML = sweepTotal(chosen().reduce((a, l) => a + BigInt(l.price), 0n), bps, picked.size, 'Drag or tap Credits');
+    if (!go) return;
     go.textContent = picked.size ? `Buy ${picked.size}` : 'Buy';
     if (!sale.preview && config.sweeper) go.disabled = !picked.size;
   };

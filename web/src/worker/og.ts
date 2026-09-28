@@ -20,7 +20,7 @@ const CARDS: Record<string, Card> = {
   time: { title: 'Time · Credit Union', description: 'Pick a stretch of the mint and see every Credit paid in it.', image: '/og/home.png' },
   rating: { title: 'Rating · Credit Union', description: 'Pick a range of ratings and see every Credit in it.', image: '/og/home.png' },
   bits: { title: 'Bits · Credit Union', description: 'Pick a range of Bits and see every Credit in it.', image: '/og/home.png' },
-  live: { title: 'Activity · Credit Union', description: 'Every deposit, buy, bid and new Credit Union, as it happens.', image: '/og/home.png' },
+  activity: { title: 'Activity · Credit Union', description: 'Every deposit, buy, bid and new Credit Union, as it happens.', image: '/og/home.png' },
   og: { title: 'Link previews · Credit Union', description: 'Every page’s link card.', image: '/og/home.png' },
 };
 
@@ -38,8 +38,8 @@ export function cardFor(path: string): Card | null {
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
-/// index.html with this route's head tags.
-export function withCard(html: Response, card: Card, url: URL): Response {
+/// index.html with this route's head tags, and `head` (the app's boot data) after them.
+export function withCard(html: Response, card: Card, url: URL, head = ''): Response {
   // `v` changes when the cards are redrawn, so sites that cached the old image by URL fetch the new one.
   const image = `${url.origin}${card.image}${card.image.includes('?') ? '&' : '?'}v=${CARDS_V}`;
   const page = `${url.origin}${url.pathname}`;
@@ -62,7 +62,7 @@ export function withCard(html: Response, card: Card, url: URL): Response {
   const res = new HTMLRewriter()
     .on('title', { element: (e) => void e.setInnerContent(card.title) })
     .on('meta[name="description"]', { element: (e) => void e.setAttribute('content', card.description) })
-    .on('head', { element: (e) => void e.append(`  ${tags}\n`, { html: true }) })
+    .on('head', { element: (e) => void e.append(`  ${tags}\n${head ? `  ${head}\n` : ''}`, { html: true }) })
     .transform(html);
   const out = new Response(res.body, res);
   out.headers.set('cache-control', 'no-cache'); // always revalidate: a stale shell would point at old asset hashes after a deploy

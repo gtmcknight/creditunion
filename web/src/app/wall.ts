@@ -6,15 +6,19 @@
 ///   Stream   the mint replayed: each second of payments a column, stacked as they landed.
 ///   One by one  one Credit at a time, large, with its number, second, inks and bits.
 /// A living band on the About page; Expand grows whatever view is on to the full window.
-/// Data: public/wall.bin (scripts/wall.ts: 32 bytes per Credit, a 4-bit CMYK mask per cell) and times.bin, plus
-/// edition-traits.bin (palette) and bits.bin (scripts/wall.ts), read only once a view or caption needs them.
+/// Data: times.bin, then the prints of wall.bin (scripts/wall.ts: 32 bytes per Credit, a 4-bit CMYK mask per cell) a
+/// block at a time as the views reach them, whole only for Color and Density; edition-traits.bin (palette) and
+/// bits.bin (scripts/wall.ts) once a view or caption needs them. One by one draws each Credit's own art (/art).
 import { bin, fetchBin } from './bins';
 import { utc } from './ui';
 
 /// Subtractive mixes as the contract's SVG draws them, indexed by the 4-bit CMYK mask (0 = paper).
 const PALETTE = ['#ffffff', '#00b5e2', '#e4007c', '#00006e', '#ffd100', '#009400', '#e40000', '#000000', '#111111', '#000c0f', '#0f0008', '#000007', '#110e00', '#000a00', '#0f0000', '#000000'];
 // RGBA packed little-endian for a Uint32 view of ImageData.
-export const PAL32 = PALETTE.map((h) => (255 << 24) | (parseInt(h.slice(5, 7), 16) << 16) | (parseInt(h.slice(3, 5), 16) << 8) | parseInt(h.slice(1, 3), 16));
+const rgba = (h: string) => (255 << 24) | (parseInt(h.slice(5, 7), 16) << 16) | (parseInt(h.slice(3, 5), 16) << 8) | parseInt(h.slice(1, 3), 16);
+export const PAL32 = PALETTE.map(rgba);
+/// One by one's ground (the site's light --bg), so each Credit's white paper reads as a sheet.
+const GROUND = rgba('#eeeeec');
 const LETTERS = 'CMYK';
 const inks = (m: number) => [...LETTERS].filter((_, b) => m & (1 << b)).join('');
 
@@ -59,10 +63,6 @@ export const loadPalette = () =>
     throw e;
   });
 export const loadBits = () => bin('bits.bin').then((b) => new Uint16Array(b));
-
-let edition: Promise<Edition> | null = null;
-export const loadEdition = () =>
-  (edition ??= Promise.all([loadCells(), loadTimes()]).then(([cells, { times }]) => ({ cells, times, n: cells.length / 32, palette: null, bits: null })));
 
 /// The prints a block at a time (wall/<k>.bin, WALL_BLOCK Credits each, cut at build by scripts/bins.mjs), for views
 /// that draw only a stretch of the mint. `cells` has wall.bin's layout and fills in as blocks land; `has(i)` says
@@ -174,8 +174,12 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
     </div>
   </figure>`;
   const cv = host.querySelector('canvas')!;
-  const e = await loadEdition().catch(() => null);
-  if (!e || !cv.isConnected) return;
+  // Payment times first; prints come a block of wall.bin at a time as a view reaches them (the band's first
+  // screen is one 81 KB block, not all 2.3 MB). Color and Density scatter across the edition, so they load it whole.
+  const mint = await loadTimes().catch(() => null);
+  if (!mint || !cv.isConnected) return;
+  const prints = printsFor(mint.n);
+  const e: Edition = { cells: prints.cells, times: mint.times, n: mint.n, palette: null, bits: null };
 
   const day = utc({ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   const sec = utc({ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -197,6 +201,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
   /// Palette and Bits load the first time a view (or the paused hover card) shows them.
   const needs = (m: Mode | 'card') =>
     Promise.all([
+      (m === 'color' || m === 'density') && !fullCells ? loadCells() : null,
       (m === 'color' || m === 'one' || m === 'card') && !pals.length
         ? loadPalette().then((p) => {
             if (pals.length) return;
@@ -269,8 +274,25 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
   // the pointer.
   const drawn: number[] = [];
   const put = (id: number, x: number, y: number, k: number) => {
-    tile(px!, W, H, e.cells, id, x, y, k);
+    tile(px!, W, H, fullCells ?? prints.cells, id, x, y, k);
     if (x < W && y < H && x + 8 * k > 0 && y + 8 * k > 0) drawn.push(id, x, y, 8 * k);
+  };
+  // The blocks of prints a view is about to draw (Credit indexes i0..i1-1); it draws again once they land.
+  let redrawing = false;
+  const redraw = () => {
+    if (redrawing) return;
+    redrawing = true;
+    requestAnimationFrame(() => {
+      redrawing = false;
+      if (cv.isConnected) frame();
+    });
+  };
+  const reach = (i0: number, i1: number) => {
+    i0 = Math.max(0, i0);
+    i1 = Math.min(e.n, i1);
+    if (fullCells || i1 <= i0) return;
+    for (let k = Math.floor(i0 / WALL_BLOCK); k <= Math.floor((i1 - 1) / WALL_BLOCK); k++)
+      if (!prints.has(k * WALL_BLOCK)) return void prints.need(i0, i1).then(redraw, () => {});
   };
   const scrubbable = () => mode === 'stream' || mode === 'one';
   let scrubbing = false;
@@ -328,6 +350,12 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
       nowEl.textContent = `${pals.length} ink combinations`;
     } else {
       const cols = Math.ceil(e.n / rows);
+      if (mode === 'time') {
+        // Payment order: the columns on screen and a screen ahead are one run of indexes (two at the wrap).
+        const c0 = first % cols;
+        reach(c0 * rows, (c0 + 2 * vis) * rows);
+        if (c0 + 2 * vis > cols) reach(0, (c0 + 2 * vis - cols) * rows);
+      }
       for (let c = 0; c < vis; c++) {
         const col = (first + c) % cols;
         for (let r = 0; r < rows; r++) {
@@ -350,6 +378,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
     const anchor = Math.round(W * 0.7);
     const from = clock - anchor / perSec, to = clock + (W - anchor) / perSec;
     const base = H - stripH() - Math.round(8 * DPR);
+    reach(atOrAfter(Math.floor(from)), atOrAfter(Math.ceil(to) + 60)); // the window, and a minute of the mint ahead
     let col = -1, stack = 0;
     for (let i = atOrAfter(Math.floor(from)); i < e.n && e.times[i] <= to; i++) {
       const t = e.times[i];
@@ -371,20 +400,51 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
   let pos = 2; // Credits advanced, fractional (from #3: the first two are Jack's own)
   const HOLD = 0.66; // share of each beat spent still
   const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+  // One Credit on its own is drawn as its contract draws it (/art: misprints, paper and eights marks included),
+  // rasterised once per size; wall.bin's registered print stands in until that arrives. (index, x, y, size) each.
+  const arts: number[] = [];
+  const art = new Map<number, { size: number; img: HTMLCanvasElement | null }>();
+  const artFor = (i: number, size: number) => {
+    const a = art.get(i);
+    if (a?.size === size) return a.img;
+    const entry = { size, img: null as HTMLCanvasElement | null };
+    art.set(i, entry);
+    const img = new Image();
+    img.src = `/art/mainnet/${i + 1}.svg`;
+    img
+      .decode()
+      .then(() => {
+        const c = document.createElement('canvas');
+        c.width = c.height = size;
+        c.getContext('2d')!.drawImage(img, 0, 0, size, size);
+        entry.img = c;
+        if (art.get(i) === entry && mode === 'one') redraw();
+      })
+      .catch(() => art.get(i) === entry && art.delete(i));
+    return null;
+  };
   const one = () => {
-    // Big in the band; in the full window, large but with room around it.
+    // Each Credit whole on its paper (twice the print), as large as the band allows.
     const room = H - stripH();
-    const k = Math.max(2, Math.floor(Math.min(room - Math.round(24 * DPR), Math.max(room * 0.6, 200 * DPR)) / 8));
-    const size = 8 * k;
-    const gap = Math.round(size * 0.35);
+    const k = Math.max(1, Math.floor((room - Math.round(48 * DPR)) / 16)); // device pixels per cell
+    const paper = 16 * k, size = 8 * k;
+    const gap = Math.round(paper * 0.12);
     const i = Math.floor(pos), frac = pos - i;
     const t = frac < HOLD ? 0 : ease((frac - HOLD) / (1 - HOLD));
-    const cx = Math.round(W / 2 - size / 2 - t * (size + gap));
-    const y = Math.round((room - size) / 2);
+    const cx = Math.round(W / 2 - paper / 2 - t * (paper + gap));
+    const y = Math.round((room - paper) / 2);
+    reach(i - 3, i + 12);
+    arts.length = 0;
     for (let d = -3; d <= 3; d++) {
       const id = (i + d + e.n) % e.n;
-      put(id, cx + d * (size + gap), y, k);
+      const x = cx + d * (paper + gap);
+      if (x >= W || x + paper <= 0) continue;
+      for (let r = Math.max(0, y); r < Math.min(H, y + paper); r++) px!.fill(PAL32[0], r * W + Math.max(0, x), r * W + Math.min(W, x + paper)); // its paper
+      put(id, x + size / 2, y + size / 2, k);
+      arts.push(id, x, y, paper);
     }
+    for (let d = 4; d <= 6; d++) artFor((i + d) % e.n, paper); // the next ones, ready before they slide in
+    for (const id of art.keys()) if (Math.abs(id - i) > 12) art.delete(id);
     const cur = t < 0.5 ? i % e.n : (i + 1) % e.n;
     strip(e.times[cur]);
     nowEl.textContent = `#${(cur + 1).toLocaleString()} · ${when(cur, true)} · ${inks(e.palette![cur])} · ${e.bits![cur]} bits`;
@@ -392,13 +452,19 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
 
   const frame = () => {
     if (!px) return;
-    px.fill(PAL32[0]);
+    px.fill(mode === 'one' ? GROUND : PAL32[0]);
     drawn.length = 0;
     if (mode === 'stream') stream();
     else if (mode === 'one') one();
     else grid();
     aboutEl.textContent = ABOUT[mode];
     flush();
+    if (mode !== 'one') return;
+    const g = cv.getContext('2d')!;
+    for (let j = 0; j < arts.length; j += 4) {
+      const c = artFor(arts[j], arts[j + 3]);
+      if (c) g.drawImage(c, arts[j + 1], arts[j + 2]);
+    }
   };
 
   let want: Mode = start; // the view last picked, which may still be loading

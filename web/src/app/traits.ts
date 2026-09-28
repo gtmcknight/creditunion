@@ -83,7 +83,7 @@ export function filterRules(f: Summary['filter'], allowlistSize: number, slotOf:
 
 /// "Palette C, K · Print Registered · Paid Sep 21, 3:05–3:06 PM · #1000–2000 · 80 listed", or "" for an open batch.
 /// Ink colours for a palette mask, C=1 M=2 Y=4 K=8.
-export const INK = ['#00aeef', '#ec008c', '#fff200', '#111111'] as const;
+export const INK = ['#00b5e2', '#e4007c', '#ffd100', '#111111'] as const; // Jack's inks (CreditDrawing.sol)
 export const maskInks = (m: number) => INK.filter((_, b) => m & (1 << b));
 export const maskLabel = (m: number) => [...'CMYK'].filter((_, b) => m & (1 << b)).join('') || 'Any';
 

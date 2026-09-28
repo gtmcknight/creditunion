@@ -1,4 +1,4 @@
-/// /activity: everything wallets have done on Credit Union, newest first, from the chain's event logs. Unions
+/// /activity.json: everything wallets have done on Credit Union, newest first, from the chain's event logs. Unions
 /// started (factory), deposits, withdrawals, burns into a Statement, bids, sales and claims (each union), and
 /// Credits bought through the Sweeper. Scanned forward from where the last scan stopped, so a refresh reads only
 /// the new blocks; the scan state lives in the colo cache and a cold one rescans from the factory's deploy block.

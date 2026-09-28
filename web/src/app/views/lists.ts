@@ -92,7 +92,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yo
         <strong>${esc(s.name || 'Untitled')}</strong>
         <span class="meta-by">${who(s.creator, 'sm', 'nested')}</span>
         <span class="meta-rule" title="${esc(rule)}">${esc(rule)}</span>
-        ${fitText ? `<span class="${fits || mine.size ? 'fit' : ''}">${fitText}</span>` : s.state !== 'Open' ? `<span>${esc(status(s))}</span>` : ''}
+        ${fitText ? `<span class="${fits || mine.size ? 'fit' : ''}">${fitText}</span>` : s.state !== 'Open' ? `<span>${esc(status(s))}</span>` : `<span class="num">${80 - s.count} to go</span>`}
       </div>
       ${cta ? (s.state === 'Open' && mine.size ? `<span class="btn sm cta joined">Joined</span>` : `<span class="btn sm primary cta">${cta}</span>`) : ''}
     </div>

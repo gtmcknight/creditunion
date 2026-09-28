@@ -62,7 +62,7 @@ There is no database or indexer. Credit Unions, slots and bids are read from the
 | `Batch` | One Credit Union: eligibility checks, deposits and withdrawals, lock, burn through the assembler, auction, split, claims. |
 | `Sweeper` | Buys OpenSea listings through Seaport 1.6 and deposits them in the buyer's name. Unused ETH is refunded; listings that sold first are skipped. 2% fee. |
 | `Ratings` | Jack's rating for all 122,154 Credits under one methodology version (`version()`), stored as data contracts and read by eligibility rules. Anyone can call `scoreOf`. The factory can move new Credit Unions to a later version; each Credit Union keeps the table it opened with, and `ratingsHistory()` lists every table used. |
-| `IAssembler` | The adapter a Credit Union calls (never delegatecalls) to burn 80 Credits into a Statement. `MockAssembler` is the testnet version; the mainnet adapter gets written once Jack's Statement contract is published. |
+| `IAssembler` | The adapter a Credit Union calls (never delegatecalls) to burn 80 Credits into a Statement. `MockAssembler` stands in for tests and local chains; the mainnet adapter gets written once Jack's Statement contract is published. |
 
 The factory can deploy with no assembler. Credit Unions fill but never lock, so anyone can always leave. When the adapter is ready, the setter address proposes it once; 30 minutes later anyone activates it and the setter has no further powers. Only then do full Credit Unions start their 5-minute countdowns.
 
@@ -91,8 +91,6 @@ Copy `contracts/.env.example` to `contracts/.env`, fill it in, and load it with 
 
 | Script | Purpose | Env |
 |---|---|---|
-| `DeployTestnet.s.sol` | Sepolia: test Credits (real art, anyone can mint), mock Statement, mock assembler, rating table, factory, Sweeper | `FEE_RECIPIENT` (optional), `STAGED` (optional, no assembler at deploy) |
-| `DeployFactory.s.sol` | Sepolia: a new factory over existing test Credits and Ratings, staged like mainnet | `CREDITS`, `RATINGS`, `SETTER` and `FEE_RECIPIENT` (optional) |
 | `DeployMainnet.s.sol` | Mainnet: rating table, factory, Sweeper | `FEE_RECIPIENT` (required), `SETTER`, `ASSEMBLER`, `RATINGS`, `PROTOCOL_FEE_BPS`, `CREATOR_FEE_BPS`, `SWEEP_FEE_BPS` |
 | `DeployRatings.s.sol` | The rating table on its own | none |
 | `CheckRatings.s.sol` | Read-only: the deployed table matches `data/scores.bin` byte for byte | args `$RATINGS $CREDITS` |
@@ -100,7 +98,6 @@ Copy `contracts/.env.example` to `contracts/.env`, fill it in, and load it with 
 | `Matrix.s.sol` | Local anvil: the end-to-end test matrix (every filter, combinations, arrangements, painted layouts per trait) | run by `web/scripts/e2e-matrix.mjs` |
 
 ```sh
-forge script script/DeployTestnet.s.sol --rpc-url "$SEPOLIA_RPC" --private-key "$PRIVATE_KEY" --broadcast --slow
 forge script script/DeployMainnet.s.sol --rpc-url "$MAINNET_RPC" --private-key "$PRIVATE_KEY" --broadcast --slow
 forge script script/CheckRatings.s.sol --sig "run(address,address)" $RATINGS $CREDITS --rpc-url "$MAINNET_RPC"
 ```
@@ -132,15 +129,20 @@ Worker endpoints:
 
 | Path | |
 |---|---|
-| `/config.json` | chain and contract addresses for the app |
-| `/rpc` | read-only JSON-RPC proxy with a method allowlist, so the RPC key stays server-side |
+| `/config.json` | chain and contract addresses for the app (also written into every page the Worker serves) |
+| `/rpc` | read-only JSON-RPC proxy with a method allowlist, so the RPC key stays server-side; falls back to `FALLBACK_RPC` when the key is over its limit or down |
+| `/unions.json` | every Credit Union with its summary and slots, one cached multicall for all visitors |
+| `/activity.json` | what wallets have done on the site, newest first, from the contracts' events (the Activity page) |
+| `/passes` | which of a wallet's Credits a Credit Union would take, in one multicall |
 | `/art/:id.svg` | Credit art, rendered from the contract and cached |
 | `/ratings`, `/edition/match` | ratings for ids; how many Credits in the edition fit a rule set |
 | `/opensea/listings`, `/opensea/quote` | fitting listings and signed Seaport orders for the Sweeper |
 | `/bids/:party`, `/owner/:id`, `/ens/:address` | bid history, current holder of a Credit, ENS name and avatar |
 | `/og/...` | link-preview cards |
 
-Rate limits are per IP (`unsafe.bindings` in `wrangler.jsonc`).
+Rate limits are per IP (`unsafe.bindings` in `wrangler.jsonc`). The build writes `_headers`, so pages the asset layer serves without the Worker get the same security headers, and hashed build files a year's cache.
+
+The keeper (`src/worker/keeper.ts`, a Cron Trigger every minute) turns burning on once the adapter's notice has run, burns every Credit Union in its locked hour, settles ended auctions, and retries payouts that failed at settle. One transaction per run, each simulated first; it never restarts a countdown. It does nothing until `KEEPER_KEY` is set, and its key holds no role in any contract, so all it can lose is its gas money.
 
 End-to-end matrix: deploys a fresh anvil (port 8546) with `contracts/script/Matrix.s.sol`, runs a second copy of the site on port 5191, and drives it in Chrome with a mock wallet. Every Credit Union's picker is checked against `Batch.canTake`, every offered Credit must deposit and every folded one revert, then Select all, Deposit and a partial Withdraw go through the page; the create page runs a few configs too. Needs foundry and Chrome.
 
@@ -157,6 +159,7 @@ cd web
 pnpm wrangler secret put RPC_URL
 pnpm wrangler secret put OPENSEA_API_KEY   # without it buy-in is hidden
 pnpm wrangler secret put ENS_RPC           # optional; mainnet RPC for ENS when not on mainnet
+pnpm wrangler secret put KEEPER_KEY        # optional; the keeper's private key (fund it with gas money only)
 pnpm run deploy                            # abi check, typecheck, vite build, wrangler deploy
 ```
 
@@ -180,16 +183,7 @@ Ratings follow Jack's published formula (methodology v3.4.0), reproduced in `web
 
 ## Deployed addresses
 
-**Sepolia testnet** (chain 11155111):
-
-| | |
-|---|---|
-| BatchFactory | [`0xA18298a11484458344Ce41DE96C99B43dB8F21a3`](https://sepolia.etherscan.io/address/0xA18298a11484458344Ce41DE96C99B43dB8F21a3) |
-| Ratings | [`0x8EfBe9Ae0b08E78Df2CB475ef1053268375ccFa7`](https://sepolia.etherscan.io/address/0x8EfBe9Ae0b08E78Df2CB475ef1053268375ccFa7) |
-| Test Credits | [`0xcd24833Ddf226C13a9B3944cAC984abd33865Cd3`](https://sepolia.etherscan.io/address/0xcd24833Ddf226C13a9B3944cAC984abd33865Cd3) |
-| Sweeper | not configured (OpenSea can't list test Credits) |
-
-**Mainnet** (chain 1), deployed 2026-09-27, details in [contracts/DEPLOY.md](contracts/DEPLOY.md):
+Ethereum mainnet, deployed 2026-09-27. Details in [contracts/DEPLOY.md](contracts/DEPLOY.md).
 
 | | |
 |---|---|
@@ -202,7 +196,7 @@ Burning waits for Jack's Statement contract: until the Safe sets the assembler, 
 
 ## Security
 
-The contracts have been reviewed internally (static analysis, adversarial reviews, invariant fuzzing, mainnet fork tests; see [contracts/AUDIT.md](contracts/AUDIT.md)). They have not had a third-Credit Union audit.
+The contracts have been reviewed internally (static analysis, adversarial reviews, invariant fuzzing, mainnet fork tests; see [contracts/AUDIT.md](contracts/AUDIT.md)). They have not had a third-party audit.
 
 To report a vulnerability, open a private [GitHub security advisory](../../security/advisories/new) on this repo. Please don't open a public issue.
 

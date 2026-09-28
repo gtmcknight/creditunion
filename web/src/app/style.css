@@ -15,7 +15,7 @@
   --err: #c4231c;
   --cyan: #00b5e2;
   --img-outline: rgba(0, 0, 0, 0.1);
-  --pick-dim: 0.35;
+  --tile-off: 0.2; /* a Credit that can't be picked */
 
   --r: 6px;
   --r-lg: 12px; /* = --r + 6px padding */
@@ -43,7 +43,6 @@
     --ok: #3ccf6e;
     --err: #ff5a4f;
     --img-outline: rgba(255, 255, 255, 0.1);
-    --pick-dim: 0.55;
     color-scheme: dark;
   }
 }
@@ -61,7 +60,6 @@
   --ok: #3ccf6e;
   --err: #ff5a4f;
   --img-outline: rgba(255, 255, 255, 0.1);
-  --pick-dim: 0.55;
   color-scheme: dark;
 }
 
@@ -871,7 +869,7 @@ nav a .num {
   aspect-ratio: 1;
   padding: 0;
   border: 0;
-  border-radius: 2px;
+  border-radius: 0;
   background: var(--empty);
   cursor: pointer;
   transition-property: opacity, scale;
@@ -882,46 +880,9 @@ nav a .num {
 .pick img {
   width: 100%;
   height: 100%;
-  border-radius: 2px;
-  outline: 1px solid rgba(0, 0, 0, 0.1);
-  outline-offset: -1px;
-}
-.picker:has([aria-pressed='true']) .pick[aria-pressed='false'] {
-  opacity: var(--pick-dim);
-}
-.picker .pick:hover {
-  opacity: 1;
 }
 .pick:active {
   scale: 0.96;
-}
-.pick[aria-pressed='true'] {
-  opacity: 1;
-}
-.pick[aria-pressed='true']::after {
-  /* Inside the tile: never clipped by the scroller, never touches a neighbour.
-     Fixed ink, because Credit art is always on white in both themes. */
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 2px;
-  box-shadow: inset 0 0 0 2px #0a0a0a;
-  pointer-events: none;
-}
-.pick[aria-pressed='true'] img {
-  outline: none;
-}
-.pick[aria-pressed='true']::before {
-  content: '';
-  position: absolute;
-  z-index: 1;
-  top: 4px;
-  right: 4px;
-  width: 14px;
-  height: 14px;
-  border-radius: 2px;
-  background: #0a0a0a url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 5.2l2 2L8 3' fill='none' stroke='%23fff' stroke-width='1.6' stroke-linecap='square'/%3E%3C/svg%3E") center / 10px no-repeat;
-  pointer-events: none;
 }
 
 .bid-now {
@@ -1993,7 +1954,7 @@ input[type='datetime-local'] {
   font-size: 12px;
 }
 .pick.off {
-  opacity: 0.18;
+  opacity: var(--tile-off);
   cursor: not-allowed;
 }
 @media (max-width: 820px) {
@@ -2281,7 +2242,6 @@ input[type='datetime-local'] {
   width: 44px;
   height: 44px;
   flex: none;
-  box-shadow: 0 0 0 1px var(--line);
 }
 .slot-tip .filled .who img {
   width: 14px;
@@ -2324,7 +2284,6 @@ input[type='datetime-local'] {
   aspect-ratio: 1;
   overflow: hidden;
   background: #fff;
-  box-shadow: 0 0 0 1px var(--line);
 }
 .slot-tip .art img {
   display: block;
@@ -2527,10 +2486,7 @@ a.rule-chip:hover {
   display: none;
 }
 .listings {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
-  gap: 8px;
-  max-height: 340px;
+  max-height: 380px;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 3px;
@@ -2539,72 +2495,33 @@ a.rule-chip:hover {
 .listings:empty {
   display: none;
 }
-.listing {
-  display: grid;
-  gap: 4px;
+/* A union's Credits panel shows its Credits at one size on every tab (Deposit, Buy, Withdraw), and so does the
+   create page's picker: the Buy tab's tiles (the explorer's, with number and price) scroll inside the pane. */
+#picker,
+#w-picker,
+.listings.trait-grid {
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 8px;
 }
-.listing .art {
-  /* The whole artwork, as OpenSea and jack.art show it: white border and the eights colour bar included. */
-  display: block;
-  aspect-ratio: 1;
-  overflow: hidden;
-  background: #fff;
-  border-radius: 2px;
-  box-shadow: 0 0 0 1px var(--line);
-  transition: box-shadow 120ms var(--ease);
+.listings.trait-grid {
+  margin-bottom: 0;
 }
-.listing img {
-  display: block;
-  width: 100%;
-}
-.listing .price {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--muted);
-}
-.listing .art-link {
-  display: block;
-}
-/* Where it's listed: a small mark before the price, linking to the listing. */
-.listing a.src {
-  display: flex;
-  flex: none;
-}
-.listing img.src {
-  flex: none;
-  width: 12px;
-  height: 12px;
-  object-fit: contain;
-}
-.listing[aria-pressed='true'] .art {
-  box-shadow: 0 0 0 2px var(--fg);
-}
-.listing[aria-pressed='true'] .price {
-  color: var(--fg);
-}
-.listings:has([aria-pressed='true']) .listing[aria-pressed='false'] {
-  opacity: 0.55;
-}
-.listings.preview .listing {
+.listings.preview .cc {
   cursor: default;
   opacity: 0.5;
 }
-
-/* A listing's × (top right, on hover; always there on touch) skips it. */
-.listing .art {
+/* A tile's × (top right, on hover; always there on touch) skips it. */
+.cc {
   position: relative;
 }
-.listing .skip {
+.cc .skip {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 3px;
+  right: 3px;
   width: 18px;
   height: 18px;
   padding: 0;
   border: 0;
-  border-radius: 2px;
   background: #fff;
   color: #0a0a0a;
   font: inherit;
@@ -2614,30 +2531,19 @@ a.rule-chip:hover {
   opacity: 0;
   transition: opacity 120ms var(--ease);
 }
-.listing:hover .skip,
-.listing .skip:focus-visible {
+.cc:hover .skip,
+.cc .skip:focus-visible {
   opacity: 1;
 }
 @media (hover: none) {
-  .listing .skip {
+  .cc .skip {
     opacity: 1;
   }
 }
-
-.buy-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-}
-.buy-head .num {
-  font-size: 15px;
-}
-.listing:focus {
-  outline: none;
-}
-.listing:focus-visible .art {
-  box-shadow: 0 0 0 2px var(--fg);
+/* Relisted higher since the page loaded: the Buy click stopped on it. */
+.cc-price.up,
+.jb .cc-price.up {
+  color: var(--err);
 }
 
 /* ---------------------------------------------------------------- section page header */
@@ -3662,19 +3568,8 @@ a.rule-chip:hover {
   color: var(--muted);
 }
 
-/* Buy tab: grey tiles and price bars while the listings load. */
-.listing.skel .art {
-  background: var(--line);
-  box-shadow: none;
-  animation: skel 1.2s ease-in-out infinite alternate;
-}
-.listing.skel .price {
-  display: block;
-  width: 60%;
-  height: 10px;
-  margin-top: 6px;
-  border-radius: 2px;
-  background: var(--line);
+/* Buy tab: grey tiles while the listings load. */
+.listings .cc.skel .cc-art {
   animation: skel 1.2s ease-in-out infinite alternate;
 }
 @keyframes skel {
@@ -3683,8 +3578,7 @@ a.rule-chip:hover {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .listing.skel .art,
-  .listing.skel .price {
+  .listings .cc.skel .cc-art {
     animation: none;
   }
 }
@@ -3727,11 +3621,6 @@ dialog.people header h3 {
 .person-art img {
   width: 28px;
   height: 28px;
-  border-radius: 4px;
-  outline: 1px solid rgba(0, 0, 0, 0.1);
-}
-:root[data-theme='dark'] .person-art img {
-  outline-color: rgba(255, 255, 255, 0.1);
 }
 .facts .link.num {
   font: inherit;
@@ -5733,8 +5622,6 @@ dialog.eligible::backdrop {
   width: 100%;
   aspect-ratio: 1;
   background: #fff;
-  border-radius: 4px;
-  box-shadow: 0 0 0 1px var(--line);
 }
 .eligible-grid figcaption {
   font-size: 11px;
@@ -5858,22 +5745,13 @@ dialog.eligible::backdrop {
 #picker-none[hidden] {
   display: none;
 }
-/* Every Credit left in the picker fits, so unselected ones stay bright; the selected ones carry the check. */
-#picker:has([aria-pressed='true']) .pick[aria-pressed='false'] {
-  opacity: 1;
-}
 #picker .pick {
   background: #fff;
 }
-#picker .pick[aria-pressed='false']:hover {
-  opacity: 1;
-}
 /* Party picker: a Credit the sheet has no slot left for (after your picks), and the fold of ones that don't fit. */
 #picker .pick.off,
-#picker .pick.off:hover,
-#picker .pick.full,
-#picker .pick.full:hover {
-  opacity: 0.22;
+#picker .pick.full {
+  opacity: var(--tile-off);
   cursor: not-allowed;
 }
 .picker-off .off-why {
@@ -6057,7 +5935,6 @@ dialog.eligible::backdrop {
   width: 100%;
   aspect-ratio: 1;
   background: #fff;
-  box-shadow: 0 0 0 1px var(--img-outline);
   image-rendering: pixelated;
 }
 .facts .swatches {
@@ -6178,14 +6055,13 @@ dialog.eligible::backdrop {
   margin-bottom: 20px;
 }
 /* A Credit in a grid, OpenSea style: its art, then its number and, when listed, its price. */
-.cc { display: grid; gap: 6px; min-width: 0; color: inherit; text-decoration: none; }
+.cc { display: grid; align-content: start; gap: 6px; min-width: 0; color: inherit; text-decoration: none; } /* a neighbour's two-line caption never stretches this one's art */
 .cc-art { display: block; }
-.cc-art img { display: block; width: 100%; aspect-ratio: 1; background: #fff; border-radius: 2px; outline: 1px solid var(--img-outline); outline-offset: -1px; }
-.cc-art:hover img { outline-color: var(--fg); }
+.cc-art { position: relative; }
+.cc-art img { display: block; width: 100%; aspect-ratio: 1; background: #fff; }
 .cc-cap a { color: inherit; text-decoration: none; }
 .cc-cap a:hover { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; }
-.cc.sel .cc-art img { outline: 2px solid var(--fg); outline-offset: -2px; }
-.cc-cap { display: flex; justify-content: space-between; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.cc-cap { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 2px 4px; font-size: 12px; color: var(--muted); white-space: nowrap; }
 .cc-price { display: flex; align-items: center; gap: 3px; color: var(--fg); }
 .cc-price img.src { width: 11px; height: 11px; }
 .trait-grid .pick {
@@ -6557,7 +6433,7 @@ dialog.eligible::backdrop {
 /* One shape: every button and button-like control is square. */
 :root { --r: 0px; --r-lg: 0px; }
 .btn, button.btn, a.btn, .subtabs a, .subtabs button, .seg, .seg span, .sort-pick, .acct-menu, .acct-menu > a, .acct-menu > button,
-.theme, .wall-tools button, .wall-zoom, .wall-expand, .listing, .tile, .brush, .arr-tile, .win-presets button, input, select, textarea {
+.theme, .wall-tools button, .wall-zoom, .wall-expand, .tile, .brush, .arr-tile, .win-presets button, input, select, textarea {
   border-radius: 0;
 }
 .rule-chip, .chip, .tag, .pick, .created-link { border-radius: 0; }
@@ -6591,8 +6467,6 @@ dialog.eligible::backdrop {
 .for-sale-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .trait-section.pair { margin-top: 32px; }
 .for-sale p { margin: 0; }
-.listings.for-sale-row { grid-template-columns: repeat(10, 1fr); max-height: none; overflow: visible; }
-@media (max-width: 720px) { .listings.for-sale-row { grid-template-columns: repeat(5, 1fr); } }
 
 /* A trait's Credits tab: the bar (how many for sale, 1/5/10, Sweep), then the grid, listed Credits first with their
    price under the number; the ones a sweep would take are outlined. */
@@ -6624,7 +6498,6 @@ dialog.eligible::backdrop {
 .jb-link:hover { color: var(--fg); }
 #trait-unions { margin: 16px 0 8px; }
 .jb-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; margin: 28px 0 16px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 15px; }
-.jb-sweep { display: flex; align-items: center; gap: 14px; }
 .jb-sort { display: flex; gap: 14px; }
 .jb-sort label { position: relative; cursor: pointer; }
 .jb-sort input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; pointer-events: none; }
@@ -6634,9 +6507,8 @@ dialog.eligible::backdrop {
 .jb-sort input:focus-visible + span { outline: 2px solid var(--fg); outline-offset: 2px; }
 /* A sweep's Credits: outlined in ink, price in ink; the rest of the listed ones grey. */
 .jb .cc-price { color: var(--muted); }
-.jb .cc.sel .cc-price { color: var(--fg); font-weight: 600; }
+.jb .cc.sel .cc-price { color: var(--fg); }
 .cc-price.yours, .jb .cc-price.yours { color: var(--fg); font-weight: 600; }
-.jb .cc.sel .cc-art img { outline: 2px solid var(--fg); outline-offset: 0; }
 .jb .cc.listed .cc-art { cursor: pointer; }
 
 /* Header: the mark and name on the left, Unions · Auctions · Credits centred, the account on the right. */
@@ -6649,21 +6521,12 @@ dialog.eligible::backdrop {
 /* Eight to a row, as the Statement is laid out; four on phones. Equal columns whatever the captions say. */
 .trait-grid { grid-template-columns: repeat(8, minmax(0, 1fr)); }
 @media (max-width: 720px) { .trait-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-.cc-cap { overflow: hidden; }
-.cc-cap > .num:first-child { overflow: hidden; text-overflow: ellipsis; }
-/* A picked Credit: the border plus a check in its corner, so a sweep's picks read at a glance. */
-.jb .cc-art { position: relative; }
-.jb .cc.sel .cc-art::after {
-  content: '';
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--fg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5.5 10.5l3 3 6-7' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 20px no-repeat;
+/* A tile too narrow for its number and price on one line puts the price under the number, never cuts the number
+   short. Decided by the tile's width, not its text, so a whole grid reads alike. */
+.cc { container-type: inline-size; }
+@container (max-width: 118px) {
+  .cc-cap { flex-direction: column; align-items: flex-start; }
 }
-:root[data-theme='dark'] .jb .cc.sel .cc-art::after { background-color: #0a0a0a; box-shadow: 0 0 0 1.5px #fff; }
 
 .jb-buy { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
 
@@ -6739,7 +6602,7 @@ dialog.eligible::backdrop {
 /* Skeletons the same shape as what replaces them. */
 .skel-bar { display: inline-block; width: 60%; height: 12px; border-radius: 2px; background: var(--empty); vertical-align: middle; }
 .jb-sweep .skel-bar { height: 44px; }
-.cc.skel .cc-art { aspect-ratio: 1; background: var(--empty); border-radius: 2px; }
+.cc.skel .cc-art { aspect-ratio: 1; background: var(--empty); }
 .cc.skel .cc-cap { height: 19px; }
 .jb-line .skel-bar { height: 22px; }
 
@@ -6815,6 +6678,9 @@ dialog.eligible::backdrop {
   outline: 2px solid var(--fg);
   outline-offset: 4px;
 }
+.sweep-range input[data-pointer]:focus-visible {
+  outline: none;
+}
 .sweep-range input:disabled {
   opacity: 0.4;
   cursor: default;
@@ -6830,23 +6696,45 @@ dialog.eligible::backdrop {
   }
 }
 
-/* Sweep row: slider, then the price with the fee under it, then "Buy 5". Fixed digits and fixed widths, so
-   nothing shifts while dragging. */
+/* Every Buy's row (the Credits explorer, a union's Buy tab): the slider, then the total with the fee under it, then
+   on the explorer "Buy 5". Fixed digits and widths, so nothing shifts while dragging. On phones the slider takes
+   the first line; the total and the button share the next. */
+.buy-row {
+  display: flex;
+  align-items: center;
+  gap: 12px 24px;
+}
+.buy-row .sweep-range {
+  flex: 1 1 auto;
+}
+.buy-row .btn {
+  flex: none;
+  min-width: 6.5em; /* fits "Buy 24" */
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 560px) {
+  .buy-row {
+    flex-wrap: wrap;
+    width: 100%;
+    justify-content: space-between;
+  }
+  .buy-row .sweep-range {
+    flex-basis: 100%;
+  }
+  .buy-row .sweep-total {
+    justify-items: start;
+    text-align: left;
+  }
+}
 .sweep-total {
   display: grid;
-  margin-left: 12px; /* 24 from the slider in all */
   min-width: 9em; /* fits "Drag or tap Credits", so the first drag moves nothing */
   justify-items: end; /* hug the button: the slot's slack goes on the slider side */
   text-align: right;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   line-height: 1.25;
-}
-#sale-go {
-  flex: none;
-  min-width: 6.5em; /* fits "Buy 24" */
-  justify-content: center;
-  font-variant-numeric: tabular-nums;
 }
 
 /* ---------------------------------------------------------------- Credit page: How it was made */
@@ -7083,7 +6971,6 @@ dialog.eligible::backdrop {
   display: block;
   width: 28px;
   height: 28px;
-  box-shadow: 0 0 0 1px var(--img-outline);
 }
 .live-when {
   white-space: nowrap;
@@ -7105,6 +6992,30 @@ dialog.eligible::backdrop {
     grid-column: 1 / -1;
     grid-row: 3;
   }
+}
+/* The Activity fold on a union's or a member's page: the phone layout at any width, who and when above what they
+   did. A member's own rows have no who: what they did and when share the first line. */
+.fold-list .live-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 12px;
+}
+.fold-list .live-what {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+.fold-list .live-art {
+  grid-column: 1 / -1;
+  grid-row: 3;
+}
+.fold-list .live-art:empty {
+  display: none;
+}
+.fold-list .live-row:not(:has(.live-who)) .live-what {
+  grid-column: 1;
+  grid-row: 1;
+}
+.fold-list .live-row:not(:has(.live-who)) .live-art {
+  grid-row: 2;
 }
 
 /* ---------------------------------------------------------------- buying */
@@ -7161,11 +7072,59 @@ dialog.eligible::backdrop {
   left: calc(var(--i) * 14px);
   width: 36px;
   height: 36px;
-  border-radius: 4px;
   background: #fff;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
   rotate: calc((var(--i) - 1) * 5deg);
 }
 @media (prefers-reduced-motion: reduce) {
   .btn.busy::before, .cc.buying .cc-art img, .cc.got .cc-art { animation: none; }
+}
+
+/* ---------------------------------------------------------------- one Credit tile
+   Every Credit shown on its own reads the same, whatever the page: square, a hairline inside its edge, ink on hover
+   where it's a link or a pick. Picked: a frame inside the edge and a square check in the corner, in Jack's cyan
+   (the C plate): Credit art sits on white paper in both themes, and ink black would vanish into a dark page.
+   Can't be picked: faded (--tile-off). */
+.cc-art img,
+.pick img,
+.slot-tip .filled > img,
+.slot-tip .art,
+.person-art img,
+.eligible-grid img,
+.credit-art img,
+.live-art img,
+.bought-fan img,
+.wall-card img {
+  border-radius: 0;
+  outline: 1px solid var(--img-outline);
+  outline-offset: -1px;
+}
+.cc-art:hover img,
+.pick:not(.off):not(.full):hover img {
+  outline-color: var(--fg);
+}
+.pick[aria-pressed='true']::after,
+.cc.sel .cc-art::after {
+  /* Inside the tile: never clipped by the scroller, never touches a neighbour. */
+  content: '';
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 0 3px var(--cyan);
+  pointer-events: none;
+}
+.pick[aria-pressed='true']::before,
+.cc.sel .cc-art::before {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  top: 4px;
+  right: 4px;
+  width: 14px;
+  height: 14px;
+  background: var(--cyan) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 5.2l2 2L8 3' fill='none' stroke='%230a0a0a' stroke-width='1.6' stroke-linecap='square'/%3E%3C/svg%3E") center / 10px no-repeat;
+  pointer-events: none;
+}
+.pick[aria-pressed='true'] img,
+.cc.sel .cc-art img {
+  outline-color: transparent;
 }

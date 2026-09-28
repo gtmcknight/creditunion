@@ -1,6 +1,7 @@
 import type { Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi } from './abi';
 import { config, onTx, pub } from './chain';
+import { fromJson } from '../shared/json';
 
 export const STATES = ['Open', 'Full', 'Expired', 'Auction', 'Settled'] as const;
 export type StateName = (typeof STATES)[number];
@@ -129,36 +130,33 @@ function toSummary(address: Address, s: Record<string, unknown>): Summary {
 
 export type Listed = { s: Summary; ids: readonly bigint[]; depositors: readonly Address[] };
 
-/// The Credit Union list is read by most pages (about eleven calls), so one read serves every page for a few
-/// seconds. Forgotten after any transaction of ours and whenever a page sees a Credit Union change.
+/// Every Credit Union, newest first, from the Worker's union index (/unions.json: one cached multicall for
+/// everyone, preloaded by list pages). Most pages read it, so one read serves every page for a few seconds.
+/// Forgotten after any transaction of ours and whenever a page sees a Credit Union change; the next read then
+/// skips the Worker's cache.
 const LIST_MS = 10_000;
-let listed: { limit: number; at: number; p: Promise<Listed[]> } | null = null;
-export function listBatches(limit = 60): Promise<Listed[]> {
-  if (listed && listed.limit === limit && Date.now() - listed.at < LIST_MS) return listed.p;
-  const p = readBatches(limit);
-  const entry = (listed = { limit, at: Date.now(), p });
+let listed: { at: number; p: Promise<Listed[]> } | null = null;
+let fresh = false;
+export function listBatches(): Promise<Listed[]> {
+  if (listed && Date.now() - listed.at < LIST_MS) return listed.p;
+  const p = readBatches(fresh);
+  fresh = false;
+  const entry = (listed = { at: Date.now(), p });
   p.catch(() => listed === entry && (listed = null)); // a failed read is retried next time, not remembered
   return p;
 }
-export const forgetBatches = () => void (listed = null);
+export const forgetBatches = () => {
+  listed = null;
+  fresh = true;
+};
 onTx(forgetBatches);
 
-async function readBatches(limit: number): Promise<Listed[]> {
-  const addrs = await pub.readContract({
-    address: config.factory,
-    abi: factoryAbi,
-    functionName: 'batches',
-    args: [0n, BigInt(limit)],
-  });
-  return Promise.all(
-    addrs.map(async (a) => {
-      const [s, slots] = await Promise.all([
-        pub.readContract({ address: a, abi: batchAbi, functionName: 'summary' }),
-        pub.readContract({ address: a, abi: batchAbi, functionName: 'slots' }),
-      ]);
-      return { s: toSummary(a, s as Record<string, unknown>), ids: slots[0], depositors: slots[1] };
-    }),
-  );
+type Indexed = { address: Address; summary: Record<string, unknown>; ids: number[]; depositors: Address[] };
+async function readBatches(fresh: boolean): Promise<Listed[]> {
+  const r = await fetch(fresh ? `/unions.json?fresh=${Date.now()}` : '/unions.json');
+  if (!r.ok) throw new Error('Credit Unions are unavailable right now.');
+  const { unions } = fromJson(await r.text()) as { unions: Indexed[] };
+  return unions.map((u) => ({ s: toSummary(u.address, u.summary), ids: u.ids.map(BigInt), depositors: u.depositors }));
 }
 
 /// Just the summary: a cheap read for spotting changes.
@@ -194,12 +192,29 @@ export const isApproved = (account: Address) =>
 export const myCredits = (account: Address) =>
   pub.readContract({ address: config.credits, abi: creditsAbi, functionName: 'tokensOf', args: [account] });
 
-/// Which of `ids` pass a batch's filter, asked of the batch itself (it reads Jack's art contract).
+/// Which of `ids` pass a batch's filter, asked of the batch itself (it reads Jack's art contract). More than a few
+/// go through the Worker's one multicall (/passes): a holder of hundreds costs one request, not a call per Credit.
 export async function eligible(batch: Address, ids: readonly bigint[]) {
-  const ok = await Promise.all(
-    ids.map((id) => pub.readContract({ address: batch, abi: batchAbi, functionName: 'passes', args: [id] })),
-  );
+  const ok = ids.length <= 4 ? await Promise.all(ids.map((id) => pub.readContract({ address: batch, abi: batchAbi, functionName: 'passes', args: [id] }))) : await passesOf(batch, ids);
   return ids.filter((_, i) => ok[i]);
+}
+/// One /passes answer per Credit Union and set of Credits for a few seconds, so a page drawn twice (a wallet
+/// reconnecting) asks once. Forgotten after any transaction of ours.
+const passMemo = new Map<string, { at: number; p: Promise<boolean[]> }>();
+onTx(() => passMemo.clear());
+function passesOf(batch: Address, ids: readonly bigint[]) {
+  const key = `${batch.toLowerCase()}:${ids.join(',')}`;
+  const hit = passMemo.get(key);
+  if (hit && Date.now() - hit.at < LIST_MS) return hit.p;
+  const p = (async () => {
+    const r = await fetch('/passes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ batch, ids: ids.map(String) }) });
+    const d = (await r.json().catch(() => ({}))) as { ok?: boolean[]; error?: string };
+    if (!r.ok || !d.ok) throw new Error(d.error ?? 'Couldn’t check your Credits right now.');
+    return d.ok;
+  })();
+  passMemo.set(key, { at: Date.now(), p });
+  p.catch(() => passMemo.delete(key));
+  return p;
 }
 
 export async function minOpen() {

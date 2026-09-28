@@ -1,0 +1,78 @@
+/// The keeper (a Cron Trigger, every minute): presses the buttons nobody is paid to press, so burn day doesn't wait
+/// on a stranger (contracts/ADAPTER.md). Each run sends at most one transaction, the most urgent that would land:
+///   1. factory.activateAssembler(), once the 30-minute notice has run;
+///   2. assemble() on a Credit Union in its burn hour;
+///   3. settle() on an auction that has ended;
+///   4. claim(member) for a member whose payout failed at settle (anyone may send it for them), for three days.
+/// It never restarts a countdown: with the keeper running, a burn hour only lapses when the burn itself fails, and a
+/// restart would lock the members in again for nothing; that call stays with people, on the page. Every call is
+/// simulated first; nothing is sent while the keeper's last transaction is pending, or while gas is over its cap.
+/// The key (secret KEEPER_KEY) holds no role in any contract: all it can lose is its gas money. Without it, the
+/// keeper does nothing.
+import { createPublicClient, createWalletClient, type Address, type Hex, type Transport } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { mainnet, sepolia } from 'viem/chains';
+import { batchAbi, factoryAbi } from '../app/abi';
+
+/// What the keeper reads of each Credit Union (Batch.summary and slots).
+export type Kept = {
+  address: Address;
+  summary: { state: number; phase: number; highBid: bigint; auctionEnd: bigint };
+  depositors: readonly Address[];
+};
+
+const ZERO = '0x0000000000000000000000000000000000000000';
+const BURNABLE = 3; // Batch.Phase
+const AUCTION = 3, SETTLED = 4; // Batch.State
+const PAY_FOR = 3n * 86_400n; // how long after an auction ends a failed payout is retried
+const ASSEMBLE_GAS = 12_000_000n; // as the page sends it: the burn runs through Jack's contract
+
+type Job = { what: string; address: Address; abi: typeof batchAbi | typeof factoryAbi; functionName: string; args?: readonly unknown[]; gas?: bigint };
+
+export async function keep(o: { key: string; chainId: number; factory: Address; maxGwei: number; transport: Transport; unions: () => Promise<Kept[]> }) {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(o.key)) return console.error('[keeper] KEEPER_KEY is not a private key');
+  const chain = o.chainId === 1 ? mainnet : o.chainId === 11_155_111 ? sepolia : { ...mainnet, id: o.chainId };
+  const account = privateKeyToAccount(o.key as Hex);
+  const c = createPublicClient({ chain, transport: o.transport });
+
+  // One at a time: while its last transaction is pending, a new one would only race it.
+  const [landed, sent, block] = await Promise.all([
+    c.getTransactionCount({ address: account.address, blockTag: 'latest' }),
+    c.getTransactionCount({ address: account.address, blockTag: 'pending' }),
+    c.getBlock(),
+  ]);
+  if (sent > landed) return console.log('[keeper] waiting for its last transaction');
+  if ((block.baseFeePerGas ?? 0n) > BigInt(Math.round(o.maxGwei * 1e9))) return console.warn(`[keeper] gas at ${block.baseFeePerGas} wei, over the ${o.maxGwei} gwei cap`);
+  const now = block.timestamp;
+
+  const jobs: Job[] = [];
+  const read = (functionName: 'assembler' | 'pendingAssembler' | 'pendingUntil') => c.readContract({ address: o.factory, abi: factoryAbi, functionName });
+  const [active, next, until] = await Promise.all([read('assembler'), read('pendingAssembler'), read('pendingUntil')]);
+  if (active === ZERO && next !== ZERO && now >= BigInt(until)) jobs.push({ what: 'turn burning on', address: o.factory, abi: factoryAbi, functionName: 'activateAssembler' });
+
+  const unions = await o.unions();
+  for (const u of unions)
+    if (u.summary.phase === BURNABLE) jobs.push({ what: `burn ${u.address}`, address: u.address, abi: batchAbi, functionName: 'assemble', gas: ASSEMBLE_GAS });
+  for (const u of unions)
+    if (u.summary.state === AUCTION && u.summary.highBid > 0n && now >= u.summary.auctionEnd) jobs.push({ what: `settle ${u.address}`, address: u.address, abi: batchAbi, functionName: 'settle' });
+  for (const u of unions) {
+    if (u.summary.state !== SETTLED || now >= u.summary.auctionEnd + PAY_FOR) continue;
+    const members = [...new Set(u.depositors.map((d) => d.toLowerCase() as Address))];
+    const owed = await Promise.all(members.map((m) => c.readContract({ address: u.address, abi: batchAbi, functionName: 'claimable', args: [m] }).catch(() => 0n)));
+    members.forEach((m, i) => owed[i] > 0n && jobs.push({ what: `pay ${m} from ${u.address}`, address: u.address, abi: batchAbi, functionName: 'claim', args: [m] }));
+  }
+  if (!jobs.length) return;
+
+  const w = createWalletClient({ account, chain, transport: o.transport });
+  for (const j of jobs) {
+    try {
+      const { request } = await c.simulateContract({ address: j.address, abi: j.abi, functionName: j.functionName, args: j.args, account } as never);
+      const hash = await w.writeContract({ ...(request as object), ...(j.gas ? { gas: j.gas } : {}) } as never);
+      return console.log(`[keeper] ${j.what}: ${hash}`);
+    } catch (e) {
+      // A burn that won't go through inside its hour is the one to look at: the window lapses without it.
+      const why = String((e as { shortMessage?: string; message?: string }).shortMessage ?? (e as Error).message ?? e).split('\n')[0];
+      (j.functionName === 'assemble' ? console.error : console.warn)(`[keeper] can't ${j.what}: ${why}`);
+    }
+  }
+}
