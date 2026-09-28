@@ -62,7 +62,8 @@ There is no database or indexer. Credit Unions, slots and bids are read from the
 | `Batch` | One Credit Union: eligibility checks, deposits and withdrawals, lock, burn through the assembler, auction, split, claims. |
 | `Sweeper` | Buys OpenSea listings through Seaport 1.6 and deposits them in the buyer's name. Unused ETH is refunded; listings that sold first are skipped. 2% fee. |
 | `Ratings` | Jack's rating for all 122,154 Credits under one methodology version (`version()`), stored as data contracts and read by eligibility rules. Anyone can call `scoreOf`. The factory can move new Credit Unions to a later version; each Credit Union keeps the table it opened with, and `ratingsHistory()` lists every table used. |
-| `IAssembler` | The adapter a Credit Union calls (never delegatecalls) to burn 80 Credits into a Statement. `MockAssembler` stands in for tests and local chains; the mainnet adapter gets written once Jack's Statement contract is published. |
+| `IAssembler` | The adapter a Credit Union calls (never delegatecalls) to burn 80 Credits into a Statement. `MockAssembler` stands in for tests and local chains. |
+| `StatementAdapter` | **Draft, not deployed.** The mainnet adapter: takes a full Credit Union's 80, has Jack's Statement contract burn them in the direction the creator chose, and hands the Statement back. Finished once Jack's contract is published; until then its one call into it is a guess and the deploy script refuses mainnet. See [contracts/ADAPTER.md](contracts/ADAPTER.md) and [contracts/RUNBOOK.md](contracts/RUNBOOK.md). |
 
 The factory can deploy with no assembler. Credit Unions fill but never lock, so anyone can always leave. When the adapter is ready, the setter address proposes it once; 30 minutes later anyone activates it and the setter has no further powers. Only then do full Credit Unions start their 5-minute countdowns.
 

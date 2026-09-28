@@ -1,8 +1,10 @@
 # The adapter: what happens when Jack's Statement contract ships
 
-> **Status, Sep 28 2026: not built.** The mainnet adapter doesn't exist yet, and no Credit Union can lock or burn
-> until one is switched on. `MockAssembler` and `MockStatement` in `src/mocks/` are test stand-ins only: they are
-> not Jack's contract and never go to mainnet.
+> **Status, Sep 28 2026: a draft, not live.** `src/StatementAdapter.sol` is written except for `_compose`, the one
+> call into Jack's contract, which follows our guess of it until he publishes. It isn't deployed, and the deploy
+> script refuses mainnet until it's finished. No Credit Union can lock or burn until an adapter is switched on.
+> `MockAssembler` and `MockStatement` in `src/mocks/` are test stand-ins only: they are not Jack's contract and never
+> go to mainnet. The burn-day checklist is [RUNBOOK.md](RUNBOOK.md).
 
 Credit Union pools Credits now. It can't burn them into Statements until Jack Butcher publishes the Statement
 contract, expected around October 1 ([his announcement](https://x.com/jackbutcher/status/2102910106451021935)).
@@ -24,6 +26,23 @@ Parts marked **Guess** depend on a contract we haven't seen. They get replaced w
 - After the adapter returns, the Credit Union checks its work itself: none of the 80 Credits may still exist, and
   the Credit Union must own the Statement the adapter reports. If either check fails, the whole burn reverts.
 - The adapter is an operator for the Credit Union's Credits only for the length of that one call.
+
+## The draft: `StatementAdapter`
+
+- **It takes the 80 in first.** A union can approve only the adapter, never Jack's contract, so the adapter moves the
+  80 to itself (in the union's order), has Jack's contract burn them and mint the Statement, and hands the Statement
+  to the union. If his contract turns out to accept Credits sent straight to it, the adapter can skip that step.
+- **Directions.** A union always tells the adapter "Deposit" (its code can't change), so the adapter keeps each
+  union's direction itself: Issued, Consolidated, Balance or Reconciled, Issued until the creator picks another.
+  The creator can change it while every member can still leave (while the union fills, while it waits for burning
+  to open, after a burn hour lapses) and not from the countdown on.
+- **Only the factory's unions** can use it, and it holds nothing between calls.
+- **`ADAPTER_READY` is false** until `_compose` meets Jack's real contract on a mainnet fork. The deploy script
+  (`script/DeployAdapter.s.sol`) refuses mainnet while it is.
+- **Tested now against the stand-in:** `test/StatementAdapter.t.sol` (the burn, directions and when they're fixed,
+  waiting for Jack's contract to open, his cap, what it refuses) and `test/StatementAdapter.fork.t.sol` (burn day on
+  a copy of mainnet: the real All Credits union filled with real holders' Credits, the real Safe's proposal, the
+  burn, the auction, every member paid; 6.4M gas for one burn).
 
 ## Who can switch it on
 
@@ -78,6 +97,7 @@ exist, so there may be a race once burning opens.
 2. **Adversarial cases:**
    - An adapter that doesn't burn, keeps the Statement, returns a wrong id or reenters: every one must revert.
    - These already exist for the mock adapter in `contracts/test/` and get rerun against the real one.
+   - `test/StatementAdapter.fork.t.sol` runs this whole list against his contract with `STATEMENTS=<his address>`.
 3. **Sepolia:** if Jack deploys a test version of his contract, we repeat the full flow on the site's
    testnet. If he doesn't, we run a Sepolia stand-in with the same interface.
 4. **Review:** the adapter goes through the same internal audit process as the rest (`AUDIT.md`), with the
@@ -87,7 +107,8 @@ exist, so there may be a race once burning opens.
 
 ## If something goes wrong
 
-- **Before activation:** the setter replaces or withdraws the proposal, and nothing is locked.
+- **Before activation:** nothing is locked. The setter can't withdraw a proposal, only replace it with another
+  adapter, which restarts the 30-minute notice.
 - **During the 30-minute notice:** anyone can leave any Credit Union.
 - **A burn fails:** the Credit Union's checks revert the whole transaction, so no Credits are lost. The Credit Union stays
   locked until the hour ends, then unlocks.
@@ -98,6 +119,7 @@ exist, so there may be a race once burning opens.
 ## Open questions (filled in when Jack's contract ships)
 
 - The exact function the adapter calls, and how it maps the order of the 80 onto the sheet (see [ORDER.md](ORDER.md)).
+- How it takes the direction (Issued, Consolidated, Balance, Reconciled).
 - Whether minting needs payment, a signature, a whitelist or an approval.
 - Whether a Credit Union contract can call it directly (some mints are limited to regular wallets).
 - Gas for a full burn of 80.
