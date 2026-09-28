@@ -7,10 +7,10 @@ What the Safe can do afterwards: [SAFE.md](SAFE.md).
 
 | Contract | Address |
 |---|---|
-| BatchFactory | _pending_ |
-| Batch implementation (clone source) | _pending_ |
-| Sweeper | _pending_ |
-| Ratings | _pending_ |
+| BatchFactory | [`0xcb06f9076e5fbF3cB052086b1EE7C0F3836aa051`](https://etherscan.io/address/0xcb06f9076e5fbF3cB052086b1EE7C0F3836aa051) |
+| Batch implementation (clone source) | [`0xd578eC605E60eDD008b415c23B15Eb3483CC6c50`](https://etherscan.io/address/0xd578eC605E60eDD008b415c23B15Eb3483CC6c50) |
+| Sweeper | [`0x7b93309A12e05944Ab821470615983A4A2AC9799`](https://etherscan.io/address/0x7b93309A12e05944Ab821470615983A4A2AC9799) |
+| Ratings | [`0x61Ca63cDE107CE7e32785c0d89904fE58f9d371d`](https://etherscan.io/address/0x61Ca63cDE107CE7e32785c0d89904fE58f9d371d) (v3.4.0, 122,154 scores in 11 data contracts) |
 
 Contracts it points at, fixed in `script/DeployMainnet.s.sol`:
 
@@ -38,10 +38,10 @@ Contracts it points at, fixed in `script/DeployMainnet.s.sol`:
 
 | | |
 |---|---|
-| Commit | _pending_ |
+| Commit | `880b3fc` (contracts as of `fc506e8`) |
 | Deployer | `0xB508D6f4E5fD9CA85036778A9f6aBE77A9F925C9` (also a Safe signer; it holds no role in the contracts) |
-| Block | _pending_ |
-| Gas | _pending_ (dry run: about 81M) |
+| Blocks | 26072342 to 26072356, 2026-09-27 |
+| Gas | 62.5M, 0.0215 ETH at 0.345 gwei (14 transactions) |
 
 ```
 cd contracts
@@ -58,15 +58,15 @@ Every transaction is in `broadcast/DeployMainnet.s.sol/1/run-latest.json`.
 - [x] Credits sealed on mainnet (`isSealed()` true); the script refuses to run otherwise
 - [x] Safe is 2 of 3 on mainnet, v1.5.0, deployer is one signer
 - [x] Sweeper changes since audit round 2 reviewed against the live FWA and CreditStrategy contracts
-- [ ] Full `forge test` with mainnet forks on the deploy commit
-- [ ] Halmos rules for Factory, Ratings and the ratings switch on the deploy commit
-- [ ] Dry run on the deploy commit
+- [x] Full `forge test` with mainnet forks on the deploy commit: 264 passed
+- [x] Halmos: settle, claim, split and Statement rules proved; the ratings switch rules proved (6); two bidding rules (5% raise, refund) time out, covered by fuzz and invariant tests
+- [x] Dry run on the deploy commit, then a full deploy on a mainnet fork with every setting read back
 
 ## Checked after
 
-- [ ] All four verified on Etherscan
-- [ ] `factory.feeRecipient()` and `factory.assemblerSetter()` are the Safe
-- [ ] `factory.protocolFeeBps()` 200, `creatorFeeBps()` 0, `sweeper.feeBps()` 200
-- [ ] `factory.ratings()` is the Ratings address above, `ratingsHistory()` has one entry
-- [ ] `factory.assembler()` is zero
+- [x] All four verified on Etherscan (the 11 Ratings data contracts are raw data, no source)
+- [x] `factory.feeRecipient()` and `factory.assemblerSetter()` are the Safe
+- [x] `factory.protocolFeeBps()` 200, `creatorFeeBps()` 0, `sweeper.feeBps()` 200
+- [x] `factory.ratings()` is the Ratings address above, `ratingsHistory()` has one entry
+- [x] `factory.assembler()` is zero
 - [ ] `web/wrangler.jsonc` points at these addresses and `/config.json` shows chainId 1
