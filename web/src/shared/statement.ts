@@ -125,13 +125,19 @@ function framed(ink: Ink): number[] {
 /// (d3's binary treemap), with a one-cell gutter at every cut, on the box's own cells. A cut that lands within
 /// two cells of the matching cut in the block beside it lines up with it, so the long lines run straight across.
 function balance(inks: readonly (Ink | null)[], ghosts: ReadonlySet<number>): Rect[] {
-  // What's in so far; an empty union shows its examples' balance, faded.
-  const some = inks.some((ink, c) => ink && !ghosts.has(c)), mix = some ? MIX : FADED;
-  const n = new Array<number>(16).fill(0);
+  // Laid out for all 80 as they'd stand (members' Credits and the examples in the empty slots). Each block fills
+  // solid from the top, cell by cell, as far as members' own ink of that mix goes; the rest stays faded.
+  const n = new Array<number>(16).fill(0), real = new Array<number>(16).fill(0);
   inks.forEach((ink, c) => {
-    if (ink && (some ? !ghosts.has(c) : ghosts.has(c))) framed(ink).forEach((v, m) => (n[m] += v));
+    if (ink) framed(ink).forEach((v, m) => ((n[m] += v), ghosts.has(c) || (real[m] += v)));
   });
   const items = n.map((v, m) => ({ m, v })).filter((b) => b.m && b.v).sort((a, b) => b.v - a.v || a.m - b.m);
+  const block = (m: number, x: number, y: number, w: number, h: number) => {
+    const solid = Math.round((w * h * real[m]) / n[m]), full = Math.floor(solid / w), part = solid % w, rest = h - full - (part ? 1 : 0);
+    if (full) out.push(cell(x, y, w, full, MIX[m]));
+    if (part) out.push(cell(x, y + full, part, 1, MIX[m]), cell(x + part, y + full, w - part, 1, FADED[m]));
+    if (rest) out.push(cell(x, y + h - rest, w, rest, FADED[m]));
+  };
   const out: Rect[] = [];
   // Gutters so far, as [line, first cell, last cell]: rows run across, columns run down.
   const rows: [number, number, number][] = [], cols: [number, number, number][] = [];
@@ -145,7 +151,7 @@ function balance(inks: readonly (Ink | null)[], ghosts: ReadonlySet<number>): Re
     return at;
   };
   const cut = (list: typeof items, x: number, y: number, w: number, h: number) => {
-    if (list.length === 1) return void out.push(cell(x, y, w, h, mix[list[0].m]));
+    if (list.length === 1) return block(list[0].m, x, y, w, h);
     const sums = [0];
     for (const b of list) sums.push(sums[sums.length - 1] + b.v);
     const total = sums[list.length], half = total / 2;
