@@ -148,13 +148,16 @@ export const priceTag = (l: Listed, up = false) =>
 /// Sweep: drag the slider to take the cheapest that many (up to MAX_SWEEP), or tap listed Credits' squares to pick
 /// them one by one. The picked are outlined in `grid` wherever they are; the button carries their total.
 /// `mark()` re-outlines after the grid changes (and lets the slider reach listings that paged in since).
-export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement) {
+/// `button: false` leaves the buying to the page (the create page buys and opens in one go); it reads `chosen()`
+/// and hears every change through `onPick`.
+export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement, o: { button?: boolean; onPick?: () => void } = {}) {
   // Nothing picked to start: drag, or tap Credits.
   const picked = new Set<string>();
   // The price sits between the slider and the button and moves as you drag; the button carries the count.
   const signedOut = canBuy(sale.preview) && !session.account;
   host.classList.add('buy-row');
-  host.innerHTML = `${sweepRow('sale', 0, Math.min(MAX_SWEEP, sale.ls.length), 0)}${signedOut ? connectToBuy() : `<button class="btn primary" id="sale-go"${canBuy(sale.preview) ? '' : ' disabled title="Mainnet prices, shown as a preview"'}>Buy</button>`}`;
+  const button = o.button === false ? '' : signedOut ? connectToBuy() : `<button class="btn primary" id="sale-go"${canBuy(sale.preview) ? '' : ' disabled title="Mainnet prices, shown as a preview"'}>Buy</button>`;
+  host.innerHTML = `${sweepRow('sale', 0, Math.min(MAX_SWEEP, sale.ls.length), 0)}${button}`;
   const totalEl = host.querySelector<HTMLElement>('#sale-total')!;
   const range = host.querySelector<HTMLInputElement>('#sale-n')!;
   const go = host.querySelector<HTMLButtonElement>('#sale-go');
@@ -193,6 +196,7 @@ export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement) 
     grid.querySelectorAll<HTMLElement>('.cc').forEach((c) => c.classList.toggle('sel', picked.has(c.dataset.id!)));
     // What the wallet will ask: the listings plus the Sweeper's fee (sweepToWallet reads the exact quote on click).
     totalEl.innerHTML = sweepTotal(chosen().reduce((a, l) => a + BigInt(l.price), 0n), bps, picked.size, 'Drag or tap Credits');
+    o.onPick?.();
     if (!go) return;
     go.textContent = picked.size ? `Buy ${picked.size}` : 'Buy';
     if (!sale.preview && config.sweeper) go.disabled = !picked.size;
@@ -214,7 +218,7 @@ export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement) 
     mark();
   });
   mark();
-  return { mark };
+  return { mark, chosen };
 }
 
 /// OpenSea listings come as signed orders (orders/ids/prices); FWA listings by listing id and price; CreditStrategy's

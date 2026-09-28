@@ -438,7 +438,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     if (rawRules) {
       try {
         const b = JSON.parse(rawRules) as Record<string, unknown>;
-        const keys = ['minScore', 'maxScore', 'bitsFrom', 'bitsTo', 'paidFrom', 'paidTo'] as const;
+        const keys = ['palettes', 'prints', 'weights', 'eights', 'idFrom', 'idTo', 'minScore', 'maxScore', 'bitsFrom', 'bitsTo', 'paidFrom', 'paidTo'] as const;
         if (!b || typeof b !== 'object' || Object.keys(b).some((k) => !(keys as readonly string[]).includes(k))) throw 0;
         rules = {};
         for (const k of keys) {

@@ -10,6 +10,8 @@ import { $$, art, errText, esc, fromUtcInput, openModal, sameUtcDay, sheet, toas
 import { LAYOUT_TRAITS, keyOf, ruleFor, slotMark, slotName, type LayoutTrait } from '../../shared/layout';
 import { bitsPath, ratingPath, setPath, timePath } from '../../shared/trait';
 import { editionArt } from '../ghosts';
+import { listedPager, priceTag, sweepControls, sweepToWallet } from '../forsale';
+import { creditCell } from './trait';
 import { Room, booksOf, noRoomReason } from '../slots';
 import { bin } from '../bins';
 import { TRAIT_KINDS, eightsName, parseTrait } from '../../shared/trait';
@@ -187,7 +189,7 @@ export async function create(app: HTMLElement) {
     return;
   }
 
-  const [owned, approved, min, protocolBps, creatorBps, table, minutes, unions] = await Promise.all([
+  const [held, approved, min, protocolBps, creatorBps, table, minutes, unions] = await Promise.all([
     myCredits(session.account),
     isApproved(session.account),
     minOpen(),
@@ -197,6 +199,7 @@ export async function create(app: HTMLElement) {
     fetch('/minutes.json').then((r) => r.json() as Promise<Minutes>).catch(() => [] as Minutes),
     listBatches().catch(() => [] as Listed[]),
   ]);
+  const owned = [...held]; // what you buy on this page joins it
   const rules: Rules = { palettes: 0, prints: 0, weights: 0, eights: 0, minuteFrom: -1, minuteTo: -1, idFrom: 0, idTo: 0, minScore: 0, maxScore: 0, bitsFrom: 0, bitsTo: 0, list: [] };
   const artOf = (id: bigint) => (config.chainId === 1 ? art(id) : `/art/mainnet/${id}.svg`);
   let ghosts: { id: bigint; palette: number; t: number }[] = [];
@@ -341,8 +344,8 @@ export async function create(app: HTMLElement) {
             ? owned.map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="false" title="Credit #${id}"><img src="${art(id)}" alt="Credit #${id}" loading="lazy"></button>`).join('')
             : `<p class="muted">You don’t hold any Credits.${config.chainId !== 1 ? ' <a href="/mint">Mint test Credits →</a>' : ''}</p>`
         }</div>
-        <p class="muted small" id="picker-none" hidden>None of your Credits fit these rules.</p>
         <details class="picker-off" id="picker-off-wrap" hidden><summary class="muted small" id="picker-off-sum"></summary><div class="picker lg" id="picker-off"></div></details>
+        <div class="create-buy" id="create-buy" hidden></div>
       </section>
 
 
@@ -361,6 +364,9 @@ export async function create(app: HTMLElement) {
 
   // ---------------------------------------------------------------- your Credits' traits (for the live preview)
   const mine = new Map<string, Rated>();
+  let traitsIn = false;
+  /// Once you pick or unpick a Credit yourself, the page stops picking for you.
+  let pickedByHand = false;
   (async () => {
     // Yield first: with no Credits the loop never awaits, and refresh() would run before it's defined.
     await Promise.resolve();
@@ -370,8 +376,59 @@ export async function create(app: HTMLElement) {
         for (const [id, v] of Object.entries(r.ratings)) mine.set(id, v);
       } catch {}
     }
+    traitsIn = true;
     refresh();
   })();
+
+  // ---------------------------------------------------------------- buy Credits that fit, when none of yours do
+  // The Credits explorer's Buy row, over the cheapest listings these rules take, without its own button: the Start
+  // button buys what's picked there ("Buy 4 and start Credit Union"), then opens the union with them. Not for a
+  // named list (its Credits are chosen).
+  let buyFor = '';
+  let buyer: ReturnType<typeof sweepControls> | null = null;
+  const buying = () => (buyer && !document.getElementById('create-buy')!.hidden ? buyer.chosen() : []);
+  const listedRules = () => {
+    const f = filterOf();
+    const all: Record<string, number> = { palettes: f.palettes, prints: f.prints, weights: f.weights, eights: f.eights, paidFrom: Number(f.paidFrom), paidTo: Number(f.paidTo), idFrom: Number(f.idFrom), idTo: Number(f.idTo), minScore: f.minScore, maxScore: f.maxScore, bitsFrom: f.bitsFrom, bitsTo: f.bitsTo };
+    return Object.fromEntries(Object.entries(all).filter(([, v]) => v));
+  };
+  async function drawBuy(fits: number) {
+    const el = document.getElementById('create-buy')!;
+    if (fits || !traitsIn || rules.list.length || !config.sweeper) {
+      el.hidden = true;
+      buyFor = '';
+      buyer = null;
+      return;
+    }
+    const key = JSON.stringify(listedRules());
+    if (key === buyFor) return;
+    buyFor = key;
+    const pager = listedPager({ rules: listedRules() });
+    await pager.fill(8, 3);
+    if (buyFor !== key || !el.isConnected) return;
+    const ls = pager.sale.ls.slice(0, 8);
+    el.hidden = !ls.length;
+    if (!ls.length) return;
+    el.innerHTML = `<div class="jb"><div class="jb-sweep" id="cb-act"></div>
+      <div class="trait-grid" id="cb-grid">${ls.map((l) => creditCell(Number(l.id), priceTag(l))).join('')}</div></div>`;
+    buyer = sweepControls(el.querySelector<HTMLElement>('#cb-act')!, { ...pager.sale, ls }, el.querySelector<HTMLElement>('#cb-grid')!, { button: false, onPick: () => refresh() });
+  }
+  /// Bought here: into the picker, picked.
+  async function gotCredits(ids: string[]) {
+    const fresh = ids.map(BigInt).filter((id) => !owned.includes(id));
+    if (!fresh.length) return;
+    try {
+      const r = await ratings(fresh);
+      for (const [id, v] of Object.entries(r.ratings)) mine.set(id, v);
+    } catch {}
+    const picker = document.getElementById('picker')!;
+    if (!owned.length) picker.innerHTML = '';
+    owned.push(...fresh);
+    picker.insertAdjacentHTML('beforeend', fresh.map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="false" title="Credit #${id}"><img src="${art(id)}" alt="Credit #${id}" loading="lazy"></button>`).join(''));
+    for (const id of fresh) picks.add(id.toString());
+    buyFor = '';
+    refresh();
+  }
 
   const qualifies = (id: bigint) => {
     const r = mine.get(id.toString());
@@ -437,7 +494,11 @@ export async function create(app: HTMLElement) {
   }
 
   /// The button says what it does: how many of your Credits go in.
-  const startLabel = () => (picks.size ? `Start Credit Union with ${picks.size} ${picks.size === 1 ? 'Credit' : 'Credits'}` : 'Start Credit Union');
+  const startLabel = () => {
+    const b = buying().length;
+    if (b) return `Buy ${b} and start Credit Union`;
+    return picks.size ? `Start Credit Union with ${picks.size} ${picks.size === 1 ? 'Credit' : 'Credits'}` : 'Start Credit Union';
+  };
   /// Each rule with a value set links to those Credits in the explorer.
   function drawSee() {
     const href: Record<string, string> = {
@@ -494,6 +555,15 @@ export async function create(app: HTMLElement) {
     drawSee();
     const fit = owned.filter(qualifies);
     for (const id of [...picks]) if (!fit.some((f) => f.toString() === id)) picks.delete(id);
+    // Until you pick yourself, the least it takes to start is picked for you (Min 1: one of yours that fits), so
+    // Start is ready as soon as the rules are; picked again if the rules change under it.
+    if (!pickedByHand && !picks.size && traitsIn) {
+      const take = capacity();
+      for (const id of fit) {
+        if (picks.size >= min) break;
+        if (take.take(keyOfMine(id.toString()))) picks.add(id.toString());
+      }
+    }
     // Keep the picks the sheet has room for, in the order picked; the rest of a value grey out once it's full.
     const room = capacity();
     for (const id of [...picks]) if (!room.take(keyOfMine(id))) picks.delete(id);
@@ -516,14 +586,17 @@ export async function create(app: HTMLElement) {
       (ok ? on : offBox).append(p);
     }
     if (owned.length) {
-      document.getElementById('picker-none')!.hidden = fit.length > 0;
+
       const wrap = document.getElementById('picker-off-wrap')!;
       wrap.hidden = offCount === 0;
-      document.getElementById('picker-off-sum')!.textContent = `You also have ${offCount} ${offCount === 1 ? 'Credit' : 'Credits'} that don’t fit these rules`;
+      document.getElementById('picker-off-sum')!.textContent = fit.length
+        ? `You also have ${offCount} ${offCount === 1 ? 'Credit' : 'Credits'} that don’t fit these rules`
+        : `None of your ${offCount === 1 ? 'Credit fits' : `${offCount} Credits fit`} these rules`;
     }
     document.getElementById('n')!.textContent = picks.size ? `${picks.size} selected` : `Min ${min}`;
     document.getElementById('all')!.hidden = !fit.length;
-    const n = picks.size;
+    void drawBuy(fit.length);
+    const n = picks.size + buying().length; // Credits being bought here count toward the minimum
     const over = overPainted();
     // The contract refuses rules that can never admit 80.
     const tooNarrow = rules.list.length && rules.list.length < 80 ? 'A named list needs at least 80 Credits.'
@@ -1190,10 +1263,12 @@ export async function create(app: HTMLElement) {
   pickerEl.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.pick');
     if (!b || b.classList.contains('off') || b.classList.contains('full')) return;
+    pickedByHand = true;
     picks.has(b.dataset.id!) ? picks.delete(b.dataset.id!) : picks.add(b.dataset.id!);
     refresh();
   });
   document.getElementById('all')!.addEventListener('click', () => {
+    pickedByHand = true;
     picks.clear();
     const room = capacity();
     for (const id of owned.filter(qualifies)) if (room.take(keyOfMine(id.toString()))) picks.add(id.toString());
@@ -1281,10 +1356,22 @@ export async function create(app: HTMLElement) {
     const chosen = Number((app.querySelector('input[name=arr]:checked') as HTMLInputElement).value);
     const arr = chosen === 4 && !layout.some(Boolean) ? 0 : chosen; // Painted with nothing painted burns in deposit order
     const split = Number((app.querySelector('input[name=split]:checked') as HTMLInputElement).value);
-    const ids = [...picks].map(BigInt);
-    const f = filterOf();
     go.disabled = true;
     go.dataset.busy = '1'; // progress labels below own the button until this finishes
+    // Credits picked in Buy Credits that fit: bought first (the explorer's price-checked buy, into your wallet),
+    // then picked here, then the union opens with them.
+    const toBuy = buying();
+    if (toBuy.length) {
+      const got = await sweepToWallet(toBuy, go);
+      if (!got?.length) {
+        delete go.dataset.busy;
+        return refresh();
+      }
+      await gotCredits(got);
+      go.disabled = true;
+    }
+    const ids = [...picks].map(BigInt);
+    const f = filterOf();
     try {
       const open = {
         address: config.factory,

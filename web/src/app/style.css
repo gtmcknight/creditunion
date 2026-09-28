@@ -6675,11 +6675,14 @@ dialog.eligible::backdrop {
   transform: scale(1.15);
 }
 .sweep-range input:focus-visible {
-  outline: 2px solid var(--fg);
-  outline-offset: 4px;
-}
-.sweep-range input[data-pointer]:focus-visible {
   outline: none;
+}
+/* Keyboard focus rings the thumb, not the whole row; a drag with the pointer leaves none. */
+.sweep-range input:focus-visible:not([data-pointer])::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--fg);
+}
+.sweep-range input:focus-visible:not([data-pointer])::-moz-range-thumb {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--fg);
 }
 .sweep-range input:disabled {
   opacity: 0.4;
@@ -6696,6 +6699,10 @@ dialog.eligible::backdrop {
   }
 }
 
+/* The create page's Buy row, under "None of your Credits fit": the row across the column, then the tiles. */
+#create-buy .buy-row {
+  margin: 14px 0 16px;
+}
 /* Every Buy's row (the Credits explorer, a union's Buy tab): the slider, then the total with the fee under it, then
    on the explorer "Buy 5". Fixed digits and widths, so nothing shifts while dragging. On phones the slider takes
    the first line; the total and the button share the next. */
