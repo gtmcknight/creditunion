@@ -6596,6 +6596,7 @@ dialog.eligible::backdrop {
 /* A sweep's Credits: outlined in ink, price in ink; the rest of the listed ones grey. */
 .jb .cc-price { color: var(--muted); }
 .jb .cc.sel .cc-price { color: var(--fg); font-weight: 600; }
+.cc-price.yours, .jb .cc-price.yours { color: var(--fg); font-weight: 600; }
 .jb .cc.sel .cc-art img { outline: 2px solid var(--fg); outline-offset: 0; }
 .jb .cc.listed .cc-art { cursor: pointer; }
 

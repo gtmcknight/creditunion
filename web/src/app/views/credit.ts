@@ -12,7 +12,7 @@ import { maskInks, paletteBit } from '../traits';
 import { art, errText, esc, eth, same, sheet, toast, utc } from '../ui';
 import { card } from './lists';
 import { processOf } from '../../shared/credits';
-import { SOURCES, type Source } from '../forsale';
+import { SOURCES, justBought, rememberBought, type Source } from '../forsale';
 
 /// Credits ever minted: the same numbers on every network.
 const SUPPLY = 122_154;
@@ -219,7 +219,7 @@ async function drawBuy(n: number) {
   } catch {
     return;
   }
-  if (!d.price || !d.source || !SOURCES[d.source] || !el.isConnected) return;
+  if (!d.price || !d.source || !SOURCES[d.source] || !el.isConnected || justBought(n)) return;
   const src = SOURCES[d.source];
   const value = BigInt(d.price);
   const inApp = !d.preview && !!d.contract && (d.source === 'strategy' || (d.source === 'fwa' && !!d.listingId));
@@ -247,7 +247,8 @@ async function drawBuy(n: number) {
         () => toast('Submitted. Waiting for confirmation…', 'info'),
       );
       toast(`Credit #${n.toLocaleString()} is yours.`, 'ok');
-      go.textContent = 'Bought';
+      rememberBought([n]);
+      el.hidden = true; // off the market: the listing box goes
     } catch (e) {
       toast(errText(e), 'err', 8000);
       go.disabled = false;

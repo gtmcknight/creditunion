@@ -1,5 +1,5 @@
 import { sweeperAbi } from './abi';
-import { config, pub, send } from './chain';
+import { config, pub, send, session } from './chain';
 import { editionArt } from './ghosts';
 import { creditCell } from './views/trait';
 import { errText, esc, rangeHtml, setRange, toast } from './ui';
@@ -11,6 +11,31 @@ export const SOURCES: Record<Source, { name: string; icon: string }> = {
   fwa: { name: 'FWA', icon: '/sources/fwa.png' },
   strategy: { name: 'CreditStrategy', icon: '/sources/strategy.svg' },
 };
+
+/// Credits this browser just bought. Listings are cached (60 s here, longer at the marketplaces), so a sold Credit
+/// can still come back listed for a while; a fresh page leaves these out until the listings catch up. (On the page
+/// that bought them they stay in place and read "Yours".)
+const BOUGHT_KEY = 'cu-bought';
+const BOUGHT_FOR = 15 * 60_000;
+const boughtAt = (): Record<string, number> => {
+  try {
+    const all = JSON.parse(sessionStorage.getItem(BOUGHT_KEY) ?? '{}') as Record<string, number>;
+    return Object.fromEntries(Object.entries(all).filter(([, t]) => Date.now() - t < BOUGHT_FOR));
+  } catch {
+    return {};
+  }
+};
+export const justBought = (id: string | number) => String(id) in boughtAt();
+export function rememberBought(ids: (string | number)[]) {
+  const all = boughtAt();
+  for (const id of ids) all[String(id)] = Date.now();
+  try {
+    sessionStorage.setItem(BOUGHT_KEY, JSON.stringify(all));
+  } catch {}
+}
+
+// ERC-721 Transfer(address indexed from, address indexed to, uint256 indexed tokenId)
+const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 
 export const minEth = (wei: bigint) => (Number(wei) / 1e18).toFixed(4).replace(/\.?0+$/, '');
 
@@ -40,21 +65,25 @@ export async function drawForSale(el: HTMLElement) {
   const sale = await loadSale();
   if (!el.isConnected) return;
   if (!sale) return void (el.hidden = true); // nothing listed: the skeleton goes
-  const show = sale.ls.slice(0, 8);
+  const show = sale.all.slice(0, 8);
   el.innerHTML = `<div class="jb-controls static"><h2 class="jb-buy">Buy Credits</h2><div class="jb-sweep" id="fs-act"></div></div>
-    <div class="trait-grid" id="fs-grid">${show.map((l) => creditCell(Number(l.id), priceTag(l))).join('')}</div>
+    <div class="trait-grid" id="fs-grid">${show.map((l) => (sale.mine.has(l.id) ? creditCell(Number(l.id), YOURS) : creditCell(Number(l.id), priceTag(l)))).join('')}</div>
     <p class="jb-line"><a class="jb-link" href="/palette">Every Credit for sale, cheapest first →</a></p>`;
-  sweepControls(el.querySelector<HTMLElement>('#fs-act')!, { ...sale, ls: show }, el.querySelector<HTMLElement>('#fs-grid')!);
+  sweepControls(el.querySelector<HTMLElement>('#fs-act')!, { ...sale, ls: show.filter((l) => !sale.mine.has(l.id)) }, el.querySelector<HTMLElement>('#fs-grid')!);
   el.hidden = false;
 }
 
-export type Sale = { ls: Listed[]; preview: boolean; byId: Map<string, Listed> };
+/// `ls`/`byId`: what can be bought. `all`: the listings in grid order, including `mine`, bought on this page.
+export type Sale = { ls: Listed[]; preview: boolean; byId: Map<string, Listed>; all: Listed[]; mine: Set<string> };
+
+/// Where a bought Credit's price was.
+export const YOURS = '<span class="cc-price yours">Yours</span>';
 
 /// Every Credit listed anywhere (of one trait, `palette/K`, or within rules like { minScore, maxScore }), cheapest first, paged in from /opensea/listed as asked
 /// for. A Credit listed more than once keeps its cheapest. `sale.ls` is the same list, for Sweep.
 export function listedPager(where: { trait?: string; rules?: Record<string, number> } = {}) {
-  const items: Listed[] = [];
-  const sale: Sale = { ls: items, preview: true, byId: new Map() };
+  const items: Listed[] = []; // the grid's order, just-bought included
+  const sale: Sale = { ls: [], preview: true, byId: new Map(), all: items, mine: new Set() };
   let cursor: string | null = '';
   const self = {
     items,
@@ -73,9 +102,10 @@ export function listedPager(where: { trait?: string; rules?: Record<string, numb
         if (d.error) break;
         sale.preview = !!d.preview;
         for (const l of d.items ?? []) {
-          if (!SOURCES[l.source] || sale.byId.has(l.id)) continue;
-          sale.byId.set(l.id, l);
+          if (!SOURCES[l.source] || sale.byId.has(l.id) || sale.mine.has(l.id) || justBought(l.id)) continue;
           items.push(l);
+          sale.byId.set(l.id, l);
+          sale.ls.push(l);
         }
         cursor = d.next ?? null;
       }
@@ -91,8 +121,8 @@ export async function loadSale(trait?: string): Promise<Sale | null> {
     const res = await fetch(`/opensea/forsale${trait ? `?trait=${encodeURIComponent(trait)}` : ''}`);
     if (!res.ok) return null;
     const d = (await res.json()) as { listings?: Listed[]; preview?: boolean };
-    const ls = (d.listings ?? []).filter((l) => SOURCES[l.source]);
-    return ls.length ? { ls, preview: !!d.preview, byId: new Map(ls.map((l) => [l.id, l])) } : null;
+    const ls = (d.listings ?? []).filter((l) => SOURCES[l.source] && !justBought(l.id));
+    return ls.length ? { ls, preview: !!d.preview, byId: new Map(ls.map((l) => [l.id, l])), all: [...ls], mine: new Set() } : null;
   } catch {
     return null;
   }
@@ -114,7 +144,26 @@ export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement) 
   const range = host.querySelector<HTMLInputElement>('#sale-n')!;
   const go = host.querySelector<HTMLButtonElement>('#sale-go')!;
   const chosen = () => sale.ls.filter((l) => picked.has(l.id)); // in price order
-  go.addEventListener('click', () => picked.size && void sweepToWallet(chosen(), go));
+  go.addEventListener('click', async () => {
+    if (!picked.size) return;
+    const got = await sweepToWallet(chosen(), go);
+    if (!got) return;
+    // Bought: off the market here at once. Each square drops its price and says it's yours.
+    for (const id of got) {
+      sale.mine.add(id);
+      sale.byId.delete(id);
+      const i = sale.ls.findIndex((l) => l.id === id);
+      if (i >= 0) sale.ls.splice(i, 1);
+      const c = grid.querySelector<HTMLElement>(`.cc[data-id="${id}"]`);
+      if (!c) continue;
+      c.classList.remove('listed', 'sel');
+      c.querySelector('.cc-art')?.removeAttribute('title');
+      c.querySelector('.cc-price')?.insertAdjacentHTML('afterend', YOURS);
+      c.querySelector('.cc-price:not(.yours)')?.remove();
+    }
+    picked.clear();
+    mark();
+  });
   let bps = DEFAULT_FEE_BPS;
   void sweepFee().then((b) => {
     bps = b;
@@ -197,7 +246,8 @@ export function checkQuote(q: Quote) {
 
 /// Sweep these listings into the connected wallet (Sweeper.buy): a fresh price for exactly them, checked
 /// against what it shows, the fee read now, then one transaction. Credits sold since drop out of the price.
-export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement) {
+/// Resolves to the ids bought, or null if nothing was.
+export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement): Promise<string[] | null> {
   const label = btn.textContent ?? '';
   btn.disabled = true;
   btn.textContent = 'Pricing…';
@@ -211,9 +261,8 @@ export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement) {
       pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'quote', args: [total] }),
       pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'feeBps' }),
     ])) as [bigint, bigint];
-    const n = q.ids.length + (q.fwa?.length ?? 0) + (q.strategy?.length ?? 0);
     btn.textContent = 'Confirm…'; // in the wallet
-    await send(
+    const receipt = await send(
       {
         address: config.sweeper!,
         abi: sweeperAbi,
@@ -231,11 +280,20 @@ export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement) {
         btn.textContent = 'Buying…';
       },
     );
+    // What actually landed: the Credits transferred to this wallet in the receipt, not what was quoted (a listing
+    // can sell to someone else between the quote and the block).
+    const me = session.account!.toLowerCase();
+    const got = receipt.logs
+      .filter((l) => l.address.toLowerCase() === config.credits.toLowerCase() && l.topics[0] === TRANSFER && l.topics.length === 4 && `0x${l.topics[2]!.slice(26)}` === me)
+      .map((l) => BigInt(l.topics[3]!).toString());
+    const n = got.length;
     toast(`${n} ${n === 1 ? 'Credit is' : 'Credits are'} yours.${n < picked.length ? ` ${picked.length - n} sold before you got to them.` : ''}`, 'ok', 8000);
-    btn.textContent = 'Bought';
+    rememberBought(got);
+    return got;
   } catch (e) {
     toast(errText(e), 'err', 8000);
     btn.disabled = false;
     btn.textContent = label;
+    return null;
   }
 }

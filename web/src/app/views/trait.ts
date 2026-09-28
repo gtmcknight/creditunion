@@ -1,5 +1,5 @@
 import { hasLayout, layoutSlot, listBatches, type Listed } from '../data';
-import { listedPager, priceTag, sweepControls } from '../forsale';
+import { YOURS, listedPager, priceTag, sweepControls } from '../forsale';
 import { hydrate } from '../ens';
 import { editionArt, fillGhosts } from '../ghosts';
 import { dice, printGlyph, swatch, weightGlyph } from '../glyphs';
@@ -135,7 +135,8 @@ export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => 
   let listed = listedPager(where);
   let sweep: { mark: () => void } | null = null;
   let page = 0, shown = 0, gen = 0, placed = 0;
-  const cell = (id: number) => creditCell(id, listed.sale.byId.has(String(id)) ? priceTag(listed.sale.byId.get(String(id))!) : '');
+  const cell = (id: number) =>
+    creditCell(id, listed.sale.mine.has(String(id)) ? YOURS : listed.sale.byId.has(String(id)) ? priceTag(listed.sale.byId.get(String(id))!) : '');
   // A range (rules) can't be searched quickly (OpenSea can't filter it), so its Credits draw at once and the listed
   // ones join the head of the grid as the search finds them; the browser keeps the view still as they arrive.
   // A trait searches fast, so it pages its listed Credits first, then the rest.
@@ -174,7 +175,7 @@ export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => 
       }
       const d = await rest(page);
       if (!grid.isConnected || my !== gen) return;
-      grid.insertAdjacentHTML('beforeend', d.ids.filter((id) => !listed.sale.byId.has(String(id))).map(cell).join(''));
+      grid.insertAdjacentHTML('beforeend', d.ids.filter((id) => !listed.sale.byId.has(String(id)) && !listed.sale.mine.has(String(id))).map(cell).join(''));
       sweep?.mark();
       shown += d.ids.length;
       page++;
