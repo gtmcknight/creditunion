@@ -8,7 +8,7 @@ import { editionArt, examples, fillGhosts, registerDeposits, registerFilter } fr
 import { keyOf as layoutKey } from '../../shared/layout';
 import { Room, books, depositedKeys, keysOf, noRoomReason, type Books } from '../slots';
 import { checkQuote, minEth, sourceMark, sweepFee, type Quote, type Source } from '../forsale';
-import { $$, art, clock, errText, esc, eth, rangeHtml, same, setRange, sheet, short, toast, until } from '../ui';
+import { $$, art, clock, errText, esc, eth, openModal, rangeHtml, same, setRange, sheet, short, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
 import { go as navigate } from '../main';
 
@@ -294,7 +294,6 @@ function openCreated(b: Ctx, placed?: (bigint | null)[], joined?: number) {
       <a class="btn primary" href="${esc(x)}" target="_blank" rel="noopener">Share on X</a>
       <button type="button" class="btn" id="created-copy">Copy link</button>
     </div>
-    <button type="submit" class="btn block created-done">Done</button>
   </form>`;
   document.body.append(d);
   const link = d.querySelector<HTMLInputElement>('.created-link')!;
@@ -308,9 +307,9 @@ function openCreated(b: Ctx, placed?: (bigint | null)[], joined?: number) {
     }
   });
   d.addEventListener('close', () => d.remove());
-  d.showModal();
-  // Focus Done, not the link (focusing it selects the text), and without a ring: nobody tabbed here.
-  (d.querySelector('.created-done') as HTMLElement).focus({ focusVisible: false } as FocusOptions);
+  openModal(d);
+  // Focus the ×, not the link (focusing it selects the text), and without a ring: nobody tabbed here.
+  (d.querySelector('.dialog-x') as HTMLElement).focus({ focusVisible: false } as FocusOptions);
 }
 
 /// "Early bird · 1st 1.88% → 80th 0.63%" of the depositors' payout, plus the connected wallet's own positions and what they add up to.
@@ -1140,7 +1139,7 @@ function openDepositors(b: Ctx, account: string | null) {
   const d = document.createElement('dialog');
   d.className = 'people';
   d.innerHTML = `<form method="dialog">
-    <header class="row"><h3>Members <span class="muted num">${list.length}</span></h3><button type="submit" class="btn sm" aria-label="Close">Close</button></header>
+    <header class="row"><h3>Members <span class="muted num">${list.length}</span></h3></header>
     <ol class="people-list">${list
       .map(
         (r) => `<li class="person" data-owner="${esc(r.addr.toLowerCase())}">
@@ -1165,7 +1164,7 @@ function openDepositors(b: Ctx, account: string | null) {
     cells.forEach((c) => c.classList.remove('lit'));
     d.remove();
   });
-  d.showModal();
+  openModal(d);
 }
 
 

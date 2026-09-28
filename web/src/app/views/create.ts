@@ -6,13 +6,13 @@ import { canBatch, config, send, sendBatch, session } from '../chain';
 import { INK, maskInks, maskLabel } from '../traits';
 import { SPLITS, creatorFeeBps, factoryRatings, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Rated } from '../data';
 import { paletteBit, TRAITS } from '../traits';
-import { $$, art, errText, esc, fromUtcInput, sameUtcDay, sheet, toast, toUtcInput, utc } from '../ui';
+import { $$, art, errText, esc, fromUtcInput, openModal, sameUtcDay, sheet, toast, toUtcInput, utc } from '../ui';
 import { LAYOUT_TRAITS, keyOf, ruleFor, slotMark, slotName, type LayoutTrait } from '../../shared/layout';
 import { bitsPath, ratingPath, setPath, timePath } from '../../shared/trait';
 import { editionArt } from '../ghosts';
 import { Room, booksOf, noRoomReason } from '../slots';
 import { bin } from '../bins';
-import { TRAIT_KINDS, parseTrait } from '../../shared/trait';
+import { TRAIT_KINDS, eightsName, parseTrait } from '../../shared/trait';
 
 const CHUNK = 40;
 /// The layouts a new party can pick, by the contract's burn-order number (1 Mint time and 3 Creator's order are retired).
@@ -1367,9 +1367,9 @@ export async function create(app: HTMLElement) {
     const total = document.getElementById('st-edition')!.textContent;
     const d = document.createElement('dialog');
     d.className = 'eligible';
-    d.innerHTML = `<div class="eligible-head"><div><h3>${esc(total ?? '')} eligible</h3><p class="rule-sentence">${sentence()}</p></div><button type="button" class="btn sm" data-close>Close</button></div><div class="eligible-grid"></div><button type="button" class="btn block" data-more hidden>Show more</button>`;
+    d.innerHTML = `<div class="eligible-head"><div><h3>${esc(total ?? '')} eligible</h3><p class="rule-sentence">${sentence()}</p></div></div><div class="eligible-grid"></div><button type="button" class="btn block" data-more hidden>Show more</button>`;
     document.body.append(d);
-    d.showModal();
+    openModal(d);
     const grid = d.querySelector<HTMLElement>('.eligible-grid')!, more = d.querySelector<HTMLButtonElement>('[data-more]')!;
     let page = 0, shown = 0;
     const load = async () => {
@@ -1384,13 +1384,8 @@ export async function create(app: HTMLElement) {
       more.textContent = `Show more (${((r.count ?? 0) - shown).toLocaleString()} left)`;
       more.disabled = false;
     };
-    const close = () => { d.close(); d.remove(); };
-    d.addEventListener('click', (e) => {
-      const t = e.target as HTMLElement;
-      if (t === d || t.closest('[data-close]')) close();
-      else if (t.closest('[data-more]')) load();
-    });
-    d.addEventListener('cancel', (e) => { e.preventDefault(); close(); });
+    d.addEventListener('close', () => d.remove());
+    more.addEventListener('click', () => load());
     await load();
   };
   document.getElementById('see-eligible')!.addEventListener('click', (e) => { e.preventDefault(); openEligible(); });
@@ -1401,7 +1396,7 @@ export async function create(app: HTMLElement) {
     if (k === 'palette') return bits(pal(), 16).map((m) => chip(swatch(slotName(0, m)), slotName(0, m))).join('');
     if (k === 'print') return bits(rules.prints, PRINTS.length).map((i) => chip(printGlyph(PRINTS[i]), PRINTS[i])).join('');
     if (k === 'weight') return bits(rules.weights, WEIGHTS.length).map((i) => chip(weightGlyph(WEIGHTS[i]), WEIGHTS[i])).join('');
-    if (k === 'eights') return bits(rules.eights, EIGHTS_MAX + 1).map((n) => chip(dice(n), `${n}×8`)).join('');
+    if (k === 'eights') return bits(rules.eights, EIGHTS_MAX + 1).map((n) => chip(dice(n), eightsName(n))).join('');
     return null;
   };
   const applyPanes = () => {

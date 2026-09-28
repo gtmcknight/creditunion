@@ -640,7 +640,10 @@ nav a .num {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  /* Drop the corner marks Credit art draws in its bottom row (y 280–320 of the 320 viewBox); the plates stop by 250. */
+}
+/* A member's Credit shows as its contract draws it, Eights marks in the bottom row included. The placeholder Credits
+   in empty slots are texture: drop that row (y 280–320 of the 320 viewBox; the plates stop by 250). */
+.cell.ghost img {
   clip-path: inset(0 0 9.375% 0);
 }
 .cell.new {
@@ -1208,6 +1211,30 @@ dialog {
 dialog::backdrop {
   background: rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(2px);
+}
+/* Every modal's close: a plain × in the top right corner (openModal). Headings leave it room. */
+.dialog-x {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.dialog-x:hover {
+  background: var(--surface);
+  color: var(--fg);
+}
+dialog:has(> .dialog-x) :is(form > h3:first-child, header.row, .eligible-head) {
+  padding-right: 32px;
 }
 dialog form {
   display: grid;
@@ -5518,15 +5545,6 @@ dialog.created .created-link:focus {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-}
-dialog.created .created-done {
-  margin-top: -6px;
-  background: none;
-  box-shadow: none;
-  color: var(--muted);
-}
-dialog.created .created-done:hover {
-  color: var(--fg);
 }
 dialog.created[open] {
   animation: created-in 260ms var(--ease) both;

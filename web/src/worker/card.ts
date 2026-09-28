@@ -4,6 +4,7 @@
 /// library or font engine in the worker. Credits are drawn exactly as their contract draws them (print.ts, misprints
 /// included); public/wall.bin's registered grid (scripts/wall.ts) is the fallback when the chain can't be read.
 import { MIXES, type Rect } from './print';
+import { eightsName } from '../shared/trait';
 
 const W = 1200, H = 630;
 
@@ -280,7 +281,7 @@ export async function drawCredit(fetcher: Fetcher, origin: string, id: number, f
     if (b === 8) c.rect(x0 + i * 28, 368 - 22, 22, 22, rgb('#111111'));
   });
   fact(x0, 328, 'Palette', inks.map((b) => 'CMYK'[Math.log2(b)]).join(''), inks.length * 28 + 6);
-  fact(col2, 328, 'Eights', f.eights ? `${f.eights}×8` : 'None');
+  fact(col2, 328, 'Eights', eightsName(f.eights));
   fact(x0, 434, 'Print', f.print);
   fact(col2, 434, 'Weight', f.weight.charAt(0).toUpperCase() + f.weight.slice(1));
   fact(x0, 540, 'Rating', f.score === null ? '–' : f.score.toFixed(1));

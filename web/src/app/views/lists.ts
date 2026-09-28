@@ -100,7 +100,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yo
 }
 
 const PARTY_STATES = new Set(['Open', 'Full', 'Expired']);
-const STAGES = [['upcoming', 'Upcoming'], ['live', 'Live'], ['sold', 'Sold']] as const;
+const STAGES = [['live', 'Live'], ['upcoming', 'Upcoming'], ['sold', 'Sold']] as const;
 type Stage = (typeof STAGES)[number][0];
 const stageOf = (b: Listed): Stage => (b.s.state === 'Full' ? 'upcoming' : b.s.state === 'Settled' ? 'sold' : 'live');
 export type HomeTab = 'parties' | 'auctions';
@@ -122,7 +122,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       lede: head[1],
       tabs:
         tab === 'parties'
-          ? [{ label: 'For you <span class="num muted" id="n-you"></span>', attrs: 'data-view="you"' }, { label: 'All <span class="num muted" id="n-all"></span>', attrs: 'data-view="all"' }]
+          ? [{ label: 'All <span class="num muted" id="n-all"></span>', attrs: 'data-view="all"' }, { label: 'For you <span class="num muted" id="n-you"></span>', attrs: 'data-view="you"' }]
           : STAGES.map(([k, l]) => ({ label: `${l} <span class="num muted" id="n-${k}"></span>`, attrs: `data-stage="${k}"` })),
       tools: tab === 'parties' ? sort : undefined,
       label: 'Show',
@@ -144,7 +144,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       app.querySelector('.page-head')?.insertAdjacentHTML('beforeend', `<p class="filter-line">Open to ${esc(want.label)} · <a href="/unions">Show all</a></p>`);
     }
     const bar = app.querySelector<HTMLElement>('.page-bar');
-    // For you / All: shown only when something is for you; until someone picks, For you leads when it has any.
+    // All / For you: opens on All, the first tab, until someone picks.
     let view: 'you' | 'all' | null = null;
     let stage: Stage | null = null;
     let fit = new Map<Address, bigint[]>();
@@ -158,9 +158,8 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       const rest = list.filter((b) => !forYou(b));
       const titled = (title: string, items: Listed[]) => (items.length ? `<h2 class="group-title">${title} <span class="num">${items.length}</span></h2>${grid(items)}` : '');
       if (tab === 'parties') {
-        // For you always shows; signed out it opens on All and For you asks to connect.
-        const has = mine.length > 0;
-        const v = view ?? (has && !want ? 'you' : 'all');
+        // For you always shows; signed out it asks to connect.
+        const v = view ?? 'all';
         app.querySelectorAll<HTMLElement>('[data-stage]').forEach((b) =>
       b.addEventListener('click', () => {
         stage = b.dataset.stage as Stage;
@@ -187,8 +186,8 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         const n = document.getElementById(`n-${k}`);
         if (n) n.textContent = String(items.length);
       }
-      // Until someone picks, open on Live when there is any, else Upcoming, else Sold.
-      const pick = stage ?? (staged.find(([k, items]) => k === 'live' && items.length) ?? staged.find(([, items]) => items.length) ?? staged[1])[0];
+      // Until someone picks, open on Live when there is any, else the first stage that has any, else Live.
+      const pick = stage ?? (staged.find(([k, items]) => k === 'live' && items.length) ?? staged.find(([, items]) => items.length) ?? staged[0])[0];
       app.querySelectorAll<HTMLElement>('[data-stage]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.stage === pick)));
       const shown = staged.find(([k]) => k === pick)![1];
       el.innerHTML = !list.length

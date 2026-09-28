@@ -12,6 +12,7 @@ import { maskInks, paletteBit } from '../traits';
 import { art, errText, esc, eth, same, sheet, toast, utc } from '../ui';
 import { card } from './lists';
 import { processOf } from '../../shared/credits';
+import { eightsName } from '../../shared/trait';
 import { SOURCES, justBought, rememberBought, type Source } from '../forsale';
 
 /// Credits ever minted: the same numbers on every network.
@@ -74,7 +75,7 @@ export async function credit(app: HTMLElement, raw: string) {
     ? [
         fact('Rating', `<a class="num" href="${ratingBand(r.score)}" title="Credits rated within a point of it">${fmtScore(r.score)}</a> <span class="muted num">· rank ${r.rank.toLocaleString()} of ${rated.n.toLocaleString()}</span>`),
         fact('Palette', traitChip(`/palette/${r.traits.palette}`, swatch(r.traits.palette), r.traits.palette)),
-        fact('Eights', traitChip(`/eights/${r.traits.eights}`, dice(r.traits.eights), r.traits.eights ? `${r.traits.eights}×8` : 'None')),
+        fact('Eights', traitChip(`/eights/${r.traits.eights}`, dice(r.traits.eights), eightsName(r.traits.eights))),
         fact('Print', traitChip(`/print/${r.traits.registration.toLowerCase()}`, printGlyph(r.traits.registration), r.traits.registration)),
         fact('Weight', traitChip(`/weight/${weightOf(r)}`, weightGlyph(weightOf(r)), cap(weightOf(r)))),
         fact('Bits', `<a class="num" href="/bits?min=${r.traits.activeBits}&max=${r.traits.activeBits}" title="Credits with as many Bits">${r.traits.activeBits.toLocaleString()}</a>`),

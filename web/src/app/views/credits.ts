@@ -3,6 +3,7 @@ import { drawForSale } from '../forsale';
 import facts from 'virtual:credits-facts';
 import { loadTimes, mintSpan, paidAtOrAfter, PAL32, printsFor, tile, type Mint, type Prints, WALL_BLOCK } from '../wall';
 import { creditsHead, pct } from './trait';
+import { eightsName } from '../../shared/trait';
 import { utc } from '../ui';
 
 const SUPPLY = 122_154;
@@ -109,7 +110,7 @@ const TILES: Tile[] = [
       const most = f.eights[top];
       return [
         columns(f.eights.map((c, i) => ({ glyph: dice(i), count: c, cls: 'die' })), total),
-        `${Math.round((f.eights[0] / total) * 100)}% have no eights · ${most === 1 ? 'one Credit has' : `${n(most)} Credits have`} ${top}×8`,
+        `${Math.round((f.eights[0] / total) * 100)}% have no eights · ${most === 1 ? 'one has' : `${n(most)} have`} ${eightsName(top, true)}`,
       ];
     },
   },

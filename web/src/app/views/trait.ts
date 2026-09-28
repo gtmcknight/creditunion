@@ -3,7 +3,7 @@ import { YOURS, listedPager, priceTag, sweepControls } from '../forsale';
 import { hydrate } from '../ens';
 import { editionArt, fillGhosts } from '../ghosts';
 import { dice, printGlyph, swatch, weightGlyph } from '../glyphs';
-import { EIGHTS_TOP, TRAIT_KINDS, parseTrait, traitPath, type TraitKind, type TraitValue } from '../../shared/trait';
+import { EIGHTS_TOP, TRAIT_KINDS, eightsName, parseTrait, traitPath, type TraitKind, type TraitValue } from '../../shared/trait';
 import { esc, pageHead } from '../ui';
 import facts from 'virtual:credits-facts';
 import { card } from './lists';
@@ -16,8 +16,8 @@ const RULE_KEY = { palette: 'palettes', eights: 'eights', print: 'prints', weigh
 export const traitGlyph = (t: TraitValue) =>
   t.kind === 'palette' ? swatch(t.name) : t.kind === 'eights' ? dice(t.v - 1) : t.kind === 'print' ? printGlyph(t.name) : weightGlyph(t.slug);
 
-/// "Sparse Credits", "3×8 Credits", "Credits with no eights".
-export const creditsOf = (t: TraitValue) => (t.kind === 'eights' && t.v === 1 ? 'Credits with no eights' : `${t.name} Credits`);
+/// "Sparse Credits", "Credits with three eights", "Credits with no eights".
+export const creditsOf = (t: TraitValue) => (t.kind === 'eights' ? `Credits with ${eightsName(t.v - 1, true)}` : `${t.name} Credits`);
 
 export const pct = (n: number) => {
   const p = (n / SUPPLY) * 100;

@@ -2,6 +2,13 @@
 /// `trait` and `v` are the painted-layout encoding (shared/layout.ts), so ruleFor(trait, v) is the page's rule.
 import { ruleFor } from './layout';
 
+/// How many eights a Credit has, in words: "No eights", "One eight", "Five eights". Lowercase for use mid-sentence.
+const EIGHT_WORDS = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
+export const eightsName = (n: number, lower = false) => {
+  const w = `${EIGHT_WORDS[n] ?? n} ${n === 1 ? 'eight' : 'eights'}`;
+  return lower ? w.toLowerCase() : w;
+};
+
 export const TRAIT_KINDS = ['palette', 'eights', 'print', 'weight'] as const;
 export type TraitKind = (typeof TRAIT_KINDS)[number];
 
@@ -37,7 +44,7 @@ export function parseTrait(kind: string, raw: string): TraitValue | null {
   if (k === 'eights') {
     if (!/^\d{1,2}$/.test(s) || Number(s) > EIGHTS_TOP) return null;
     const n = Number(s);
-    return make(n ? `${n}×8` : 'No eights', String(n), 1, n + 1);
+    return make(eightsName(n), String(n), 1, n + 1);
   }
   const list = k === 'print' ? PRINTS : WEIGHTS;
   const i = list.findIndex((x) => x.toLowerCase() === s.toLowerCase());

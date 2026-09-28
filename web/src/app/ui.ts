@@ -204,3 +204,28 @@ export function setRange(el: HTMLInputElement, value?: number, max?: number) {
   if (out) out.textContent = String(v);
   el.disabled = hi <= lo && lo === 0;
 }
+
+/// Every modal opens through here: an × in the top right corner, and a click outside it (on the backdrop) closes
+/// it. Both close with returnValue '' (the wallet picker reads that as "cancelled"); Esc already does.
+export function openModal(d: HTMLDialogElement) {
+  if (!d.querySelector(':scope > .dialog-x')) {
+    d.insertAdjacentHTML(
+      'afterbegin',
+      '<button type="button" class="dialog-x" aria-label="Close"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>',
+    );
+    d.querySelector('.dialog-x')!.addEventListener('click', () => d.close(''));
+    // A press that starts and ends outside the box. Starting inside (selecting text, dragging) never closes it.
+    let outside = false;
+    const out = (e: PointerEvent) => {
+      const r = d.getBoundingClientRect();
+      return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+    };
+    d.addEventListener('pointerdown', (e) => (outside = e.target === d && out(e)));
+    d.addEventListener('pointerup', (e) => {
+      if (outside && e.target === d && out(e)) d.close('');
+      outside = false;
+    });
+  }
+  d.returnValue = '';
+  d.showModal();
+}

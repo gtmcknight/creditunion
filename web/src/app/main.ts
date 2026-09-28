@@ -14,7 +14,7 @@ import { traitPage } from './views/trait';
 import { timePage } from './views/time';
 import { creditsPage } from './views/credits';
 import { bitsPage, ratingPage } from './views/scale';
-import { esc, errText, toast } from './ui';
+import { esc, errText, openModal, toast } from './ui';
 
 const app = document.getElementById('app')!;
 let seq = 0;
@@ -143,7 +143,7 @@ async function openConnect() {
     d.querySelector('#copy-link')?.addEventListener('click', () => {
       navigator.clipboard?.writeText(location.href).then(() => toast('Link copied.', 'ok'));
     });
-    d.showModal();
+    openModal(d);
     return;
   }
   if (wallets.length <= 1) {
@@ -156,8 +156,8 @@ async function openConnect() {
   }
   d.innerHTML = `<form method="dialog"><h3>Connect a wallet</h3><div class="wallet-list">${wallets
     .map((w, i) => `<button class="wallet" value="${i}"><img src="${esc(w.info.icon)}" alt=""><span>${esc(w.info.name)}</span></button>`)
-    .join('')}</div><button class="btn block" value="">Cancel</button></form>`;
-  d.showModal();
+    .join('')}</div></form>`;
+  openModal(d);
   d.addEventListener(
     'close',
     async () => {
