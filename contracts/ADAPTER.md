@@ -1,5 +1,9 @@
 # The adapter: what happens when Jack's Statement contract ships
 
+> **Status, Sep 28 2026: not built.** The mainnet adapter doesn't exist yet, and no Credit Union can lock or burn
+> until one is switched on. `MockAssembler` and `MockStatement` in `src/mocks/` are test stand-ins only: they are
+> not Jack's contract and never go to mainnet.
+
 Credit Union pools Credits now. It can't burn them into Statements until Jack Butcher publishes the Statement
 contract, expected around October 1 ([his announcement](https://x.com/jackbutcher/status/2102910106451021935)).
 The piece that connects the two is the **adapter** (called the assembler in the code). This doc is the plan

@@ -6,6 +6,8 @@ import {IAssembler} from "../interfaces/IAssembler.sol";
 import {ICredits} from "../interfaces/ICredits.sol";
 import {MockStatement} from "./MockStatement.sol";
 
+/// NOT THE REAL ADAPTER. A test stand-in: it only talks to MockStatement, never to Jack's Statement contract,
+/// and it is never proposed to the mainnet factory. The mainnet adapter isn't written yet (see ADAPTER.md).
 /// @notice Testnet adapter for MockStatement. Models the worst case for the mainnet adapter: the
 ///         Statement contract insists that its caller owns the Credits, so the adapter pulls them from
 ///         the Batch (which approved it as operator), mints, and hands the Statement back.
