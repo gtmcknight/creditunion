@@ -244,7 +244,9 @@ document.addEventListener('click', (e) => {
   document.getElementById('magic-eye')?.addEventListener('click', () => import('./magic').then((m) => m.openMagic()));
   const factoryUrl = explorer('address', config.factory);
   if (factoryUrl) document.getElementById('foot-contract')?.setAttribute('href', factoryUrl);
-  await restore().catch(() => {});
+  // Draw with the wallet if it answers quickly; never wait on it. A slow extension (Rainbow can take seconds to
+  // answer eth_accounts) reconnects whenever it answers, and the page redraws then (onSession).
+  await Promise.race([restore().catch(() => {}), new Promise((r) => setTimeout(r, 300))]);
   route();
   // Header counts. The Parties and Auctions pages fill them from their own read.
 })();
