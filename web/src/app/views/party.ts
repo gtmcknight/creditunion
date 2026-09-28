@@ -1,7 +1,7 @@
 import { parseAbi, parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi } from '../abi';
 import { canBatch, config, explorer, pub, send, sendBatch, session } from '../chain';
-import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, forgetBatches, getBatch, getSummary, hasLayout, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
+import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, forgetBatches, getBatch, getSummary, hasLayout, indexedBatch, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { hydrate, pct, who } from '../ens';
 import { examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
@@ -85,18 +85,27 @@ const LIVE_MS = 12_000; // about one block
 
 export async function party(app: HTMLElement, address: Address, rerender: () => void) {
   let b: Ctx;
-  // Only parties our factory made: any contract can answer summary() with a made-up party. A read that fails
-  // (the network, a rate limit) says so, rather than that the Credit Union doesn't exist.
-  const [ours, got] = await Promise.all([
-    pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'isBatch', args: [address] }).catch(() => null),
-    getBatch(address).catch(() => null),
-  ]);
-  if (!ours || !got) {
-    app.innerHTML = `<section class="prose"><h1>${ours === false ? 'Credit Union not found' : 'Couldn’t load this Credit Union'}</h1><p>${ours === false ? '' : 'Refresh to try again. '}<a href="/unions">← Credit Unions</a></p></section>`;
-    return;
-  }
-  b = got;
   const account = session.account;
+  // Your side of it (shares, what you're owed, your Credits), read alongside the Credit Union, not after it.
+  const mine = account ? me(address, account) : null;
+  // From the Credit Union index when a page read it in the last minute (being in it is being ours): the page shows at
+  // once, and is checked against the chain right after. Otherwise only parties our factory made: any contract can
+  // answer summary() with a made-up party. A read that fails (the network, a rate limit) says so, rather than that
+  // the Credit Union doesn't exist.
+  const indexed = indexedBatch(address);
+  if (indexed) b = indexed.b;
+  else {
+    const [ours, got] = await Promise.all([
+      pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'isBatch', args: [address] }).catch(() => null),
+      getBatch(address).catch(() => null),
+    ]);
+    if (!ours || !got) {
+      mine?.catch(() => {});
+      app.innerHTML = `<section class="prose"><h1>${ours === false ? 'Credit Union not found' : 'Couldn’t load this Credit Union'}</h1><p>${ours === false ? '' : 'Refresh to try again. '}<a href="/unions">← Credit Unions</a></p></section>`;
+      return;
+    }
+    b = got;
+  }
   // /union/0x…?pick=123 (from a Credit's page): open on Your Credits with that one picked, if it fits.
   const want = new URLSearchParams(location.search).get('pick');
   if (want && /^\d{1,6}$/.test(want)) {
@@ -111,7 +120,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   // The value of the painted trait each Credit in was booked under (Batch.keyOf), read alongside the wallet's
   // own reads rather than after them.
   const keysRead = slots && !burned ? depositedKeys(s.address, b.ids).catch(() => null) : null;
-  const m: Mine = account ? await me(address, account) : null;
+  const m: Mine = mine ? await mine : null;
   const myIds = new Set(b.ids.filter((_, i) => same(b.depositors[i], account)).map(String));
   const rules = filterRules(s.filter, s.allowlistSize, (i) => layoutSlot(s.filter, i));
   const depositors = new Set(b.depositors.map((d) => d.toLowerCase())).size;
@@ -231,7 +240,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     });
   });
   bind(b, m, myIds, rerender, keyed);
-  watchLive(app, address, b.s, rerender);
+  watchLive(app, address, b.s, rerender, !!indexed);
   // Just made on the create page: congratulate once. The flag goes as soon as it's read, so a refresh won't reshow it.
   try {
     if (sessionStorage.getItem('cu-created')?.toLowerCase() === address.toLowerCase()) {
@@ -249,12 +258,13 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
 
 /// Keep the page current while someone sits on it: every block or so, read the summary and redraw when the
 /// Credit Union changed (someone deposited, withdrew, bid, or it locked). Waits while the tab is hidden, a
-/// transaction is in flight or a dialog is open. New Credits drop in with the usual animation.
-function watchLive(app: HTMLElement, address: Address, s: Ctx['s'], rerender: () => void) {
+/// transaction is in flight or a dialog is open. New Credits drop in with the usual animation. `now`: look once
+/// straight away too (the page was drawn from the index, which can be a few seconds old).
+function watchLive(app: HTMLElement, address: Address, s: Ctx['s'], rerender: () => void, now = false) {
   if (live) clearInterval(live);
   const was = `${stamp(s.state, s.count, s.highBid)}:${s.lockAt}:${s.state}`;
   const path = location.pathname;
-  live = setInterval(async () => {
+  const look = async () => {
     if (location.pathname !== path || !app.isConnected) {
       clearInterval(live!);
       live = null;
@@ -271,7 +281,9 @@ function watchLive(app: HTMLElement, address: Address, s: Ctx['s'], rerender: ()
         await party(app, address, rerender);
       }
     } catch {}
-  }, LIVE_MS);
+  };
+  live = setInterval(look, LIVE_MS);
+  if (now) void look();
 }
 
 /// Remember a deposit that just landed, so the rerendered page opens the "You're in" card once.

@@ -135,15 +135,25 @@ export type Listed = { s: Summary; ids: readonly bigint[]; depositors: readonly 
 /// Forgotten after any transaction of ours and whenever a page sees a Credit Union change; the next read then
 /// skips the Worker's cache.
 const LIST_MS = 10_000;
-let listed: { at: number; p: Promise<Listed[]> } | null = null;
+let listed: { at: number; p: Promise<Listed[]>; value?: Listed[] } | null = null;
 let fresh = false;
 export function listBatches(): Promise<Listed[]> {
   if (listed && Date.now() - listed.at < LIST_MS) return listed.p;
   const p = readBatches(fresh);
   fresh = false;
-  const entry = (listed = { at: Date.now(), p });
-  p.catch(() => listed === entry && (listed = null)); // a failed read is retried next time, not remembered
+  const entry: NonNullable<typeof listed> = (listed = { at: Date.now(), p });
+  p.then((v) => (entry.value = v)).catch(() => listed === entry && (listed = null)); // a failed read is retried next time, not remembered
   return p;
+}
+
+/// One Credit Union as the index had it when a page read it in the last minute (a list page, say), with how old
+/// that read is; null when there's none. Being in the index is being one of our factory's. Forgotten, like the
+/// index, after any transaction of ours.
+export function indexedBatch(a: Address): { b: Listed; age: number } | null {
+  const v = listed?.value;
+  if (!listed || !v || Date.now() - listed.at > 60_000) return null;
+  const b = v.find((x) => x.s.address.toLowerCase() === a.toLowerCase());
+  return b ? { b, age: Date.now() - listed.at } : null;
 }
 export const forgetBatches = () => {
   listed = null;
@@ -170,7 +180,22 @@ export async function getBatch(a: Address) {
   return { s: toSummary(a, s as Record<string, unknown>), ids: slots[0], depositors: slots[1] };
 }
 
-export async function me(batch: Address, account: Address) {
+/// Your side of a Credit Union, kept 20 s (forgotten after any transaction of ours), so a page you open, or are about
+/// to (a link under the pointer reads ahead), has it waiting.
+const MINE_MS = 20_000;
+const mine = new Map<string, { at: number; p: ReturnType<typeof readMine> }>();
+onTx(() => mine.clear());
+export function me(batch: Address, account: Address) {
+  const k = `${batch}:${account}`.toLowerCase();
+  const hit = mine.get(k);
+  if (hit && Date.now() - hit.at < MINE_MS) return hit.p;
+  const p = readMine(batch, account);
+  mine.set(k, { at: Date.now(), p });
+  p.catch(() => mine.get(k)?.p === p && mine.delete(k));
+  return p;
+}
+
+async function readMine(batch: Address, account: Address) {
   const [shares, claimable, owed, approved, owned] = await Promise.all([
     pub.readContract({ address: batch, abi: batchAbi, functionName: 'sharesOf', args: [account] }),
     pub.readContract({ address: batch, abi: batchAbi, functionName: 'claimable', args: [account] }),

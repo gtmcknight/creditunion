@@ -394,7 +394,7 @@ export const creditsHead = (current: string, value?: string) => {
   const tabs: [string, string][] = [['credits', 'All'], ...sections];
   return `<header class="page-head">
       <nav class="jb-crumb" aria-label="Where">${crumb}</nav>
-      <div class="page-bar"><nav class="subtabs" aria-label="Credits by">${tabs.map(([k, l]) => `<a href="/${k}"${k === current ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</nav></div>
+      <div class="page-bar"><nav class="subtabs swipe" aria-label="Credits by">${tabs.map(([k, l]) => `<a href="/${k}"${k === current ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</nav></div>
     </header>`;
 };
 

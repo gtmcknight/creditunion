@@ -16,6 +16,7 @@ import { timePage } from './views/time';
 import { bitsPage, ratingPage } from './views/scale';
 import { esc, errText, openModal, toast, utc } from './ui';
 import { factoryAbi } from './abi';
+import { me } from './data';
 
 const app = document.getElementById('app')!;
 let seq = 0;
@@ -91,6 +92,10 @@ async function route() {
     document.title = name && name !== 'Credit Union' ? `${name} · Credit Union` : 'Credit Union';
   };
   title();
+  // A tab row that swipes (the Credits pages on a phone) opens with the current tab in the middle of it.
+  const cur = app.querySelector<HTMLElement>('.subtabs.swipe [aria-current]');
+  const row = cur?.parentElement;
+  if (cur && row && row.scrollWidth > row.clientWidth) row.scrollLeft += cur.getBoundingClientRect().left - row.getBoundingClientRect().left - (row.clientWidth - cur.offsetWidth) / 2;
   headWatch?.disconnect();
   const h1 = app.querySelector('h1');
   if (h1) (headWatch = new MutationObserver(title)).observe(h1, { subtree: true, childList: true, characterData: true });
@@ -263,6 +268,11 @@ document.addEventListener('click', (e) => {
 });
 
 // A slider dragged with the pointer keeps no focus ring; one moved with the keyboard shows it.
+// Reading ahead: a pointer over a link to a Credit Union starts reading your side of it, so it opens with it there.
+document.addEventListener('pointerover', (e) => {
+  const to = (e.target as HTMLElement).closest?.<HTMLAnchorElement>('a[href^="/union/0x"]')?.pathname.slice(7);
+  if (to && /^0x[0-9a-fA-F]{40}$/.test(to) && session.account) void me(to as Address, session.account).catch(() => {});
+});
 document.addEventListener('pointerdown', (e) => (e.target as HTMLElement).closest?.('.sweep-range input')?.setAttribute('data-pointer', ''), true);
 document.addEventListener('keydown', (e) => (e.target as HTMLElement).closest?.('.sweep-range input')?.removeAttribute('data-pointer'), true);
 

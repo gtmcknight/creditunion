@@ -6455,6 +6455,12 @@ a.quiet:hover { text-decoration: underline; text-underline-offset: 3px; }
 /* One line box for every part of the crumb, so the title sits at the same height on every page. */
 .jb-crumb > * { line-height: 32px; display: inline-block; }
 .jb-crumb a { min-height: 0; height: 32px; }
+/* The Credits pages' eight tabs: on a phone, one row that swipes edge to edge instead of two. */
+@media (max-width: 640px) {
+  .page-bar .subtabs.swipe { flex-wrap: nowrap; overflow-x: auto; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); scrollbar-width: none; overscroll-behavior-x: contain; }
+  .page-bar .subtabs.swipe::-webkit-scrollbar { display: none; }
+  .page-bar .subtabs.swipe a { flex: none; }
+}
 
 /* A Credit tile still loading, the same shape as what replaces it: the square, then two lines (number, price). */
 .cc.skel .cc-art { aspect-ratio: 1; background: var(--empty); }
