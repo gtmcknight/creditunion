@@ -71,6 +71,8 @@ async function fillSheet(el: HTMLElement) {
   const want = cells.map((_, i) => (hasLayout(f) ? layoutSlot(f, i) : 0));
   const empties = cells.map((c, i) => [c, i] as const).filter(([c]) => c.classList.contains('empty'));
   if (!empties.length) return;
+  // An Eights rule is what these Credits are about: keep their marks (the bottom row) on the placeholders too.
+  el.classList.toggle('eights-rule', !!f.eights || (hasLayout(f) && f.layoutTrait === 1));
   // Each empty slot shows an example that fits it: a painted slot one of its own value, an open slot a mix
   // of whatever the batch accepts. The same rule feeds the hover card.
   const keys = [...new Set([0, ...empties.map(([, i]) => want[i])])];

@@ -644,6 +644,9 @@ nav a .num {
 .cell.ghost img {
   clip-path: inset(0 0 9.375% 0);
 }
+.sheet.eights-rule .cell.ghost img {
+  clip-path: none;
+}
 .cell.new {
   animation: drop 360ms var(--ease) both;
   animation-delay: calc(var(--k) * 28ms);
