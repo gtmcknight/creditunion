@@ -64,6 +64,22 @@ function slips(mis: Uint8Array): { dx: number[]; dy: number[] } {
   return { dx, dy };
 }
 
+/// Each step from payment to picture, for the Credit page's "How it was made": the hash, the four 8×8 plates
+/// (bit order as the art reads them), which plates the payment time turns on, and each plate's slip.
+export type Process = { hash: Uint8Array; plates: boolean[][]; mask: number; dx: number[]; dy: number[]; misprint: boolean };
+export function processOf(seed: string, paidAt: number): Process {
+  const hash = sha256(enc.encode(seed));
+  const mis = sha256(enc.encode(seed + '/misprint'));
+  const plates = [0, 1, 2, 3].map((layer) =>
+    Array.from({ length: 64 }, (_, i) => {
+      const index = layer * 64 + i;
+      return ((hash[index >> 3] >> (7 - (index & 7))) & 1) === 1;
+    }),
+  );
+  const { dx, dy } = slips(mis);
+  return { hash, plates, mask: (paidAt % 15) + 1, dx, dy, misprint: mis[0] < 32 };
+}
+
 export function traitsOf(seed: string, paidAt: number): Traits {
   const hash = sha256(enc.encode(seed));
   const mis = sha256(enc.encode(seed + '/misprint'));

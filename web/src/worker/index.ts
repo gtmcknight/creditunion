@@ -1002,7 +1002,7 @@ const RANGE_DEPTH = 150;
 /// Credits in a For sale row.
 const FOR_SALE = 10;
 /// The most Credits one sweep takes.
-const MAX_SWEEP = 20;
+const MAX_SWEEP = 24;
 /// Listed Credits per page of /opensea/listed (before a trait filters them).
 const LISTED_CHUNK = 60;
 const offOpenSea = (env: Env) => !!(addrOrNull(env.FWA_MARKET) || addrOrNull(env.STRATEGY));

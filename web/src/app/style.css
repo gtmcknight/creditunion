@@ -507,13 +507,14 @@ nav a .num {
 /* ---------------------------------------------------------------- batches grid */
 
 .section-head {
+  /* Same as a .box head: the hairline above, 24 to the heading, 16 to what it heads. */
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px 10px;
-  padding-bottom: 16px;
-  margin-bottom: 24px;
-  border-bottom: 1px solid var(--line);
+  padding-top: 24px;
+  margin-bottom: 16px;
+  border-top: 1px solid var(--line);
 }
 .grid {
   display: grid;
@@ -779,7 +780,7 @@ nav a .num {
   justify-self: stretch;
 }
 .batch-side h1 {
-  font-size: clamp(32px, 5vw, 44px);
+  font-size: 32px; /* detail pages (a union, a Credit): the art leads, the title names it */
   overflow-wrap: anywhere;
 }
 .facts {
@@ -788,11 +789,14 @@ nav a .num {
   border-top: 1px solid var(--line);
 }
 .facts > div {
+  /* One height for every row, whatever it holds (text, a chip with its glyph, a link button), so the rules fall
+     evenly down the list. */
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   gap: 16px;
-  padding: 11px 0;
+  min-height: 46px;
+  padding: 0;
   border-bottom: 1px solid var(--line);
   font-size: 14px;
 }
@@ -858,8 +862,12 @@ nav a .num {
   max-height: 248px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 3px 3px 24px;
+  padding: 3px;
   margin: -3px;
+}
+/* Only a picker that scrolls fades out at the bottom, with room so the last row can scroll clear of the fade. */
+.picker.overflows {
+  padding-bottom: 24px;
   mask-image: linear-gradient(#000 calc(100% - 32px), transparent);
   -webkit-mask-image: linear-gradient(#000 calc(100% - 32px), transparent);
 }
@@ -2488,7 +2496,7 @@ a.rule-chip:hover {
 /* ---------------------------------------------------------------- batch page: Add Credits tabs, OpenSea listings */
 
 .box.add .subtabs {
-  margin: 0 0 4px;
+  margin: 0;
 }
 .subtabs button {
   border: 0;
@@ -2497,9 +2505,14 @@ a.rule-chip:hover {
   font-size: 14px;
   cursor: pointer;
 }
+/* One rhythm in the Credits box: 16 between blocks, 8 between a label and the tiles it names. */
 [data-pane] {
   display: grid;
-  gap: 12px;
+  gap: 16px;
+}
+#fit-line + .picker,
+.yours-in .fit-row + .picker {
+  margin-top: -11px; /* the pane's 16 less 8, less the picker's own -3 */
 }
 [data-pane][hidden] {
   display: none;
@@ -3707,7 +3720,7 @@ dialog.people header h3 {
   text-decoration: underline;
   text-decoration-color: var(--line);
   text-underline-offset: 3px;
-  min-height: 40px;
+  min-height: 0; /* the row sets the height */
   padding: 0 4px;
   margin: 0 -4px;
   border: 0;
@@ -5821,7 +5834,7 @@ dialog.eligible::backdrop {
 
 /* Your Credits that don't fit the rules, folded under the picker. */
 .picker-off {
-  margin-top: 12px;
+  margin-top: 0;
 }
 .picker-off summary {
   cursor: pointer;
@@ -5837,7 +5850,7 @@ dialog.eligible::backdrop {
   content: ' −';
 }
 .picker-off .picker {
-  margin-top: 10px;
+  margin-top: 5px; /* 8 below its label, less the picker's own -3 */
 }
 .picker-off[hidden],
 #picker-none[hidden] {
@@ -5862,10 +5875,10 @@ dialog.eligible::backdrop {
   cursor: not-allowed;
 }
 .picker-off .off-why {
-  margin: 12px 0 0;
+  margin: 8px 0 0;
 }
 .picker-off .off-why + .picker {
-  margin-top: 6px;
+  margin-top: 5px;
 }
 
 /* Picker hover card: same card as a sheet slot's, sized to its lines. */
@@ -5916,8 +5929,11 @@ dialog.eligible::backdrop {
 /* "Yours in this party" follows the same rhythm as the deposit block above it. */
 .yours-in {
   display: grid;
-  gap: 12px;
+  gap: 16px;
   margin-top: 16px;
+}
+[data-pane="withdraw"] > .yours-in {
+  margin-top: 0; /* first thing in its own tab */
 }
 .yours-in .fit-row {
   margin: 0;
@@ -6699,3 +6715,284 @@ dialog.eligible::backdrop {
 .cr-ruler-end:last-of-type { translate: -100% 0; }
 .cr-ruler-mark.last { translate: calc(-100% + 1px) 0; justify-items: end; } /* the top 1% sits at the right edge: its label reads leftward */
 .cc-cap { padding: 0 2px; } /* number and price sit just inside the square's edges */
+
+/* ---------------------------------------------------------------- sweep slider (trait pages, a union's Buy tab) */
+
+.sweep-range {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 140px;
+  cursor: pointer;
+}
+.sweep-range input {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  height: 24px; /* the hit area; the track is drawn thinner */
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  touch-action: pan-y;
+  padding: 0;
+  border: 0;
+  box-shadow: none; /* not a text field: drop the global input frame */
+}
+.sweep-range input::-webkit-slider-runnable-track {
+  height: 2px;
+  background: linear-gradient(var(--fg), var(--fg)) 0 / var(--p, 0%) 100% no-repeat, var(--line);
+}
+.sweep-range input::-moz-range-track {
+  height: 2px;
+  background: var(--line);
+}
+.sweep-range input::-moz-range-progress {
+  height: 2px;
+  background: var(--fg);
+}
+.sweep-range input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -6px;
+  background: var(--fg);
+  border: 0;
+  transition: transform 120ms var(--ease);
+}
+.sweep-range input::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  background: var(--fg);
+  border: 0;
+  border-radius: 0;
+}
+.sweep-range input:active::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+.sweep-range input:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 4px;
+}
+.sweep-range input:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.sweep-range output {
+  min-width: 2ch;
+  text-align: right;
+  font-weight: 500;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sweep-range input::-webkit-slider-thumb {
+    transition: none;
+  }
+}
+
+/* Sweep row: slider, then the price with the fee under it, then "Buy 5". Fixed digits and fixed widths, so
+   nothing shifts while dragging. */
+.sweep-total {
+  display: grid;
+  margin-left: 12px; /* 24 from the slider in all */
+  min-width: 9em; /* fits "Drag or tap Credits", so the first drag moves nothing */
+  justify-items: end; /* hug the button: the slot's slack goes on the slider side */
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+#sale-go {
+  flex: none;
+  min-width: 6.5em; /* fits "Buy 24" */
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- Credit page: How it was made */
+
+/* Left to right on wide screens (ID and hash → four plates → the Credit), stacked on phones. */
+.credit-process {
+  margin-top: 56px;
+}
+.proc {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px minmax(0, 1.7fr) 32px minmax(0, 0.41fr); /* the Credit tile matches a plate */
+  align-items: start;
+}
+.proc-step {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+.proc-k {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.proc-k + .proc-seed,
+.proc-k + .proc-hash {
+  margin-top: -2px;
+}
+.proc-seed {
+  margin-bottom: 12px;
+  font: 500 15px/1.4 var(--mono);
+  letter-spacing: 0.03em;
+  overflow-wrap: anywhere;
+}
+.proc-seed b {
+  font-weight: 700;
+  box-shadow: inset 0 -2px 0 currentColor; /* each 8 registers in the art */
+}
+.proc-hash {
+  display: grid;
+  gap: 2px;
+  font: 12px/1.6 var(--mono);
+  color: var(--muted);
+}
+.proc-hash span {
+  padding-left: 8px;
+  border-left: 2px solid var(--ink0);
+}
+.proc-hash .h1 { border-color: var(--ink1); }
+.proc-hash .h2 { border-color: var(--ink2); }
+.proc-hash .h3 { border-color: var(--ink3); }
+.proc-arrow {
+  align-self: center;
+  justify-self: center;
+  width: 12px;
+  height: 12px;
+  border-top: 1.5px solid var(--muted);
+  border-right: 1.5px solid var(--muted);
+  transform: rotate(45deg);
+  margin-top: -24px; /* centre on the tiles, not on the captions under them */
+}
+.proc-plates {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+.plate {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.plate svg {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 18%;
+  background: #fff;
+  outline: 1px solid var(--img-outline);
+  outline-offset: -1px;
+  box-sizing: border-box;
+}
+.plate:nth-child(1) svg { fill: var(--ink0); }
+.plate:nth-child(2) svg { fill: var(--ink1); }
+.plate:nth-child(3) svg { fill: var(--ink2); }
+.plate:nth-child(4) svg { fill: var(--ink3); }
+.plate.off svg { fill: #dcdcdc; }
+.plate figcaption {
+  font: 500 12px/1 var(--mono);
+  text-align: center;
+}
+.plate.off figcaption { color: var(--muted); opacity: 0.6; }
+.proc-note {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.proc-art {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  outline: 1px solid var(--img-outline);
+  outline-offset: -1px;
+}
+@media (max-width: 820px) {
+  .proc {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+  .proc-arrow {
+    margin: 0;
+    transform: rotate(135deg);
+  }
+  .proc-out {
+    grid-template-columns: 96px minmax(0, 1fr);
+    align-items: end;
+    gap: 12px;
+  }
+}
+.proc-cap {
+  margin: 0;
+  font: 500 12px/1 var(--mono);
+  text-align: center; /* same caption as the plates' C M Y K */
+}
+@media (max-width: 820px) {
+  .proc-cap { text-align: left; }
+}
+
+/* Credit page: a box under the title when the Credit sits in a Credit Union (or was burned by one). */
+.home-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0;
+  padding: 12px 16px 12px 12px;
+  background: var(--surface);
+  color: inherit;
+  text-decoration: none;
+  font-size: 14px;
+  transition: background 160ms var(--ease);
+}
+.home-bar:hover {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.home-mini {
+  flex: none;
+  width: 40px;
+}
+.home-mini .sheet {
+  box-shadow: 0 0 0 1px var(--img-outline); /* the same outline as every other piece of art on the page */
+}
+/* The box already divides the title from the facts; don't stack the list's own top rule under it. */
+.home-bar + .facts {
+  border-top: 0;
+}
+.home-text {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.home-top,
+.home-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+}
+.home-sub {
+  font-size: 13px;
+  color: var(--muted);
+}
+.home-sub .who {
+  font-size: 13px;
+  color: var(--muted);
+}
+.home-text strong {
+  font-weight: 500;
+}
+.home-go {
+  flex: none;
+  color: var(--muted);
+}
+.home-bar:hover .home-go {
+  color: var(--fg);
+}
+@media (max-width: 560px) {
+  .home-go { display: none; }
+}

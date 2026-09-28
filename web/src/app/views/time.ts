@@ -1,6 +1,6 @@
 import { go } from '../main';
 import { listBatches, type Listed } from '../data';
-import { fromLocalInput, toLocalInput } from '../ui';
+import { fromUtcInput, toUtcInput, utc } from '../ui';
 import { loadTimes, mintSpan, paidAtOrAfter, PAL32, printsFor, tile } from '../wall';
 import { rangeStrip, stripHTML } from './range';
 import { buyGrid, buyRow, creditsHead, pct, unionsLink } from './trait';
@@ -19,7 +19,7 @@ export async function timePage(app: HTMLElement) {
     <div class="time-stream"><canvas aria-label="The Credits paid in this window, each second a column"></canvas><span class="time-scale small muted"></span></div>
     ${stripHTML()}
     <div class="time-controls">
-      <div class="win-inputs"><label><span>Start</span><input type="datetime-local" id="time-from" step="60"></label><label><span>End</span><input type="datetime-local" id="time-to" step="60"></label></div>
+      <div class="win-inputs"><label><span>Start (UTC)</span><input type="datetime-local" id="time-from" step="60"></label><label><span>End (UTC)</span><input type="datetime-local" id="time-to" step="60"></label></div>
       <div class="win-presets"><button type="button" data-pick="first">First hour</button><button type="button" data-pick="last">Last hour</button></div>
     </div>
     ${buyRow('Buy Credits paid in this window')}
@@ -52,9 +52,9 @@ export async function timePage(app: HTMLElement) {
   const lo = () => paidAtOrAfter(e, fromT());
   const hi = () => paidAtOrAfter(e, toT() + 1);
 
-  const sec = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' });
-  const min = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  const at = (t: number) => sec.format(new Date(t * 1000));
+  const sec = utc({ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const min = utc({ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const at = (t: number) => `${sec.format(new Date(t * 1000))} UTC`;
 
   const readout = document.getElementById('time-readout')!;
   const startBtn = document.getElementById('time-start') as HTMLAnchorElement;
@@ -191,10 +191,10 @@ export async function timePage(app: HTMLElement) {
   // ---- Start and End: typed to the minute; End is where the window ends (exclusive), as the readout says
   const fromIn = document.getElementById('time-from') as HTMLInputElement;
   const toIn = document.getElementById('time-to') as HTMLInputElement;
-  fromIn.min = toIn.min = toLocalInput(BASE);
-  fromIn.max = toIn.max = toLocalInput(BASE + M * 60);
+  fromIn.min = toIn.min = toUtcInput(BASE);
+  fromIn.max = toIn.max = toUtcInput(BASE + M * 60);
   fromIn.addEventListener('change', () => {
-    const t = fromLocalInput(fromIn.value);
+    const t = fromUtcInput(fromIn.value);
     if (t !== null) {
       a = clampM(Math.floor((t - BASE) / 60));
       if (a > b) b = a;
@@ -202,7 +202,7 @@ export async function timePage(app: HTMLElement) {
     update();
   });
   toIn.addEventListener('change', () => {
-    const t = fromLocalInput(toIn.value);
+    const t = fromUtcInput(toIn.value);
     if (t !== null) {
       b = clampM(Math.ceil((t - BASE) / 60) - 1);
       if (b < a) a = b;
@@ -245,8 +245,8 @@ export async function timePage(app: HTMLElement) {
   function update(now = false) {
     strip.set(a, b);
     drawReadout();
-    fromIn.value = toLocalInput(fromT());
-    toIn.value = toLocalInput(toT() + 1);
+    fromIn.value = toUtcInput(fromT());
+    toIn.value = toUtcInput(toT() + 1);
     picks.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach((p) => {
       const [pa, pb] = PICKS[p.dataset.pick!];
       p.setAttribute('aria-pressed', String(pa === a && pb === b));

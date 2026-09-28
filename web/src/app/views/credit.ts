@@ -4,19 +4,21 @@ import { dice, printGlyph, swatch, weightGlyph } from '../glyphs';
 const traitChip = (href: string, g: string, l: string) => `<a class="vchip" href="${href}">${g}<span>${l}</span></a>`;
 import { creditsAbi, factoryAbi } from '../abi';
 import { config, pub, send, session } from '../chain';
-import { getBatch, listBatches, ratings, type Listed, type Rated } from '../data';
+import { earlyShare, getBatch, listBatches, ratings, type Listed, type Rated } from '../data';
 import { hydrate, who } from '../ens';
 import { fitIds, weightOf } from '../fit';
 import { fillGhosts } from '../ghosts';
 import { maskInks, paletteBit } from '../traits';
-import { art, errText, esc, eth, same, toast } from '../ui';
+import { art, errText, esc, eth, same, sheet, toast, utc } from '../ui';
 import { card } from './lists';
+import { processOf } from '../../shared/credits';
 import { SOURCES, type Source } from '../forsale';
 
 /// Credits ever minted: the same numbers on every network.
 const SUPPLY = 122_154;
 const fmtScore = (s: number) => (Math.floor(s * 100) / 100).toFixed(2);
-const paid = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' });
+/// Payment time in UTC, as Jack's site and "How it was made" show it: the second is what picks the plates.
+const paid = utc({ year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 /// /rating around a score: a point either side, in the Rating rule's tenths.
 const ratingBand = (s: number) => {
   const t = Math.round(s * 10);
@@ -57,15 +59,14 @@ export async function credit(app: HTMLElement, raw: string) {
   const depositor = union ? union.depositors[union.ids.indexOf(id)] : undefined;
   const mine = !!owner && !union && same(owner, session.account);
   const you = (a?: Address) => (a && same(a, session.account) ? ' <span class="tag you">You</span>' : '');
-  const unionLink = (b: Listed) => `<a href="/union/${b.s.address}">${esc(b.s.name || 'Untitled')}</a>`;
 
-  const where = union
-    ? fact('Deposited in', unionLink(union)) + (depositor ? fact('Deposited by', who(depositor, 'sm', true) + you(depositor)) : '')
-    : owner
-      ? fact('Owner', who(owner, 'sm', true) + you(owner))
-      : burnedIn
-        ? fact('Burned into', `Statement #${burnedIn.s.statementId} · ${unionLink(burnedIn)}`)
-        : fact('Owner', '<span class="muted">Burned</span>');
+  // Owner is always the first fact. In a Credit Union it's the depositor: the union holds it, but they can take it
+  // back until it locks. Burned, there's no owner; the box above says what it became.
+  const holder = union ? depositor : owner;
+  const where = holder
+    ? fact('Owner', `<span${union ? ' title="Held by the Credit Union; the depositor can withdraw it until it locks"' : ''}>${who(holder, 'sm', true)}${you(holder)}</span>`)
+    : fact('Owner', '<span class="muted">Burned</span>');
+  const home = union ?? burnedIn;
 
   const r = rated.r;
   const inks = r ? maskInks(paletteBit(r.traits.palette)) : [];
@@ -77,7 +78,7 @@ export async function credit(app: HTMLElement, raw: string) {
         fact('Print', traitChip(`/print/${r.traits.registration.toLowerCase()}`, printGlyph(r.traits.registration), r.traits.registration)),
         fact('Weight', traitChip(`/weight/${weightOf(r)}`, weightGlyph(weightOf(r)), cap(weightOf(r)))),
         fact('Bits', `<a class="num" href="/bits?min=${r.traits.activeBits}&max=${r.traits.activeBits}" title="Credits with as many Bits">${r.traits.activeBits.toLocaleString()}</a>`),
-        fact('Paid', `<span class="num">${paid.format(new Date(r.paidAt * 1000))}</span>`),
+        fact('Paid', `<span class="num">${paid.format(new Date(r.paidAt * 1000))} UTC</span>`),
       ].join('')
     : fact('Rating', '<span class="muted">Unavailable</span>');
 
@@ -86,10 +87,12 @@ export async function credit(app: HTMLElement, raw: string) {
     <div class="credit-art"><img src="${art(id)}" alt="${title}"></div>
     <div class="batch-side">
       <header><h1>${title}</h1></header>
+      ${home ? homeBar(home, id, burnedIn === home, depositor, you) : ''}
       <dl class="facts">${where}${traits}</dl>
       <div id="credit-buy" hidden></div>
     </div>
   </section>
+  ${r ? howMade(seedText(String(seed)), r) : ''}
   ${owner && !union ? `<section class="credit-fits"><div class="section-head"><h3>Invited</h3><span class="muted num" id="fits-n"></span></div><p class="muted section-sub">Credit Unions that this Credit can join.</p><div id="fits"><p class="muted">Checking open Credit Unions…</p></div></section>` : ''}`;
   hydrate(app);
 
@@ -97,6 +100,82 @@ export async function credit(app: HTMLElement, raw: string) {
     void drawFits(id, r, list, mine);
     if (!mine) void drawBuy(n);
   }
+}
+
+/// Where this Credit is when it isn't in a wallet, as a box under its title: a mini sheet of its Credit
+/// Union, then who put it in, its place in line and its share of the sale (Early bird unions pay by position).
+function homeBar(b: Listed, id: bigint, burned: boolean, depositor: Address | undefined, you: (a?: Address) => string) {
+  const i = b.ids.indexOf(id);
+  const by = depositor ?? (i >= 0 ? b.depositors[i] : undefined);
+  const share = b.s.split === 1 && i >= 0 ? earlyShare(i) : 1 / 80;
+  const dot = ' <span class="muted">·</span> ';
+  // Row 1 says plainly what happened to it: deposited in a union, or burned into a Statement. Row 2: its place.
+  const name = `<strong>${esc(b.s.name || 'Untitled')}</strong>`;
+  const top = burned
+    ? `<span class="tag state settled">Burned</span> into <strong>Statement #${b.s.statementId}</strong>${dot}made by ${name}`
+    : `<span class="tag state">Deposited</span> in ${name}${dot}<span class="num">${b.s.count} of 80 in</span>`;
+  const paid = b.s.state === 'Settled';
+  const sub = [
+    i >= 0 ? `Position ${i + 1}` : '',
+    `${paid ? 'got' : 'gets'} ${(share * 100).toFixed(2).replace(/\.?0+$/, '')}% of the sale`,
+    burned && by ? `by ${who(by, 'sm', 'nested')}${you(by)}` : '', // a live Credit's depositor is the Owner row
+  ]
+    .filter(Boolean)
+    .join(dot);
+  return `<a class="home-bar" href="/union/${b.s.address}">
+    <span class="home-mini">${sheet(b.ids, { size: 'sm' })}</span>
+    <span class="home-text"><span class="home-top">${top}</span><span class="home-sub">${sub}</span></span>
+    <span class="home-go" aria-label="View Credit Union">→</span>
+  </a>`;
+}
+
+/// The seed is 21 bytes of the X Money transaction ID; read it byte for byte, as the contract hashes it.
+const seedText = (hex: string) => String.fromCharCode(...(hex.slice(2).match(/../g) ?? []).map((h) => parseInt(h, 16)));
+
+/// The art's inks (CreditDrawing.palette), C M Y K.
+const PLATE_INK = ['#00b5e2', '#e4007c', '#ffd100', '#111111'];
+const PLATE_NAME = ['Cyan', 'Magenta', 'Yellow', 'Black'];
+const clock = utc({ hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+/// "How it was made": this Credit's own path from payment to picture, step by step, the way Jack's page shows a
+/// random one. Every value is recomputed from the seed and payment time with the art contract's own maths.
+function howMade(seed: string, r: Rated) {
+  const p = processOf(seed, r.paidAt);
+  const on = (l: number) => (p.mask & (1 << l)) !== 0;
+  const hex = [...p.hash].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const plate = (l: number) =>
+    `<figure class="plate${on(l) ? '' : ' off'}"><svg viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true">${p.plates[l]
+      .map((bit, i) => (bit ? `<rect x="${i % 8}" y="${i >> 3}" width="1" height="1"/>` : ''))
+      .join('')}</svg><figcaption>${'CMYK'[l]}</figcaption></figure>`;
+  const shown = [0, 1, 2, 3].filter(on).map((l) => 'CMYK'[l]).join(' · ');
+  const step = (k: number, v: number) => (k ? `${Math.abs(k)} ${k < 0 ? (v ? 'up' : 'left') : v ? 'down' : 'right'}` : '');
+  const slipped = [0, 1, 2, 3]
+    .filter((l) => on(l) && (p.dx[l] || p.dy[l]))
+    .map((l) => `${PLATE_NAME[l]} ${[step(p.dx[l], 0), step(p.dy[l], 1)].filter(Boolean).join(', ')}`);
+  const arrow = '<div class="proc-arrow" aria-hidden="true"></div>';
+  return `<section class="credit-process">
+    <div class="section-head"><h3>How it was made</h3></div>
+    <div class="proc" style="${PLATE_INK.map((c, i) => `--ink${i}:${c}`).join(';')}">
+      <div class="proc-step">
+        <p class="proc-k">X Money transaction ID</p>
+        <code class="proc-seed">${[...seed].map((ch) => (ch === '8' ? '<b title="Each 8 registers in the art">8</b>' : esc(ch))).join('')}</code>
+        <p class="proc-k">SHA-256 · 64 bits per plate</p>
+        <code class="proc-hash">${[0, 1, 2, 3].map((l) => `<span class="h${l}">${hex.slice(l * 16, l * 16 + 16)}</span>`).join('')}</code>
+      </div>
+      ${arrow}
+      <div class="proc-step">
+        <div class="proc-plates">${[0, 1, 2, 3].map(plate).join('')}</div>
+        <p class="proc-note">Paid <span class="num">${clock.format(new Date(r.paidAt * 1000))}</span> UTC · shows ${shown}${
+          slipped.length ? `<br>${esc(r.traits.registration)}: ${slipped.map((x) => x.charAt(0).toLowerCase() + x.slice(1)).join(', ')}` : ''
+        }</p>
+      </div>
+      ${arrow}
+      <div class="proc-step proc-out">
+        <img src="${art(BigInt(r.id))}" alt="" class="proc-art">
+        <p class="proc-cap">#${Number(r.id).toLocaleString()}</p>
+      </div>
+    </div>
+  </section>`;
 }
 
 /// Open Credit Unions that would take this Credit now, by the same rules the rest of the site uses. The owner's

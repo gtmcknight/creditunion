@@ -1817,6 +1817,11 @@ export const batchAbi = [
   },
   {
     "type": "error",
+    "name": "SettleGasTooLow",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "StatementNotReceived",
     "inputs": []
   },

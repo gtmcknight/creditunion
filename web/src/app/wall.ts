@@ -9,6 +9,7 @@
 /// Data: public/wall.bin (scripts/wall.ts: 32 bytes per Credit, a 4-bit CMYK mask per cell) and times.bin, plus
 /// edition-traits.bin (palette) and bits.bin (scripts/wall.ts), read only once a view or caption needs them.
 import { bin, fetchBin } from './bins';
+import { utc } from './ui';
 
 /// Subtractive mixes as the contract's SVG draws them, indexed by the 4-bit CMYK mask (0 = paper).
 const PALETTE = ['#ffffff', '#00b5e2', '#e4007c', '#00006e', '#ffd100', '#009400', '#e40000', '#000000', '#111111', '#000c0f', '#0f0008', '#000007', '#110e00', '#000a00', '#0f0000', '#000000'];
@@ -176,9 +177,9 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
   const e = await loadEdition().catch(() => null);
   if (!e || !cv.isConnected) return;
 
-  const day = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  const sec = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' });
-  const when = (id: number, withSeconds = false) => (withSeconds ? sec : day).format(new Date(e.times[id] * 1000));
+  const day = utc({ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const sec = utc({ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const when = (id: number, withSeconds = false) => `${(withSeconds ? sec : day).format(new Date(e.times[id] * 1000))} UTC`;
   const nowEl = host.querySelector<HTMLElement>('.wall-now')!;
   const aboutEl = host.querySelector<HTMLElement>('.wall-about')!;
   const total = e.n.toLocaleString();
@@ -363,7 +364,7 @@ export async function mountWall(host: HTMLElement, { label = '', mode: start = '
     }
     const i = Math.max(0, atOrAfter(Math.floor(clock)) - 1);
     strip(clock);
-    nowEl.textContent = `${sec.format(new Date(Math.floor(clock) * 1000))} · ${(i + 1).toLocaleString()} paid`;
+    nowEl.textContent = `${sec.format(new Date(Math.floor(clock) * 1000))} UTC · ${(i + 1).toLocaleString()} paid`;
   };
 
   // ---- one by one: hold each Credit, then slide the next one in

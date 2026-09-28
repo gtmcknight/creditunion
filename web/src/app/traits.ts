@@ -2,6 +2,7 @@ import { slotName } from '../shared/layout';
 import { bitsPath, ratingPath, setPath, slotPath, timePath } from '../shared/trait';
 import { keccak256, toBytes, type Hex } from 'viem';
 import type { Summary } from './data';
+import { sameUtcDay, utc } from './ui';
 
 /// Trait values exactly as Jack's CreditArt.describe returns them.
 const LETTERS = 'CMYK';
@@ -25,15 +26,15 @@ for (const vals of Object.values(TRAITS)) for (const v of vals) reverse.set(kecc
 /// The label a filter hash stands for, if it is one of the known trait values.
 export const traitLabel = (hash: string) => reverse.get(hash as Hex);
 
-const dayTime = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-const timeOnly = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
-/// "Sep 21, 3:05–3:06 PM" in the viewer's own time zone; the window's end is shown as the next minute.
+const dayTime = utc({ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+const timeOnly = utc({ hour: '2-digit', minute: '2-digit' });
+/// "Paid Sep 21, 15:05–15:06 UTC"; the window's end is shown as the next minute.
 function window(from: number, to: number) {
   if (from && to) {
     const a = new Date(from * 1000), b = new Date((to + 1) * 1000);
-    return `Paid ${dayTime.format(a)}–${a.toDateString() === b.toDateString() ? timeOnly.format(b) : dayTime.format(b)}`;
+    return `Paid ${dayTime.format(a)}–${sameUtcDay(a, b) ? timeOnly.format(b) : dayTime.format(b)} UTC`;
   }
-  return from ? `Paid after ${dayTime.format(new Date(from * 1000))}` : `Paid before ${dayTime.format(new Date((to + 1) * 1000))}`;
+  return from ? `Paid after ${dayTime.format(new Date(from * 1000))} UTC` : `Paid before ${dayTime.format(new Date((to + 1) * 1000))} UTC`;
 }
 
 /// Bit for a palette string ("CMY" → 7); the set bit is 1 << that.

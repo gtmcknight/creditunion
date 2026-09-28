@@ -2,7 +2,7 @@ import { sweeperAbi } from './abi';
 import { config, pub, send } from './chain';
 import { editionArt } from './ghosts';
 import { creditCell } from './views/trait';
-import { errText, esc, toast } from './ui';
+import { errText, esc, rangeHtml, setRange, toast } from './ui';
 
 /// Where a listing is: its marketplace's name and mark (Buy tab, Credit pages, For sale rows).
 export type Source = 'opensea' | 'fwa' | 'strategy';
@@ -20,14 +20,18 @@ export const sourceMark = (id: string | number, source: Source, url?: string) =>
 
 type Listed = { id: string; price: string; source: Source; url?: string; hash?: string; protocol?: string; listingId?: string };
 
-const COUNTS = [1, 5, 10, 20];
 /// The most one sweep takes (the worker's quote allows as many).
-const MAX_SWEEP = 20;
+const MAX_SWEEP = 24;
 /// Buying runs where the Sweeper is deployed (mainnet); elsewhere the prices are mainnet's, as a preview.
 const canBuy = (preview?: boolean) => !preview && !!config.sweeper;
-/// The Sweeper's fee on every buy, read once, so the button says it before the wallet does.
+/// The Sweeper's fee on every buy, read once, so the price says it before the wallet does. Where there's no
+/// Sweeper (testnets) it's the 2% mainnet deploys with, so the preview prices match what mainnet will charge.
+const DEFAULT_FEE_BPS = 200n;
 let feeBps: Promise<bigint> | null = null;
-const sweepFee = () => (feeBps ??= pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'feeBps' }) as Promise<bigint>);
+export const sweepFee = () =>
+  (feeBps ??= config.sweeper
+    ? (pub.readContract({ address: config.sweeper, abi: sweeperAbi, functionName: 'feeBps' }) as Promise<bigint>).catch(() => DEFAULT_FEE_BPS)
+    : Promise.resolve(DEFAULT_FEE_BPS));
 
 /// /credits: the eight cheapest Credits for sale anywhere, laid out like a trait page's grid with the same Buy row
 /// (tap to pick, or 1 / 5 / 10), and a way through to all of them. It replaces the page's skeleton of the same
@@ -98,50 +102,42 @@ export async function loadSale(trait?: string): Promise<Sale | null> {
 export const priceTag = (l: Listed) =>
   `<span class="cc-price num" title="On ${SOURCES[l.source].name}"><img class="src" src="${SOURCES[l.source].icon}" alt="${SOURCES[l.source].name}">${minEth(BigInt(l.price))}</span>`;
 
-/// Sweep: pick 1, 5 or 10 to take the cheapest that many, or tap listed Credits' squares to pick them one by one
-/// (up to MAX_SWEEP). The picked are outlined in `grid` wherever they are; the button carries their total.
-/// `mark()` re-outlines after the grid changes.
+/// Sweep: drag the slider to take the cheapest that many (up to MAX_SWEEP), or tap listed Credits' squares to pick
+/// them one by one. The picked are outlined in `grid` wherever they are; the button carries their total.
+/// `mark()` re-outlines after the grid changes (and lets the slider reach listings that paged in since).
 export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement) {
-  // Every count shows even while listings are still paging in; a count picks as many as are found so far.
-  const counts = COUNTS;
-  // Nothing picked to start: tap Credits, or 1 / 5 / 10 for the cheapest that many.
+  // Nothing picked to start: drag, or tap Credits.
   const picked = new Set<string>();
-  host.innerHTML = `<span class="muted">Sweep</span><div class="jb-sort" role="radiogroup" aria-label="How many">${counts
-    .map((c) => `<label><input type="radio" name="sale-n" value="${c}"><span>${c}</span></label>`)
-    .join('')}</div><button type="button" class="jb-link" id="sale-clear" hidden>Clear</button><button class="btn primary" id="sale-go"${canBuy(sale.preview) ? '' : ' disabled title="Mainnet prices, shown as a preview"'}></button>`;
+  // The price sits between the slider and the button and moves as you drag; the button carries the count.
+  host.innerHTML = `<span class="muted">Sweep</span>${rangeHtml('sale-n', 0, Math.min(MAX_SWEEP, sale.ls.length), 0, false)}<span class="sweep-total num" id="sale-total"></span><button class="btn primary" id="sale-go"${canBuy(sale.preview) ? '' : ' disabled title="Mainnet prices, shown as a preview"'}>Buy</button>`;
+  const totalEl = host.querySelector<HTMLElement>('#sale-total')!;
+  const range = host.querySelector<HTMLInputElement>('#sale-n')!;
   const go = host.querySelector<HTMLButtonElement>('#sale-go')!;
   const chosen = () => sale.ls.filter((l) => picked.has(l.id)); // in price order
   go.addEventListener('click', () => picked.size && void sweepToWallet(chosen(), go));
-  const clear = host.querySelector<HTMLButtonElement>('#sale-clear')!;
-  clear.addEventListener('click', () => {
-    picked.clear();
-    host.querySelectorAll<HTMLInputElement>('input[name=sale-n]').forEach((r) => (r.checked = false));
+  let bps = DEFAULT_FEE_BPS;
+  void sweepFee().then((b) => {
+    bps = b;
     mark();
   });
-  let fee = '';
-  if (canBuy(sale.preview))
-    void sweepFee().then(
-      (bps) => {
-        fee = bps ? ` + ${Number(bps) / 100}% fee` : '';
-        mark();
-      },
-      () => {},
-    );
   const mark = () => {
-    clear.hidden = !picked.size;
+    setRange(range, picked.size, Math.min(MAX_SWEEP, sale.ls.length));
     grid.querySelectorAll<HTMLElement>('.cc').forEach((c) => c.classList.toggle('sel', picked.has(c.dataset.id!)));
+    // What the wallet will ask: the listings plus the Sweeper's fee (sweepToWallet reads the exact quote on click).
     const total = chosen().reduce((a, l) => a + BigInt(l.price), 0n);
-    go.textContent = picked.size ? `Buy ${picked.size} · ${minEth(total)} ETH${fee} →` : 'Pick Credits to buy';
+    const pay = total + (total * bps) / 10_000n;
+    totalEl.innerHTML = picked.size
+      ? `<span>${(Number(pay) / 1e18).toFixed(4)} ETH</span>${bps ? `<span class="muted small">incl. ${Number(bps) / 100}% fee</span>` : ''}`
+      : '<span class="muted">Drag or tap Credits</span>';
+    go.textContent = picked.size ? `Buy ${picked.size}` : 'Buy';
     if (!sale.preview && config.sweeper) go.disabled = !picked.size;
   };
-  host.querySelectorAll<HTMLInputElement>('input[name=sale-n]').forEach((r) =>
-    r.addEventListener('change', () => {
-      picked.clear();
-      for (const l of sale.ls.slice(0, Number(r.value))) picked.add(l.id);
-      mark();
-    }),
-  );
-  // A listed Credit's square picks or unpicks it; its number still opens its page. Picking by hand leaves the presets.
+  range.addEventListener('input', () => {
+    picked.clear();
+    for (const l of sale.ls.slice(0, Number(range.value))) picked.add(l.id);
+    mark();
+  });
+  // A listed Credit's square picks or unpicks it; its number still opens its page. The slider follows the count.
   grid.addEventListener('click', (e) => {
     const art = (e.target as HTMLElement).closest('.cc-art');
     const id = art?.closest<HTMLElement>('.cc')?.dataset.id;
@@ -150,7 +146,6 @@ export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement) 
     if (picked.has(id)) picked.delete(id);
     else if (picked.size >= MAX_SWEEP) return toast(`Up to ${MAX_SWEEP} in one sweep.`, 'info');
     else picked.add(id);
-    host.querySelectorAll<HTMLInputElement>('input[name=sale-n]').forEach((r) => (r.checked = false));
     mark();
   });
   mark();
@@ -205,7 +200,7 @@ export function checkQuote(q: Quote) {
 export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement) {
   const label = btn.textContent ?? '';
   btn.disabled = true;
-  btn.textContent = 'Getting a price…';
+  btn.textContent = 'Pricing…';
   try {
     const r = await fetch('/opensea/buyquote', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ listings: picked }) });
     const q = (await r.json()) as Quote;
@@ -217,7 +212,7 @@ export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement) {
       pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'feeBps' }),
     ])) as [bigint, bigint];
     const n = q.ids.length + (q.fwa?.length ?? 0) + (q.strategy?.length ?? 0);
-    btn.textContent = 'Confirm in your wallet…';
+    btn.textContent = 'Confirm…'; // in the wallet
     await send(
       {
         address: config.sweeper!,

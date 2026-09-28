@@ -132,13 +132,15 @@ const ERRORS: Record<string, string> = {
 export type { Address };
 
 /// Unix seconds ⇄ a datetime-local input's value ("2026-09-21T09:11"), in local time, to the minute.
-export function toLocalInput(unix: number) {
-  const d = new Date(unix * 1000);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+/// Payment times read the same for everyone: UTC, 24-hour, as Jack's site shows them. (Auction clocks stay local.)
+export const utc = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-US', { ...o, timeZone: 'UTC', hourCycle: 'h23' });
+export const sameUtcDay = (a: Date, b: Date) => a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10);
+/// datetime-local inputs for payment windows, read and written as UTC (their label says so).
+export function toUtcInput(unix: number) {
+  return new Date(unix * 1000).toISOString().slice(0, 16);
 }
-export function fromLocalInput(v: string) {
-  const t = new Date(v).getTime();
+export function fromUtcInput(v: string) {
+  const t = Date.parse(`${v}Z`);
   return Number.isFinite(t) ? Math.floor(t / 1000) : null;
 }
 
@@ -159,4 +161,46 @@ export function pageHead({ title, lede, tabs, tools, label = 'Sections' }: { tit
   const nav = !tabs?.length ? '' : links ? `<nav class="subtabs" aria-label="${label}">${items}</nav>` : `<div class="subtabs" role="tablist" aria-label="${label}">${items}</div>`;
   const bar = nav || tools ? `<div class="page-bar">${nav}${tools ? `<div class="page-tools">${tools}</div>` : ''}</div>` : '';
   return `<header class="page-head"><h1>${title}</h1>${lede ? `<p class="page-lede">${lede}</p>` : ''}${bar}</header>`;
+}
+
+/// Pickers fade at the bottom only when they scroll (`.overflows`); a short row of tiles gets no dead space.
+/// Rechecked when a picker resizes or anything on the page changes (tiles arrive after the picker is drawn).
+if (typeof document !== 'undefined') {
+  const check = (el: Element) => {
+    const pad = el.classList.contains('overflows') ? 21 : 0; // the extra bottom padding .overflows adds
+    el.classList.toggle('overflows', el.scrollHeight - pad > el.clientHeight + 1);
+  };
+  const ro = new ResizeObserver((es) => es.forEach((e) => check(e.target)));
+  const seen = new WeakSet<Element>();
+  let queued = false;
+  const scan = () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => {
+      queued = false;
+      document.querySelectorAll('.picker').forEach((p) => {
+        if (!seen.has(p)) {
+          seen.add(p);
+          ro.observe(p);
+        }
+        check(p);
+      });
+    });
+  };
+  new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true });
+  scan();
+}
+
+/// How many to buy: a slider from `min` to `max` with the count beside it. Drag, click the track or use the arrow
+/// keys; `setRange` keeps the fill and the count in step when code moves it.
+export const rangeHtml = (id: string, min: number, max: number, value: number, count = true) =>
+  `<label class="sweep-range"><input type="range" id="${id}" min="${min}" max="${Math.max(min, max)}" step="1" value="${value}" aria-label="How many to buy">${count ? `<output for="${id}" class="num"></output>` : ''}</label>`;
+export function setRange(el: HTMLInputElement, value?: number, max?: number) {
+  if (max !== undefined) el.max = String(Math.max(Number(el.min), max));
+  if (value !== undefined) el.value = String(value);
+  const lo = Number(el.min), hi = Number(el.max), v = Number(el.value);
+  el.style.setProperty('--p', `${hi > lo ? ((v - lo) / (hi - lo)) * 100 : 0}%`);
+  const out = el.parentElement?.querySelector('output');
+  if (out) out.textContent = String(v);
+  el.disabled = hi <= lo && lo === 0;
 }

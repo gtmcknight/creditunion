@@ -6,7 +6,7 @@ import { canBatch, config, send, sendBatch, session } from '../chain';
 import { INK, maskInks, maskLabel } from '../traits';
 import { SPLITS, creatorFeeBps, factoryRatings, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Rated } from '../data';
 import { paletteBit, TRAITS } from '../traits';
-import { $$, art, errText, esc, fromLocalInput, sheet, toast, toLocalInput } from '../ui';
+import { $$, art, errText, esc, fromUtcInput, sameUtcDay, sheet, toast, toUtcInput, utc } from '../ui';
 import { LAYOUT_TRAITS, keyOf, ruleFor, slotMark, slotName, type LayoutTrait } from '../../shared/layout';
 import { bitsPath, ratingPath, setPath, timePath } from '../../shared/trait';
 import { editionArt } from '../ghosts';
@@ -271,7 +271,7 @@ export async function create(app: HTMLElement) {
           <svg id="hist" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
           <div class="dual"><input type="range" id="win-from" min="0" max="${last}" value="0" aria-label="Window start"><input type="range" id="win-to" min="0" max="${last}" value="${last}" aria-label="Window end"></div>
         </div>
-        <div class="win-inputs"><label><span>Start</span><input type="datetime-local" id="win-start" step="60"></label><label><span>End</span><input type="datetime-local" id="win-end" step="60"></label></div>
+        <div class="win-inputs"><label><span>Start (UTC)</span><input type="datetime-local" id="win-start" step="60"></label><label><span>End (UTC)</span><input type="datetime-local" id="win-end" step="60"></label></div>
         <p class="hint" id="win-count" hidden></p>
         <a class="rule-see" data-see="time" target="_blank" rel="noopener" hidden>See these Credits →</a>
       </section>
@@ -926,9 +926,9 @@ export async function create(app: HTMLElement) {
       })
       .join('');
   };
-  const fmtDT = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  const fmtT = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
-  const tz = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(new Date()).find((p) => p.type === 'timeZoneName')?.value ?? '';
+  const fmtDT = utc({ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const fmtT = utc({ hour: '2-digit', minute: '2-digit' });
+  const tz = 'UTC';
   const drawWindow = () => {
     const a = Number(from.value), b = Number(to.value);
     const any = !minutes.length || (a === 0 && b === last);
@@ -939,15 +939,15 @@ export async function create(app: HTMLElement) {
       winCount.textContent = minutes.length ? `${minutes.reduce((s, [, c]) => s + c, 0).toLocaleString()} Credits` : '';
     } else {
       const start = new Date(minutes[a][0] * 1000), end = new Date((minutes[b][0] + 60) * 1000);
-      winText.textContent = `${fmtDT.format(start)} – ${start.toDateString() === end.toDateString() ? fmtT.format(end) : fmtDT.format(end)} ${tz}`;
+      winText.textContent = `${fmtDT.format(start)} – ${sameUtcDay(start, end) ? fmtT.format(end) : fmtDT.format(end)} ${tz}`;
       let n = 0;
       for (let i = a; i <= b; i++) n += minutes[i][1];
       winCount.textContent = `${n.toLocaleString()} Credit${n === 1 ? '' : 's'}`;
     }
     if (minutes.length) {
       // Start is the first minute's start; End is where the last minute ends (exclusive), as the heading says.
-      startIn.value = toLocalInput(minutes[a][0]);
-      endIn.value = toLocalInput(minutes[b][0] + 60);
+      startIn.value = toUtcInput(minutes[a][0]);
+      endIn.value = toUtcInput(minutes[b][0] + 60);
     }
     drawHist();
   };
@@ -965,8 +965,8 @@ export async function create(app: HTMLElement) {
   const startIn = document.getElementById('win-start') as HTMLInputElement;
   const endIn = document.getElementById('win-end') as HTMLInputElement;
   if (minutes.length) {
-    startIn.min = endIn.min = toLocalInput(minutes[0][0]);
-    startIn.max = endIn.max = toLocalInput(minutes[last][0] + 60);
+    startIn.min = endIn.min = toUtcInput(minutes[0][0]);
+    startIn.max = endIn.max = toUtcInput(minutes[last][0] + 60);
   }
   /// The first minute that ends after `t`; the last minute that starts before `t`.
   const firstFrom = (t: number) => {
@@ -989,13 +989,13 @@ export async function create(app: HTMLElement) {
     drawWindow();
   };
   startIn.addEventListener('change', () => {
-    const t = fromLocalInput(startIn.value);
+    const t = fromUtcInput(startIn.value);
     if (t === null) return drawWindow();
     setWindow(firstFrom(t), Number(to.value), 'a');
     refresh();
   });
   endIn.addEventListener('change', () => {
-    const t = fromLocalInput(endIn.value);
+    const t = fromUtcInput(endIn.value);
     if (t === null) return drawWindow();
     setWindow(Number(from.value), lastBefore(t), 'b');
     refresh();

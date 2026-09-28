@@ -3,6 +3,7 @@ import { drawForSale } from '../forsale';
 import facts from 'virtual:credits-facts';
 import { loadTimes, mintSpan, paidAtOrAfter, PAL32, printsFor, tile, type Mint, type Prints, WALL_BLOCK } from '../wall';
 import { creditsHead, pct } from './trait';
+import { utc } from '../ui';
 
 const SUPPLY = 122_154;
 const PRINTS = ['Registered', 'Nudge', 'Slip', 'Skew', 'Drift', 'Loose'];
@@ -232,7 +233,7 @@ function drift(host: HTMLElement, e: Mint, prints: Prints) {
     img = new ImageData(W, H);
     px = new Uint32Array(img.data.buffer);
   };
-  const sec = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' });
+  const sec = utc({ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
   let clock = span.start, shown = -1, loading = false;
   const frame = () => {
     if (!px) return;
@@ -270,7 +271,7 @@ function drift(host: HTMLElement, e: Mint, prints: Prints) {
     const whole = Math.floor(clock);
     if (whole !== shown) {
       shown = whole;
-      nowEl.textContent = sec.format(new Date(whole * 1000));
+      nowEl.textContent = `${sec.format(new Date(whole * 1000))} UTC`;
     }
   };
 

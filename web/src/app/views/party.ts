@@ -7,8 +7,8 @@ import { hydrate, pct, who } from '../ens';
 import { editionArt, examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
 import { keyOf as layoutKey } from '../../shared/layout';
 import { Room, books, depositedKeys, keysOf, noRoomReason, type Books } from '../slots';
-import { checkQuote, minEth, sourceMark, type Quote, type Source } from '../forsale';
-import { $$, art, clock, errText, esc, eth, same, sheet, short, toast, until } from '../ui';
+import { checkQuote, minEth, sourceMark, sweepFee, type Quote, type Source } from '../forsale';
+import { $$, art, clock, errText, esc, eth, rangeHtml, same, setRange, sheet, short, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
 import { go as navigate } from '../main';
 
@@ -176,7 +176,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
           ${fact('Layout', ARRANGEMENTS[s.arrangement] ?? 'Deposit order')}
           ${fact('Payout', payout(b, myIds))}
           ${s.state === 'Auction' || s.state === 'Settled' ? fact('Members', `<button type="button" class="link num" id="depositors-btn">${depositors}</button>`) : ''}
-          ${s.count ? fact('Rating', `<span id="rating" class="muted">…</span>`) : ''}
+          ${s.count ? fact('Credit rating', `<span id="rating" class="muted">…</span>`) : ''}
           ${s.reserve && (s.state === 'Open' || s.state === 'Full' || (s.state === 'Auction' && s.minBid === s.reserve && !s.highBid)) ? fact('Reserve', eth(s.reserve)) : ''}
           ${fact('Sale split', split(s))}
           ${fact('Contract', link(s.address))}
@@ -389,25 +389,28 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
       : '';
 
   if (s.state === 'Open') {
-    // Two ways in, one box: your own Credits, or OpenSea listings that fit. Buy leads when you hold none.
-    const start = addTab?.at === s.address ? addTab.tab : !m || !m.owned.length ? 'buy' : 'mine';
+    // One box, three tabs: add your own Credits, buy ones that fit, or take yours back. Buy leads when you hold
+    // none; Withdraw only exists once you have Credits in.
+    const remembered = addTab?.at === s.address && (addTab.tab !== 'withdraw' || myIds.size) ? addTab.tab : null;
+    const start = remembered ?? (!m || !m.owned.length ? 'buy' : 'mine');
     return `<div class="box add">
-      <div class="box-head"><h3>Add Credits</h3><span class="muted small num" id="pick-count"></span></div>
+      <div class="box-head"><h3>Credits</h3><span class="muted small num" id="pick-count"></span></div>
       <div class="subtabs" role="tablist">
-        <button type="button" role="tab" data-add="mine" aria-selected="${start === 'mine'}">Your Credits <span class="num" id="n-mine"></span></button>
-        <button type="button" role="tab" data-add="buy" aria-selected="${start === 'buy'}">Buy Credits</button>
+        <button type="button" role="tab" data-add="mine" aria-selected="${start === 'mine'}">Deposit <span class="num" id="n-mine"></span></button>
+        <button type="button" role="tab" data-add="buy" aria-selected="${start === 'buy'}">Buy</button>
+        ${myIds.size ? `<button type="button" role="tab" data-add="withdraw" aria-selected="${start === 'withdraw'}">Withdraw <span class="num">${myIds.size}</span></button>` : ''}
       </div>
       <div data-pane="mine"${start === 'mine' ? '' : ' hidden'}>
         ${
           m
             ? `<p class="small" id="fit-line">Checking your Credits…</p>
         <div class="picker" id="picker"></div>
-        <div class="stack" id="deposit-actions"></div>
-        ${withdraw()}`
+        <div class="stack" id="deposit-actions"></div>`
             : `<p class="muted small">Connect to see which of your Credits fit.</p>${connect}`
         }
       </div>
       <div data-pane="buy"${start === 'buy' ? '' : ' hidden'}>${buyPane(!!m)}</div>
+      ${myIds.size ? `<div data-pane="withdraw"${start === 'withdraw' ? '' : ' hidden'}>${withdraw()}</div>` : ''}
       <p class="muted small pane-note"><span id="buy-line">Finding the cheapest listings that fit… </span>Leave anytime until it locks. Credit Union is unofficial and experimental, so use it at your own risk. <a href="/about/faq">Questions?</a></p>
     </div>`;
   }
@@ -490,16 +493,16 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
   </div>`;
 }
 
-const BUY_COUNTS = [1, 5, 10];
+const MAX_BUY = 24; // the most one sweep takes, as on trait pages
 
 
 function buyPane(connected: boolean) {
   // How many and the running total on one line; the Credits; then one button that carries the price.
-  return `<div class="buy-head"><div class="seg sm" role="radiogroup" aria-label="How many">${BUY_COUNTS.map((n) => `<label><input type="radio" name="buy-n" value="${n}" ${n === 5 ? 'checked' : ''}><span>${n}</span></label>`).join('')}</div><span class="num" id="buy-sub"></span></div>
+  return `<div class="buy-head">${rangeHtml('buy-n', 1, MAX_BUY, 1, false)}<span class="sweep-total num" id="buy-sub"></span></div>
     <div class="listings" id="listings">${'<span class="listing skel" aria-hidden="true"><span class="art"></span><span class="price"></span></span>'.repeat(5)}</div>
     <div id="buy-quote" class="quote small"></div>
-    ${connected || !config.sweeper ? `<button class="btn primary block" id="buy-go" disabled>Buy</button>` : '<button class="btn primary block" data-connect>Connect to buy</button>'}
-    <p class="muted small buy-source">The cheapest Credits that fit on OpenSea, FWA and CreditStrategy, bought and deposited in one transaction.</p>
+    ${connected || !config.sweeper ? `<button class="btn primary block" id="buy-go" disabled>Buy &amp; deposit</button>` : '<button class="btn primary block" data-connect>Connect to buy</button>'}
+    <p class="muted small buy-source">One transaction buys the cheapest Credits that fit (OpenSea, FWA, CreditStrategy) and deposits them here in your name.</p>
 `;
 }
 
@@ -915,7 +918,15 @@ async function bindBuy(
     if (timer) clearInterval(timer);
     timer = null;
   };
-  const want = () => Math.min(Number((document.querySelector('input[name=buy-n]:checked') as HTMLInputElement | null)?.value ?? 5), room, 40);
+  // The slider reaches as far as there are open slots and listings (the cheapest that many fill the row).
+  const range = document.getElementById('buy-n') as HTMLInputElement | null;
+  if (range) setRange(range, Math.min(Number(range.value), room, pool.length || 1), Math.min(MAX_BUY, room, pool.length || 1));
+  const want = () => Math.min(Number(range?.value ?? 1), room, MAX_BUY);
+  let feeBps = 200n;
+  void sweepFee().then((b) => {
+    feeBps = b;
+    if (grid.isConnected) draw();
+  });
   // Testnet showing mainnet listings: the testnet sheet can't judge mainnet Credits, so book them against its
   // free slots by their real traits (mainnet the worker already asks the batch's canTake).
   let slotKey: ((id: string) => number) | null = null;
@@ -938,8 +949,13 @@ async function bindBuy(
     grid.classList.toggle('preview', preview);
     grid.innerHTML = pick.map((l) => tile(l.id, preview || mainnetOnly ? editionArt(Number(l.id)) : art(BigInt(l.id)), l.price, l.source, l.url)).join('');
     const sub = pick.reduce((a, l) => a + (l.price ? BigInt(l.price) : 0n), 0n);
+    // The price with the Sweeper's fee in, as the wallet will ask (the quote step shows the exact split).
     const subEl = document.getElementById('buy-sub');
-    if (subEl) subEl.textContent = pick.length && !preview ? eth(sub) : '';
+    const pay = sub + (sub * feeBps) / 10_000n;
+    if (subEl)
+      subEl.innerHTML = pick.length && !preview
+        ? `<span>${(Number(pay) / 1e18).toFixed(4)} ETH</span><span class="muted small">incl. ${Number(feeBps) / 100}% fee</span>`
+        : '';
     line.textContent = (preview || mainnetOnly
       ? '' // testnet: the banner already says it's a preview
       : !pool.length
@@ -951,10 +967,13 @@ async function bindBuy(
     out.innerHTML = '';
     if (go) {
       go.disabled = preview || mainnetOnly || !pick.length || !connected;
-      go.textContent = pick.length && !preview ? `Buy ${plural(pick.length)} · ${eth(sub)}` : 'Buy';
+      go.textContent = pick.length && !preview ? `Buy & deposit ${pick.length}` : 'Buy & deposit';
     }
   };
-  document.querySelectorAll('input[name=buy-n]').forEach((r) => r.addEventListener('change', draw));
+  range?.addEventListener('input', () => {
+    setRange(range);
+    draw();
+  });
   grid.addEventListener('click', (e) => {
     const t = (e.target as HTMLElement).closest('.skip')?.closest<HTMLElement>('.listing');
     if (!t || preview) return;
@@ -970,7 +989,7 @@ async function bindBuy(
       if (left <= 0) {
         stopTimer();
         q = null;
-        if (go) go.textContent = `Buy ${plural(chosen().length)}`;
+        if (go) go.textContent = `Buy & deposit ${plural(chosen().length)}`;
         out.innerHTML = '<p>That price has expired. Get a fresh one.</p>';
         return;
       }
@@ -1001,7 +1020,7 @@ async function bindBuy(
           <div class="quote-row total"><span>Total</span><span class="num">${eth(value)}</span></div>
           ${chosen().length > quotedCount(q) ? `<p>${chosen().length - quotedCount(q)} no longer available.</p>` : ''}
           ${q.expires ? '<p class="muted small num" id="buy-expiry"></p>' : ''}`;
-        go.textContent = `Buy ${quotedCount(q)} & deposit`;
+        go.textContent = `Buy & deposit ${plural(quotedCount(q))}`;
         if (q.expires) countdown(q.expires);
       } catch (e) {
         q = null;
@@ -1089,10 +1108,10 @@ async function loadRatings(
   if (!el) return;
   const scores = b.ids.map((id) => rated[id.toString()]?.score).filter((x): x is number => typeof x === 'number');
   if (scores.length) {
-    const avg = scores.reduce((a, x) => a + x, 0) / scores.length;
-    const top = Math.max(...scores);
+    // The Statement's own metadata carries a "Credit rating": the total over its 80. Show that total, so far.
+    const total = scores.reduce((a, x) => a + x, 0);
     el.classList.remove('muted');
-    el.innerHTML = `<span class="num">avg ${fmtScore(avg)}</span> · <span class="num">top ${fmtScore(top)}</span> <a href="${RATING_URL}" target="_blank" rel="noopener" class="muted small" title="Jack Butcher’s rating, v${version}, over all ${n.toLocaleString()} Credits">v${version} ↗</a>`;
+    el.innerHTML = `<span class="num">${Math.round(total).toLocaleString()}</span>${scores.length < 80 ? ` <span class="muted small num">from ${scores.length} of 80</span>` : ''} <a href="${RATING_URL}" target="_blank" rel="noopener" class="muted small" title="The total of Jack Butcher’s rating (v${version}, over all ${n.toLocaleString()} Credits) across this Credit Union’s Credits">v${version} ↗</a>`;
   }
   document.querySelectorAll<HTMLElement>('.batch-art .cell[data-id]').forEach((c) => {
     const r = rated[c.dataset.id!];

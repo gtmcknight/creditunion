@@ -109,7 +109,8 @@ function tip() {
   document.body.append(tipEl);
   let shown: Element | null = null;
   document.addEventListener('pointerover', (e) => {
-    const cell = (e.target as Element).closest?.('.cell.ghost, .cell[data-id]');
+    // List cards are one link into the Credit Union: no per-cell cards there, only on its own page.
+    const cell = (e.target as Element).closest?.('.card') ? null : (e.target as Element).closest?.('.cell.ghost, .cell[data-id]');
     const s = cell && slotOf.get(cell);
     const d = cell && !s ? deposits.get((cell as HTMLElement).dataset.id ?? '') : undefined;
     if (!cell || (!s && !d)) {
