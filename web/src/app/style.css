@@ -3189,7 +3189,8 @@ a.rule-chip:hover {
   outline: none;
 }
 .wall-modes button[data-tip]::after,
-.wall-tools button[data-tip]::after {
+.wall-tools button[data-tip]::after,
+.src-toggle[data-tip]::after {
   content: attr(data-tip);
   position: absolute;
   top: calc(100% + 8px);
@@ -3212,7 +3213,9 @@ a.rule-chip:hover {
   translate: 0 -2px;
 }
 .wall-modes button[data-tip]:hover::after,
-.wall-tools button[data-tip]:hover::after {
+.wall-tools button[data-tip]:hover::after,
+.src-toggle[data-tip]:hover::after,
+.src-toggle[data-tip]:focus-visible::after {
   opacity: 1;
   translate: -50% 0;
 }
@@ -6425,6 +6428,14 @@ a.quiet:hover { text-decoration: underline; text-underline-offset: 3px; }
 }
 
 .jb-buy { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+/* The marketplaces' marks by a Buy heading: tap one to hide its listings for the visit; hidden, it stays, faint. */
+.src-toggles { display: inline-flex; gap: 2px; margin-left: 8px; vertical-align: middle; }
+.src-toggles:empty, .src-toggles[hidden] { display: none; }
+.src-toggle { position: relative; display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: none; cursor: pointer; }
+.src-toggle:hover { background: var(--line); }
+.src-toggle img.src { width: 14px; height: 14px; transition: opacity 160ms var(--ease), filter 160ms var(--ease); }
+.src-toggle[aria-pressed='false'] img.src { opacity: 0.3; filter: grayscale(1); }
+.jb-sweep > .src-toggles { margin: 0 4px 0 0; } /* leading a Buy row that has no heading (the create page) */
 
 .filter-line { margin: 8px 0 0; font-size: 15px; color: var(--muted); }
 .filter-line a { color: var(--fg); }

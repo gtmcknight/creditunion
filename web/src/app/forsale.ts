@@ -220,6 +220,64 @@ export function relist(grid: HTMLElement, sale: Sale, next: Listed[], cell: (l: 
   if (lost) toast(lost === 1 ? 'A Credit you picked is no longer for sale.' : `${lost} Credits you picked are no longer for sale.`, 'info');
 }
 
+/// Marketplaces hidden for this visit (the marks by a Buy heading): their listings leave every grid of Credits for
+/// sale until shown again. A new visit shows them all.
+const HIDE_KEY = 'cu-hide-sources';
+const hiddenSources = new Set<Source>(
+  (() => {
+    try {
+      return (JSON.parse(sessionStorage.getItem(HIDE_KEY) ?? '[]') as Source[]).filter((s) => s in SOURCES);
+    } catch {
+      return [];
+    }
+  })(),
+);
+export const sourceShown = (l: { source: Source }) => !hiddenSources.has(l.source);
+
+/// The marketplaces as marks, into `el`: one for each in `have` (and any hidden, so it can come back), lit while its
+/// listings show. None when there's only one to choose from.
+export function sourceMarks(el: HTMLElement, have: Iterable<Source>) {
+  const seen = new Set(have);
+  const list = (Object.keys(SOURCES) as Source[]).filter((s) => seen.has(s) || hiddenSources.has(s));
+  el.innerHTML =
+    list.length < 2
+      ? ''
+      : list
+          .map((s) => {
+            const tip = sourceTip(s);
+            return `<button type="button" class="src-toggle" data-src="${s}" aria-pressed="${!hiddenSources.has(s)}" aria-label="${tip}" data-tip="${tip}"><img class="src" src="${SOURCES[s].icon}" alt=""></button>`;
+          })
+          .join('');
+}
+
+/// What tapping a mark does, as its tooltip says it.
+const sourceTip = (s: Source) => `${hiddenSources.has(s) ? 'Show' : 'Hide'} ${SOURCES[s].name} listings`;
+
+/// `fn` each time a marketplace is hidden or shown, while `el` is on the page.
+export function onSources(el: HTMLElement, fn: () => void) {
+  const on = () => (el.isConnected ? fn() : window.removeEventListener('cu-sources', on));
+  window.addEventListener('cu-sources', on);
+}
+
+// Every mark on every page: tap to hide or show that marketplace's listings for the visit. The last one lit stays.
+document.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.src-toggle');
+  if (!b) return;
+  const s = b.dataset.src as Source;
+  if (hiddenSources.has(s)) hiddenSources.delete(s);
+  else if ([...(b.parentElement?.children ?? [])].filter((x) => x.getAttribute('aria-pressed') === 'true').length > 1) hiddenSources.add(s);
+  else return;
+  try {
+    sessionStorage.setItem(HIDE_KEY, JSON.stringify([...hiddenSources]));
+  } catch {}
+  document.querySelectorAll<HTMLButtonElement>(`.src-toggle[data-src="${s}"]`).forEach((x) => {
+    x.setAttribute('aria-pressed', String(!hiddenSources.has(s)));
+    x.setAttribute('aria-label', sourceTip(s));
+    x.dataset.tip = sourceTip(s);
+  });
+  window.dispatchEvent(new Event('cu-sources'));
+});
+
 /// `ls`/`byId`: what can be bought. `all`: the listings in grid order, including `mine`, bought on this page.
 export type Sale = { ls: Listed[]; preview: boolean; byId: Map<string, Listed>; all: Listed[]; mine: Set<string> };
 
@@ -227,14 +285,17 @@ export type Sale = { ls: Listed[]; preview: boolean; byId: Map<string, Listed>; 
 export const YOURS = '<span class="cc-price yours">Yours</span>';
 
 /// Every Credit listed anywhere (of one trait, `palette/K`, or within rules like { minScore, maxScore }), cheapest first, paged in from /opensea/listed as asked
-/// for. A Credit listed more than once keeps its cheapest. `sale.ls` is the same list, for Sweep.
+/// for. A Credit listed more than once keeps its cheapest. `sale.ls` is the same list, for Sweep. Marketplaces hidden
+/// this visit are left out; `seen` is every marketplace with Credits listed (as the Worker says), hidden or not.
 export function listedPager(where: { trait?: string; rules?: Record<string, number> } = {}) {
   const items: Listed[] = []; // the grid's order, just-bought included
   const sale: Sale = { ls: [], preview: true, byId: new Map(), all: items, mine: new Set() };
+  const seen = new Set<Source>();
   let cursor: string | null = '';
   const self = {
     items,
     sale,
+    seen,
     done: false,
     /// Pages in until at least `n` are in hand, or there are no more (at most `calls` requests).
     async fill(n: number, most = 20) {
@@ -245,11 +306,14 @@ export function listedPager(where: { trait?: string; rules?: Record<string, numb
         if (cursor) qs.set('c', cursor);
         const res = await fetch(`/opensea/listed?${qs}`);
         if (!res.ok) break;
-        const d = (await res.json()) as { items?: Listed[]; next?: string | null; preview?: boolean; error?: string };
+        const d = (await res.json()) as { items?: Listed[]; next?: string | null; preview?: boolean; sources?: Source[]; error?: string };
         if (d.error) break;
         sale.preview = !!d.preview;
+        for (const src of d.sources ?? []) if (src in SOURCES) seen.add(src);
         for (const l of d.items ?? []) {
           if (!SOURCES[l.source] || sale.byId.has(l.id) || sale.mine.has(l.id) || justBought(l.id)) continue;
+          seen.add(l.source);
+          if (!sourceShown(l)) continue;
           items.push(l);
           sale.byId.set(l.id, l);
           sale.ls.push(l);

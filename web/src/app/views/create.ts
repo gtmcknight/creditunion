@@ -10,7 +10,7 @@ import { $$, art, errText, esc, fromUtcInput, openModal, sameUtcDay, sheet, toas
 import { LAYOUT_TRAITS, keyOf, ruleFor, slotMark, slotName, type LayoutTrait } from '../../shared/layout';
 import { bitsPath, ratingPath, setPath, timePath } from '../../shared/trait';
 import { editionArt } from '../ghosts';
-import { listedPager, live, priceTag, relist, sweepControls, sweepToWallet, type Listed as Listing } from '../forsale';
+import { listedPager, live, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepToWallet, type Listed as Listing } from '../forsale';
 import { creditCell } from './trait';
 import { Room, booksOf, noRoomReason } from '../slots';
 import { bin } from '../bins';
@@ -408,23 +408,36 @@ export async function create(app: HTMLElement) {
     await pager.fill(8, 3);
     if (buyFor !== key || !el.isConnected) return;
     const ls = pager.sale.ls.slice(0, 8);
-    el.hidden = !ls.length;
-    if (!ls.length) return;
+    // The marketplaces' marks lead the Buy row: tap one to hide its listings for this visit.
+    const marks = document.createElement('span');
+    marks.className = 'src-toggles';
+    sourceMarks(marks, pager.seen);
+    el.hidden = !ls.length && !marks.childElementCount;
+    if (el.hidden) return;
     const tile = (l: Listing) => creditCell(Number(l.id), priceTag(l));
     el.innerHTML = `<div class="jb"><div class="jb-sweep" id="cb-act"></div>
       <div class="trait-grid" id="cb-grid">${ls.map(tile).join('')}</div></div>`;
     const grid = el.querySelector<HTMLElement>('#cb-grid')!;
+    const act = el.querySelector<HTMLElement>('#cb-act')!;
     const sale = { ...pager.sale, ls, all: [...ls] };
-    const mine = sweepControls(el.querySelector<HTMLElement>('#cb-act')!, sale, grid, { button: false, onPick: () => refresh() });
+    const mine = sweepControls(act, sale, grid, { button: false, onPick: () => refresh() });
+    act.prepend(marks);
     buyer = mine;
     // Live: the cheapest eight again every 20 s, and any you picked stay while they're listed.
-    live(grid, async () => {
+    const tick = async () => {
       if (buyFor !== key) return;
       const fresh = listedPager({ rules: want });
       await fresh.fill(8, 3);
       if (buyFor !== key || !grid.isConnected || (!fresh.items.length && !fresh.done)) return;
       const picked = new Set(mine.chosen().map((l) => l.id));
       relist(grid, sale, fresh.sale.ls.filter((l, i) => i < 8 || picked.has(l.id)), tile, mine);
+      sourceMarks(marks, fresh.seen);
+    };
+    live(grid, tick);
+    // A marketplace hidden: its tiles leave at once, then the eight fill up again; shown: its Credits slide in.
+    onSources(grid, () => {
+      relist(grid, sale, sale.ls.filter(sourceShown), tile, mine);
+      void tick();
     });
   }
   /// Bought here: into the picker, picked.

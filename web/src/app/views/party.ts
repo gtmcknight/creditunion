@@ -6,7 +6,7 @@ import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../trai
 import { hydrate, pct, who } from '../ens';
 import { examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
 import { Room, books, depositedKeys, keysOf, noRoomReason, type Books } from '../slots';
-import { MAX_SWEEP, buying, checkQuote, connectToBuy, live as keepLive, minEth, priceTag, relist, sweepControls, sweepRow, type Listed, type Quote, type Sale } from '../forsale';
+import { MAX_SWEEP, buying, checkQuote, connectToBuy, live as keepLive, minEth, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepRow, type Listed, type Quote, type Sale, type Source } from '../forsale';
 import { creditCell, creditSkel } from './trait';
 import { activityFold } from './live';
 import { $$, art, clock, errText, esc, eth, openModal, same, setRange, sheet, short, toast, until } from '../ui';
@@ -401,7 +401,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
     const remembered = addTab?.at === s.address && (addTab.tab !== 'withdraw' || myIds.size) ? addTab.tab : null;
     const start = remembered ?? (!m || !m.owned.length ? 'buy' : 'mine');
     return `<div class="box add">
-      <div class="box-head"><h3>Credits</h3><span class="muted small num" id="pick-count"></span></div>
+      <div class="box-head"><h3>Credits<span class="src-toggles" id="buy-sources"${start === 'buy' ? '' : ' hidden'}></span></h3><span class="muted small num" id="pick-count"></span></div>
       <div class="subtabs" role="tablist">
         <button type="button" role="tab" data-add="mine" aria-selected="${start === 'mine'}">Deposit <span class="num" id="n-mine"></span></button>
         <button type="button" role="tab" data-add="buy" aria-selected="${start === 'buy'}">Buy</button>
@@ -668,6 +668,7 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
       t.addEventListener('click', () => {
         document.querySelectorAll('[data-add]').forEach((x) => x.setAttribute('aria-selected', String(x === t)));
         document.querySelectorAll<HTMLElement>('[data-pane]').forEach((p) => (p.hidden = p.dataset.pane !== t.dataset.add));
+        document.getElementById('buy-sources')?.toggleAttribute('hidden', t.dataset.add !== 'buy');
         addTab = { at: s.address, tab: t.dataset.add! };
         if (t.dataset.add === 'buy') buy();
       }),
@@ -924,6 +925,7 @@ async function bindBuy(
   if (!line || !grid || !host) return;
 
   let listings: Listed[] = [];
+  let sources: Source[] = [];
   // preview: no OpenSea key here, so edition Credits stand in. mainnetOnly: real mainnet listings and prices,
   // but this party is on a testnet and can't take them.
   let preview = false;
@@ -932,9 +934,10 @@ async function bindBuy(
     const r = await fetch(`/opensea/listings?batch=${batch}`);
     if (r.status === 501) preview = true;
     else {
-      const d = (await r.json()) as { listings?: typeof listings; preview?: boolean; error?: string };
+      const d = (await r.json()) as { listings?: typeof listings; preview?: boolean; sources?: Source[]; error?: string };
       if (!r.ok || d.error) throw new Error(d.error ?? 'OpenSea is unavailable right now.');
       listings = d.listings ?? [];
+      sources = d.sources ?? [];
       mainnetOnly = !!d.preview;
     }
   } catch (e) {
@@ -952,7 +955,12 @@ async function bindBuy(
     line.hidden = true;
     return;
   }
-  const shown = listings.slice(0, MAX_SWEEP);
+  // Every listing that fits, and what shows: the cheapest that many from the marketplaces shown, and any picked.
+  let all = listings;
+  const marks = document.getElementById('buy-sources');
+  if (marks) sourceMarks(marks, [...sources, ...all.map((l) => l.source)]);
+  const showing = (picked: Set<string>) => all.filter(sourceShown).filter((l, i) => i < MAX_SWEEP || picked.has(l.id));
+  const shown = showing(new Set());
   const sale: Sale = { ls: [...shown], preview: mainnetOnly, byId: new Map(shown.map((l) => [l.id, l])), all: shown, mine: new Set() };
   // Credits whose price went up at the last click: their new price shows in red until the next.
   const rose = new Set<string>();
@@ -984,13 +992,20 @@ async function bindBuy(
   // many show, and any you picked stay while they're listed.
   keepLive(grid, async () => {
     const r = await fetch(`/opensea/listings?batch=${batch}`);
-    const d = r.ok ? ((await r.json()) as { listings?: Listed[]; error?: string }) : null;
+    const d = r.ok ? ((await r.json()) as { listings?: Listed[]; sources?: Source[]; error?: string }) : null;
     if (!d?.listings || d.error || !grid.isConnected) return;
-    const picked = new Set(ctl.chosen().map((l) => l.id));
-    relist(grid, sale, d.listings.filter((l, i) => i < MAX_SWEEP || picked.has(l.id)), tile, ctl);
+    all = d.listings;
+    sources = d.sources ?? sources;
+    reshow();
+  });
+  const reshow = () => {
+    relist(grid, sale, showing(new Set(ctl.chosen().map((l) => l.id))), tile, ctl);
+    if (marks) sourceMarks(marks, [...sources, ...all.map((l) => l.source)]);
     line.textContent = sale.ls.length || mainnetOnly ? '' : 'No listings fit right now. ';
     line.hidden = !line.textContent;
-  });
+  };
+  // A marketplace hidden or shown: its listings leave or slide in.
+  onSources(grid, reshow);
   if (!go || !connected || mainnetOnly) return;
 
   // One click: a fresh signed price for exactly these (OpenSea's is good for ~90 s), then the wallet. Listings

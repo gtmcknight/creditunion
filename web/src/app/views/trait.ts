@@ -1,5 +1,5 @@
 import { hasLayout, layoutSlot, listBatches, type Listed } from '../data';
-import { YOURS, listedPager, live, priceTag, relist, sweepControls, sweepWaiting } from '../forsale';
+import { YOURS, listedPager, live, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepWaiting, type Listed as Listing } from '../forsale';
 import { hydrate } from '../ens';
 import { editionArt, fillGhosts } from '../ghosts';
 import { dice, printGlyph, swatch, weightGlyph } from '../glyphs';
@@ -170,11 +170,19 @@ export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => 
   // Listed Credits found since the last look, onto the grid: at its end, or (behind) at the end of the listed run
   // at its head, moved there if the rest already drew them.
   const unskel = () => grid.querySelectorAll(':scope > .skel').forEach((el) => el.remove());
-  // The Buy row (heading and Sweep): up while listings load, and while any are listed.
+  // The marketplaces' marks by the heading: tap one to hide its listings for this visit.
+  const marks = document.createElement('span');
+  marks.className = 'src-toggles';
+  heading?.append(marks);
+  // The Buy row (heading, marks and Sweep): up while listings load, while any are listed, and while a marketplace is
+  // hidden (so it can be shown again).
   const row = (on: boolean) => {
-    if (heading) heading.hidden = !on;
-    host.hidden = !on;
+    sourceMarks(marks, listed.seen);
+    const up = on || !!marks.childElementCount;
+    if (heading) heading.hidden = !up;
+    host.hidden = !up;
   };
+  const tile = (l: Listing) => creditCell(Number(l.id), priceTag(l));
   const place = () => {
     unskel();
     for (; placed < listed.items.length; placed++) {
@@ -239,7 +247,29 @@ export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => 
     if (my !== gen || loading || !grid.isConnected || (!fresh.items.length && !fresh.done)) return; // the read failed
     const top = fresh.done ? null : fresh.items.reduce((m, l) => (BigInt(l.price) > m ? BigInt(l.price) : m), 0n);
     const past = top === null ? [] : listed.sale.ls.filter((l) => BigInt(l.price) >= top && !fresh.sale.byId.has(l.id));
-    relist(grid, listed.sale, [...fresh.items, ...past], (l) => creditCell(Number(l.id), priceTag(l)), sweep);
+    for (const src of fresh.seen) listed.seen.add(src);
+    relist(grid, listed.sale, [...fresh.items, ...past], tile, sweep);
+    placed = listed.items.length;
+    if (listed.items.length && !sweep) sweep = sweepControls(host, listed.sale, grid);
+    row(!!listed.items.length);
+  });
+  // A marketplace hidden: its tiles leave at once. Shown again: the listings are read again as far as the grid
+  // reaches, so its Credits slide in where they belong (and paging on picks up after them).
+  onSources(grid, async () => {
+    const my = gen;
+    const keep = listed.sale.ls.filter(sourceShown);
+    if (keep.length < listed.sale.ls.length) relist(grid, listed.sale, keep, tile, sweep);
+    else {
+      const top = listed.sale.ls.length ? BigInt(listed.sale.ls[listed.sale.ls.length - 1].price) : 0n;
+      const fresh = listedPager(where);
+      for (let calls = 0; calls < 8 && !fresh.done; calls++) {
+        await fresh.fill(fresh.items.length + 1, 1);
+        const last = fresh.items[fresh.items.length - 1];
+        if (last && BigInt(last.price) >= top) break;
+      }
+      if (my !== gen || !grid.isConnected) return;
+      relist(grid, listed.sale, fresh.items, tile, sweep);
+    }
     placed = listed.items.length;
     if (listed.items.length && !sweep) sweep = sweepControls(host, listed.sale, grid);
     row(!!listed.items.length);

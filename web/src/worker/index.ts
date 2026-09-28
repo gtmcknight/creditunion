@@ -366,8 +366,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       // A preview's listings carry their packed edition traits, so the Buy tab can book them against the sheet's
       // slots without reading edition-traits.bin (478 KB) itself.
       const table = live ? null : await load(env.ASSETS, url.origin).catch(() => null);
+      const more = (await extras(env, url, ctx)).extra;
       return Response.json(
-        { listings: listings.map((l) => ({ id: l.id, price: l.price, source: l.source, url: listingUrl(env, live, l), ...(table ? { traits: table[Number(l.id) - 1] ?? 0 } : {}) })), preview: !live },
+        { listings: listings.map((l) => ({ id: l.id, price: l.price, source: l.source, url: listingUrl(env, live, l), ...(table ? { traits: table[Number(l.id) - 1] ?? 0 } : {}) })), preview: !live, sources: sourcesOf(env, more) },
         { headers: { 'cache-control': 'no-store' } },
       );
     } catch (e) {
@@ -473,7 +474,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         .sort((a, b) => (BigInt(a.price) < BigInt(b.price) ? -1 : BigInt(a.price) > BigInt(b.price) ? 1 : 0))
         .map((l) => ({ ...l, url: listingUrl(env, live, l) }));
       const left = !cur.d || cur.i < more.length;
-      return Response.json({ items, next: left ? btoa(JSON.stringify(cur)) : null, preview: !live }, { headers: { 'cache-control': 'no-store' } });
+      return Response.json({ items, next: left ? btoa(JSON.stringify(cur)) : null, preview: !live, sources: sourcesOf(env, more) }, { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
     }
@@ -1099,6 +1100,10 @@ async function quoteListings(env: Env, url: URL, listings: Listing[]) {
   return { ...os, total: total.toString(), fwa, strategy };
 }
 
+/// The marketplaces with any Credit listed right now (OpenSea whenever it's read), in the order the site shows them:
+/// every Buy heading shows the same marks, whatever the first listings happen to be.
+const sourcesOf = (env: Env, extra: { source: string }[]) => [...(env.OPENSEA_API_KEY ? ['opensea'] : []), ...['fwa', 'strategy'].filter((s) => extra.some((e) => e.source === s))];
+
 /// One page of OpenSea's cheapest listings, cached 15 s: every live grid reads its head again every 20 s, so any
 /// number of people watching one costs OpenSea a call per page every 15 s.
 async function bestPageCached(env: Env, url: URL, ctx: ExecutionContext, credits: Address, next: string, trait?: { traitType: string; value: string }) {
@@ -1172,7 +1177,7 @@ async function fwaListings(env: Env, url: URL, ctx: ExecutionContext): Promise<E
   if (hit) return tag(await hit.json<FwaListing[]>());
   try {
     const live = await marketListings(mainClient(env), { market, collection: MAINNET_CREDITS, store: cacheStore(url.origin) });
-    ctx.waitUntil(cache.put(key, Response.json(live, { headers: { 'cache-control': 'public, max-age=30' } })));
+    ctx.waitUntil(cache.put(key, Response.json(live, { headers: { 'cache-control': 'public, max-age=15' } }))); // as fresh as OpenSea's pages
     return tag(live);
   } catch (e) {
     console.warn('[fwa] listings unavailable', safeError(e));
@@ -1180,32 +1185,51 @@ async function fwaListings(env: Env, url: URL, ctx: ExecutionContext): Promise<E
   }
 }
 
-/// The Credits CreditStrategy has for sale. Reading them is 13 heavy eth_calls, so the result is cached for a
-/// minute and shared while in flight; a Credit sold since is dropped when it is quoted.
+/// The Credits CreditStrategy has for sale. Reading them is 13 heavy eth_calls, so the result is cached 15 s (as
+/// fresh as OpenSea's pages) and shared while in flight; a Credit sold since is dropped when it is quoted. A read that fails everywhere
+/// serves the last good one, up to an hour old: each buy re-reads its Credits on-chain first.
 let strategyRead: Promise<Extra[]> | null = null;
 async function heldByStrategy(env: Env, url: URL, ctx: ExecutionContext): Promise<Extra[]> {
   const strategy = addrOrNull(env.STRATEGY);
   if (!strategy) return [];
   const cache = caches.default;
   const key = new Request(`${url.origin}/strategy/listings/${strategy.toLowerCase()}`);
+  const lastGood = new Request(`${url.origin}/strategy/listings-last/${strategy.toLowerCase()}`);
   const hit = await cache.match(key);
   if (hit) return hit.json<Extra[]>();
   if (!strategyRead) {
-    strategyRead = strategyListings(mainClient(env), { strategy, supply: SUPPLY })
+    strategyRead = readStrategy(env, strategy)
       .then((ls) => {
         const out = ls.map((l): Extra => ({ ...l, source: 'strategy' }));
-        ctx.waitUntil(cache.put(key, Response.json(out, { headers: { 'cache-control': 'public, max-age=60' } })));
+        ctx.waitUntil(cache.put(key, Response.json(out, { headers: { 'cache-control': 'public, max-age=15' } })));
+        ctx.waitUntil(cache.put(lastGood, Response.json(out, { headers: { 'cache-control': 'public, max-age=3600' } })));
         return out;
       })
-      .catch((e) => {
+      .catch(async (e) => {
         console.warn('[strategy] listings unavailable', safeError(e));
-        return [];
+        return (await cache.match(lastGood))?.json<Extra[]>() ?? [];
       })
       .finally(() => {
         strategyRead = null;
       });
   }
   return strategyRead;
+}
+
+/// The strategy's scan (creation code run in an eth_call, 50M gas each) through our RPC first, then public ones:
+/// some providers refuse that kind of call ("Transaction creation failed") while serving every ordinary read.
+async function readStrategy(env: Env, strategy: Address) {
+  const urls = [...new Set([env.FALLBACK_RPC, 'https://ethereum-rpc.publicnode.com', 'https://eth.drpc.org'].filter((u): u is string => !!u))];
+  const clients = [mainClient(env), ...urls.map((u) => createPublicClient({ chain: mainnet, transport: http(u, { timeout: 20_000 }) }))];
+  let last: unknown;
+  for (const c of clients) {
+    try {
+      return await strategyListings(c, { strategy, supply: SUPPLY });
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
 }
 
 /// Testnet preview of `fitting`: mainnet listings that pass the party's rules as the edition knows them.

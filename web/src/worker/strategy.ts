@@ -12,6 +12,8 @@ const SCAN =
 /// Ids per call: about 3,800 gas each, under the 50M eth_call gas cap most RPCs (publicnode included) set.
 const SPAN = 10_000;
 const GAS = 50_000_000n;
+/// A span that won't run in one call (more of it for sale costs more gas) is read in halves, down to this.
+const MIN_SPAN = 500;
 
 export type StrategyListing = { id: string; price: string };
 
@@ -20,13 +22,19 @@ export type StrategyListing = { id: string; price: string };
 export async function strategyListings(c: PublicClient, o: { strategy: Address; supply: number }): Promise<StrategyListing[]> {
   const spans: [number, number][] = [];
   for (let from = 1; from <= o.supply; from += SPAN) spans.push([from, Math.min(from + SPAN, o.supply + 1)]);
-  const parts = await Promise.all(
-    spans.map(async ([from, to]) => {
-      const args = encodeAbiParameters([{ type: 'address' }, { type: 'uint256' }, { type: 'uint256' }], [o.strategy, BigInt(from), BigInt(to)]);
+  const read = async (from: number, to: number): Promise<bigint[]> => {
+    const args = encodeAbiParameters([{ type: 'address' }, { type: 'uint256' }, { type: 'uint256' }], [o.strategy, BigInt(from), BigInt(to)]);
+    try {
       const r = await c.call({ data: (SCAN + args.slice(2)) as Hex, gas: GAS });
       return decode(r.data ?? '0x');
-    }),
-  );
+    } catch (e) {
+      if (to - from <= MIN_SPAN) throw e;
+      const mid = from + Math.floor((to - from) / 2);
+      const [a, b] = await Promise.all([read(from, mid), read(mid, to)]);
+      return [...a, ...b];
+    }
+  };
+  const parts = await Promise.all(spans.map(([from, to]) => read(from, to)));
   const mask = (1n << 128n) - 1n;
   const all = parts.flat().map((x) => ({ id: x >> 128n, price: x & mask }));
   all.sort((a, b) => (a.price < b.price ? -1 : a.price > b.price ? 1 : a.id < b.id ? -1 : 1));
