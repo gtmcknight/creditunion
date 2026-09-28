@@ -197,7 +197,7 @@ export default {
     return secure(res, url);
   },
 
-  // Every minute: the keeper (keeper.ts), once KEEPER_KEY is set.
+  // Every 5 minutes: the keeper (keeper.ts), once KEEPER_KEY is set.
   async scheduled(_event, env, ctx) {
     if (!env.KEEPER_KEY) return;
     ctx.waitUntil(

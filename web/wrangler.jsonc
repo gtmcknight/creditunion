@@ -31,8 +31,8 @@
     { "pattern": "eighty.rhps.fun", "custom_domain": true }
   ],
   "observability": { "enabled": true },
-  // The keeper (src/worker/keeper.ts) runs every minute; it does nothing until `wrangler secret put KEEPER_KEY`.
-  "triggers": { "crons": ["* * * * *"] },
+  // The keeper (src/worker/keeper.ts) runs every 5 minutes; it does nothing until `wrangler secret put KEEPER_KEY`.
+  "triggers": { "crons": ["*/5 * * * *"] },
   // Per-IP rate limits (Workers Rate Limiting API). Keys are cf-connecting-ip. RL_RPC counts JSON-RPC calls, not requests.
   "unsafe": {
     "bindings": [
