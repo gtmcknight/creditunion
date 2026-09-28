@@ -3,7 +3,7 @@
 /// Allowlisted batches are the exception: their lists live only onchain, so those are checked there.
 import type { Address } from 'viem';
 import { batchAbi } from './abi';
-import { pub, session } from './chain';
+import { onTx, pub, session } from './chain';
 import { hasLayout, myCredits, ratings, type Listed, type Rated, type Summary } from './data';
 import { paletteBit, TRAITS } from './traits';
 
@@ -28,6 +28,8 @@ export async function myTraits(account = session.account): Promise<{ owned: bigi
 export function invalidateFit() {
   cache = null;
 }
+// A buy, deposit or withdrawal changes what the wallet holds: read it again next time.
+onTx(invalidateFit);
 
 export const weightOf = (r: Rated) => {
   const marks = r.traits.activeBits, cap = r.traits.palette.length * 64;

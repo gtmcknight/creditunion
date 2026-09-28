@@ -236,10 +236,24 @@ async function drawBuy(n: number) {
     }`;
   el.hidden = false;
   const go = document.getElementById('credit-buy-go') as HTMLButtonElement | null;
+  // Bought: back to the union you came from with this Credit picked to deposit, else this page again, now yours.
+  const done = () => {
+    el.remove();
+    let prev = '';
+    try {
+      // Only the step that brought you to this very page counts (not one from earlier in the session).
+      const p = JSON.parse(sessionStorage.getItem('cu-prev') ?? '{}') as { from?: string; to?: string };
+      if (p.to === location.pathname) prev = p.from ?? '';
+    } catch {}
+    if (/^\/(union|party)\/0x[0-9a-fA-F]{40}$/.test(prev)) {
+      history.pushState(null, '', `${prev}?pick=${n}`);
+    }
+    window.dispatchEvent(new PopStateEvent('popstate')); // the router draws whatever the address now says
+  };
   go?.addEventListener('click', async () => {
     if (viaSweeper) {
       const got = await sweepToWallet([{ id: String(n), price: d.price!, source: 'opensea', hash: d.hash!, protocol: d.protocol! }], go);
-      if (got?.length) el.hidden = true; // off the market: the listing box goes
+      if (got?.length) done();
       return;
     }
     const label = go.textContent ?? '';
@@ -257,7 +271,7 @@ async function drawBuy(n: number) {
       );
       boughtToast([n]);
       rememberBought([n]);
-      el.hidden = true; // off the market: the listing box goes
+      done();
     } catch (e) {
       toast(errText(e), 'err', 8000);
       go.classList.remove('busy');

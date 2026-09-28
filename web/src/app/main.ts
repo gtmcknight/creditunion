@@ -36,6 +36,10 @@ if (location.hash.startsWith('#/')) {
 /// Navigate without a reload.
 export function go(path: string) {
   if (path === location.pathname + location.search) return;
+  // Where you came from, so a page can send you back (a Credit bought from a union's page returns there).
+  try {
+    sessionStorage.setItem('cu-prev', JSON.stringify({ from: location.pathname, to: path.split('?')[0] }));
+  } catch {}
   history.pushState(null, '', path);
   window.scrollTo({ top: 0 });
   route();
