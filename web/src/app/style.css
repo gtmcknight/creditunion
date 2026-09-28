@@ -714,6 +714,69 @@ nav a .num {
   gap: 12px;
 }
 
+/* Statement directions: Issued is the sheet; the other three draw on a canvas in its place. */
+.batch-art > .sheet,
+.batch-art > .dir-canvas,
+.design-preview > #preview,
+.design-preview > .dir-canvas {
+  grid-area: 1 / 1;
+}
+.dir-canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+.dir-canvas[hidden] {
+  display: none;
+}
+.dir-host.dir-on :is(.sheet, .spot) {
+  visibility: hidden;
+}
+/* The create page: Rules joins the directions row on a wide screen; its phone bar keeps Rules · Credits only. */
+.preview-foot .dirs {
+  margin-left: 0;
+}
+@media (min-width: 821px) {
+  .design-preview .view-toggle {
+    display: none;
+  }
+}
+@media (max-width: 820px) {
+  .design-preview :is(.dirs, .dir-canvas) {
+    display: none;
+  }
+  .design-preview.dir-on .sheet {
+    visibility: visible;
+  }
+}
+.dirs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0 14px;
+  margin-left: auto;
+}
+.dirs button {
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: color 150ms var(--ease);
+}
+.dirs button:hover,
+.dirs button[aria-checked='true'] {
+  color: var(--fg);
+}
+.dirs button[aria-checked='true'] {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 6px;
+}
+
 /* ---------------------------------------------------------------- batch page */
 
 .back {
@@ -5806,7 +5869,7 @@ dialog.eligible::backdrop {
 }
 
 /* Light mode sits on gray; the Credit sheets stay white with a soft lift, so the grids read as objects. */
-:root:not([data-mode='dark']) :is(.card .sheet, .batch-art .sheet) {
+:root:not([data-mode='dark']) :is(.card .sheet, .batch-art .sheet, .dir-host .dir-canvas) {
   background: #fff;
   border-color: transparent;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 8px 24px -12px rgba(0, 0, 0, 0.18);

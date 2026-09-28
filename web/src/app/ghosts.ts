@@ -91,11 +91,14 @@ async function fillSheet(el: HTMLElement) {
     const from = own.length ? own : pool;
     const n = used.get(want[i]) ?? 0;
     used.set(want[i], n + 1);
+    const id = from[(seed + n) % from.length];
     c.className = 'cell ghost';
+    c.dataset.ghost = String(id);
     c.removeAttribute('title');
-    c.innerHTML = `<img src="${editionArt(from[(seed + n) % from.length])}" alt="" loading="lazy" decoding="async">`;
+    c.innerHTML = `<img src="${editionArt(id)}" alt="" loading="lazy" decoding="async">`;
     slotOf.set(c, { i, want: want[i], f, fit: fits.get(want[i])! });
   });
+  el.dispatchEvent(new Event('ghosts', { bubbles: true }));
 }
 
 // ---------------------------------------------------------------- hover card

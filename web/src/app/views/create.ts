@@ -12,6 +12,7 @@ import { bitsPath, ratingPath, setPath, timePath } from '../../shared/trait';
 import { editionArt } from '../ghosts';
 import { listedPager, live, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepToWallet, type Listed as Listing } from '../forsale';
 import { creditCell } from './trait';
+import { directionCanvas, directions, mountDirections, rulesView } from '../directions';
 import { Room, booksOf, noRoomReason } from '../slots';
 import { bin } from '../bins';
 import { TRAIT_KINDS, eightsName, parseTrait } from '../../shared/trait';
@@ -230,10 +231,11 @@ export async function create(app: HTMLElement) {
   app.innerHTML = `
   <header class="create-head"><h1>Start a Credit Union</h1><p class="create-lede">Set the rules, add your Credits, invite everyone. At 80 they burn into a Statement and everyone in splits the sale. <a href="/">How it works →</a></p></header>
   <section class="design">
-    <div class="design-preview">
-      <div id="preview">${sheet([])}</div>
+    <div class="design-preview dir-host">
+      <div id="preview">${sheet([])}</div>${directionCanvas}
       <div class="preview-foot">
         <div class="view-toggle" role="radiogroup" aria-label="Show" hidden><label><input type="radio" name="view" value="rules"><span>Rules</span></label><label><input type="radio" name="view" value="credits" checked><span>Credits</span></label></div>
+        <div class="muted small">${directions('create', true)}</div>
         <span class="muted small num" id="layout-pick"></span>
       </div>
     </div>
@@ -768,10 +770,12 @@ export async function create(app: HTMLElement) {
       mine: picks,
       ghosts: rest.slice(0, 80 - mineIds.length).map((g) => ({ id: g.id, src: g.id ? artOf(g.id) : '' })),
     });
+    mountDirections(app);
   }
   function setView(v: 'rules' | 'credits') {
     view = v;
     app.querySelector<HTMLInputElement>(`input[name=view][value=${v}]`)!.checked = true;
+    rulesView(app.querySelector<HTMLElement>('.dirs'), v === 'rules');
     drawPreview(owned.filter(qualifies));
   }
 
@@ -1318,6 +1322,7 @@ export async function create(app: HTMLElement) {
     paintBlock.hidden = !on;
     // Rules only mean something slot by slot on a painted sheet; otherwise every slot takes the same Credits.
     app.querySelector<HTMLElement>('.view-toggle')!.hidden = !on;
+    app.querySelector<HTMLElement>('.dirs [data-dir="Rules"]')!.hidden = !on;
     preview.classList.toggle('paintable', on);
     setView(on ? 'rules' : 'credits');
     if (on) drawBrushes();
@@ -1328,6 +1333,11 @@ export async function create(app: HTMLElement) {
     }
   };
   app.querySelectorAll<HTMLInputElement>('input[name=view]').forEach((r) => r.addEventListener('change', () => setView(r.value as 'rules' | 'credits')));
+  // On a wide screen Rules sits in the directions row: picking it shows the rules, any direction the Credits.
+  app.addEventListener('direction', (e) => {
+    const d = (e as CustomEvent<string>).detail;
+    if ((d === 'Rules') !== (view === 'rules')) setView(d === 'Rules' ? 'rules' : 'credits');
+  });
   arrRadios.forEach((r) => r.addEventListener('change', syncOrder));
   // Paint straight onto the preview sheet: tap or drag across its slots.
   const slotAt = (x: number, y: number) => {

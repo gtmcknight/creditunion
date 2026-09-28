@@ -25,7 +25,7 @@ async function loadEdition(assets: Fetcher, origin: string): Promise<Edition> {
   return edition;
 }
 
-export type Rated = Rating & { id: string; paidAt: number };
+export type Rated = Rating & { id: string; seed: string; paidAt: number };
 
 /// One JSON-RPC batch per 100 calls: plain fetch, no shared scheduler (see index.ts on why).
 async function seeds(rpc: string, credits: Address, ids: bigint[]): Promise<Map<string, [string, number]>> {
@@ -85,6 +85,6 @@ export async function ratings(o: {
     }
   }
   const out: Record<string, Rated> = {};
-  for (const [id, [seed, paidAt]] of known) out[id] = { id, paidAt, ...rate(seed, paidAt, ed) };
+  for (const [id, [seed, paidAt]] of known) out[id] = { id, seed, paidAt, ...rate(seed, paidAt, ed) };
   return { n: ed.n, version: '3.4.0', ratings: out };
 }

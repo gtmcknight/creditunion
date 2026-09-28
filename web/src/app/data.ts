@@ -50,6 +50,8 @@ export const sharePct = (x: number) => `${(x * 100).toFixed(2).replace(/0$/, '')
 
 export type Rated = {
   id: string;
+  /// The 21-byte seed as text (latin1), for drawing the Credit's ink.
+  seed: string;
   paidAt: number;
   score: number;
   rank: number;

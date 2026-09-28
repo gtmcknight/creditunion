@@ -8,6 +8,7 @@ import { examples, fillGhosts, registerDeposits, registerFilter } from '../ghost
 import { Room, books, depositedKeys, keysOf, noRoomReason, type Books } from '../slots';
 import { MAX_SWEEP, buying, checkQuote, connectToBuy, live as keepLive, minEth, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepRow, type Listed, type Quote, type Sale, type Source } from '../forsale';
 import { creditCell, creditSkel } from './trait';
+import { directionCanvas, directions, mountDirections } from '../directions';
 import { activityFold } from './live';
 import { $$, art, clock, errText, esc, eth, openModal, same, setRange, sheet, short, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
@@ -149,13 +150,13 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   registerDeposits(b.ids, b.depositors, b.s.split === 1);
   const artHtml = burned
     ? `<figure class="statement">${sheet(b.ids, { closed: true })}<figcaption class="legend muted small"><span>Statement #${s.statementId}</span></figcaption></figure>`
-    : `${sheet(b.ids, { mine: myIds, fresh: placed ? undefined : seen < s.count ? seen : undefined, closing: s.state === 'Full', placed, batch: s.state === 'Open' ? s.address : undefined })}
-       <div class="legend muted small">${myIds.size ? `<button type="button" class="spot" aria-pressed="false"><i class="dot mine"></i><span>Highlight yours</span><span class="num muted">${myIds.size}</span></button>` : ''}</div>`;
+    : `${sheet(b.ids, { mine: myIds, fresh: placed ? undefined : seen < s.count ? seen : undefined, closing: s.state === 'Full', placed, batch: s.state === 'Open' ? s.address : undefined })}${directionCanvas}
+       <div class="legend muted small">${myIds.size ? `<button type="button" class="spot" aria-pressed="false"><i class="dot mine"></i><span>Highlight yours</span><span class="num muted">${myIds.size}</span></button>` : ''}${directions(s.address)}</div>`;
 
   app.innerHTML = `
   
   <section class="batch">
-    <div class="batch-art">${artHtml}</div>
+    <div class="batch-art dir-host">${artHtml}</div>
     <div class="batch-side">
       <header>
         <div class="row"><span class="tag ${s.state.toLowerCase()}">${s.state}</span><button type="button" class="link small" id="share">Share</button></div>
@@ -624,6 +625,8 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
       send({ address: s.address, abi: batchAbi, functionName: 'bid', value }, txNote),
     'You’re the high bidder.');
   });
+
+  mountDirections();
 
   // Spotlight your Credits (tap on touch; hover handled in CSS)
   document.querySelector('.spot')?.addEventListener('click', (e) => {
