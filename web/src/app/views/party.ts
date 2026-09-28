@@ -1087,7 +1087,8 @@ function openDepositors(b: Ctx, account: string | null) {
     rows.set(key, r);
   });
   const list = [...rows.values()].sort((x, y) => y.shares - x.shares || y.ids.length - x.ids.length);
-  const total = list.reduce((n, r) => n + r.shares, 0) || 1;
+  // Shares are of all 80 positions (early-bird weights also add up to 80): the sale is split only once it's full.
+  const total = 80;
   const d = document.createElement('dialog');
   d.className = 'people';
   d.innerHTML = `<form method="dialog">
@@ -1096,7 +1097,7 @@ function openDepositors(b: Ctx, account: string | null) {
       .map(
         (r) => `<li class="person" data-owner="${esc(r.addr.toLowerCase())}">
           <div class="row">${who(r.addr, 'sm', true)}<span class="tags">${same(r.addr, s.creator) ? '<span class="tag">Creator</span>' : ''}${account && same(r.addr, account) ? '<span class="tag you">You</span>' : ''}</span></div>
-          <div class="row muted small"><span class="num">${r.ids.length} Credit${r.ids.length === 1 ? '' : 's'}</span><span class="num">${s.split === 1 ? `${r.shares.toFixed(2)} shares · ` : ''}${((r.shares / total) * 100).toFixed(1)}% of the sale</span></div>
+          <div class="row muted small"><span class="num">${r.ids.length} Credit${r.ids.length === 1 ? '' : 's'}</span><span class="num">${s.split === 1 ? `${r.shares.toFixed(2)} shares · ` : ''}${sharePct(r.shares / total)} of the sale</span></div>
           <div class="person-art">${r.ids.slice(0, 8).map((id) => `<img src="${art(id)}" alt="" title="Credit #${id}" loading="lazy">`).join('')}${r.ids.length > 8 ? `<span class="muted small num">+${r.ids.length - 8}</span>` : ''}</div>
         </li>`,
       )

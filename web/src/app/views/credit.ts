@@ -9,7 +9,7 @@ import { hydrate, who } from '../ens';
 import { fitIds, weightOf } from '../fit';
 import { fillGhosts } from '../ghosts';
 import { maskInks, paletteBit } from '../traits';
-import { art, errText, esc, eth, same, sheet, toast, utc } from '../ui';
+import { art, boughtToast, errText, esc, eth, same, sheet, toast, utc } from '../ui';
 import { card } from './lists';
 import { creditsHead } from './trait';
 import { processOf } from '../../shared/credits';
@@ -250,13 +250,17 @@ async function drawBuy(n: number) {
         d.source === 'strategy'
           ? { address: d.contract!, abi: buyAbi, functionName: 'sellTargetNFT', args: [BigInt(n)], value }
           : { address: d.contract!, abi: buyAbi, functionName: 'buy', args: [BigInt(d.listingId!), session.account!], value },
-        () => toast('Submitted. Waiting for confirmation…', 'info'),
+        () => {
+          go.classList.add('busy');
+          go.textContent = 'Buying';
+        },
       );
-      toast(`Credit #${n.toLocaleString()} is yours.`, 'ok');
+      boughtToast([n]);
       rememberBought([n]);
       el.hidden = true; // off the market: the listing box goes
     } catch (e) {
       toast(errText(e), 'err', 8000);
+      go.classList.remove('busy');
       go.disabled = false;
       go.textContent = label;
     }

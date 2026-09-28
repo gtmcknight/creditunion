@@ -93,10 +93,10 @@ const MARK = `<svg viewBox="0 0 9 8" fill="#0a0a0a" shape-rendering="crispEdges"
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
-/// One card, like the home hero: the wall edge to edge, the headline on black bars fitted to each line, a line
-/// under it on a white bar, the domain in the corner. Drawn by Chrome, which sizes each bar to its words.
-const cards: { name: string; ground: Buffer; title: string[]; line: string }[] = [];
-const card = (name: string, ground: Buffer, title: string[], line: string) => cards.push({ name, ground, title, line });
+/// One card: the wall edge to edge, the mark top left and the headline on white bars fitted to each line. Nothing
+/// else. Drawn by Chrome, which sizes each bar to its words.
+const cards: { name: string; ground: Buffer; title: string[] }[] = [];
+const card = (name: string, ground: Buffer, title: string[]) => cards.push({ name, ground, title });
 
 async function draw() {
   const { chromium } = await import('playwright-core');
@@ -106,12 +106,10 @@ async function draw() {
     await page.setContent(`<html><head><link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600&display=swap" rel="stylesheet"><style>
       body{margin:0;width:${W}px;height:${H}px;background:url(data:image/png;base64,${c.ground.toString('base64')}) 0 0/${W}px ${H}px;font-family:Geist,sans-serif;position:relative}
       .t{position:absolute;left:64px;top:50%;translate:0 -50%}
-      .t span{display:block;width:fit-content;background:#0a0a0a;color:#fff;font-weight:600;font-size:64px;line-height:1;letter-spacing:-0.035em;padding:.16em .3em .2em}
-      .t p{display:inline-block;margin:16px 0 0;background:#fff;color:#0a0a0a;font-size:26px;padding:10px 18px}
-      .d{position:absolute;right:32px;bottom:32px;background:#fff;color:#0a0a0a;font-weight:600;font-size:22px;padding:8px 16px}
+      .t span{display:block;width:fit-content;background:#fff;color:#0a0a0a;font-weight:600;font-size:64px;line-height:1;letter-spacing:-0.035em;padding:.16em .3em .2em}
       .b{position:absolute;left:32px;top:32px;display:flex;align-items:center;gap:12px;background:#fff;color:#0a0a0a;font-weight:600;font-size:24px;letter-spacing:-0.01em;padding:12px 18px}
       .b svg{width:36px;height:32px;display:block}
-    </style></head><body><div class="b">${MARK}Credit Union</div><div class="t">${c.title.map((t) => `<span>${esc(t)}</span>`).join('')}<p>${esc(c.line)}</p></div><div class="d">creditunion.fun</div></body></html>`);
+    </style></head><body><div class="b">${MARK}Credit Union</div><div class="t">${c.title.map((t) => `<span>${esc(t)}</span>`).join('')}</div></body></html>`);
     await page.evaluate(() => document.fonts.ready);
     const out = await page.screenshot({ type: 'png' });
     writeFileSync(pub(`og/${c.name}.png`), out);
@@ -121,11 +119,11 @@ async function draw() {
 }
 
 mkdirSync(pub('og'), { recursive: true });
-card('home', wall('time', 3), ['Join a Credit Union', 'to make a Statement together.'], 'Pool your Credits with other holders. At 80, burn, auction, split.');
-card('about', wall('density', 3), ['How it works'], 'One wallet nobody owns. Rules nobody can change.');
-card('auctions', wall('color', 3), ['Statements', 'at auction'], '24 hours from the first bid, split between the 80.');
-card('create', wall('time', 5, 40_000), ['Start a Credit Union'], 'Pick who joins and how the 80 are laid out.');
-card('party', wall('color', 5, 7), ['Join this Credit Union'], '80 Credits. One Statement. Split 80 ways.');
-card('mint', wall('density', 5, 90_000), ['Mint test Credits'], 'Real Credits art, on testnet.');
+card('home', wall('time', 3), ['Join a Credit Union', 'to make a Statement together.']);
+card('about', wall('density', 3), ['How it works']);
+card('auctions', wall('color', 3), ['Statements', 'at auction']);
+card('create', wall('time', 5, 40_000), ['Start a Credit Union']);
+card('party', wall('color', 5, 7), ['Join this Credit Union']);
+card('mint', wall('density', 5, 90_000), ['Mint test Credits']);
 
 await draw();

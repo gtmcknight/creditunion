@@ -113,8 +113,9 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     tab === 'parties'
       ? ['Credit Unions', 'Each Credit Union pools Credits toward 80. Join with ones that fit, and leave anytime before it fills.']
       : ['Auctions', 'Every Statement a Credit Union makes is sold here. 24 hours from the first bid, split among its members.'];
-  // One small menu, not a second row of tabs: a sort glyph, the current order, and the native picker.
-  const sort = `<label class="sort-pick"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10M1.5 10.5 4 13l2.5-2.5M12 13V3M9.5 5.5 12 3l2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><select name="sort" aria-label="Sort">${SORTS.map(([k, l]) => `<option value="${k}"${k === sortKey() ? ' selected' : ''}>${l}</option>`).join('')}</select></label>`;
+  // One small menu, not a second row of tabs: a sort glyph and the current order; the choices drop down under it.
+  const cur = sortKey();
+  const sort = `<div class="sort-pick"><button type="button" class="sort-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Sort"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10M1.5 10.5 4 13l2.5-2.5M12 13V3M9.5 5.5 12 3l2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="sort-label">${SORTS.find(([k]) => k === cur)?.[1] ?? ''}</span></button><ul class="sort-menu" role="listbox" aria-label="Sort" hidden>${SORTS.map(([k, l]) => `<li role="option" tabindex="-1" data-sort="${k}" aria-selected="${k === cur}">${l}</li>`).join('')}</ul></div>`;
   app.innerHTML = `
   <section class="home">
     ${pageHead({
@@ -124,7 +125,8 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         tab === 'parties'
           ? [{ label: 'All <span class="num muted" id="n-all"></span>', attrs: 'data-view="all"' }, { label: 'For you <span class="num muted" id="n-you"></span>', attrs: 'data-view="you"' }]
           : STAGES.map(([k, l]) => ({ label: `${l} <span class="num muted" id="n-${k}"></span>`, attrs: `data-stage="${k}"` })),
-      tools: tab === 'parties' ? `${sort}<a class="btn primary" href="/create">Start a Credit Union</a>` : undefined,
+      tools: tab === 'parties' ? sort : undefined,
+      action: tab === 'parties' ? '<a class="btn primary" href="/create">Start a Credit Union</a>' : undefined,
       label: 'Show',
     })}
     <div id="batches"><p class="muted">Loading from chain…</p></div>
@@ -223,14 +225,48 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         if (document.getElementById('batches') === el) draw();
       });
     }
-    document.querySelectorAll<HTMLSelectElement>('select[name=sort]').forEach((r) =>
-      r.addEventListener('change', () => {
+    const pick = app.querySelector<HTMLElement>('.sort-pick');
+    if (pick) {
+      const btn = pick.querySelector<HTMLButtonElement>('.sort-btn')!, menu = pick.querySelector<HTMLElement>('.sort-menu')!;
+      const opts = [...menu.querySelectorAll<HTMLElement>('[data-sort]')];
+      const open = (on: boolean) => {
+        menu.hidden = !on;
+        btn.setAttribute('aria-expanded', String(on));
+        if (on) (opts.find((o) => o.getAttribute('aria-selected') === 'true') ?? opts[0]).focus();
+      };
+      const choose = (o: HTMLElement) => {
+        opts.forEach((x) => x.setAttribute('aria-selected', String(x === o)));
+        pick.querySelector('.sort-label')!.textContent = o.textContent;
         try {
-          localStorage.setItem('cu-sort', r.value);
+          localStorage.setItem('cu-sort', o.dataset.sort!);
         } catch {}
+        open(false);
+        btn.focus();
         draw();
-      }),
-    );
+      };
+      btn.addEventListener('click', () => open(menu.hidden === true));
+      menu.addEventListener('click', (e) => {
+        const o = (e.target as HTMLElement).closest<HTMLElement>('[data-sort]');
+        if (o) choose(o);
+      });
+      menu.addEventListener('keydown', (e) => {
+        const i = opts.indexOf(document.activeElement as HTMLElement);
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          opts[(i + (e.key === 'ArrowDown' ? 1 : opts.length - 1)) % opts.length].focus();
+        } else if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          if (i >= 0) choose(opts[i]);
+        } else if (e.key === 'Escape' || e.key === 'Tab') {
+          open(false);
+          if (e.key === 'Escape') btn.focus();
+        }
+      });
+      // A click anywhere else closes it.
+      document.addEventListener('pointerdown', (e) => {
+        if (!menu.hidden && !pick.contains(e.target as Node)) open(false);
+      });
+    }
   } catch (e) {
     const el = document.getElementById('batches');
     if (el) el.innerHTML = `<p class="error">Couldn't read Credit Unions from chain. ${esc((e as Error).message)}</p>`;

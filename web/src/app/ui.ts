@@ -77,10 +77,11 @@ export function sheet(
   return `<div class="${cls}"${opts.batch ? ` data-batch="${opts.batch}"` : ''}>${cells.join('')}</div>`;
 }
 
-export function toast(msg: string, kind: 'ok' | 'err' | 'info' = 'info', ms = 5000) {
+export function toast(msg: string, kind: 'ok' | 'err' | 'info' = 'info', ms = 5000, html = false) {
   const el = document.createElement('div');
   el.className = `toast ${kind}`;
-  el.textContent = msg;
+  if (html) el.innerHTML = msg;
+  else el.textContent = msg;
   $('#toasts').append(el);
   requestAnimationFrame(() => el.classList.add('in'));
   setTimeout(() => {
@@ -149,7 +150,8 @@ export type SubTab = { label: string; href?: string; current?: boolean; attrs?: 
 
 /// Every section page opens the same way: the h1, one muted line, then a bar with sub-nav tabs on the left and
 /// the page's controls on the right. `title` and `lede` are HTML; callers escape.
-export function pageHead({ title, lede, tabs, tools, label = 'Sections' }: { title: string; lede?: string; tabs?: SubTab[]; tools?: string; label?: string }) {
+/// `action`: the page's one call to action, to the right of the title and lede.
+export function pageHead({ title, lede, tabs, tools, action, label = 'Sections' }: { title: string; lede?: string; tabs?: SubTab[]; tools?: string; action?: string; label?: string }) {
   const links = !!tabs?.[0]?.href;
   const items = (tabs ?? [])
     .map((t) =>
@@ -160,7 +162,8 @@ export function pageHead({ title, lede, tabs, tools, label = 'Sections' }: { tit
     .join('');
   const nav = !tabs?.length ? '' : links ? `<nav class="subtabs" aria-label="${label}">${items}</nav>` : `<div class="subtabs" role="tablist" aria-label="${label}">${items}</div>`;
   const bar = nav || tools ? `<div class="page-bar">${nav}${tools ? `<div class="page-tools">${tools}</div>` : ''}</div>` : '';
-  return `<header class="page-head"><h1>${title}</h1>${lede ? `<p class="page-lede">${lede}</p>` : ''}${bar}</header>`;
+  const words = `<h1>${title}</h1>${lede ? `<p class="page-lede">${lede}</p>` : ''}`;
+  return `<header class="page-head">${action ? `<div class="page-top"><div>${words}</div><div class="page-action">${action}</div></div>` : words}${bar}</header>`;
 }
 
 /// Pickers fade at the bottom only when they scroll (`.overflows`); a short row of tiles gets no dead space.
@@ -228,4 +231,28 @@ export function openModal(d: HTMLDialogElement) {
   }
   d.returnValue = '';
   d.showModal();
+  // The × takes the opening focus without a ring: nobody tabbed here. Tabbing still shows it.
+  d.querySelector<HTMLElement>(':scope > .dialog-x')?.focus({ focusVisible: false } as FocusOptions);
+}
+
+/// "#45, #48 and #92333": Credit numbers in a sentence, the rest counted past `most`.
+export function creditList(ids: (string | number)[], most = 3) {
+  const n = ids.map((id) => `#${Number(id)}`); // no thousands commas: three numbers in a row read as one list
+  if (n.length > most) return `${n.slice(0, most).join(', ')} and ${n.length - most} more`;
+  return n.length > 1 ? `${n.slice(0, -1).join(', ')} and ${n[n.length - 1]}` : (n[0] ?? '');
+}
+
+/// A finished purchase: the Credits fanned like cards (up to four), and whose they are now.
+export function boughtToast(ids: (string | number)[], note = '') {
+  if (!ids.length) return toast(note || 'Nothing was bought.', 'info', 8000);
+  const fan = ids
+    .slice(0, 4)
+    .map((id, i) => `<img src="${art(BigInt(id))}" alt="" style="--i:${i}">`)
+    .join('');
+  toast(
+    `<div class="bought"><span class="bought-fan" style="--n:${Math.min(ids.length, 4)}">${fan}</span><span><b>Purchase successful</b><span>${creditList(ids)} ${ids.length === 1 ? 'is' : 'are'} now yours.${note ? ` ${esc(note)}` : ''}</span></span></div>`,
+    'ok',
+    9000,
+    true,
+  );
 }

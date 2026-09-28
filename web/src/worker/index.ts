@@ -848,10 +848,10 @@ async function linkCard(req: Request, env: Env, url: URL, ctx: ExecutionContext,
   try {
     if (kind === 'sample') {
       const x = sample(key);
-      if (x) u = { name: x.name, rule: x.rule, ids: await admitted(env, url, x.rules) };
+      if (x) u = { name: x.name, ids: await admitted(env, url, x.rules) };
     } else if (/^0x[0-9a-fA-F]{40}$/.test(key) && (await isBatch(env, url, key.toLowerCase() as Address))) {
       const p = await readParty(env, key as Address);
-      u = { name: p.name, rule: ruleLine(p.filter, p.allowlistSize), ids: await admitted(env, url, rulesOf(p.filter)) };
+      u = { name: p.name, ids: await admitted(env, url, rulesOf(p.filter)) };
     }
   } catch {
     u = null;

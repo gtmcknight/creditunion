@@ -2687,9 +2687,15 @@ a.rule-chip:hover {
   gap: 8px;
   margin-left: auto;
 }
-.page-tools .btn {
-  height: 36px;
-  padding: 0 14px;
+.page-top {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px 24px;
+}
+.page-action { flex: none; }
+@media (max-width: 640px) {
+  .page-top { flex-direction: column; align-items: flex-start; }
 }
 .subtabs a[aria-current='page'] {
   background: var(--line);
@@ -6465,21 +6471,24 @@ dialog.eligible::backdrop {
 .logo:not([aria-current]) .mark { opacity: 0.45; }
 .logo:hover .mark { opacity: 1; }
 /* Sort: one quiet menu button in the page bar, with the native picker underneath. */
-.sort-pick {
+.sort-pick { position: relative; }
+.sort-btn {
   position: relative;
   display: inline-flex;
   align-items: center;
   gap: 8px;
   height: 36px;
   padding: 0 32px 0 12px;
-  border: 1px solid var(--line-strong);
+  border: 0;
   border-radius: var(--r);
+  background: none;
   color: var(--fg);
+  font: inherit;
   font-size: 14px;
   cursor: pointer;
 }
-.sort-pick svg { width: 16px; height: 16px; color: var(--muted); flex: none; }
-.sort-pick::after {
+.sort-btn svg { width: 16px; height: 16px; color: var(--muted); flex: none; }
+.sort-btn::after {
   content: '';
   position: absolute;
   right: 12px;
@@ -6490,24 +6499,58 @@ dialog.eligible::backdrop {
   border-width: 0 1.4px 1.4px 0;
   translate: 0 -70%;
   rotate: 45deg;
-  pointer-events: none;
+  transition: rotate 150ms var(--ease), translate 150ms var(--ease);
 }
-.sort-pick:hover { background: var(--surface); }
-.sort-pick select {
-  appearance: none;
-  -webkit-appearance: none;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  padding: 0;
+.sort-btn[aria-expanded='true']::after { rotate: 225deg; translate: 0 -20%; }
+.sort-btn:hover, .sort-btn[aria-expanded='true'] { background: var(--surface); }
+/* The choices: a small sheet under the button, right-aligned, in the page's colours. */
+.sort-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 100%;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  background: var(--bg);
+  box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.3);
+  transform-origin: top right;
+  animation: menu-in 140ms var(--ease);
+}
+@keyframes menu-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+}
+.sort-menu li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: calc(var(--r) - 2px);
+  font-size: 14px;
+  color: var(--muted);
   cursor: pointer;
+  white-space: nowrap;
   outline: none;
 }
-.sort-pick:focus-within { box-shadow: 0 0 0 2px var(--fg); }
-.sort-pick select:focus, .sort-pick select:focus-visible { outline: none; box-shadow: none; }
-.sort-pick select { width: auto; height: auto; box-shadow: none; background: none; font-size: 14px; }
-.sort-pick select:focus { box-shadow: none; }
+.sort-menu li:hover, .sort-menu li:focus-visible { background: var(--surface); color: var(--fg); }
+.sort-menu li[aria-selected='true'] { color: var(--fg); }
+.sort-menu li[aria-selected='true']::after {
+  content: '';
+  width: 8px;
+  height: 4px;
+  border: solid currentColor;
+  border-width: 0 0 1.5px 1.5px;
+  rotate: -45deg;
+  translate: 0 -2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sort-menu { animation: none; }
+}
 /* Calls to action in empty states are square, like the hero's. */
 .empty-state .btn { border-radius: 0; }
 
@@ -7062,4 +7105,67 @@ dialog.eligible::backdrop {
     grid-column: 1 / -1;
     grid-row: 3;
   }
+}
+
+/* ---------------------------------------------------------------- buying */
+/* The button while the transaction is out: a small spinning ring before its word. */
+.btn.busy::before {
+  content: '';
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 8px;
+  vertical-align: -1px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: busy-spin 700ms linear infinite;
+}
+@keyframes busy-spin {
+  to { rotate: 360deg; }
+}
+/* The Credits being bought breathe until the block lands; each one bought pops once as it turns Yours. */
+.cc.buying .cc-art img {
+  animation: buying 900ms var(--ease) infinite alternate;
+}
+@keyframes buying {
+  to { opacity: 0.4; }
+}
+.cc.got .cc-art {
+  animation: got 460ms cubic-bezier(0.2, 0.9, 0.3, 1.25);
+}
+@keyframes got {
+  0% { transform: scale(0.94); }
+  60% { transform: scale(1.03); }
+  100% { transform: none; }
+}
+/* Purchase toast: the Credits fanned like cards, then what happened. */
+.bought {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.bought b {
+  display: block;
+  font-weight: 600;
+}
+.bought-fan {
+  position: relative;
+  flex: none;
+  width: calc(36px + (var(--n) - 1) * 14px);
+  height: 40px;
+}
+.bought-fan img {
+  position: absolute;
+  top: 2px;
+  left: calc(var(--i) * 14px);
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.3);
+  rotate: calc((var(--i) - 1) * 5deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn.busy::before, .cc.buying .cc-art img, .cc.got .cc-art { animation: none; }
 }

@@ -2,7 +2,7 @@ import { sweeperAbi } from './abi';
 import { config, pub, send, session } from './chain';
 import { editionArt } from './ghosts';
 import { creditCell } from './views/trait';
-import { errText, esc, rangeHtml, setRange, toast } from './ui';
+import { boughtToast, errText, esc, rangeHtml, setRange, toast } from './ui';
 
 /// Where a listing is: its marketplace's name and mark (Buy tab, Credit pages, For sale rows).
 export type Source = 'opensea' | 'fwa' | 'strategy';
@@ -146,7 +146,10 @@ export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement) 
   const chosen = () => sale.ls.filter((l) => picked.has(l.id)); // in price order
   go.addEventListener('click', async () => {
     if (!picked.size) return;
-    const got = await sweepToWallet(chosen(), go);
+    const mine = [...picked];
+    const cells = () => mine.map((id) => grid.querySelector<HTMLElement>(`.cc[data-id="${id}"]`)).filter((c): c is HTMLElement => !!c);
+    const got = await sweepToWallet(chosen(), go, () => cells().forEach((c) => c.classList.add('buying')));
+    cells().forEach((c) => c.classList.remove('buying'));
     if (!got) return;
     // Bought: off the market here at once. Each square drops its price and says it's yours.
     for (const id of got) {
@@ -157,6 +160,7 @@ export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement) 
       const c = grid.querySelector<HTMLElement>(`.cc[data-id="${id}"]`);
       if (!c) continue;
       c.classList.remove('listed', 'sel');
+      c.classList.add('got'); // a small pop as it becomes yours
       c.querySelector('.cc-art')?.removeAttribute('title');
       c.querySelector('.cc-price')?.insertAdjacentHTML('afterend', YOURS);
       c.querySelector('.cc-price:not(.yours)')?.remove();
@@ -247,7 +251,8 @@ export function checkQuote(q: Quote) {
 /// Sweep these listings into the connected wallet (Sweeper.buy): a fresh price for exactly them, checked
 /// against what it shows, the fee read now, then one transaction. Credits sold since drop out of the price.
 /// Resolves to the ids bought, or null if nothing was.
-export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement): Promise<string[] | null> {
+/// `onSubmit` runs once the wallet has sent it (the Credits' squares start their buying pulse then).
+export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement, onSubmit?: () => void): Promise<string[] | null> {
   const label = btn.textContent ?? '';
   btn.disabled = true;
   btn.textContent = 'Pricing…';
@@ -261,7 +266,7 @@ export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement): P
       pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'quote', args: [total] }),
       pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'feeBps' }),
     ])) as [bigint, bigint];
-    btn.textContent = 'Confirm…'; // in the wallet
+    btn.textContent = 'Confirm in wallet';
     const receipt = await send(
       {
         address: config.sweeper!,
@@ -277,21 +282,25 @@ export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement): P
         value,
       },
       () => {
-        btn.textContent = 'Buying…';
+        btn.classList.add('busy');
+        btn.textContent = 'Buying';
+        onSubmit?.();
       },
     );
+    btn.classList.remove('busy');
     // What actually landed: the Credits transferred to this wallet in the receipt, not what was quoted (a listing
     // can sell to someone else between the quote and the block).
     const me = session.account!.toLowerCase();
     const got = receipt.logs
       .filter((l) => l.address.toLowerCase() === config.credits.toLowerCase() && l.topics[0] === TRANSFER && l.topics.length === 4 && `0x${l.topics[2]!.slice(26)}` === me)
       .map((l) => BigInt(l.topics[3]!).toString());
-    const n = got.length;
-    toast(`${n} ${n === 1 ? 'Credit is' : 'Credits are'} yours.${n < picked.length ? ` ${picked.length - n} sold before you got to them.` : ''}`, 'ok', 8000);
+    const missed = picked.length - got.length;
+    boughtToast(got, missed > 0 ? `${missed} sold before you got to ${missed === 1 ? 'it' : 'them'}.` : '');
     rememberBought(got);
     return got;
   } catch (e) {
     toast(errText(e), 'err', 8000);
+    btn.classList.remove('busy');
     btn.disabled = false;
     btn.textContent = label;
     return null;

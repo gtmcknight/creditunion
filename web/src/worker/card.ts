@@ -1,4 +1,4 @@
-/// Link cards drawn in the worker: a Credit Union's (its name and rule over a wall of Credits it takes) and a
+/// Link cards drawn in the worker: a Credit Union's (its name over a wall of Credits it takes) and a
 /// Credit's (its art large, its traits). Pixels are set by hand and packed as a
 /// PNG, with text from pre-rendered Geist glyphs (public/og/font.bin, scripts/og-font.py), so there is no image
 /// library or font engine in the worker. Credits are drawn exactly as their contract draws them (print.ts, misprints
@@ -151,10 +151,9 @@ function header(c: Canvas) {
 }
 
 /// A Credit Union's link card shows only what never changes, since platforms cache a link's preview for days:
-/// its name, its join rule, and a wall of Credits the rule lets in. No count, no state.
+/// its name and a wall of Credits its rule lets in. No count, no state.
 export type UnionCard = {
   name: string;
-  rule: string; // "Palette Y · Print Registered", or "" for any Credit
   ids: number[]; // Credits the rule lets in (any number; the wall samples them)
 };
 
@@ -183,8 +182,8 @@ function gridPrint(cells: Uint8Array, id: number): Rect[] | null {
 
 const WHITE = rgb('#ffffff');
 
-/// Like the fixed cards (scripts/og.ts): the wall edge to edge, the name on black bars fitted to each line, the rule
-/// on a white bar under it, the mark top left and the domain bottom right on white boxes. The wall is the registered
+/// Like the fixed cards (scripts/og.ts): the wall edge to edge, the mark top left and the name on white bars fitted
+/// to each line. The wall is the registered
 /// grid from wall.bin (it's texture), 5 px a cell, grouped by palette so mixed rules read as bands.
 export async function drawUnion(fetcher: Fetcher, origin: string, u: UnionCard): Promise<Uint8Array> {
   const { cells, faces } = await load(fetcher, origin);
@@ -216,25 +215,15 @@ export async function drawUnion(fetcher: Fetcher, origin: string, u: UnionCard):
   c.rect(bx, by, bw, bh, WHITE);
   for (const [mx, my, w, h, col] of MARK) c.rect(bx + 18 + mx * s, by + 12 + my * s, w * s, h * s, col);
   c.text(LABEL, 'Credit Union', bx + 18 + 9 * s + 12, by + 37, INK);
-  // Domain, bottom right.
-  const dw = c.width(LABEL, 'creditunion.fun') + 32, dh = 44;
-  c.rect(W - 32 - dw, H - 32 - dh, dw, dh, WHITE);
-  c.text(LABEL, 'creditunion.fun', W - 32 - dw + 16, H - 32 - 14, INK);
-
-  // Name on black bars, one per line, then the rule on a white bar; the block centred top to bottom.
+  // The name on white bars, one per line, centred top to bottom. Nothing else: the rule is in the link's text.
   const lines = c.wrap(TITLE, u.name || 'A Credit Union', W - 64 - 64 - 38, 2);
-  const barH = 88, lineGap = 0, ruleH = 58;
-  const rule = c.wrap(BODY, u.rule || 'Any Credit can join', W - 64 - 64 - 36, 1)[0];
-  const total = lines.length * barH + (lines.length - 1) * lineGap + 16 + ruleH;
-  let y = Math.round((H - total) / 2);
+  const barH = 88;
+  let y = Math.round((H - lines.length * barH) / 2);
   for (const l of lines) {
-    c.rect(64, y, c.width(TITLE, l) + 38, barH, INK);
-    c.text(TITLE, l, 64 + 19, y + 62, WHITE);
-    y += barH + lineGap;
+    c.rect(64, y, c.width(TITLE, l) + 38, barH, WHITE);
+    c.text(TITLE, l, 64 + 19, y + 62, INK);
+    y += barH;
   }
-  y += 16;
-  c.rect(64, y, c.width(BODY, rule) + 36, ruleH, WHITE);
-  c.text(BODY, rule, 64 + 18, y + 39, INK);
   return png(c.px);
 }
 
@@ -324,18 +313,18 @@ function chunk(type: string, data: Uint8Array) {
 }
 
 /// Made-up unions for /og, to judge the card before real ones exist. `rules` picks the wall's Credits.
-export function sample(kind: string): (Omit<UnionCard, 'ids'> & { rules: Record<string, number> }) | null {
+export function sample(kind: string): { name: string; rules: Record<string, number> } | null {
   switch (kind) {
     case 'open':
-      return { name: 'Just Yellow', rule: 'Palette Y', rules: { palettes: 1 << 4 } };
+      return { name: 'Just Yellow', rules: { palettes: 1 << 4 } };
     case 'full':
-      return { name: 'First minute of the mint', rule: 'Paid Sep 21, 15:05–15:06 UTC', rules: { idTo: 400 } };
+      return { name: 'First minute of the mint', rules: { idTo: 400 } };
     case 'auction':
-      return { name: 'Checkerboard', rule: 'Print Registered · Weight even', rules: { prints: 1, weights: 1 } };
+      return { name: 'Checkerboard', rules: { prints: 1, weights: 1 } };
     case 'nobids':
-      return { name: 'Eights only', rule: 'Three or four eights', rules: { eights: (1 << 3) | (1 << 4) } };
+      return { name: 'Eights only', rules: { eights: (1 << 3) | (1 << 4) } };
     case 'sold':
-      return { name: 'Anyone', rule: '', rules: {} };
+      return { name: 'Anyone', rules: {} };
     default:
       return null;
   }
