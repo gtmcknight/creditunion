@@ -1,5 +1,7 @@
 # Security review — 2026-09-24
 
+> Where things stand now, with the proofs and tests since: [Security in the README](../README.md#security). This file is the review log, oldest round first.
+
 Internal review of `Batch.sol`, `BatchFactory.sol`, `Sweeper.sol` and the Worker, before any external audit.
 Commit: see git history for "Security review" on this date. **This is not a substitute for an independent
 audit before mainnet.** The mainnet assembler adapter does not exist yet and must be reviewed with it.

@@ -1,6 +1,6 @@
 <a href="https://creditunion.fun"><img src="docs/banner.jpg" alt="Credit Union: join a Credit Union to make a Statement together"></a>
 
-<p align="center"><b><a href="https://creditunion.fun">creditunion.fun</a></b> · <a href="#how-a-credit-union-works">How it works</a> · <a href="contracts/AUDIT.md">Audit</a> · <a href="contracts/ADAPTER.md">Adapter plan</a> · <a href="#deployed-addresses">Addresses</a></p>
+<p align="center"><b><a href="https://creditunion.fun">creditunion.fun</a></b> · <a href="#how-a-credit-union-works">How it works</a> · <a href="#security">Security</a> · <a href="contracts/ADAPTER.md">Adapter plan</a> · <a href="#deployed-addresses">Addresses</a></p>
 
 # Credit Union
 
@@ -33,7 +33,7 @@ Credit Union lets holders of Jack Butcher's [Credits](https://jack.art/credits) 
 contracts/          Foundry
   src/              Batch, BatchFactory, Sweeper, Ratings, interfaces, mocks, vendored Credits art
   script/           deploy and check scripts
-  test/             unit, fuzz, invariant, adversarial and mainnet fork tests
+  test/             unit, fuzz, invariant, adversarial and mainnet fork tests; test/formal/ the Halmos proofs
   data/scores.bin   the frozen rating table deployed onchain
   AUDIT.md          internal review log
   ADAPTER.md        the plan for connecting Jack's Statement contract
@@ -68,7 +68,7 @@ The factory can deploy with no assembler. Credit Unions fill but never lock, so 
 
 Fees are set at deploy and capped in code: protocol 2% (max 5%), creator 0% (max 10%), sweep 2% (max 5%). The fee recipient can change them within the caps; a Credit Union keeps the fees it opened with.
 
-Review history, findings and fixes: [contracts/AUDIT.md](contracts/AUDIT.md).
+Reviews, proofs and tests: [Security](#security).
 
 How burning gets switched on once Jack's Statement contract ships, who controls it, and how it's tested: [contracts/ADAPTER.md](contracts/ADAPTER.md).
 
@@ -137,6 +137,7 @@ Worker endpoints:
 | `/art/:id.svg` | Credit art, rendered from the contract and cached |
 | `/ratings`, `/edition/match` | ratings for ids; how many Credits in the edition fit a rule set |
 | `/opensea/listings`, `/opensea/quote` | fitting listings and signed Seaport orders for the Sweeper |
+| `/opensea/listed`, `/opensea/credit/:id`, `/opensea/buyquote` | every Credit for sale, cheapest first (OpenSea, FWA, CreditStrategy); one Credit's cheapest listing; a price for the ones picked. Pages read listings again every 20 s to stay live; OpenSea's pages are cached 15 s, so viewers share each call |
 | `/bids/:party`, `/owner/:id`, `/ens/:address` | bid history, current holder of a Credit, ENS name and avatar |
 | `/og/...` | link-preview cards |
 
@@ -196,7 +197,12 @@ Burning waits for Jack's Statement contract: until the Safe sets the assembler, 
 
 ## Security
 
-The contracts have been reviewed internally (static analysis, adversarial reviews, invariant fuzzing, mainnet fork tests; see [contracts/AUDIT.md](contracts/AUDIT.md)). They have not had a third-party audit.
+- **Review log:** seven rounds of internal review, every finding and its fix: [contracts/AUDIT.md](contracts/AUDIT.md).
+- **Proofs:** 51 rules proved with Halmos on the deployed contracts, none broken, 5 timed out. What those leave unproven is at the top of [contracts/test/formal/REPORT.md](contracts/test/formal/REPORT.md).
+- **Tests:** 264 Foundry tests (unit, fuzz, invariant, adversarial, mainnet fork) pass on the deploy commit: [contracts/DEPLOY.md](contracts/DEPLOY.md).
+- **Site:** an end-to-end run drives the site in Chrome against a local chain across 40 Credit Union setups (see [For developers](#for-developers)).
+
+No third-party audit.
 
 To report a vulnerability, open a private [GitHub security advisory](../../security/advisories/new) on this repo. Please don't open a public issue.
 

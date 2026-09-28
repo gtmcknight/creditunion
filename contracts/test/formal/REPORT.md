@@ -2,21 +2,21 @@
 
 | | |
 |---|---|
-| Commit | `6c81ccc`, Sweeper at `b5e11f8`. Started at `40ecae0`; only `Sweeper.sol` changed in between (FWA and CreditStrategy buys), so the Sweeper rules were rewritten for it and every proved rule was rerun at `6c81ccc`. `Sweeper.buy()` (added in `b5e11f8`) got its own rules; the Sweeper suite was rerun at `b5e11f8`. |
-| Build | `forge build` in a fresh clone of `40ecae0`: exit 0 (forge 1.7.1, solc 0.8.28, via-IR), lint warnings only. `6c81ccc` builds too. |
-| forge test | 229 of 230 passed at both commits. The failure was stale: `Adversarial2.t.sol:313` expected `BadChunk(0)` from `new Ratings(chunks, 0)`, but `Ratings` now rejects a zero count first with `BadCount()`. Fixed in `1c91a56`; the suite passes. |
-| Halmos | 0.3.3 (`uv tool install halmos`). Default solver Yices 2.6.4; Bitwuzla for the payout math. |
+| Commit | `bcf9a04`: the contracts deployed on mainnet. `DEPLOY.md` records the deploy from contracts as of `fc506e8`, and `src/` and `test/formal/` are identical at `bcf9a04`. Every rule below was rerun there. |
+| Build | `forge build` in a fresh clone of `bcf9a04`: exit 0 (forge 1.7.1, solc 0.8.28, via-IR), warnings only. |
+| forge test | Not rerun for this report. `DEPLOY.md` records 264 passed, mainnet forks included, on the deploy commit (`880b3fc`, contracts as of `fc506e8`). |
+| Halmos | 0.3.3 (`uv tool install halmos`). Default solver Yices 2.6.4; Bitwuzla 0.8.1 for the payout math. |
 | In scope | `Batch.sol`, `BatchFactory.sol`, `Sweeper.sol`, `Ratings.sol` |
 
-**Result: 45 rules proved, 0 broken, 5 timed out.** Every timeout except one was split into parts that all proved. The one property still unproven: each outbid clears the last bid by 5% (`check_outbidRaisesEnough`). The refund proved, and `test/Batch.t.sol:308` checks the 5% step with one concrete bid (3 ETH, then 3.15 ETH minimum).
+**Result: 51 rules proved, 0 broken, 5 timed out.** What the timeouts leave unproven: that each outbid clears the last bid by 5% (`check_outbidRaisesEnough`; the refund proved, and `test/Batch.t.sol:309` checks the 5% step with one concrete bid, 3 ETH then 3.15 ETH minimum), and that settle's fees are at least the protocol fee (part of `check_settleConservesEth`, whose other parts proved). Everything else the timed-out rules check was split into smaller rules that proved.
 
 ## What "proved" means here
 
 Every argument to a `check_` function is symbolic: Halmos proves the rule for every caller, amount and timestamp, not a sample. Limits you should know:
 
-- **Mocks stand in for the outside world.** Credits, the Statement, the assembler and FWA's market are the repo's mocks; Seaport and CreditStrategy get small stand-ins here (`FormalSeaport`, `FormalStrategy`). The proofs cover Credit Union's contracts against those, not against mainnet Credits, Seaport, FWA or CreditStrategy.
+- **Mocks stand in for the outside world.** Credits, the Statement, the assembler and FWA's market are the repo's mocks; Seaport and CreditStrategy get small stand-ins here (`FormalSeaport`, `FormalStrategy`), and the score tables are real `Ratings` contracts with scores for 3 Credits. The proofs cover Credit Union's contracts against those, not against mainnet Credits, Seaport, FWA, CreditStrategy or the deployed score table.
 - **Fixed starting states.** Most rules start from one concrete setup (an open union, a full one, one in auction) and prove what any single call can do from there. The `invariant_` rules explore sequences of calls by two members, 2 calls deep.
-- **Bounds on inputs:** bids and prices ≤ 1e30 wei, time jumps < 30 days. Arbitrary calls (`createCalldata`) use Halmos's default dynamic lengths (arrays 0-2, bytes 0/65/1024).
+- **Bounds on inputs:** bids and prices ≤ 1e30 wei, time jumps < 30 days (< 365 days in the two notice-delay rules). Arbitrary calls (`createCalldata`) use Halmos's default dynamic lengths (arrays 0-2, bytes 0/65/1024).
 - **Loop unrolling.** No single-call rule hit Halmos's loop bound. The invariants were rerun at `--loop 5` to clear that warning (see below).
 
 ## Rules
@@ -60,7 +60,7 @@ Every argument to a `check_` function is symbolic: Halmos proves the rule for ev
 | `BatchAuctionFormal.check_bidNeverShortensAuction` | A bid never cuts the auction short, and a late bid leaves at least 15 minutes. | Proved |
 | `BatchAuctionFormal.check_noSettleBeforeEnd` | Nobody can close the auction early and take the Statement cheap. | Proved |
 | `BatchAuctionFormal.check_settleConservesEth` | Every wei of the sale goes to fees or members; nothing stuck, nothing extra. | Timed out (Yices 10 min, 30 min no solver limit; Bitwuzla 20 min) |
-| `BatchAuctionFormal.check_settlePaysOutExactly` | Fees plus both members' claims equal the winning bid exactly, and the batch ends empty. | Proved (Bitwuzla) |
+| `BatchAuctionFormal.check_settlePaysOutExactly` | Settle alone pays everyone: fees plus both members' payouts equal the winning bid exactly, the batch ends empty, and nothing is left to claim. | Proved (Bitwuzla) |
 | `BatchAuctionFormal.check_equalSplitIsEqual` | Equal split pays equal shares, and the Statement lands with the winner. | Proved (Bitwuzla) |
 | `BatchAuctionFormal.check_claimOnce` | A member can't be paid twice. | Proved |
 | `BatchAuctionFormal.check_settleOnce` | Settle can't run twice and pay fees twice. | Proved |
@@ -89,6 +89,17 @@ Every argument to a `check_` function is symbolic: Halmos proves the rule for ev
 | `RatingsFormal.check_knownIdsReadExactly` | Every rated id reads back exactly its stored score. | Proved (id split into its 3 values: Halmos can't take a symbolic EXTCODECOPY offset) |
 | `RatingsFormal.check_constructorRejectsWrongCount` | The table only deploys with exactly the data it claims to cover. | Proved |
 
+### Ratings switch
+
+| Rule | Why it matters | Result |
+|---|---|---|
+| `RatingsSwitchFormal.check_proposeRatings_onlyFeeRecipient` | Only the fee recipient can put a new score table up for activation. | Proved |
+| `RatingsSwitchFormal.check_activateRatings_notBeforeDelay` | No new table goes live before its 30 minutes' notice is up, whoever activates it. | Proved |
+| `RatingsSwitchFormal.check_ratings_onlyActivateMovesIt_exceptCreate` | With a new table ready, only activateRatings() switches to it: every other factory function except create() leaves the table alone, whoever calls. | Proved |
+| `RatingsSwitchFormal.check_ratings_unchangedByCreate` | Same rule, create() by anyone with any id. | Proved |
+| `RatingsSwitchFormal.check_create_onlyOnExpectedTable` | A union opens only on the table its creator was shown and records exactly that table, so a switch can't be slipped in front of an opening. | Proved |
+| `RatingsSwitchFormal.check_openBatch_keepsItsTable` | After the factory switches, no call by anyone changes an open union's table: its rating rules stay the ones members joined under. | Proved |
+
 ### Batch
 
 | Rule | Why it matters | Result |
@@ -99,1499 +110,416 @@ Every argument to a `check_` function is symbolic: Halmos proves the rule for ev
 
 ## Commands and output
 
-Each rule was run on its own under a wall-clock cap (`test/formal/run.sh <Contract> <seconds>`). Output below is Halmos's own; forge's compile banner and lint warnings are stripped.
+Each rule was run on its own under a wall-clock cap (`test/formal/run.sh <Contract> <seconds>`): 600 s, 900 s for the invariants, and for the retries under Timeouts 1800 s (Yices, no solver limit) or 1200 s (Bitwuzla). Output below is Halmos's own; forge's compile banner and lint warnings are stripped, as are Halmos's notes that it skipped the build files of two local scripts that aren't in the repo.
 
 
-### At 6c81ccc (every proved rule)
+### At bcf9a04 (every proved rule)
 
 
 **BatchAccessFormal.check_booksMatchHoldings.log**
 ```
 $ halmos --match-contract '^BatchAccessFormal$' --match-test '^check_booksMatchHoldings\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/BatchAccessFormal.t.sol:BatchAccessFormal
-[PASS] check_booksMatchHoldings(bool,bool) (paths: 157, time: 9.61s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 9.93s
+[PASS] check_booksMatchHoldings(bool,bool) (paths: 170, time: 4.50s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 4.61s
 ```
 
 **BatchAccessFormal.check_depositFrom_onlyFactory.log**
 ```
 $ halmos --match-contract '^BatchAccessFormal$' --match-test '^check_depositFrom_onlyFactory\('
-379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-450 |                 uint256 p = keyOf[id];
-440 |         Phase p = phase();
-438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
-892 |     function ids() external view returns (uint256[] memory) {
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
+No files changed, compilation skipped
 Running 1 tests for test/formal/BatchAccessFormal.t.sol:BatchAccessFormal
-[PASS] check_depositFrom_onlyFactory(address,address,uint256) (paths: 6, time: 0.09s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.48s
+[PASS] check_depositFrom_onlyFactory(address,address,uint256) (paths: 6, time: 0.05s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.14s
 ```
 
 **BatchAccessFormal.check_hook_onlyCredits.log**
 ```
 $ halmos --match-contract '^BatchAccessFormal$' --match-test '^check_hook_onlyCredits\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/BatchAccessFormal.t.sol:BatchAccessFormal
-[PASS] check_hook_onlyCredits(address,address,address,uint256,bytes) (paths: 6, time: 0.12s, bounds: [data=[0, 65, 1024]])
-Symbolic test result: 1 passed; 0 failed; time: 0.42s
+[PASS] check_hook_onlyCredits(address,address,address,uint256,bytes) (paths: 6, time: 0.05s, bounds: [data=[0, 65, 1024]])
+Symbolic test result: 1 passed; 0 failed; time: 0.17s
 ```
 
 **BatchAccessFormal.check_outsiderCannotTouchDeposit.log**
 ```
 $ halmos --match-contract '^BatchAccessFormal$' --match-test '^check_outsiderCannotTouchDeposit\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/BatchAccessFormal.t.sol:BatchAccessFormal
-[PASS] check_outsiderCannotTouchDeposit(address) (paths: 85, time: 5.07s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 5.43s
+[PASS] check_outsiderCannotTouchDeposit(address) (paths: 91, time: 1.95s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 2.05s
 ```
 
 **BatchAccessFormal.check_rescue_neverTakesPooled.log**
 ```
 $ halmos --match-contract '^BatchAccessFormal$' --match-test '^check_rescue_neverTakesPooled\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/BatchAccessFormal.t.sol:BatchAccessFormal
-[PASS] check_rescue_neverTakesPooled(address) (paths: 2, time: 0.02s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.34s
+[PASS] check_rescue_neverTakesPooled(address) (paths: 2, time: 0.01s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.13s
 ```
 
 **BatchAccessFormal.check_withdraw_onlyDepositor.log**
 ```
 $ halmos --match-contract '^BatchAccessFormal$' --match-test '^check_withdraw_onlyDepositor\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/BatchAccessFormal.t.sol:BatchAccessFormal
-[PASS] check_withdraw_onlyDepositor(address) (paths: 2, time: 0.04s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.41s
+[PASS] check_withdraw_onlyDepositor(address) (paths: 2, time: 0.02s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.11s
 ```
 
 **BatchAuctionFormal.check_bidNeverShortensAuction.log**
 ```
 $ halmos --match-contract '^BatchAuctionFormal$' --match-test '^check_bidNeverShortensAuction\('
-379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-450 |                 uint256 p = keyOf[id];
-440 |         Phase p = phase();
-438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
-892 |     function ids() external view returns (uint256[] memory) {
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
+No files changed, compilation skipped
 Running 1 tests for test/formal/BatchAuctionFormal.t.sol:BatchAuctionFormal
-[PASS] check_bidNeverShortensAuction(uint256,uint256,uint256) (paths: 32, time: 6.83s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 54.10s
+[PASS] check_bidNeverShortensAuction(uint256,uint256,uint256) (paths: 34, time: 3.01s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 24.61s
 ```
 
 **BatchAuctionFormal.check_claimOnce.log**
 ```
 $ halmos --match-contract '^BatchAuctionFormal$' --match-test '^check_claimOnce\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/BatchAuctionFormal.t.sol:BatchAuctionFormal
-[PASS] check_claimOnce(uint256,address) (paths: 33, time: 3.49s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 48.62s
+[PASS] check_claimOnce(uint256,address) (paths: 74, time: 11.05s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 32.89s
 ```
 
 **BatchAuctionFormal.check_claimStatement_onlyWinner.log**
 ```
 $ halmos --match-contract '^BatchAuctionFormal$' --match-test '^check_claimStatement_onlyWinner\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/BatchAuctionFormal.t.sol:BatchAuctionFormal
-[PASS] check_claimStatement_onlyWinner(uint256,address) (paths: 15, time: 2.62s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 46.53s
+[PASS] check_claimStatement_onlyWinner(uint256,address) (paths: 52, time: 9.44s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 31.14s
 ```
 
 **BatchAuctionFormal.check_equalSplitIsEqual.log**
 ```
 $ halmos --match-contract '^BatchAuctionFormal$' --match-test '^check_equalSplitIsEqual\(' --solver bitwuzla --solver-timeout-assertion 0
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/BatchAuctionFormal.t.sol:BatchAuctionFormal
-[PASS] check_equalSplitIsEqual(uint256) (paths: 22, time: 2.84s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 47.49s
+[PASS] check_equalSplitIsEqual(uint256) (paths: 61, time: 11.29s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 32.97s
 ```
 
 **BatchAuctionFormal.check_noSettleBeforeEnd.log**
 ```
 $ halmos --match-contract '^BatchAuctionFormal$' --match-test '^check_noSettleBeforeEnd\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/BatchAuctionFormal.t.sol:BatchAuctionFormal
-[PASS] check_noSettleBeforeEnd(uint256,uint256,address) (paths: 19, time: 4.18s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 47.94s
+[PASS] check_noSettleBeforeEnd(uint256,uint256,address) (paths: 54, time: 9.99s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 31.83s
 ```
 
 **BatchAuctionFormal.check_outbidRefundsExactly.log**
 ```
 $ halmos --match-contract '^BatchAuctionFormal$' --match-test '^check_outbidRefundsExactly\(' --solver bitwuzla --solver-timeout-assertion 0
-379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-450 |                 uint256 p = keyOf[id];
-440 |         Phase p = phase();
-438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
-892 |     function ids() external view returns (uint256[] memory) {
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
+No files changed, compilation skipped
 Running 1 tests for test/formal/BatchAuctionFormal.t.sol:BatchAuctionFormal
-[PASS] check_outbidRefundsExactly(uint256,uint256) (paths: 9, time: 2.91s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 50.16s
+[PASS] check_outbidRefundsExactly(uint256,uint256) (paths: 9, time: 1.52s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 23.20s
 ```
 
 **BatchAuctionFormal.check_settleOnce.log**
 ```
 $ halmos --match-contract '^BatchAuctionFormal$' --match-test '^check_settleOnce\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/BatchAuctionFormal.t.sol:BatchAuctionFormal
-[PASS] check_settleOnce(uint256,address) (paths: 15, time: 1.80s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 44.42s
+[PASS] check_settleOnce(uint256,address) (paths: 53, time: 8.99s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 30.72s
 ```
 
 **BatchAuctionFormal.check_settlePaysOutExactly.log**
 ```
 $ halmos --match-contract '^BatchAuctionFormal$' --match-test '^check_settlePaysOutExactly\(' --solver bitwuzla --solver-timeout-assertion 0
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/BatchAuctionFormal.t.sol:BatchAuctionFormal
-[PASS] check_settlePaysOutExactly(uint256) (paths: 47, time: 7.10s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 51.17s
+[PASS] check_settlePaysOutExactly(uint256) (paths: 63, time: 12.56s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 34.36s
 ```
 
 **BatchAuctionFormal.check_statementStaysDuringAuction.log**
 ```
 $ halmos --match-contract '^BatchAuctionFormal$' --match-test '^check_statementStaysDuringAuction\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/BatchAuctionFormal.t.sol:BatchAuctionFormal
-[PASS] check_statementStaysDuringAuction(address) (paths: 92, time: 13.37s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 52.70s
+[PASS] check_statementStaysDuringAuction(address) (paths: 98, time: 8.33s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 29.78s
 ```
 
 **BatchEarlyFormal.check_earlySplitConserves.log**
 ```
 $ halmos --match-contract '^BatchEarlyFormal$' --match-test '^check_earlySplitConserves\(' --solver bitwuzla --solver-timeout-assertion 0
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/BatchAuctionFormal.t.sol:BatchEarlyFormal
-[PASS] check_earlySplitConserves(uint256) (paths: 72, time: 52.07s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 94.66s
+[PASS] check_earlySplitConserves(uint256) (paths: 121, time: 57.42s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 79.06s
 ```
 
 **BatchInvariantFormal.log**
 ```
 $ halmos --match-contract '^BatchInvariantFormal$' --loop 5
-379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-450 |                 uint256 p = keyOf[id];
-440 |         Phase p = phase();
-438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
-892 |     function ids() external view returns (uint256[] memory) {
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
+No files changed, compilation skipped
 Running 3 tests for test/formal/BatchInvariantFormal.t.sol:BatchInvariantFormal
-[PASS] invariant_booksMatchHoldings() (paths: 1230, time: 110.63s, bounds: [])
-[PASS] invariant_onlyRealDepositors() (paths: 6034, time: 255.64s, bounds: [])
-[PASS] invariant_sharesMatchCount() (paths: 390, time: 19.26s, bounds: [])
-Symbolic test result: 3 passed; 0 failed; time: 386.07s
+╭───────────────────── Initial Invariant Target Functions ─────────────────────╮
+│ MockCredits.sol:MockCredits @ 0xaaaa0002                                     │
+│ └── safeTransferFrom(address,address,uint256)                                │
+│                                                                              │
+│ Batch.sol:Batch @ 0xaaaa0008                                                 │
+│ ├── assemble()                                                               │
+│ ├── bid()                                                                    │
+│ ├── claim(address)                                                           │
+│ ├── claimStatement(address)                                                  │
+│ ├── depositFrom(address,uint256[])                                           │
+│ ├── initialize(address,string,(uint16,uint8,uint8,uint32,uint64,uint64,uint2 │
+│ │   56,uint256,uint16,uint16,uint256,uint64,uint16,uint16,uint8),uint256[],u │
+│ │   int256,uint256,uint256,uint8,uint8,uint64,address)                       │
+│ ├── onERC721Received(address,address,uint256,bytes)                          │
+│ ├── rescue(address,uint256)                                                  │
+│ ├── restartCountdown()                                                       │
+│ ├── settle()                                                                 │
+│ ├── withdraw(uint256[])                                                      │
+│ └── withdrawOwed()                                                           │
+╰──────────────────────────────────────────────────────────────────────────────╯
+[PASS] invariant_booksMatchHoldings() (paths: 534, time: 23.78s, bounds: [])
+[PASS] invariant_onlyRealDepositors() (paths: 2995, time: 64.69s, bounds: [])
+[PASS] invariant_sharesMatchCount() (paths: 178, time: 4.66s, bounds: [])
+Symbolic test result: 3 passed; 0 failed; time: 93.34s
 ```
 
 **BatchLockFormal.check_burnOnlyInWindow.log**
 ```
 $ halmos --match-contract '^BatchLockFormal$' --match-test '^check_burnOnlyInWindow\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/BatchLockFormal.t.sol:BatchLockFormal
-[PASS] check_burnOnlyInWindow(address,uint256) (paths: 4, time: 29.09s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 47.39s
+[PASS] check_burnOnlyInWindow(address,uint256) (paths: 4, time: 14.29s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 23.37s
 ```
 
 **BatchLockFormal.check_canLeaveOutsideBurnWindow.log**
 ```
 $ halmos --match-contract '^BatchLockFormal$' --match-test '^check_canLeaveOutsideBurnWindow\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/BatchLockFormal.t.sol:BatchLockFormal
-[PASS] check_canLeaveOutsideBurnWindow(uint256) (paths: 3, time: 10.32s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 29.84s
+[PASS] check_canLeaveOutsideBurnWindow(uint256) (paths: 3, time: 5.48s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 14.71s
 ```
 
 **BatchLockFormal.check_neverMoreThan80.log**
 ```
 $ halmos --match-contract '^BatchLockFormal$' --match-test '^check_neverMoreThan80\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/BatchLockFormal.t.sol:BatchLockFormal
-[PASS] check_neverMoreThan80(bool) (paths: 3, time: 0.93s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 19.02s
+[PASS] check_neverMoreThan80(bool) (paths: 3, time: 0.47s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 9.56s
 ```
 
 **BatchLockFormal.check_noWithdrawWhileBurnable.log**
 ```
 $ halmos --match-contract '^BatchLockFormal$' --match-test '^check_noWithdrawWhileBurnable\('
-379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-450 |                 uint256 p = keyOf[id];
-440 |         Phase p = phase();
-438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
-892 |     function ids() external view returns (uint256[] memory) {
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
+No files changed, compilation skipped
 Running 1 tests for test/formal/BatchLockFormal.t.sol:BatchLockFormal
-[PASS] check_noWithdrawWhileBurnable(uint256) (paths: 5, time: 16.72s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 36.78s
+[PASS] check_noWithdrawWhileBurnable(uint256) (paths: 4, time: 5.64s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 14.82s
 ```
 
 **BatchLockFormal.check_restartAlwaysGivesNotice.log**
 ```
 $ halmos --match-contract '^BatchLockFormal$' --match-test '^check_restartAlwaysGivesNotice\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/BatchLockFormal.t.sol:BatchLockFormal
-[PASS] check_restartAlwaysGivesNotice(address,uint256) (paths: 9, time: 1.92s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 21.29s
+[PASS] check_restartAlwaysGivesNotice(address,uint256) (paths: 10, time: 1.14s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 10.26s
 ```
 
 **FactoryFormal.check_activate_notBeforeDelay.log**
 ```
 $ halmos --match-contract '^FactoryFormal$' --match-test '^check_activate_notBeforeDelay\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/FactoryFormal.t.sol:FactoryFormal
-[PASS] check_activate_notBeforeDelay(address,uint256) (paths: 3, time: 0.06s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.33s
+[PASS] check_activate_notBeforeDelay(address,uint256) (paths: 3, time: 0.03s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.14s
 ```
 
 **FactoryFormal.check_assembler_fixedOnceActive_create.log**
 ```
 $ halmos --match-contract '^FactoryFormal$' --match-test '^check_assembler_fixedOnceActive_create\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/FactoryFormal.t.sol:FactoryFormal
-[PASS] check_assembler_fixedOnceActive_create(address,uint256) (paths: 5, time: 0.36s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.64s
+[PASS] check_assembler_fixedOnceActive_create(address,uint256) (paths: 5, time: 0.16s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.27s
 ```
 
 **FactoryFormal.check_assembler_fixedOnceActive_exceptCreate.log**
 ```
 $ halmos --match-contract '^FactoryFormal$' --match-test '^check_assembler_fixedOnceActive_exceptCreate\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/FactoryFormal.t.sol:FactoryFormal
-[PASS] check_assembler_fixedOnceActive_exceptCreate(address) (paths: 186, time: 8.89s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 9.22s
+[PASS] check_assembler_fixedOnceActive_exceptCreate(address) (paths: 141, time: 2.83s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 2.94s
 ```
 
 **FactoryFormal.check_depositFor_rejectsSinks.log**
 ```
 $ halmos --match-contract '^FactoryFormal$' --match-test '^check_depositFor_rejectsSinks\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/FactoryFormal.t.sol:FactoryFormal
 [PASS] check_depositFor_rejectsSinks(uint256) (paths: 3, time: 0.03s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.38s
+Symbolic test result: 1 passed; 0 failed; time: 0.14s
 ```
 
 **FactoryFormal.check_factory_neverTakesOthersCredits_create.log**
 ```
 $ halmos --match-contract '^FactoryFormal$' --match-test '^check_factory_neverTakesOthersCredits_create\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/FactoryFormal.t.sol:FactoryFormal
-[PASS] check_factory_neverTakesOthersCredits_create(address,uint256) (paths: 6, time: 0.50s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.79s
+[PASS] check_factory_neverTakesOthersCredits_create(address,uint256) (paths: 5, time: 0.19s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.29s
 ```
 
 **FactoryFormal.check_factory_neverTakesOthersCredits_exceptCreate.log**
 ```
 $ halmos --match-contract '^FactoryFormal$' --match-test '^check_factory_neverTakesOthersCredits_exceptCreate\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/FactoryFormal.t.sol:FactoryFormal
-[PASS] check_factory_neverTakesOthersCredits_exceptCreate(address) (paths: 164, time: 7.07s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 7.35s
+[PASS] check_factory_neverTakesOthersCredits_exceptCreate(address) (paths: 92, time: 1.59s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 1.70s
 ```
 
 **FactoryFormal.check_fees_neverAboveCaps.log**
 ```
 $ halmos --match-contract '^FactoryFormal$' --match-test '^check_fees_neverAboveCaps\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/FactoryFormal.t.sol:FactoryFormal
-[PASS] check_fees_neverAboveCaps(address,uint256,uint256) (paths: 5, time: 0.08s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.41s
+[PASS] check_fees_neverAboveCaps(address,uint256,uint256) (paths: 5, time: 0.04s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.15s
 ```
 
 **FactoryFormal.check_initialize_once.log**
 ```
 $ halmos --match-contract '^FactoryFormal$' --match-test '^check_initialize_once\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/FactoryFormal.t.sol:FactoryFormal
-[PASS] check_initialize_once(address,bool) (paths: 4, time: 0.07s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.42s
+[PASS] check_initialize_once(address,bool) (paths: 4, time: 0.03s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.14s
 ```
 
 **FactoryFormal.check_propose_onlySetter.log**
 ```
 $ halmos --match-contract '^FactoryFormal$' --match-test '^check_propose_onlySetter\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/FactoryFormal.t.sol:FactoryFormal
-[PASS] check_propose_onlySetter(address,address) (paths: 5, time: 0.06s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.40s
+[PASS] check_propose_onlySetter(address,address) (paths: 5, time: 0.03s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.14s
 ```
 
 **FactoryFormal.check_setFees_onlyFeeRecipient.log**
 ```
 $ halmos --match-contract '^FactoryFormal$' --match-test '^check_setFees_onlyFeeRecipient\('
-379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-450 |                 uint256 p = keyOf[id];
-440 |         Phase p = phase();
-438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
-892 |     function ids() external view returns (uint256[] memory) {
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
+No files changed, compilation skipped
 Running 1 tests for test/formal/FactoryFormal.t.sol:FactoryFormal
-[PASS] check_setFees_onlyFeeRecipient(address,uint256,uint256) (paths: 5, time: 0.08s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.40s
+[PASS] check_setFees_onlyFeeRecipient(address,uint256,uint256) (paths: 5, time: 0.03s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.14s
 ```
 
 **RatingsFormal.check_constructorRejectsWrongCount.log**
 ```
 $ halmos --match-contract '^RatingsFormal$' --match-test '^check_constructorRejectsWrongCount\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/RatingsFormal.t.sol:RatingsFormal
 WARNING  unknown deployed bytecode: 0x0020033412401f
-[PASS] check_constructorRejectsWrongCount(uint256) (paths: 8, time: 0.25s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.27s
+[PASS] check_constructorRejectsWrongCount(uint256) (paths: 8, time: 0.04s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.05s
 ```
 
 **RatingsFormal.check_knownIdsReadExactly.log**
 ```
 $ halmos --match-contract '^RatingsFormal$' --match-test '^check_knownIdsReadExactly\('
 No files changed, compilation skipped
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
 Running 1 tests for test/formal/RatingsFormal.t.sol:RatingsFormal
 WARNING  unknown deployed bytecode: 0x0020033412401f
-[PASS] check_knownIdsReadExactly(uint256) (paths: 3, time: 0.08s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.11s
+[PASS] check_knownIdsReadExactly(uint256) (paths: 3, time: 0.02s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.03s
 ```
 
 **RatingsFormal.check_unknownIdScoresZero.log**
 ```
 $ halmos --match-contract '^RatingsFormal$' --match-test '^check_unknownIdScoresZero\('
-379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-450 |                 uint256 p = keyOf[id];
-440 |         Phase p = phase();
-438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
-892 |     function ids() external view returns (uint256[] memory) {
-WARNING  Skipped SweeperForkTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperStrategyForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployTestnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperForkTest.json due to parsing failure: KeyError:
-         'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped ISignedZone.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped TipsTheSweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Wallet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped SweeperFWATest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockFWAMarket.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Adversarial2Test.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped MockSeaport.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped Sweeper.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped AuditSweeperTest.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
-WARNING  Skipped DeployMainnet.json due to parsing failure: KeyError: 'ast'
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
+No files changed, compilation skipped
 Running 1 tests for test/formal/RatingsFormal.t.sol:RatingsFormal
 WARNING  unknown deployed bytecode: 0x0020033412401f
-[PASS] check_unknownIdScoresZero(uint256) (paths: 2, time: 0.06s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.10s
+[PASS] check_unknownIdScoresZero(uint256) (paths: 2, time: 0.01s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.02s
+```
+
+**RatingsSwitchFormal.check_activateRatings_notBeforeDelay.log**
+```
+$ halmos --match-contract '^RatingsSwitchFormal$' --match-test '^check_activateRatings_notBeforeDelay\('
+No files changed, compilation skipped
+Running 1 tests for test/formal/RatingsSwitchFormal.t.sol:RatingsSwitchFormal
+WARNING  unknown deployed bytecode: 0x0020033412401f
+WARNING  unknown deployed bytecode: 0x00401f34122003
+[PASS] check_activateRatings_notBeforeDelay(address,uint256) (paths: 3, time: 0.03s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.14s
+```
+
+**RatingsSwitchFormal.check_create_onlyOnExpectedTable.log**
+```
+$ halmos --match-contract '^RatingsSwitchFormal$' --match-test '^check_create_onlyOnExpectedTable\('
+No files changed, compilation skipped
+Running 1 tests for test/formal/RatingsSwitchFormal.t.sol:RatingsSwitchFormal
+WARNING  unknown deployed bytecode: 0x0020033412401f
+WARNING  unknown deployed bytecode: 0x00401f34122003
+[PASS] check_create_onlyOnExpectedTable(address) (paths: 4, time: 0.10s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.20s
+```
+
+**RatingsSwitchFormal.check_openBatch_keepsItsTable.log**
+```
+$ halmos --match-contract '^RatingsSwitchFormal$' --match-test '^check_openBatch_keepsItsTable\('
+No files changed, compilation skipped
+Running 1 tests for test/formal/RatingsSwitchFormal.t.sol:RatingsSwitchFormal
+WARNING  unknown deployed bytecode: 0x0020033412401f
+WARNING  unknown deployed bytecode: 0x00401f34122003
+[PASS] check_openBatch_keepsItsTable(address) (paths: 112, time: 1.39s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 1.49s
+```
+
+**RatingsSwitchFormal.check_proposeRatings_onlyFeeRecipient.log**
+```
+$ halmos --match-contract '^RatingsSwitchFormal$' --match-test '^check_proposeRatings_onlyFeeRecipient\('
+No files changed, compilation skipped
+Running 1 tests for test/formal/RatingsSwitchFormal.t.sol:RatingsSwitchFormal
+WARNING  unknown deployed bytecode: 0x0020033412401f
+WARNING  unknown deployed bytecode: 0x00401f34122003
+[PASS] check_proposeRatings_onlyFeeRecipient(address) (paths: 3, time: 0.02s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.16s
+```
+
+**RatingsSwitchFormal.check_ratings_onlyActivateMovesIt_exceptCreate.log**
+```
+$ halmos --match-contract '^RatingsSwitchFormal$' --match-test '^check_ratings_onlyActivateMovesIt_exceptCreate\('
+No files changed, compilation skipped
+Running 1 tests for test/formal/RatingsSwitchFormal.t.sol:RatingsSwitchFormal
+WARNING  unknown deployed bytecode: 0x0020033412401f
+WARNING  unknown deployed bytecode: 0x00401f34122003
+[PASS] check_ratings_onlyActivateMovesIt_exceptCreate(address) (paths: 56, time: 0.53s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.63s
+```
+
+**RatingsSwitchFormal.check_ratings_unchangedByCreate.log**
+```
+$ halmos --match-contract '^RatingsSwitchFormal$' --match-test '^check_ratings_unchangedByCreate\('
+No files changed, compilation skipped
+Running 1 tests for test/formal/RatingsSwitchFormal.t.sol:RatingsSwitchFormal
+WARNING  unknown deployed bytecode: 0x0020033412401f
+WARNING  unknown deployed bytecode: 0x00401f34122003
+[PASS] check_ratings_unchangedByCreate(address,uint256) (paths: 3, time: 0.07s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.17s
 ```
 
 **SweeperFormal.check_buyExactAndHoldsNothing.log**
@@ -1599,8 +527,8 @@ Symbolic test result: 1 passed; 0 failed; time: 0.10s
 $ halmos --match-contract '^SweeperFormal$' --match-test '^check_buyExactAndHoldsNothing\('
 No files changed, compilation skipped
 Running 1 tests for test/formal/SweeperFormal.t.sol:SweeperFormal
-[PASS] check_buyExactAndHoldsNothing(uint96,uint256,uint256,uint256,uint256,uint256) (paths: 209, time: 17.86s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 18.10s
+[PASS] check_buyExactAndHoldsNothing(uint96,uint256,uint256,uint256,uint256,uint256) (paths: 167, time: 11.65s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 11.82s
 ```
 
 **SweeperFormal.check_buyFeeRaiseNeverSlipsIn.log**
@@ -1608,8 +536,8 @@ Symbolic test result: 1 passed; 0 failed; time: 18.10s
 $ halmos --match-contract '^SweeperFormal$' --match-test '^check_buyFeeRaiseNeverSlipsIn\('
 No files changed, compilation skipped
 Running 1 tests for test/formal/SweeperFormal.t.sol:SweeperFormal
-[PASS] check_buyFeeRaiseNeverSlipsIn(uint256,uint256) (paths: 3, time: 0.06s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.31s
+[PASS] check_buyFeeRaiseNeverSlipsIn(uint256,uint256) (paths: 2, time: 0.05s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.23s
 ```
 
 **SweeperFormal.check_constructorRejectsOtherStrategy.log**
@@ -1617,8 +545,8 @@ Symbolic test result: 1 passed; 0 failed; time: 0.31s
 $ halmos --match-contract '^SweeperFormal$' --match-test '^check_constructorRejectsOtherStrategy\('
 No files changed, compilation skipped
 Running 1 tests for test/formal/SweeperFormal.t.sol:SweeperFormal
-[PASS] check_constructorRejectsOtherStrategy(address) (paths: 4, time: 0.11s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.47s
+[PASS] check_constructorRejectsOtherStrategy(address) (paths: 4, time: 0.06s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.24s
 ```
 
 **SweeperFormal.check_feeRaiseNeverSlipsIn.log**
@@ -1626,26 +554,17 @@ Symbolic test result: 1 passed; 0 failed; time: 0.47s
 $ halmos --match-contract '^SweeperFormal$' --match-test '^check_feeRaiseNeverSlipsIn\('
 No files changed, compilation skipped
 Running 1 tests for test/formal/SweeperFormal.t.sol:SweeperFormal
-[PASS] check_feeRaiseNeverSlipsIn(uint256,uint256) (paths: 3, time: 0.10s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.52s
+[PASS] check_feeRaiseNeverSlipsIn(uint256,uint256) (paths: 3, time: 0.05s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.23s
 ```
 
 **SweeperFormal.check_setFee_onlyRecipientAndCapped.log**
 ```
 $ halmos --match-contract '^SweeperFormal$' --match-test '^check_setFee_onlyRecipientAndCapped\('
-379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-450 |                 uint256 p = keyOf[id];
-440 |         Phase p = phase();
-438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
-892 |     function ids() external view returns (uint256[] memory) {
-42 |         BatchFactory f = new BatchFactory(ICredits(address(c)), IRatings(address(r)), IAssembler(address(0)), a0, a0, 200, 0, 0);
-70 |     BatchFactory f;
+No files changed, compilation skipped
 Running 1 tests for test/formal/SweeperFormal.t.sol:SweeperFormal
-[PASS] check_setFee_onlyRecipientAndCapped(address,uint256) (paths: 4, time: 0.06s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.32s
+[PASS] check_setFee_onlyRecipientAndCapped(address,uint256) (paths: 4, time: 0.05s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.23s
 ```
 
 **SweeperFormal.check_sweepAllExactAndHoldsNothing.log**
@@ -1653,8 +572,8 @@ Symbolic test result: 1 passed; 0 failed; time: 0.32s
 $ halmos --match-contract '^SweeperFormal$' --match-test '^check_sweepAllExactAndHoldsNothing\('
 No files changed, compilation skipped
 Running 1 tests for test/formal/SweeperFormal.t.sol:SweeperFormal
-[PASS] check_sweepAllExactAndHoldsNothing(uint96,uint256,uint256,uint256,uint256,uint256) (paths: 208, time: 17.74s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 17.97s
+[PASS] check_sweepAllExactAndHoldsNothing(uint96,uint256,uint256,uint256,uint256,uint256) (paths: 173, time: 12.03s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 12.17s
 ```
 
 **SweeperFormal.check_sweepExactAndHoldsNothing.log**
@@ -1662,8 +581,8 @@ Symbolic test result: 1 passed; 0 failed; time: 17.97s
 $ halmos --match-contract '^SweeperFormal$' --match-test '^check_sweepExactAndHoldsNothing\('
 No files changed, compilation skipped
 Running 1 tests for test/formal/SweeperFormal.t.sol:SweeperFormal
-[PASS] check_sweepExactAndHoldsNothing(uint256,uint256) (paths: 14, time: 0.51s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.74s
+[PASS] check_sweepExactAndHoldsNothing(uint256,uint256) (paths: 11, time: 0.35s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.53s
 ```
 
 **SweeperFormal.check_sweepOnlyIntoBatches.log**
@@ -1671,11 +590,11 @@ Symbolic test result: 1 passed; 0 failed; time: 0.74s
 $ halmos --match-contract '^SweeperFormal$' --match-test '^check_sweepOnlyIntoBatches\('
 No files changed, compilation skipped
 Running 1 tests for test/formal/SweeperFormal.t.sol:SweeperFormal
-[PASS] check_sweepOnlyIntoBatches(address,uint256) (paths: 3, time: 0.14s, bounds: [])
-Symbolic test result: 1 passed; 0 failed; time: 0.59s
+[PASS] check_sweepOnlyIntoBatches(address,uint256) (paths: 3, time: 0.06s, bounds: [])
+Symbolic test result: 1 passed; 0 failed; time: 0.24s
 ```
 
-### Timeouts (run at 40ecae0; the code they cover is unchanged at 6c81ccc)
+### Timeouts (at bcf9a04)
 
 
 **FactoryFormal.check_assembler_fixedOnceActive.log**
@@ -1695,20 +614,11 @@ TIMED OUT after 600s (wall clock)
 **BatchAuctionFormal.check_outbidRaisesAndRefunds.log**
 ```
 $ halmos --match-contract '^BatchAuctionFormal$' --match-test '^check_outbidRaisesAndRefunds\('
-379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-450 |                 uint256 p = keyOf[id];
-440 |         Phase p = phase();
-438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
-892 |     function ids() external view returns (uint256[] memory) {
-42 |         BatchFactory f = new BatchFactory(ICredits(address(c)), IRatings(address(r)), IAssembler(address(0)), a0, a0, 200, 0, 0);
-70 |     BatchFactory f;
+No files changed, compilation skipped
 Running 1 tests for test/formal/BatchAuctionFormal.t.sol:BatchAuctionFormal
-[TIMEOUT] check_outbidRaisesAndRefunds(uint256,uint256) (paths: 26, time: 61.68s, bounds: [])
-Timeout queries saved in: /var/folders/6q/tt5xvkvd76ldv0wkmkwc8p240000gn/T/check_outbidRaisesAndRefunds-7y4cdw21-timeout
-Symbolic test result: 0 passed; 1 failed; time: 89.32s
+[TIMEOUT] check_outbidRaisesAndRefunds(uint256,uint256) (paths: 26, time: 61.88s, bounds: [])
+Timeout queries saved in: /var/folders/6q/tt5xvkvd76ldv0wkmkwc8p240000gn/T/check_outbidRaisesAndRefunds-11iyeyos-timeout
+Symbolic test result: 0 passed; 1 failed; time: 83.50s
 ```
 
 **BatchAuctionFormal.check_settleConservesEth.log**
@@ -1716,31 +626,19 @@ Symbolic test result: 0 passed; 1 failed; time: 89.32s
 $ halmos --match-contract '^BatchAuctionFormal$' --match-test '^check_settleConservesEth\('
 No files changed, compilation skipped
 Running 1 tests for test/formal/BatchAuctionFormal.t.sol:BatchAuctionFormal
-[TIMEOUT] check_settleConservesEth(uint256) (paths: 53, time: 64.77s, bounds: [])
-Timeout queries saved in: /var/folders/6q/tt5xvkvd76ldv0wkmkwc8p240000gn/T/check_settleConservesEth-cmfnjdte-timeout
-Symbolic test result: 0 passed; 1 failed; time: 87.62s
+[TIMEOUT] check_settleConservesEth(uint256) (paths: 103, time: 72.83s, bounds: [])
+Timeout queries saved in: /var/folders/6q/tt5xvkvd76ldv0wkmkwc8p240000gn/T/check_settleConservesEth-582jy82r-timeout
+Symbolic test result: 0 passed; 1 failed; time: 94.37s
 ```
 
-**BatchEarlyFormal.check_earlySplitConserves.log**
+**yices/BatchEarlyFormal.check_earlySplitConserves.log**
 ```
 $ halmos --match-contract '^BatchEarlyFormal$' --match-test '^check_earlySplitConserves\('
-379 |     function depositFrom(address from, uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-450 |                 uint256 p = keyOf[id];
-440 |         Phase p = phase();
-438 |     function withdraw(uint256[] calldata ids) external nonReentrant {
-892 |     function ids() external view returns (uint256[] memory) {
-614 |     function canTake(uint256[] calldata ids) external view returns (bool[] memory ok) {
-892 |     function ids() external view returns (uint256[] memory) {
-42 |         BatchFactory f = new BatchFactory(ICredits(address(c)), IRatings(address(r)), IAssembler(address(0)), a0, a0, 200, 0, 0);
-70 |     BatchFactory f;
-WARNING  Skipped Clones.json due to parsing failure: JSONDecodeError: Expecting
-         value: line 1 column 1 (char 0)
-         (see https://github.com/a16z/halmos/wiki/warnings#parsing-error)
+No files changed, compilation skipped
 Running 1 tests for test/formal/BatchAuctionFormal.t.sol:BatchEarlyFormal
-[TIMEOUT] check_earlySplitConserves(uint256) (paths: 70, time: 83.38s, bounds: [])
-Timeout queries saved in: /var/folders/6q/tt5xvkvd76ldv0wkmkwc8p240000gn/T/check_earlySplitConserves-n4g3jn4f-timeout
-Symbolic test result: 0 passed; 1 failed; time: 111.17s
+[TIMEOUT] check_earlySplitConserves(uint256) (paths: 119, time: 104.76s, bounds: [])
+Timeout queries saved in: /var/folders/6q/tt5xvkvd76ldv0wkmkwc8p240000gn/T/check_earlySplitConserves-f47e75ei-timeout
+Symbolic test result: 0 passed; 1 failed; time: 127.17s
 ```
 
 **retry/BatchAuctionFormal.check_outbidRaisesAndRefunds.log**
@@ -1766,21 +664,14 @@ TIMED OUT after 1800s (wall clock)
 
 **bitwuzla/BatchAuctionFormal.check_outbidRaisesAndRefunds.log**
 ```
-$ HALMOS_ALLOW_DOWNLOAD=1 halmos --match-contract '^BatchAuctionFormal$' --match-test '^check_outbidRaisesAndRefunds\(' --solver bitwuzla --solver-timeout-assertion 0
+$ halmos --match-contract '^BatchAuctionFormal$' --match-test '^check_outbidRaisesAndRefunds\(' --solver bitwuzla --solver-timeout-assertion 0
 No files changed, compilation skipped
-Running 1 tests for test/formal/BatchAuctionFormal.t.sol:BatchAuctionFormal
-Downloading
-https://github.com/bitwuzla/bitwuzla/releases/download/0.8.1/Bitwuzla-macOS-arm6
-4-static.zip
-Verifying sha256 hash for Bitwuzla-macOS-arm64-static.zip
-Extracting Bitwuzla-macOS-arm64-static/bin/bitwuzla
-Solver saved to /Users/gtm/.halmos/solvers/bitwuzla (3.3MB)
 TIMED OUT after 1200s (wall clock)
 ```
 
 **bitwuzla/BatchAuctionFormal.check_settleConservesEth.log**
 ```
-$ HALMOS_ALLOW_DOWNLOAD=1 halmos --match-contract '^BatchAuctionFormal$' --match-test '^check_settleConservesEth\(' --solver bitwuzla --solver-timeout-assertion 0
+$ halmos --match-contract '^BatchAuctionFormal$' --match-test '^check_settleConservesEth\(' --solver bitwuzla --solver-timeout-assertion 0
 No files changed, compilation skipped
 TIMED OUT after 1200s (wall clock)
 ```
@@ -1792,12 +683,14 @@ No files changed, compilation skipped
 TIMED OUT after 1200s (wall clock)
 ```
 
+The Bitwuzla run of `check_settleConservesEth` straddled a four-hour hibernation when the laptop's battery ran out. The cap only counts time awake, so it still ran about 20 minutes.
+
 Bitwuzla runs need `HALMOS_ALLOW_DOWNLOAD=1` the first time (Halmos fetches the solver).
 
 
 ## Code
 
-Rerun everything: `cd contracts && forge build --ast && for c in FactoryFormal BatchAccessFormal BatchLockFormal BatchAuctionFormal BatchEarlyFormal SweeperFormal RatingsFormal; do test/formal/run.sh $c 600; done`, then `halmos --match-contract BatchInvariantFormal --loop 5`, and for the Bitwuzla rules add `--solver bitwuzla --solver-timeout-assertion 0`.
+Rerun everything: `cd contracts && forge build --ast && for c in FactoryFormal BatchAccessFormal BatchLockFormal BatchAuctionFormal BatchEarlyFormal SweeperFormal RatingsFormal RatingsSwitchFormal; do test/formal/run.sh $c 600; done`, then `halmos --match-contract BatchInvariantFormal --loop 5`, and for the Bitwuzla rules add `--solver bitwuzla --solver-timeout-assertion 0`.
 
 
 ### test/formal/FormalBase.sol
@@ -1806,6 +699,7 @@ Rerun everything: `cd contracts && forge build --ast && for c in FactoryFormal B
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {ratingsOf} from "../../script/RatingsOf.sol";
 import {Batch, IRatings} from "../../src/Batch.sol";
 import {BatchFactory} from "../../src/BatchFactory.sol";
 import {IAssembler} from "../../src/interfaces/IAssembler.sol";
@@ -1869,7 +763,7 @@ abstract contract FormalBase is Test {
         vm.startPrank(who);
         credits.setApprovalForAll(address(factory), true);
         b = Batch(
-            factory.create("u", f, new uint256[](0), 0, Batch.Arrangement.Deposit, split, 3 days, ids, PROTOCOL_BPS, CREATOR_BPS)
+            factory.create("u", f, new uint256[](0), 0, Batch.Arrangement.Deposit, split, 3 days, ids, PROTOCOL_BPS, CREATOR_BPS, ratingsOf(address(factory)))
         );
         vm.stopPrank();
     }
@@ -1889,7 +783,8 @@ abstract contract FormalBase is Test {
 pragma solidity 0.8.28;
 
 import {FormalBase, svm} from "./FormalBase.sol";
-import {Batch} from "../../src/Batch.sol";
+import {ratingsOf} from "../../script/RatingsOf.sol";
+import {Batch, IRatings} from "../../src/Batch.sol";
 import {IAssembler} from "../../src/interfaces/IAssembler.sol";
 
 /// @dev BatchFactory: who may touch fees and the assembler, and that it only ever moves the caller's Credits.
@@ -1982,7 +877,7 @@ contract FactoryFormal is FormalBase {
         Batch target = impl ? Batch(factory.implementation()) : batch;
         Batch.Filter memory f;
         vm.prank(caller);
-        try target.initialize(caller, "x", f, new uint256[](0), 0, 500, 1000, Batch.Arrangement.Deposit, Batch.Split.Equal, 0) {
+        try target.initialize(caller, "x", f, new uint256[](0), 0, 500, 1000, Batch.Arrangement.Deposit, Batch.Split.Equal, 0, IRatings(address(0))) {
             assert(false);
         } catch {}
     }
@@ -2021,7 +916,7 @@ contract FactoryFormal is FormalBase {
         uint256[] memory ids = new uint256[](1);
         ids[0] = id;
         vm.prank(caller);
-        try factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 3 days, ids, 250, 500) {}
+        try factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 3 days, ids, 250, 500, ratingsOf(address(factory))) {}
             catch {}
         assert(address(factory.assembler()) == a);
         assert(factory.assemblerActiveAt() == at);
@@ -2047,7 +942,7 @@ contract FactoryFormal is FormalBase {
         uint256[] memory ids = new uint256[](1);
         ids[0] = id;
         vm.prank(caller);
-        try factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 3 days, ids, 250, 500) {}
+        try factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 3 days, ids, 250, 500, ratingsOf(address(factory))) {}
             catch {}
         assert(credits.ownerOf(2) == ALICE);
     }
@@ -2321,11 +1216,12 @@ contract BatchAuctionFormal is AuctionBase {
         }
     }
 
-    /// Fees plus both members' claims are exactly the winning bid; the batch ends empty.
+    /// Settle alone pays out the sale: fees plus both members' shares are exactly the winning bid, the batch
+    /// ends empty, and neither member has anything left to claim.
     function check_settlePaysOutExactly(uint256 v) public {
         _sold(v);
-        batch.claim(ALICE);
-        batch.claim(BOB);
+        assert(batch.claimable(ALICE) == 0 && batch.claimable(BOB) == 0);
+        assert(batch.claimed(ALICE) && batch.claimed(BOB));
         assert(address(batch).balance == 0);
         assert(FEE.balance + ALICE.balance + BOB.balance == v);
     }
@@ -2333,7 +1229,8 @@ contract BatchAuctionFormal is AuctionBase {
     /// Equal split: two members with 40 Credits each are owed the same.
     function check_equalSplitIsEqual(uint256 v) public {
         _sold(v);
-        assert(batch.claimable(ALICE) == batch.claimable(BOB));
+        assert(batch.unitsOf(ALICE) * batch.payoutPerUnit() == batch.unitsOf(BOB) * batch.payoutPerUnit());
+        assert(ALICE.balance - v * CREATOR_BPS / 10_000 == BOB.balance);
         assert(statement.ownerOf(batch.statementId()) == b1);
     }
 
@@ -2360,32 +1257,27 @@ contract BatchAuctionFormal is AuctionBase {
         } catch {}
     }
 
-    /// Settlement conserves the sale: fees plus every member's claim is exactly the winning bid, nothing is
+    /// Settlement conserves the sale: fees plus every member's share is exactly the winning bid, nothing is
     /// left stuck and nothing is paid twice. The Statement goes to the winner.
     function check_settleConservesEth(uint256 v) public {
         _sold(v);
         assert(statement.ownerOf(batch.statementId()) == b1);
-        uint256 afterFees = address(batch).balance;
-        assert(FEE.balance + ALICE.balance + afterFees == v);
-        assert(ALICE.balance == v * CREATOR_BPS / 10_000);
         assert(FEE.balance >= v * PROTOCOL_BPS / 10_000);
-
-        batch.claim(ALICE);
-        batch.claim(BOB);
         assert(address(batch).balance == 0);
         assert(FEE.balance + ALICE.balance + BOB.balance == v);
         // equal split: 40 shares each
         assert(ALICE.balance - v * CREATOR_BPS / 10_000 == BOB.balance);
     }
 
-    /// A member is paid once.
+    /// A member is paid once: after settle paid them, no claim by anyone pays them again.
     function check_claimOnce(uint256 v, address caller) public {
         _sold(v);
-        batch.claim(BOB);
+        uint256 paid = BOB.balance;
         vm.prank(caller);
         try batch.claim(BOB) {
             assert(false);
         } catch {}
+        assert(BOB.balance == paid);
     }
 
     /// Settle runs once: no second payout of fees.
@@ -2428,8 +1320,6 @@ contract BatchEarlyFormal is AuctionBase {
         _sold(v);
         assert(batch.unitsOf(ALICE) + batch.unitsOf(BOB) == 12_640);
         uint256 creatorFee = v * CREATOR_BPS / 10_000;
-        batch.claim(ALICE);
-        batch.claim(BOB);
         assert(address(batch).balance == 0);
         assert(FEE.balance + ALICE.balance + BOB.balance == v);
         assert(ALICE.balance - creatorFee >= BOB.balance);
@@ -2817,7 +1707,7 @@ contract RatingsFormal is Test {
         chunk = DataStore.write(hex"2003" hex"3412" hex"401f");
         address[] memory c = new address[](1);
         c[0] = chunk;
-        ratings = new Ratings(c, 3);
+        ratings = new Ratings(c, 3, "test");
     }
 
     /// Unknown ids score 0, which Batch treats as "never admitted by a rating rule".
@@ -2839,9 +1729,131 @@ contract RatingsFormal is Test {
     function check_constructorRejectsWrongCount(uint256 n) public {
         address[] memory c = new address[](1);
         c[0] = chunk;
-        try new Ratings(c, n) {
+        try new Ratings(c, n, "test") {
             assert(n == 3);
         } catch {}
+    }
+}
+```
+
+### test/formal/RatingsSwitchFormal.t.sol
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.28;
+
+import {FormalBase, svm} from "./FormalBase.sol";
+import {ratingsOf} from "../../script/RatingsOf.sol";
+import {Batch, IRatings} from "../../src/Batch.sol";
+import {BatchFactory} from "../../src/BatchFactory.sol";
+import {IAssembler} from "../../src/interfaces/IAssembler.sol";
+import {ICredits} from "../../src/interfaces/ICredits.sol";
+import {MockCredits} from "../../src/mocks/MockCredits.sol";
+import {MockStatement} from "../../src/mocks/MockStatement.sol";
+import {MockAssembler} from "../../src/mocks/MockAssembler.sol";
+import {Ratings, DataStore} from "../../src/Ratings.sol";
+
+/// @dev Moving to a later score table: who may propose, the notice, that nothing else moves the factory's table,
+///      that create() only opens on the table the caller expected, and that an open batch keeps its own.
+contract RatingsSwitchFormal is FormalBase {
+    Ratings internal v3;
+    Ratings internal v4;
+    Batch internal batch;
+
+    function setUp() public {
+        vm.warp(1_000_000);
+        v3 = _table(hex"2003" hex"3412" hex"401f", "3.4.0");
+        v4 = _table(hex"401f" hex"3412" hex"2003", "4.0.0");
+        credits = new MockCredits();
+        statement = new MockStatement(ICredits(address(credits)));
+        asm_ = new MockAssembler(statement);
+        factory = new BatchFactory(
+            ICredits(address(credits)), IRatings(address(v3)), IAssembler(address(asm_)), SETTER, FEE, PROTOCOL_BPS, CREATOR_BPS, 1
+        );
+        credits.mint(ALICE, 1);
+        batch = _open(ALICE, _ids(1, 1), Batch.Split.Equal);
+    }
+
+    function _table(bytes memory data, string memory version) internal returns (Ratings r) {
+        address[] memory c = new address[](1);
+        c[0] = DataStore.write(data);
+        r = new Ratings(c, 3, version);
+    }
+
+    function _propose() internal {
+        vm.prank(FEE);
+        factory.proposeRatings(IRatings(address(v4)));
+    }
+
+    /// Only the fee recipient proposes a table.
+    function check_proposeRatings_onlyFeeRecipient(address caller) public {
+        vm.prank(caller);
+        try factory.proposeRatings(IRatings(address(v4))) {
+            assert(caller == FEE);
+        } catch {}
+    }
+
+    /// A proposed table cannot go live before its 30-minute notice, whoever activates it.
+    function check_activateRatings_notBeforeDelay(address caller, uint256 wait) public {
+        _propose();
+        uint256 proposedAt = block.timestamp;
+        vm.assume(wait < 365 days);
+        vm.warp(proposedAt + wait);
+        vm.prank(caller);
+        try factory.activateRatings() {
+            assert(wait >= 30 minutes);
+        } catch {}
+    }
+
+    /// With a proposal pending, no call except activateRatings() (and create(), below) moves the factory's table,
+    /// whoever makes it.
+    function check_ratings_onlyActivateMovesIt_exceptCreate(address caller) public {
+        _propose();
+        vm.warp(block.timestamp + 30 minutes);
+        bytes memory data = svm.createCalldata("BatchFactory");
+        vm.assume(bytes4(data) != factory.create.selector && bytes4(data) != factory.activateRatings.selector);
+        vm.prank(caller);
+        (bool ok,) = address(factory).call(data);
+        ok;
+        assert(address(factory.ratings()) == address(v3));
+    }
+
+    /// create() never moves the factory's table.
+    function check_ratings_unchangedByCreate(address caller, uint256 id) public {
+        _propose();
+        vm.warp(block.timestamp + 30 minutes);
+        Batch.Filter memory f;
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = id;
+        vm.prank(caller);
+        try factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 3 days, ids, PROTOCOL_BPS, CREATOR_BPS, IRatings(address(v3))) {}
+            catch {}
+        assert(address(factory.ratings()) == address(v3));
+    }
+
+    /// A batch only opens on the table its creator expected, and it keeps exactly that table.
+    function check_create_onlyOnExpectedTable(address expect) public {
+        credits.mint(BOB, 1);
+        Batch.Filter memory f;
+        vm.startPrank(BOB);
+        credits.setApprovalForAll(address(factory), true);
+        try factory.create("x", f, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 3 days, _ids(2, 1), PROTOCOL_BPS, CREATOR_BPS, IRatings(expect)) returns (address b) {
+            assert(expect == address(v3));
+            assert(address(Batch(b).ratings()) == address(v3));
+        } catch {}
+        vm.stopPrank();
+    }
+
+    /// After the factory moves to a new table, no call to an open batch by anyone changes the table it opened with.
+    function check_openBatch_keepsItsTable(address caller) public {
+        _propose();
+        vm.warp(block.timestamp + 30 minutes);
+        factory.activateRatings();
+        assert(address(factory.ratings()) == address(v4));
+        bytes memory data = svm.createCalldata("Batch");
+        vm.prank(caller);
+        (bool ok,) = address(batch).call(data);
+        ok;
+        assert(address(batch.ratings()) == address(v3));
     }
 }
 ```
