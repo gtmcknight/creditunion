@@ -272,9 +272,7 @@ contract Audit5Test is Test {
         vm.prank(eve);
         b.bid{value: 1 ether + 3}();
         skip(24 hours);
-        b.settle();
-        b.claim(alice);
-        b.claim(bob);
+        b.settle(); // pays alice and bob
         assertEq(address(b).balance, 0);
         assertEq(fee.balance + alice.balance + bob.balance, 200 ether + 1 ether + 3);
         uint256 sid = b.statementId();

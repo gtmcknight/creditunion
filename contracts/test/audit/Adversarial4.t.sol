@@ -102,21 +102,16 @@ contract Adversarial4Test is Test {
         }
     }
 
-    /// Σ claimable + protocol fee (incl. dust) + creator fee must equal highBid; then every claim empties the batch.
+    /// Settle pays every member: Σ shares + protocol fee (incl. dust) + creator fee must equal highBid, every
+    /// member is marked paid with nothing left to claim, and the batch ends empty.
     function _assertConserved(Batch b, address[] memory ds, uint256 amount) internal {
         uint256 sum;
-        for (uint256 i; i < ds.length; ++i) sum += b.claimable(ds[i]);
-        uint256 creatorFee = amount * b.creatorFeeBps() / 10_000;
-        uint256 paidFee = fee.balance;
-        assertEq(sum + paidFee + creatorFee, amount, "claimable + fees != highBid");
-        uint256 before;
-        for (uint256 i; i < ds.length; ++i) before += ds[i].balance;
         for (uint256 i; i < ds.length; ++i) {
-            if (b.claimable(ds[i]) > 0) b.claim(ds[i]);
+            sum += b.unitsOf(ds[i]) * b.payoutPerUnit();
+            assertEq(b.claimable(ds[i]), 0, "left unpaid by settle");
         }
-        uint256 after_;
-        for (uint256 i; i < ds.length; ++i) after_ += ds[i].balance;
-        assertEq(after_ - before, sum, "claims paid != claimable");
+        uint256 creatorFee = amount * b.creatorFeeBps() / 10_000;
+        assertEq(sum + fee.balance + creatorFee, amount, "shares + fees != highBid");
         assertEq(address(b).balance, 0, "dust left in batch");
     }
 
@@ -158,23 +153,24 @@ contract Adversarial4Test is Test {
         ready(b);
         b.assemble();
         uint256 amount = 7.123456789012345678 ether;
-        _bidAndSettle(b, amount);
+        vm.deal(address(0xB1D), amount);
+        vm.prank(address(0xB1D));
+        b.bid{value: amount}();
+        skip(1 days);
 
-        // gas: last position, one Credit → full 80-slot walk inside claim()
+        // gas: settle pays all 80 distinct members in one call
         uint256 g = gasleft();
-        b.claim(ds[79]);
+        b.settle();
         uint256 used = g - gasleft();
-        emit log_named_uint("claim gas, position 79, 1 Credit", used);
-        assertLt(used, 500_000);
-        // first position for comparison
-        g = gasleft();
-        b.claim(ds[0]);
-        emit log_named_uint("claim gas, position 0, 1 Credit", g - gasleft());
+        emit log_named_uint("settle gas, 80 distinct members", used);
+        // ~70k a member here: a cold send to an empty account (25k new-account charge) and the claimed flag's
+        // first write (22k). Members who already hold ETH skip the 25k.
+        assertLt(used, 6_000_000);
 
-        // conservation over the rest
-        uint256 paid = ds[0].balance + ds[79].balance;
-        for (uint256 i = 1; i < 79; ++i) {
-            b.claim(ds[i]);
+        uint256 paid;
+        for (uint256 i; i < 80; ++i) {
+            assertEq(ds[i].balance, (237 - 2 * i) * b.payoutPerUnit(), "position paid");
+            assertEq(b.claimable(ds[i]), 0);
             paid += ds[i].balance;
         }
         assertEq(paid + fee.balance, amount, "every wei accounted for");
@@ -183,19 +179,17 @@ contract Adversarial4Test is Test {
         assertLt(fee.balance - amount * FEE_BPS / 10_000, 12_640);
     }
 
-    /// Worst case for a whale: 40 Credits sitting in positions 40..79 (early-exit never fires before the end).
-    function test_ClaimGas_FortyCreditsAtTheBack() public {
+    /// A whale with 40 Credits at positions 40..79 is paid the sum of those weights by settle.
+    function test_SettlePaysFortyAtTheBack() public {
         Batch b = _open(factory, alice, _range(1, 40), Batch.Split.Early, Batch.Arrangement.Deposit);
         vm.prank(bob);
         factory.deposit(address(b), _range(81, 40));
         ready(b);
         b.assemble();
+        uint256 b0 = bob.balance;
         _bidAndSettle(b, 1 ether);
-        uint256 g = gasleft();
-        b.claim(bob);
-        uint256 used = g - gasleft();
-        emit log_named_uint("claim gas, 40 Credits at positions 40..79", used);
-        assertLt(used, 500_000);
+        assertEq(bob.balance - b0, b.unitsOf(bob) * b.payoutPerUnit());
+        assertEq(b.claimable(bob), 0);
     }
 
     /// Random churn while Open (deposit / withdraw / re-deposit by three actors), then fill and sell:
@@ -272,7 +266,7 @@ contract Adversarial4Test is Test {
         assertEq(b.payoutPerUnit(), per);
         assertEq(b.summary().payoutPerShare, per);
         assertEq(b.unitsOf(alice), b.sharesOf(alice));
-        assertEq(b.claimable(alice), 40 * per);
+        assertEq(b.unitsOf(alice) * b.payoutPerUnit(), 40 * per);
         assertLe(dust, 79);
         address[] memory ds = new address[](2);
         (ds[0], ds[1]) = (alice, bob);
@@ -314,11 +308,10 @@ contract Adversarial4Test is Test {
         vm.prank(carol);
         vm.expectRevert(abi.encodeWithSelector(Batch.BidTooLow.selector, 0.01 ether));
         b.bid{value: 12_639}();
+        uint256 b0 = bob.balance;
         _bidAndSettle(b, 0.01 ether);
         assertGt(b.payoutPerUnit(), 0);
-        assertGt(b.claimable(bob), 0); // even the back of the line
-        b.claim(alice);
-        b.claim(bob);
+        assertGt(bob.balance - b0, 0); // even the back of the line
         assertEq(address(b).balance, 0);
     }
 
@@ -460,16 +453,14 @@ contract Adversarial4Test is Test {
         rc.arm(b, alice);
         ready(b);
         b.assemble();
-        _bidAndSettle(b, 3 ether);
-        uint256 due = b.claimable(address(rc));
-        b.claim(address(rc));
+        uint256 a0 = alice.balance;
+        _bidAndSettle(b, 3 ether); // settle pays rc, whose receive() tries to claim again and to claim alice's
         assertEq(rc.hits(), 1);
-        assertEq(address(rc).balance, due);
+        assertEq(address(rc).balance, b.unitsOf(address(rc)) * b.payoutPerUnit());
+        assertEq(alice.balance - a0, b.unitsOf(alice) * b.payoutPerUnit(), "alice paid once, exactly");
         assertEq(b.claimable(address(rc)), 0);
-        assertGt(b.claimable(alice), 0, "alice's claim untouched by the re-entrant attempt");
         vm.expectRevert(Batch.NothingToClaim.selector);
         b.claim(address(rc));
-        b.claim(alice);
         assertEq(address(b).balance, 0);
     }
 

@@ -440,9 +440,7 @@ contract Adversarial3Test is Test {
         vm.prank(bob);
         vm.expectRevert(Batch.NotWinner.selector);
         b.claimStatement(bob);
-        // ETH conservation
-        b.claim(alice);
-        b.claim(bob);
+        // ETH conservation: settle already paid alice and bob
         assertEq(address(b).balance, 0);
         assertEq(fee.balance, 11 ether - b.payoutPerShare() * 80);
     }
@@ -460,9 +458,7 @@ contract Adversarial3Test is Test {
         vm.expectRevert(Batch.PaymentFailed.selector);
         g.pull(b); // still cannot receive; the batch keeps it, nobody else can take it
         skip(1 days);
-        b.settle();
-        b.claim(alice);
-        b.claim(bob);
+        b.settle(); // pays alice and bob
         assertEq(address(b).balance, 1 ether, "exactly the owed refund remains");
         vm.expectRevert(Batch.NothingToClaim.selector);
         b.withdrawOwed();

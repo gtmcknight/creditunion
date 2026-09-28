@@ -66,7 +66,7 @@ wait on a stranger. **Guess:** only 1,526 Statements can ever exist, so there ma
 1. **Mainnet fork:**
    - Deploy the adapter on a fork of mainnet with Jack's real Statement contract.
    - Fill a Credit Union with real Credit ids (impersonated holders) in every burn order.
-   - Run the full path: countdown, lock, `assemble()`, auction, settle, claim.
+   - Run the full path: countdown, lock, `assemble()`, auction, settle (which pays every member).
    - Check that the Credits are burned, the Statement is owned by the Credit Union, and the order Jack's contract
      received equals `burnOrder()`.
 2. **Adversarial cases:**

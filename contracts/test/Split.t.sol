@@ -74,22 +74,20 @@ contract SplitTest is Test {
         assertEq(b.unitsOf(carol), 4720);
         assertEq(uint256(2280 + 5640 + 4720), 12_640);
 
-        _sell(b, 4 ether);
+        uint256 a0 = alice.balance;
+        uint256 b0 = bob.balance;
+        uint256 c0 = carol.balance;
+        _sell(b, 4 ether); // settle pays every member
         uint256 net = 4 ether - 0.08 ether;
         uint256 per = net / 12_640;
         assertEq(b.payoutPerUnit(), per);
         assertEq(b.payoutPerShare(), per * 158); // one "average" share
-        assertEq(b.claimable(alice), 2280 * per);
+        assertEq(alice.balance - a0, 2280 * per);
+        assertEq(b.claimable(alice), 0);
         // first position earns 1.5 shares, last earns 0.5
         assertEq(237 * per, b.payoutPerShare() * 3 / 2);
         assertEq(79 * per, b.payoutPerShare() / 2);
 
-        uint256 a0 = alice.balance;
-        uint256 b0 = bob.balance;
-        uint256 c0 = carol.balance;
-        b.claim(alice);
-        b.claim(bob);
-        b.claim(carol);
         assertEq(alice.balance - a0 + bob.balance - b0 + carol.balance - c0 + fee.balance, 4 ether, "every wei paid out");
         assertEq(address(b).balance, 0);
         assertGt(alice.balance - a0, 10 * b.payoutPerShare()); // early money beat the average
@@ -125,10 +123,11 @@ contract SplitTest is Test {
         Batch b = _open(alice, _range(1, 40), Batch.Split.Equal);
         vm.prank(bob);
         factory.deposit(address(b), _range(81, 40));
+        uint256 a0 = alice.balance;
         _sell(b, 3 ether);
         assertEq(b.payoutPerShare(), (3 ether - 0.06 ether) / 80);
         assertEq(b.unitsOf(alice), 40);
-        assertEq(b.claimable(alice), 40 * b.payoutPerShare());
+        assertEq(alice.balance - a0, 40 * b.payoutPerShare());
         assertEq(b.summary().payoutPerShare, b.payoutPerShare());
         assertEq(uint256(b.summary().split), uint256(Batch.Split.Equal));
     }
@@ -156,14 +155,20 @@ contract SplitTest is Test {
         assertLe(fee.balance, uint256(amount) * 2 / 100 + 12_640); // fee + at most one unit of dust per unit
     }
 
-    /// Claiming on an Early batch walks the positions: the back-of-line depositor is the worst case (~460k).
-    function test_ClaimGas() public {
+    /// Settling an Early batch pays both members in the same call; claim is only the fallback for a failed send.
+    function test_SettleGas() public {
         Batch b = _open(alice, _range(1, 40), Batch.Split.Early);
         vm.prank(bob);
         factory.deposit(address(b), _range(81, 40));
-        _sell(b, 1 ether);
+        ready(b);
+        b.assemble();
+        vm.deal(address(0xB1D), 1 ether);
+        vm.prank(address(0xB1D));
+        b.bid{value: 1 ether}();
+        skip(1 days);
         uint256 g = gasleft();
-        b.claim(bob); // positions 40..79: the early exit never fires before the end
-        assertLt(g - gasleft(), 500_000);
+        b.settle();
+        assertLt(g - gasleft(), 700_000);
+        assertEq(b.claimable(bob), 0);
     }
 }

@@ -322,18 +322,15 @@ contract BatchTest is Test {
         vm.expectRevert(Batch.AuctionOver.selector);
         b.bid{value: 10 ether}();
 
-        b.settle();
+        uint256 bobBefore = bob.balance;
+        b.settle(); // pays every member
         assertEq(statement.ownerOf(1), alice);
         assertEq(fee.balance, 0.04 ether);
         assertEq(b.payoutPerShare(), 0.0495 ether);
-
-        uint256 bobBefore = bob.balance;
-        vm.prank(carol);
-        b.claim(bob); // anyone can push
         assertEq(bob.balance, bobBefore + 40 * 0.0495 ether);
+        assertTrue(b.claimed(bob));
         vm.expectRevert(Batch.NothingToClaim.selector);
         b.claim(bob);
-        b.claim(alice);
         assertEq(address(b).balance, 0);
     }
 
@@ -415,8 +412,7 @@ contract BatchTest is Test {
         early.settle();
         assertEq(fee.balance, 0.01 ether); // 1%, not 2%
         assertEq(early.payoutPerShare(), 0.99 ether / 80);
-        early.claim(alice);
-        assertEq(alice.balance - aliceBefore, 40 * (0.99 ether / 80)); // 40 shares, no creator fee
+        assertEq(alice.balance - aliceBefore, 40 * (0.99 ether / 80)); // 40 shares paid by settle, no creator fee
     }
 
     function test_ProtocolFeeCappedAt5Percent() public {
@@ -440,10 +436,9 @@ contract BatchTest is Test {
         uint256 aliceBefore = alice.balance;
         b.settle();
         assertEq(fee.balance, 0.03 ether); // 1% protocol
-        assertEq(alice.balance - aliceBefore, 0.06 ether); // 2% creator, paid to the opener
+        // alice opened it (2% creator) and holds 40 shares, all paid by settle
+        assertEq(alice.balance - aliceBefore, 0.06 ether + 40 * 0.036375 ether);
         assertEq(b.payoutPerShare(), 0.036375 ether); // (3 − 0.09) / 80
-        b.claim(alice);
-        b.claim(bob);
         assertEq(address(b).balance, 0);
     }
 

@@ -89,11 +89,12 @@ contract BatchAuctionFormal is AuctionBase {
         }
     }
 
-    /// Fees plus both members' claims are exactly the winning bid; the batch ends empty.
+    /// Settle alone pays out the sale: fees plus both members' shares are exactly the winning bid, the batch
+    /// ends empty, and neither member has anything left to claim.
     function check_settlePaysOutExactly(uint256 v) public {
         _sold(v);
-        batch.claim(ALICE);
-        batch.claim(BOB);
+        assert(batch.claimable(ALICE) == 0 && batch.claimable(BOB) == 0);
+        assert(batch.claimed(ALICE) && batch.claimed(BOB));
         assert(address(batch).balance == 0);
         assert(FEE.balance + ALICE.balance + BOB.balance == v);
     }
@@ -101,7 +102,8 @@ contract BatchAuctionFormal is AuctionBase {
     /// Equal split: two members with 40 Credits each are owed the same.
     function check_equalSplitIsEqual(uint256 v) public {
         _sold(v);
-        assert(batch.claimable(ALICE) == batch.claimable(BOB));
+        assert(batch.unitsOf(ALICE) * batch.payoutPerUnit() == batch.unitsOf(BOB) * batch.payoutPerUnit());
+        assert(ALICE.balance - v * CREATOR_BPS / 10_000 == BOB.balance);
         assert(statement.ownerOf(batch.statementId()) == b1);
     }
 
@@ -128,32 +130,27 @@ contract BatchAuctionFormal is AuctionBase {
         } catch {}
     }
 
-    /// Settlement conserves the sale: fees plus every member's claim is exactly the winning bid, nothing is
+    /// Settlement conserves the sale: fees plus every member's share is exactly the winning bid, nothing is
     /// left stuck and nothing is paid twice. The Statement goes to the winner.
     function check_settleConservesEth(uint256 v) public {
         _sold(v);
         assert(statement.ownerOf(batch.statementId()) == b1);
-        uint256 afterFees = address(batch).balance;
-        assert(FEE.balance + ALICE.balance + afterFees == v);
-        assert(ALICE.balance == v * CREATOR_BPS / 10_000);
         assert(FEE.balance >= v * PROTOCOL_BPS / 10_000);
-
-        batch.claim(ALICE);
-        batch.claim(BOB);
         assert(address(batch).balance == 0);
         assert(FEE.balance + ALICE.balance + BOB.balance == v);
         // equal split: 40 shares each
         assert(ALICE.balance - v * CREATOR_BPS / 10_000 == BOB.balance);
     }
 
-    /// A member is paid once.
+    /// A member is paid once: after settle paid them, no claim by anyone pays them again.
     function check_claimOnce(uint256 v, address caller) public {
         _sold(v);
-        batch.claim(BOB);
+        uint256 paid = BOB.balance;
         vm.prank(caller);
         try batch.claim(BOB) {
             assert(false);
         } catch {}
+        assert(BOB.balance == paid);
     }
 
     /// Settle runs once: no second payout of fees.
@@ -196,8 +193,6 @@ contract BatchEarlyFormal is AuctionBase {
         _sold(v);
         assert(batch.unitsOf(ALICE) + batch.unitsOf(BOB) == 12_640);
         uint256 creatorFee = v * CREATOR_BPS / 10_000;
-        batch.claim(ALICE);
-        batch.claim(BOB);
         assert(address(batch).balance == 0);
         assert(FEE.balance + ALICE.balance + BOB.balance == v);
         assert(ALICE.balance - creatorFee >= BOB.balance);

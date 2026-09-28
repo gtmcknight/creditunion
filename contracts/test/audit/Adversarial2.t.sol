@@ -147,7 +147,8 @@ contract Adversarial2Test is Test {
         uint256 aliceBefore = alice.balance;
         b.settle();
         assertEq(fee.balance - feeBefore, 0.1 ether, "protocol fee must be the 1% snapshot");
-        assertEq(alice.balance - aliceBefore, 0, "creator fee must be the 0% snapshot");
+        // alice is also a member (40 shares, paid by settle); anything above that would be a creator fee
+        assertEq(alice.balance - aliceBefore, 40 * (9.9 ether / 80), "creator fee must be the 0% snapshot");
         assertEq(b.payoutPerShare(), 9.9 ether / 80);
     }
 
