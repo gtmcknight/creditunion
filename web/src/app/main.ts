@@ -8,6 +8,7 @@ import { invalidateFit } from './fit';
 import { hydrate, who } from './ens';
 import { mint } from './views/mint';
 import { previews } from './views/previews';
+import { live } from './views/live';
 import { profile } from './views/profile';
 import { credit } from './views/credit';
 import { traitPage } from './views/trait';
@@ -60,6 +61,7 @@ async function route() {
     if (page === '' || page === 'about') home(app);
     else if (page === 'mint') await mint(app, route);
     else if (page === 'og') await previews(app);
+    else if (page === 'live') await live(app);
     else if (page === 'me') await profile(app, route);
     else if (page === 'member' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await profile(app, route, arg as Address);
     else if (page === 'create') await create(app);

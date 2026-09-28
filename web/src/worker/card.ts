@@ -1,5 +1,5 @@
-/// Per-party link cards, drawn in the worker: the party's own sheet of Credits on the left (its deposits, with
-/// the empty slots waiting), its name and where it stands on the right. Pixels are set by hand and packed as a
+/// Link cards drawn in the worker: a Credit Union's (its name and rule over a wall of Credits it takes) and a
+/// Credit's (its art large, its traits). Pixels are set by hand and packed as a
 /// PNG, with text from pre-rendered Geist glyphs (public/og/font.bin, scripts/og-font.py), so there is no image
 /// library or font engine in the worker. Credits are drawn exactly as their contract draws them (print.ts, misprints
 /// included); public/wall.bin's registered grid (scripts/wall.ts) is the fallback when the chain can't be read.
@@ -67,6 +67,11 @@ class Canvas {
   constructor(private faces: Face[]) {}
 
   rect(x: number, y: number, w: number, h: number, [r, g, b]: [number, number, number]) {
+    // Whole pixels only: a fractional x (from a text width) would index between pixels and write nothing.
+    w = Math.round(x + w) - Math.round(x);
+    h = Math.round(y + h) - Math.round(y);
+    x = Math.round(x);
+    y = Math.round(y);
     for (let j = Math.max(0, y); j < Math.min(H, y + h); j++)
       for (let i = Math.max(0, x); i < Math.min(W, x + w); i++) {
         const o = (j * W + i) * 3;
@@ -145,20 +150,12 @@ function header(c: Canvas) {
   c.text(LABEL, 'creditunion.fun', W - 48 - c.width(LABEL, 'creditunion.fun'), y + 8 * s - 4, MUTED);
 }
 
-export type PartyCard = {
+/// A Credit Union's link card shows only what never changes, since platforms cache a link's preview for days:
+/// its name, its join rule, and a wall of Credits the rule lets in. No count, no state.
+export type UnionCard = {
   name: string;
-  state: 'Open' | 'Full' | 'Expired' | 'Auction' | 'Settled';
-  count: number;
-  ids: number[]; // Credit numbers in sheet order
-  early: boolean;
-  highBid: bigint;
-  auctionEnd: number;
-  canBurn: boolean;
-};
-
-const eth = (wei: bigint) => {
-  const s = (Number(wei) / 1e18).toFixed(4).replace(/\.?0+$/, '');
-  return `${s} ETH`;
+  rule: string; // "Palette Y · Print Registered", or "" for any Credit
+  ids: number[]; // Credits the rule lets in (any number; the wall samples them)
 };
 
 /// Paints a print's rects at `s` px per 10 canvas units, cropped to [from, to) of its 320-unit canvas. Every edge in
@@ -184,61 +181,60 @@ function gridPrint(cells: Uint8Array, id: number): Rect[] | null {
   return out;
 }
 
-/// `prints[i]` is p.ids[i] as its contract draws it, or null to fall back to wall.bin.
-export async function drawParty(fetcher: Fetcher, origin: string, p: PartyCard, prints: (Rect[] | null)[]): Promise<Uint8Array> {
+const WHITE = rgb('#ffffff');
+
+/// Like the fixed cards (scripts/og.ts): the wall edge to edge, the name on black bars fitted to each line, the rule
+/// on a white bar under it, the mark top left and the domain bottom right on white boxes. The wall is the registered
+/// grid from wall.bin (it's texture), 5 px a cell, grouped by palette so mixed rules read as bands.
+export async function drawUnion(fetcher: Fetcher, origin: string, u: UnionCard): Promise<Uint8Array> {
   const { cells, faces } = await load(fetcher, origin);
   const c = new Canvas(faces);
+  const n = cells.length / 32;
+  const k = 5, T = 8 * k, rows = Math.ceil(H / T), cols = Math.ceil(W / T), need = rows * cols;
+  const pool = u.ids.filter((id) => id >= 1 && id <= n);
+  const from = pool.length ? pool : Array.from({ length: n }, (_, i) => i + 1);
+  // An even sample across the matches, the same every time for the same rule.
+  const pick = Array.from({ length: need }, (_, i) => from[Math.floor((i * from.length) / need)]);
+  const mask = (id: number) => {
+    let m = 0;
+    for (let b = 0; b < 32; b++) m |= cells[(id - 1) * 32 + b] | (cells[(id - 1) * 32 + b] >> 4);
+    return m & 15;
+  };
+  pick.sort((a, b) => mask(a) - mask(b) || a - b);
+  // Row by row, so palettes lie in horizontal bands, as on the fixed cards.
+  for (let row = 0; row < rows; row++)
+    for (let col = 0; col < cols; col++) {
+      const id = pick[(row * cols + col) % pick.length];
+      for (let cell = 0; cell < 64; cell++) {
+        const m = (cells[(id - 1) * 32 + (cell >> 1)] >> ((cell & 1) * 4)) & 15;
+        if (m) c.rect(col * T + (cell % 8) * k, row * T + Math.floor(cell / 8) * k, k, k, MIX[m]);
+      }
+    }
 
-  header(c);
-  // The sheet: 8 across, 10 down, as the Statement is laid out, under the header. A slot is the middle 200 of a
-  // Credit's 320 units at 2 px a 10 (a registered grid is 32 px); the widest misprints' slipped plates reach 20
-  // units past that, so their ink hangs up to 4 px into the gap, as a misprint does. Paper is the card's white, so
-  // only ink is drawn, except on the one Credit printed on black (five eights).
-  const T = 40, gap = 5, sx = 48, sy = 137;
-  for (let slot = 0; slot < 80; slot++) {
-    const x = sx + (slot % 8) * (T + gap), y = sy + Math.floor(slot / 8) * (T + gap);
-    const id = p.ids[slot];
-    const art = id ? (prints[slot] ?? gridPrint(cells, id)) : null;
-    if (!art) c.rect(x, y, T, T, SLOT);
-    else if (art[0][4] !== 0xffffff) paint(c, art, x, y, 2, 60, 260);
-    else paint(c, art.slice(2), x - 4, y - 4, 2, 40, 280);
+  // Mark and name, top left.
+  const s = 4, bx = 32, by = 32, bw = 18 + 9 * s + 12 + c.width(LABEL, 'Credit Union') + 18, bh = 56;
+  c.rect(bx, by, bw, bh, WHITE);
+  for (const [mx, my, w, h, col] of MARK) c.rect(bx + 18 + mx * s, by + 12 + my * s, w * s, h * s, col);
+  c.text(LABEL, 'Credit Union', bx + 18 + 9 * s + 12, by + 37, INK);
+  // Domain, bottom right.
+  const dw = c.width(LABEL, 'creditunion.fun') + 32, dh = 44;
+  c.rect(W - 32 - dw, H - 32 - dh, dw, dh, WHITE);
+  c.text(LABEL, 'creditunion.fun', W - 32 - dw + 16, H - 32 - 14, INK);
+
+  // Name on black bars, one per line, then the rule on a white bar; the block centred top to bottom.
+  const lines = c.wrap(TITLE, u.name || 'A Credit Union', W - 64 - 64 - 38, 2);
+  const barH = 88, lineGap = 0, ruleH = 58;
+  const rule = c.wrap(BODY, u.rule || 'Any Credit can join', W - 64 - 64 - 36, 1)[0];
+  const total = lines.length * barH + (lines.length - 1) * lineGap + 16 + ruleH;
+  let y = Math.round((H - total) / 2);
+  for (const l of lines) {
+    c.rect(64, y, c.width(TITLE, l) + 38, barH, INK);
+    c.text(TITLE, l, 64 + 19, y + 62, WHITE);
+    y += barH + lineGap;
   }
-
-  const x0 = 464, colW = 688;
-  const now = Date.now() / 1000;
-  const live = p.state === 'Auction' && p.highBid > 0n && now < p.auctionEnd;
-  const label =
-    p.state === 'Settled' ? 'Sold'
-    : p.state === 'Auction' ? (p.highBid > 0n ? (live ? 'At auction' : 'Auction ended') : 'At auction')
-    : p.state === 'Full' ? 'Full'
-    : p.state === 'Expired' ? 'Expired'
-    : 'Open to join';
-  c.text(LABEL, label, x0, 176, MUTED);
-
-  const name = c.wrap(TITLE, p.name || 'Untitled', colW, 2);
-  name.forEach((l, i) => c.text(TITLE, l, x0, 250 + i * 72, INK));
-
-  const statY = 474;
-  if (p.state === 'Open' || p.state === 'Full' || p.state === 'Expired') {
-    const w = c.text(BIG, String(p.count), x0, statY, INK);
-    c.text(BIG, '/80', x0 + w + 4, statY, FAINT);
-    const sub =
-      p.state === 'Full' ? (p.canBurn ? 'Full. Ready to burn into a Statement.' : 'Full. Waiting to burn into a Statement.')
-      : `${80 - p.count} to go · ${p.early ? 'early bird' : 'equal'} payout`;
-    c.text(BODY, sub, x0, statY + 50, MUTED);
-    c.rect(x0, statY + 78, colW, 10, TRACK);
-    c.rect(x0, statY + 78, Math.round((colW * p.count) / 80), 10, INK);
-  } else {
-    const big = p.highBid > 0n ? eth(p.highBid) : 'No bids yet';
-    c.text(c.width(BIG, big) <= colW ? BIG : TITLE, big, x0, statY, INK);
-    const sub =
-      p.state === 'Settled' ? 'Split between the 80 Credits that made it.'
-      : p.highBid === 0n ? 'The 24-hour clock starts with the first bid.'
-      : live ? 'High bid. 24 hours from the first bid.'
-      : 'Winning bid. Ready to settle.';
-    c.text(BODY, sub, x0, statY + 50, MUTED);
-  }
-
+  y += 16;
+  c.rect(64, y, c.width(BODY, rule) + 36, ruleH, WHITE);
+  c.text(BODY, rule, 64 + 18, y + 39, INK);
   return png(c.px);
 }
 
@@ -327,21 +323,19 @@ function chunk(type: string, data: Uint8Array) {
   return out;
 }
 
-/// Made-up parties for /og, so every state's card can be judged before real ones exist.
-export function sample(kind: string): PartyCard | null {
-  const ids = (n: number, from: number) => Array.from({ length: n }, (_, i) => from + i * 1471);
-  const base = { early: false, highBid: 0n, auctionEnd: 0, canBurn: false };
+/// Made-up unions for /og, to judge the card before real ones exist. `rules` picks the wall's Credits.
+export function sample(kind: string): (Omit<UnionCard, 'ids'> & { rules: Record<string, number> }) | null {
   switch (kind) {
     case 'open':
-      return { ...base, name: 'Early risers', state: 'Open', count: 43, ids: ids(43, 311) };
+      return { name: 'Just Yellow', rule: 'Palette Y', rules: { palettes: 1 << 4 } };
     case 'full':
-      return { ...base, name: 'First minute of the mint', state: 'Full', count: 80, ids: ids(80, 3), early: true, canBurn: true };
+      return { name: 'First minute of the mint', rule: 'Paid Sep 21, 15:05–15:06 UTC', rules: { idTo: 400 } };
     case 'auction':
-      return { ...base, name: 'Checkerboard', state: 'Auction', count: 80, ids: ids(80, 911), highBid: 1_250_000_000_000_000_000n, auctionEnd: Date.now() / 1000 + 5 * 3600 + 720 };
+      return { name: 'Checkerboard', rule: 'Print Registered · Weight even', rules: { prints: 1, weights: 1 } };
     case 'nobids':
-      return { ...base, name: 'Eights only', state: 'Auction', count: 80, ids: ids(80, 5001) };
+      return { name: 'Eights only', rule: 'Three or four eights', rules: { eights: (1 << 3) | (1 << 4) } };
     case 'sold':
-      return { ...base, name: 'Border of blacks', state: 'Settled', count: 80, ids: ids(80, 20_000), highBid: 3_200_000_000_000_000_000n };
+      return { name: 'Anyone', rule: '', rules: {} };
     default:
       return null;
   }

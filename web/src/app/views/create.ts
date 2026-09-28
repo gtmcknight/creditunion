@@ -89,15 +89,18 @@ const DESIGNS: [string, number, number][] = [
 ];
 const INK_OF = (m: number) => [...'CMYK'].filter((_, b) => m & (1 << b)).map((c) => INKS[c])[0] ?? '#111';
 /// A design as a tiny sheet in two colours (B '' leaves those slots open).
-const designIcon = (name: string, a: string, b: string) => {
+/// `a` and `b` are each a colour, or several side by side (a palette's inks, split like its brush swatch).
+const designIcon = (name: string, a: string[], b: string[]) => {
   const fn = LAYOUTS[name];
   let r = '';
   for (let i = 0; i < 80; i++) {
     const v = fn(i);
-    const c = v === 'A' ? a : v === 'B' ? b : '';
-    r += `<rect x="${(i % 8) * 3}" y="${Math.floor(i / 8) * 3}" width="2.6" height="2.6" fill="${c || '#e9e9e7'}"/>`;
+    const cs = v === 'A' ? a : v === 'B' ? b : [];
+    const x = (i % 8) * 3, y = Math.floor(i / 8) * 3;
+    if (!cs.length) r += `<rect x="${x}" y="${y}" width="2.6" height="2.6" fill="#e9e9e7"/>`;
+    else cs.forEach((c, k) => (r += `<rect x="${x + (2.6 * k) / cs.length}" y="${y}" width="${2.6 / cs.length}" height="2.6" fill="${c}"/>`));
   }
-  return `<svg viewBox="0 0 24 30" aria-hidden="true">${r}</svg>`;
+  return `<svg viewBox="0 0 24 30" aria-hidden="true" shape-rendering="crispEdges">${r}</svg>`;
 };
 const fmt = (n: number) => n.toFixed(4).replace(/\.?0+$/, '');
 const INKS: Record<string, string> = { C: '#00B5E2', M: '#E4007C', Y: '#FFD100', K: '#111111' };
@@ -167,8 +170,6 @@ const PALETTE_ROWS = [1, 2, 3, 4].map((n) => TRAITS.colors.filter((p) => p.lengt
 /// layout reads at a glance even with real Credits in the slots. Deliberately not the CMYK inks.
 const KEY_COLORS = ['#2f6bff', '#ff6a00', '#12a150', '#a24dff', '#00a3a3', '#c79100', '#e11d48', '#0ea5e9', '#7c3aed', '#65a30d', '#db2777', '#0f766e', '#b45309', '#4f46e5', '#15803d', '#be123c'];
 const keyColor = (v: number) => KEY_COLORS[(v - 1) % KEY_COLORS.length];
-/// How a Colors value prints: the subtractive mix of its inks, as the art draws it.
-const MIX_HEX = ['#ffffff', '#00b5e2', '#e4007c', '#00006e', '#ffd100', '#009400', '#e40000', '#111111', '#111111', '#0b1a1f', '#1f0b14', '#0b0b1f', '#1f1b0b', '#0b1f0b', '#1f0b0b', '#111111'];
 
 /// Badge a preview slot with its paint's icon, the same one its brush shows ('' clears it).
 function markPaint(cell: HTMLElement, icon: string) {
@@ -741,9 +742,11 @@ export async function create(app: HTMLElement) {
     const B = brushB && brushB !== A && vals.includes(brushB) ? brushB : vals.find((v) => v !== A) ?? 0;
     return [A, B];
   };
-  const paintHex = (v: number) => (layoutTrait === 0 ? MIX_HEX[v] : keyOfPaint(layoutTrait, v));
+  /// A Colors value as its inks side by side (as its brush shows it); any other trait as its key colour.
+  const inksOf = (m: number) => [...'CMYK'].filter((_, b) => m & (1 << b)).map((l) => INKS[l]);
+  const paintHex = (v: number): string[] => (!v ? [] : layoutTrait === 0 ? inksOf(v) : [keyOfPaint(layoutTrait, v)]);
   /// Two rows of ready-made designs, drawn in the colours they'd paint with.
-  const gallery = (colours: (a: number, b: number) => [string, string]) =>
+  const gallery = (colours: (a: number, b: number) => [string[], string[]]) =>
     `<div class="paint-designs">${DESIGNS.map(([n, a, b], i) => {
       const [ca, cb] = colours(a, b);
       return `<button type="button" class="paint-design" data-design="${i}" aria-label="${n}" title="${n}">${designIcon(n, ca, cb)}</button>`;
@@ -764,7 +767,7 @@ export async function create(app: HTMLElement) {
     });
     if (!gs.length) {
       document.getElementById('brushes')!.innerHTML = `<p class="term-desc">Pick Colors, Eights, Print or Weight above to paint with them, or start from a design.</p>
-        ${gallery((a, b) => [MIX_HEX[a], MIX_HEX[b]])}`;
+        ${gallery((a, b) => [inksOf(a), inksOf(b)])}`;
       app.querySelector<HTMLElement>('.paint-bar')!.hidden = true;
       document.getElementById('designs')!.innerHTML = '';
       if (wiped) syncLayout();
@@ -784,7 +787,7 @@ export async function create(app: HTMLElement) {
         .map((v) => `<button type="button" class="brush" data-trait="${layoutTrait}" data-v="${v}" title="${slotName(layoutTrait, v)}" aria-label="${slotName(layoutTrait, v)}" aria-pressed="${v === brush}">${glyphFor(layoutTrait, v)}</button>`)
         .join('')}</span><button type="button" class="link small clear-all" data-layout="Clear">Clear all</button></div>`;
     document.getElementById('designs')!.innerHTML =
-      `<span class="eyebrow">Or start from a design</span>` + gallery(() => { const [A, B] = pair(); return [paintHex(A), B ? paintHex(B) : '']; });
+      `<span class="eyebrow">Or start from a design</span>` + gallery(() => { const [A, B] = pair(); return [paintHex(A), paintHex(B)]; });
     if (wiped) syncLayout();
   }
   let painting = false;
@@ -899,6 +902,17 @@ export async function create(app: HTMLElement) {
         rules.palettes = picked;
       } else rules[key] ^= 1 << Number(btn.dataset.bit); // tap to add, tap again to remove
       pattern = 'none';
+      // A value just added becomes the brush, so you can paint with it straight away: in the trait you're painting,
+      // or in this one while the sheet is still blank.
+      const bit = Number(btn.dataset.bit);
+      const t = ({ palettes: 0, eights: 1, prints: 2, weights: 3 } as Record<string, LayoutTrait | undefined>)[key];
+      if (t !== undefined && rules[key] & (1 << bit) && (t === layoutTrait || !layout.some(Boolean))) {
+        const v = t === 0 ? bit : bit + 1;
+        if (t !== layoutTrait) brushB = 0;
+        else if (brush && brush !== v) brushB = brush;
+        layoutTrait = t;
+        brush = brushA = v;
+      }
       drawBrushes(); // paint in a value you just took off the rule goes with it
       syncTiles();
       refresh();

@@ -499,9 +499,8 @@ function buyPane(connected: boolean) {
   // How many and the running total on one line; the Credits; then one button that carries the price.
   return `<div class="buy-head">${rangeHtml('buy-n', 1, MAX_BUY, 1, false)}<span class="sweep-total num" id="buy-sub"></span></div>
     <div class="listings" id="listings">${'<span class="listing skel" aria-hidden="true"><span class="art"></span><span class="price"></span></span>'.repeat(5)}</div>
-    <div id="buy-quote" class="quote small"></div>
     ${connected || !config.sweeper ? `<button class="btn primary block" id="buy-go" disabled>Buy &amp; deposit</button>` : '<button class="btn primary block" data-connect>Connect to buy</button>'}
-    <p class="muted small buy-source">One transaction buys the cheapest Credits that fit (OpenSea, FWA, CreditStrategy) and deposits them here in your name.</p>
+    <p class="muted small buy-source">One transaction buys the cheapest Credits that fit (OpenSea, FWA, CreditStrategy) and deposits them here in your name. <span id="buy-fee">2%</span> fee.</p>
 `;
 }
 
@@ -863,10 +862,9 @@ async function drawPicker(
 }
 
 const quotedCount = (q: Quote) => q.ids.length + (q.fwa?.length ?? 0) + (q.strategy?.length ?? 0);
-let quotedFeeBps = 0n; // the Sweeper's rate at quote time; the sweep reverts if it has been raised since
 
-/// The Buy tab: pick 1, 5 or 10 and the cheapest live OpenSea listings that fit fill in, with prices; then a
-/// signed price for exactly those. Where buy-in is off (testnets), it previews edition Credits that fit, disabled.
+/// The Buy tab: drag for how many and the cheapest listings that fit fill in, with prices. One click gets a signed
+/// price for exactly those and opens the wallet. Where buy-in is off (testnets), it previews edition Credits, disabled.
 async function bindBuy(
   b: Ctx,
   connected: boolean,
@@ -877,9 +875,8 @@ async function bindBuy(
   const batch = b.s.address;
   const line = document.getElementById('buy-line');
   const grid = document.getElementById('listings');
-  const out = document.getElementById('buy-quote');
   const go = document.getElementById('buy-go') as HTMLButtonElement | null;
-  if (!line || !grid || !out) return;
+  if (!line || !grid) return;
   const room = 80 - b.s.count;
   // The art opens the Credit's page; the source mark opens the listing on its marketplace.
   const tile = (id: string | number, src: string, price: string | null, source?: Source, url?: string) =>
@@ -910,20 +907,15 @@ async function bindBuy(
     ? (await examples(b.s.filter)).map((id) => ({ id: String(id), price: null }))
     : listings;
   const skipped = new Set<string>();
-  let q: Quote | null = null;
-  let value = 0n;
-  let timer: ReturnType<typeof setInterval> | null = null;
-  const stopTimer = () => {
-    if (timer) clearInterval(timer);
-    timer = null;
-  };
   // The slider reaches as far as there are open slots and listings (the cheapest that many fill the row).
   const range = document.getElementById('buy-n') as HTMLInputElement | null;
   if (range) setRange(range, Math.min(Number(range.value), room, pool.length || 1), Math.min(MAX_BUY, room, pool.length || 1));
   const want = () => Math.min(Number(range?.value ?? 1), room, MAX_BUY);
   let feeBps = 200n;
+  const feeEl = document.getElementById('buy-fee');
   void sweepFee().then((b) => {
     feeBps = b;
+    if (feeEl) feeEl.textContent = `${Number(b) / 100}%`;
     if (grid.isConnected) draw();
   });
   // Testnet showing mainnet listings: the testnet sheet can't judge mainnet Credits, so book them against its
@@ -942,19 +934,14 @@ async function bindBuy(
     return free.filter((l) => r.take(slotKey!(l.id)));
   };
   const draw = () => {
-    stopTimer();
-    q = null;
     const pick = chosen();
     grid.classList.toggle('preview', preview);
     grid.innerHTML = pick.map((l) => tile(l.id, preview || mainnetOnly ? editionArt(Number(l.id)) : art(BigInt(l.id)), l.price, l.source, l.url)).join('');
     const sub = pick.reduce((a, l) => a + (l.price ? BigInt(l.price) : 0n), 0n);
-    // The price with the Sweeper's fee in, as the wallet will ask (the quote step shows the exact split).
+    // The price with the Sweeper's fee in, as the wallet will ask.
     const subEl = document.getElementById('buy-sub');
     const pay = sub + (sub * feeBps) / 10_000n;
-    if (subEl)
-      subEl.innerHTML = pick.length && !preview
-        ? `<span>${(Number(pay) / 1e18).toFixed(4)} ETH</span><span class="muted small">incl. ${Number(feeBps) / 100}% fee</span>`
-        : '';
+    if (subEl) subEl.textContent = pick.length && !preview ? `${(Number(pay) / 1e18).toFixed(4)} ETH` : '';
     line.textContent = (preview || mainnetOnly
       ? '' // testnet: the banner already says it's a preview
       : !pool.length
@@ -963,7 +950,6 @@ async function bindBuy(
           ? `Only ${pick.length} listed that fit.`
           : '') + ' ';
     line.hidden = !line.textContent.trim();
-    out.innerHTML = '';
     if (go) {
       go.disabled = preview || mainnetOnly || !pick.length || !connected;
       go.textContent = pick.length && !preview ? `Buy & deposit ${pick.length}` : 'Buy & deposit';
@@ -979,68 +965,34 @@ async function bindBuy(
     skipped.add(t.dataset.id!);
     draw();
   });
-  // OpenSea signs each fill for ~90 s; past that the sweep would revert, so the price is shown with its clock.
-  const countdown = (expires: number) => {
-    stopTimer();
-    const el = document.getElementById('buy-expiry');
-    const tick = () => {
-      const left = Math.floor(expires - Date.now() / 1000);
-      if (left <= 0) {
-        stopTimer();
-        q = null;
-        if (go) go.textContent = `Buy & deposit ${plural(chosen().length)}`;
-        out.innerHTML = '<p>That price has expired. Get a fresh one.</p>';
-        return;
-      }
-      if (el) el.textContent = `Price good for ${left}s`;
-    };
-    tick();
-    timer = setInterval(tick, 1000);
-  };
   draw();
   if (!go || !connected || preview || mainnetOnly) return;
 
+  // One click: a fresh signed price for exactly these (OpenSea's is good for ~90 s), then the wallet. Listings
+  // sold since drop out; the wallet shows the total, the Sweeper's fee included.
   go.addEventListener('click', async () => {
-    if (!q) {
-      go.disabled = true;
-      go.textContent = 'Getting price…';
-      try {
-        const r = await fetch(`/opensea/quote?batch=${batch}&ids=${chosen().map((l) => l.id).join(',')}`);
-        q = (await r.json()) as Quote;
-        if (!r.ok || q.error) throw new Error(q.error ?? 'No quote');
-        checkQuote(q);
-        const total = BigInt(q.total);
-        [value, quotedFeeBps] = (await Promise.all([
-          pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'quote', args: [total] }),
-          pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'feeBps' }),
-        ])) as [bigint, bigint];
-        out.innerHTML = `<div class="quote-row"><span>${plural(quotedCount(q))}</span><span class="num">${eth(total)}</span></div>
-          <div class="quote-row"><span>Credit Union fee</span><span class="num">${eth(value - total)}</span></div>
-          <div class="quote-row total"><span>Total</span><span class="num">${eth(value)}</span></div>
-          ${chosen().length > quotedCount(q) ? `<p>${chosen().length - quotedCount(q)} no longer available.</p>` : ''}
-          ${q.expires ? '<p class="muted small num" id="buy-expiry"></p>' : ''}`;
-        go.textContent = `Buy & deposit ${plural(quotedCount(q))}`;
-        if (q.expires) countdown(q.expires);
-      } catch (e) {
-        q = null;
-        out.textContent = errText(e);
-        go.textContent = 'Try again';
-      }
-      go.disabled = false;
-      return;
-    }
-    const quote = q;
-    stopTimer();
+    const picked = chosen();
+    if (!picked.length) return;
     await run(go, 'Buying…', async () => {
-      const fwa = (quote.fwa ?? []).map((f) => ({ listingId: BigInt(f.listingId), price: BigInt(f.price) }));
-      const strategy = (quote.strategy ?? []).map((f) => ({ tokenId: BigInt(f.id), price: BigInt(f.price) }));
+      const r = await fetch(`/opensea/quote?batch=${batch}&ids=${picked.map((l) => l.id).join(',')}`);
+      const q = (await r.json()) as Quote;
+      if (!r.ok || q.error) throw new Error(q.error ?? 'No price right now. Try again.');
+      checkQuote(q);
+      const [value, fee] = (await Promise.all([
+        pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'quote', args: [BigInt(q.total)] }),
+        pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'feeBps' }),
+      ])) as [bigint, bigint];
+      const fwa = (q.fwa ?? []).map((f) => ({ listingId: BigInt(f.listingId), price: BigInt(f.price) }));
+      const strategy = (q.strategy ?? []).map((f) => ({ tokenId: BigInt(f.id), price: BigInt(f.price) }));
       await send(
         fwa.length || strategy.length
-          ? { address: config.sweeper!, abi: sweeperAbi, functionName: 'sweepAll', args: [batch, quote.orders, fwa, strategy, 1n, quotedFeeBps], value }
-          : { address: config.sweeper!, abi: sweeperAbi, functionName: 'sweep', args: [batch, quote.orders, 1n, quotedFeeBps], value },
+          ? { address: config.sweeper!, abi: sweeperAbi, functionName: 'sweepAll', args: [batch, q.orders, fwa, strategy, 1n, fee], value }
+          : { address: config.sweeper!, abi: sweeperAbi, functionName: 'sweep', args: [batch, q.orders, 1n, fee], value },
         txNote,
       );
-      justJoined(batch, quotedCount(quote));
+      const n = quotedCount(q);
+      if (n < picked.length) toast(`${picked.length - n} sold before you got to them.`, 'info', 8000);
+      justJoined(batch, n);
     }, '');
   });
 }

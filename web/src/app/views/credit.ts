@@ -11,9 +11,10 @@ import { fillGhosts } from '../ghosts';
 import { maskInks, paletteBit } from '../traits';
 import { art, errText, esc, eth, same, sheet, toast, utc } from '../ui';
 import { card } from './lists';
+import { creditsHead } from './trait';
 import { processOf } from '../../shared/credits';
 import { eightsName } from '../../shared/trait';
-import { SOURCES, justBought, rememberBought, type Source } from '../forsale';
+import { SOURCES, justBought, rememberBought, sweepFee, sweepToWallet, type Source } from '../forsale';
 
 /// Credits ever minted: the same numbers on every network.
 const SUPPLY = 122_154;
@@ -84,6 +85,7 @@ export async function credit(app: HTMLElement, raw: string) {
     : fact('Rating', '<span class="muted">Unavailable</span>');
 
   app.innerHTML = `
+  <div class="jb">${creditsHead('credit', `#${id.toLocaleString('en-US')}`)}</div>
   <section class="batch credit-page">
     <div class="credit-art"><img src="${art(id)}" alt="${title}"></div>
     <div class="batch-side">
@@ -136,7 +138,6 @@ const seedText = (hex: string) => String.fromCharCode(...(hex.slice(2).match(/..
 /// The art's inks (CreditDrawing.palette), C M Y K.
 const PLATE_INK = ['#00b5e2', '#e4007c', '#ffd100', '#111111'];
 const PLATE_NAME = ['Cyan', 'Magenta', 'Yellow', 'Black'];
-const clock = utc({ hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
 /// "How it was made": this Credit's own path from payment to picture, step by step, the way Jack's page shows a
 /// random one. Every value is recomputed from the seed and payment time with the art contract's own maths.
@@ -148,14 +149,12 @@ function howMade(seed: string, r: Rated) {
     `<figure class="plate${on(l) ? '' : ' off'}"><svg viewBox="0 0 8 8" shape-rendering="crispEdges" aria-hidden="true">${p.plates[l]
       .map((bit, i) => (bit ? `<rect x="${i % 8}" y="${i >> 3}" width="1" height="1"/>` : ''))
       .join('')}</svg><figcaption>${'CMYK'[l]}</figcaption></figure>`;
-  const shown = [0, 1, 2, 3].filter(on).map((l) => 'CMYK'[l]).join(' · ');
   const step = (k: number, v: number) => (k ? `${Math.abs(k)} ${k < 0 ? (v ? 'up' : 'left') : v ? 'down' : 'right'}` : '');
   const slipped = [0, 1, 2, 3]
     .filter((l) => on(l) && (p.dx[l] || p.dy[l]))
     .map((l) => `${PLATE_NAME[l]} ${[step(p.dx[l], 0), step(p.dy[l], 1)].filter(Boolean).join(', ')}`);
   const arrow = '<div class="proc-arrow" aria-hidden="true"></div>';
   return `<section class="credit-process">
-    <div class="section-head"><h3>How it was made</h3></div>
     <div class="proc" style="${PLATE_INK.map((c, i) => `--ink${i}:${c}`).join(';')}">
       <div class="proc-step">
         <p class="proc-k">X Money transaction ID</p>
@@ -166,9 +165,7 @@ function howMade(seed: string, r: Rated) {
       ${arrow}
       <div class="proc-step">
         <div class="proc-plates">${[0, 1, 2, 3].map(plate).join('')}</div>
-        <p class="proc-note">Paid <span class="num">${clock.format(new Date(r.paidAt * 1000))}</span> UTC · shows ${shown}${
-          slipped.length ? `<br>${esc(r.traits.registration)}: ${slipped.map((x) => x.charAt(0).toLowerCase() + x.slice(1)).join(', ')}` : ''
-        }</p>
+        ${slipped.length ? `<p class="proc-note">${esc(r.traits.registration)}: ${slipped.map((x) => x.charAt(0).toLowerCase() + x.slice(1)).join(', ')}</p>` : ''}
       </div>
       ${arrow}
       <div class="proc-step proc-out">
@@ -205,13 +202,13 @@ async function drawFits(id: bigint, r: Rated | undefined, list: Listed[], mine: 
 
 const buyAbi = parseAbi(['function sellTargetNFT(uint256 tokenId) payable', 'function buy(uint256 listingId, address recipient) payable']);
 
-/// This Credit's cheapest listing: OpenSea, CreditStrategy or FWA. CreditStrategy and FWA sell from their own
-/// contracts, so those buy right here; OpenSea's opens OpenSea. Where the site can't buy (testnets), the mainnet
+/// This Credit's cheapest listing: OpenSea, CreditStrategy or FWA, all bought right here. CreditStrategy and FWA sell
+/// from their own contracts; an OpenSea order goes through the Sweeper, like a sweep of one (its 2% fee). Where the site can't buy (testnets), the mainnet
 /// price shows as a preview with the button off. Not listed: nothing.
 async function drawBuy(n: number) {
   const el = document.getElementById('credit-buy');
   if (!el) return;
-  type Offer = { price?: string | null; source?: Source; contract?: Address | null; listingId?: string | null; preview?: boolean; url?: string };
+  type Offer = { price?: string | null; source?: Source; contract?: Address | null; listingId?: string | null; hash?: string | null; protocol?: string | null; preview?: boolean; url?: string };
   let d: Offer;
   try {
     const res = await fetch(`/opensea/credit/${n}`);
@@ -223,7 +220,10 @@ async function drawBuy(n: number) {
   if (!d.price || !d.source || !SOURCES[d.source] || !el.isConnected || justBought(n)) return;
   const src = SOURCES[d.source];
   const value = BigInt(d.price);
-  const inApp = !d.preview && !!d.contract && (d.source === 'strategy' || (d.source === 'fwa' && !!d.listingId));
+  const viaSweeper = !d.preview && d.source === 'opensea' && !!d.hash && !!d.protocol && !!config.sweeper;
+  const bps = viaSweeper ? await sweepFee() : 0n;
+  if (!el.isConnected) return;
+  const inApp = viaSweeper || (!d.preview && !!d.contract && (d.source === 'strategy' || (d.source === 'fwa' && !!d.listingId)));
   const view = d.url ? `<a class="muted small" href="${esc(d.url)}" target="_blank" rel="noopener">View on ${src.name} ↗</a>` : '';
   el.className = 'box';
   el.innerHTML = `<div class="box-head"><h3 class="listed-on"><img class="src" src="${src.icon}" alt="">Listed on ${src.name}</h3><strong class="num">${eth(value)}</strong></div>
@@ -231,12 +231,17 @@ async function drawBuy(n: number) {
       d.preview
         ? `<button class="btn primary block" disabled>Buy</button><p class="muted small">Mainnet price, shown as a preview. ${view}</p>`
         : inApp
-          ? `<button class="btn primary block" id="credit-buy-go">Buy · ${eth(value)}</button>${view}`
+          ? `<button class="btn primary block" id="credit-buy-go">Buy · ${eth(value + (value * bps) / 10_000n)}</button><p class="muted small">${bps ? `Includes the ${Number(bps) / 100}% fee. ` : ''}${view}</p>`
           : `<a class="btn primary block" href="${esc(d.url ?? '#')}" target="_blank" rel="noopener">Buy on ${src.name} ↗</a>`
     }`;
   el.hidden = false;
   const go = document.getElementById('credit-buy-go') as HTMLButtonElement | null;
   go?.addEventListener('click', async () => {
+    if (viaSweeper) {
+      const got = await sweepToWallet([{ id: String(n), price: d.price!, source: 'opensea', hash: d.hash!, protocol: d.protocol! }], go);
+      if (got?.length) el.hidden = true; // off the market: the listing box goes
+      return;
+    }
     const label = go.textContent ?? '';
     go.disabled = true;
     go.textContent = 'Buying…';

@@ -4,7 +4,7 @@
 export type Card = { title: string; description: string; image: string };
 
 const SITE = 'Credit Union';
-const CARDS_V = 3;
+const CARDS_V = 4;
 const CARDS: Record<string, Card> = {
   home: { title: 'Credit Union', description: 'Join a Credit Union to make a Statement together.', image: '/og/home.png' },
   parties: { title: 'Credit Unions', description: 'Credit Unions pooling Credits toward a Statement. Join one, leave any time before it fills.', image: '/og/party.png' },
@@ -20,6 +20,7 @@ const CARDS: Record<string, Card> = {
   time: { title: 'Time · Credit Union', description: 'Pick a stretch of the mint and see every Credit paid in it.', image: '/og/home.png' },
   rating: { title: 'Rating · Credit Union', description: 'Pick a range of ratings and see every Credit in it.', image: '/og/home.png' },
   bits: { title: 'Bits · Credit Union', description: 'Pick a range of Bits and see every Credit in it.', image: '/og/home.png' },
+  live: { title: 'Activity · Credit Union', description: 'Every deposit, buy, bid and new Credit Union, as it happens.', image: '/og/home.png' },
   og: { title: 'Link previews · Credit Union', description: 'Every page’s link card.', image: '/og/home.png' },
 };
 
@@ -68,15 +69,53 @@ export function withCard(html: Response, card: Card, url: URL): Response {
   return out;
 }
 
-/// A party page's card, from the party itself: its name and where it stands, and its own drawn image.
-export function partyCard(address: string, name: string, state: string, count: number, highBid: string, stamp: string): Card {
+/// A Credit Union's card. Only what never changes (name, rule): platforms keep a link's preview for days, so a
+/// count or a state would go stale.
+export function partyCard(address: string, name: string, rule: string): Card {
   const n = name || 'A Credit Union';
-  const where =
-    state === 'Settled' ? `Sold for ${highBid}.`
-    : state === 'Auction' ? (highBid ? `At auction, high bid ${highBid}.` : 'At auction. The clock starts with the first bid.')
-    : state === 'Full' ? 'Full: 80 Credits, ready to become a Statement.'
-    : `${count} of 80 Credits in. Join with yours, leave any time before it fills.`;
-  return { title: `${n} · Credit Union`, description: where, image: `/og/party/${address.toLowerCase()}.png?s=${stamp}` };
+  const takes = rule ? `${rule}. ` : '';
+  return {
+    title: `${n} · Credit Union`,
+    description: `${takes}80 Credits burn into one Statement, auctioned and split among the members.`,
+    image: `/og/party/${address.toLowerCase()}.png`,
+  };
+}
+
+/// A Batch.Filter as one line: "Palette Y · Print Registered · Three or four eights". "" when anything can join.
+export type Filter = {
+  palettes: number; prints: number; weights: number; eights: number;
+  paidFrom: bigint; paidTo: bigint; idFrom: bigint; idTo: bigint;
+  minScore: number; maxScore: number; bitsFrom: number; bitsTo: number;
+};
+const PRINT_NAMES = ['Registered', 'Nudge', 'Slip', 'Skew', 'Drift', 'Loose'];
+const WEIGHT_NAMES = ['Even', 'Lean', 'Sparse', 'Extreme'];
+const WORDS = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
+const setOf = (bits: number, n: number) => Array.from({ length: n }, (_, i) => i).filter((i) => bits & (1 << i));
+const either = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} or ${xs[xs.length - 1]}` : xs[0] ?? '');
+const utcDay = (t: number) => new Date(t * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+const utcTime = (t: number) => new Date(t * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+export function ruleLine(f: Filter, allowlistSize = 0): string {
+  const parts: string[] = [];
+  if (f.palettes) parts.push(`Palette ${either(setOf(f.palettes, 16).map((m) => [...'CMYK'].filter((_, b) => m & (1 << b)).join('')))}`);
+  if (f.prints) parts.push(`Print ${either(setOf(f.prints, 6).map((i) => PRINT_NAMES[i]))}`);
+  if (f.weights) parts.push(`Weight ${either(setOf(f.weights, 4).map((i) => WEIGHT_NAMES[i].toLowerCase()))}`);
+  if (f.eights) {
+    const ns = setOf(f.eights, 11);
+    const w = either(ns.map((n) => WORDS[n].toLowerCase()));
+    parts.push(`${w.charAt(0).toUpperCase()}${w.slice(1)} ${ns.length === 1 && ns[0] === 1 ? 'eight' : 'eights'}`);
+  }
+  const pf = Number(f.paidFrom), pt = Number(f.paidTo);
+  if (pf || pt) {
+    if (pf && pt && utcDay(pf) === utcDay(pt)) parts.push(`Paid ${utcDay(pf)}, ${utcTime(pf)}–${utcTime(pt)} UTC`);
+    else if (pf && pt) parts.push(`Paid ${utcDay(pf)} ${utcTime(pf)} to ${utcDay(pt)} ${utcTime(pt)} UTC`);
+    else parts.push(pf ? `Paid after ${utcDay(pf)} ${utcTime(pf)} UTC` : `Paid before ${utcDay(pt)} ${utcTime(pt)} UTC`);
+  }
+  if (f.minScore || f.maxScore) parts.push(f.minScore && f.maxScore ? `Rating ${f.minScore / 10}–${f.maxScore / 10}` : f.minScore ? `Rating ${f.minScore / 10}+` : `Rating up to ${f.maxScore / 10}`);
+  if (f.bitsFrom || f.bitsTo) parts.push(f.bitsFrom && f.bitsTo ? `Bits ${f.bitsFrom}–${f.bitsTo}` : f.bitsFrom ? `Bits ${f.bitsFrom}+` : `Bits up to ${f.bitsTo}`);
+  const a = Number(f.idFrom), b = Number(f.idTo);
+  if (a || b) parts.push(a && b ? `#${a.toLocaleString('en-US')}–${b.toLocaleString('en-US')}` : a ? `#${a.toLocaleString('en-US')}+` : `Up to #${b.toLocaleString('en-US')}`);
+  if (allowlistSize) parts.push(`${allowlistSize} listed Credits`);
+  return parts.join(' · ');
 }
 
 /// A trait page's card: "Sparse · Credit Union", and how many Credits have it.

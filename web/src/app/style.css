@@ -664,21 +664,6 @@ nav a .num {
     animation: none;
   }
 }
-.cell.mine::after {
-  /* A short ink bar in the cell's empty bottom strip (the art stops above it), so neighbouring Credits of
-     yours never stack into double borders. Credit art is always on white, so fixed ink reads in both themes. */
-  content: '';
-  position: absolute;
-  left: 22%;
-  right: 22%;
-  bottom: 4%;
-  height: 3px;
-  background: #0a0a0a;
-  pointer-events: none;
-}
-.sheet.sm .cell.mine::after {
-  height: 2px;
-}
 .cell img {
   transition: opacity 200ms var(--ease);
 }
@@ -2076,9 +2061,6 @@ input[type='datetime-local'] {
   .design-preview .sheet {
     gap: 0;
   }
-  .design-preview .cell.mine::after {
-    display: none;
-  }
   .design-stats {
     grid-template-columns: 1fr 1fr;
     border-top: 0;
@@ -2704,6 +2686,10 @@ a.rule-chip:hover {
   align-items: center;
   gap: 8px;
   margin-left: auto;
+}
+.page-tools .btn {
+  height: 36px;
+  padding: 0 14px;
 }
 .subtabs a[aria-current='page'] {
   background: var(--line);
@@ -5010,13 +4996,11 @@ a.who:hover .who-name {
   border-radius: var(--r);
   background: none;
   color: var(--muted);
-  box-shadow: inset 0 0 0 1px var(--line-strong);
   cursor: pointer;
-  transition: color 150ms var(--ease), box-shadow 150ms var(--ease);
+  transition: color 150ms var(--ease);
 }
 .eye-btn:hover {
   color: var(--fg);
-  box-shadow: inset 0 0 0 1px var(--fg);
 }
 .eye-btn svg {
   width: 18px;
@@ -5841,12 +5825,6 @@ dialog.eligible::backdrop {
   margin-top: 6px;
 }
 .paint-bar[hidden] {
-  display: none;
-}
-
-/* Create preview: your selected Credits are the solid ones (the rest are faded), so no frame is needed,
-   and neighbouring picks don't stack into double borders. */
-.design-preview .cell.mine::after {
   display: none;
 }
 
@@ -7014,4 +6992,74 @@ dialog.eligible::backdrop {
 }
 @media (max-width: 560px) {
   .home-go { display: none; }
+}
+
+/* ---------------------------------------------------------------- live: what wallets do, newest first */
+.live-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+.live-row {
+  display: grid;
+  grid-template-columns: minmax(0, 180px) minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 52px;
+  padding: 8px 0;
+  font-size: 14px;
+}
+.live-row + .live-row {
+  border-top: 1px solid var(--line);
+}
+.live-row.new {
+  animation: live-in 400ms var(--ease) both;
+}
+@keyframes live-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.live-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.live-what a {
+  color: var(--fg);
+}
+.live-art {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.live-art img {
+  display: block;
+  width: 28px;
+  height: 28px;
+  box-shadow: 0 0 0 1px var(--img-outline);
+}
+.live-when {
+  white-space: nowrap;
+  text-align: right;
+}
+.live-empty {
+  padding: 16px 0;
+}
+@media (max-width: 640px) {
+  .live-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 12px;
+  }
+  .live-what {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .live-art {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
 }

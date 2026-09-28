@@ -78,7 +78,7 @@ function usable(l: Json, credits: Address) {
 }
 
 /// One Credit's cheapest usable listing, or null when it has none.
-export async function best(key: string, slug: string, credits: Address, id: number): Promise<{ price: bigint; seller: Address } | null> {
+export async function best(key: string, slug: string, credits: Address, id: number): Promise<{ price: bigint; seller: Address; hash: string; protocol: string } | null> {
   let r: Json;
   try {
     r = await os(key, `/listings/collection/${slug}/nfts/${id}/best`);
@@ -87,7 +87,7 @@ export async function best(key: string, slug: string, credits: Address, id: numb
     throw e;
   }
   const l = usable(r, credits);
-  return l && l.id === String(id) ? { price: l.price, seller: l.seller } : null;
+  return l && l.id === String(id) ? { price: l.price, seller: l.seller, hash: l.hash, protocol: l.protocol } : null;
 }
 
 /// One page of OpenSea's listings of the collection, cheapest first, as fillable listings (the checks `scan` makes

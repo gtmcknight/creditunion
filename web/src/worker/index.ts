@@ -15,11 +15,11 @@ import { cacheStore, confirmListing, marketListings, type FwaListing } from './f
 import { confirmStrategy, strategyAbi, strategyListings } from './strategy';
 import { ratings } from './ratings';
 import { load, loadScores, match, predicate, type Rules } from './match';
-import { cardFor, creditCard, creditsCard, partyCard, rangeCard, timeCard, traitCard, withCard } from './og';
+import { cardFor, creditCard, creditsCard, partyCard, rangeCard, ruleLine, timeCard, traitCard, withCard, type Filter } from './og';
 import { parseTrait } from '../shared/trait';
-import { drawCredit, drawParty, sample, type CreditFacts, type PartyCard } from './card';
+import { drawCredit, drawUnion, sample, type CreditFacts, type UnionCard } from './card';
 import { printOf, type Rect } from './print';
-import { stamp } from '../shared/stamp';
+import { readActivity } from './activity';
 import { keyOf, ruleFor } from '../shared/layout';
 
 interface RateLimit {
@@ -65,6 +65,8 @@ const RPC_METHODS = new Set([
 const MAX_RPC_BODY = 64_000;
 const MAINNET_CREDITS: Address = '0x97630aA70AB14ed9883B41dAfccBc11349723043';
 const MAX_RPC_BATCH = 50;
+/// The mainnet factory's deploy block (contracts/DEPLOY.md); /activity scans from here.
+const ACTIVITY_FROM = 26_072_342n;
 /// Credits ever minted; ids outside 1..SUPPLY are refused before any RPC.
 const SUPPLY = 122_154;
 const inSupply = (id: number) => Number.isInteger(id) && id >= 1 && id <= SUPPLY;
@@ -501,14 +503,14 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
               if (!l) return null;
               const c = live ? client(env) : createPublicClient({ transport: http(env.ENS_RPC || 'https://eth.drpc.org', { timeout: 8_000 }) });
               const holder = await c.readContract({ address: credits, abi: creditsAbi, functionName: 'ownerOf', args: [BigInt(id)] }).catch(() => null);
-              return holder && holder.toLowerCase() === l.seller.toLowerCase() ? l.price : null;
+              return holder && holder.toLowerCase() === l.seller.toLowerCase() ? l : null;
             })
           : null,
         strategy ? main.readContract({ address: strategy, abi: strategyAbi, functionName: 'nftForSale', args: [BigInt(id)] }).catch(() => 0n) : 0n,
         fwaListings(env, url, ctx).then((ls) => ls.find((l) => l.id === String(id)) ?? null),
       ]);
       const offers: Listing[] = [];
-      if (os !== null) offers.push({ id: String(id), price: os.toString(), source: 'opensea' });
+      if (os !== null) offers.push({ id: String(id), price: os.price.toString(), source: 'opensea', hash: os.hash, protocol: os.protocol });
       if (held > 0n) offers.push({ id: String(id), price: held.toString(), source: 'strategy' });
       if (fwa) offers.push({ id: String(id), price: fwa.price, source: 'fwa', listingId: fwa.listingId });
       offers.sort((a, b) => (BigInt(a.price) < BigInt(b.price) ? -1 : 1));
@@ -521,12 +523,40 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
               // Where to buy it in-app: the strategy sells a held Credit itself; FWA's market by listing id.
               contract: l.source === 'strategy' ? addrOrNull(env.STRATEGY) : l.source === 'fwa' ? addrOrNull(env.FWA_MARKET) : null,
               listingId: l.listingId ?? null,
+              // An OpenSea order, bought in-app through the Sweeper (Sweeper.buy), like a sweep of one.
+              hash: l.hash ?? null,
+              protocol: l.protocol ?? null,
               url: listingUrl(env, live, l),
               preview: !live,
             }
           : { price: null, preview: !live },
         { headers: { 'cache-control': 'public, max-age=60' } },
       );
+      ctx.waitUntil(cache.put(key, res.clone()));
+      return res;
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
+  }
+
+  // /activity: what wallets have done on the site, newest first (activity.ts). Fifteen seconds per colo.
+  if (url.pathname === '/activity') {
+    const cache = caches.default;
+    const key = new Request(`${url.origin}/activity`);
+    const hit = await cache.match(key);
+    if (hit) return hit;
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    try {
+      const c = client(env);
+      // Mainnet scans from the factory's deploy block; elsewhere, the last ~2 weeks.
+      const from = env.CHAIN_ID === '1' ? ACTIVITY_FROM : (await c.getBlockNumber()) - 100_000n;
+      const items = await readActivity(c as never, cache, `${url.origin}/activity-state/${env.FACTORY.toLowerCase()}`, {
+        factory: env.FACTORY,
+        sweeper: hasSweeper(env) ? env.SWEEPER : null,
+        credits: env.CREDITS,
+        from: from < 0n ? 0n : from,
+      });
+      const res = Response.json({ items }, { headers: { 'cache-control': 'public, max-age=15' } });
       ctx.waitUntil(cache.put(key, res.clone()));
       return res;
     } catch (e) {
@@ -716,7 +746,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   }
   if (card && party && !(await limited(env.RL_MISC, req)) && (await isBatch(env, url, party.toLowerCase() as Address))) {
     const p = await readParty(env, party as Address).catch(() => null);
-    if (p) card = partyCard(party, p.name, p.state, p.count, p.highBid > 0n ? ethText(p.highBid) : '', stamp(p.state, p.count, p.highBid));
+    if (p) card = partyCard(party, p.name, ruleLine(p.filter, p.allowlistSize));
   }
   if (card) {
     const shell = await env.ASSETS.fetch(new Request(new URL('/', url), req));
@@ -745,27 +775,32 @@ async function creditFacts(env: Env, url: URL, id: number): Promise<CreditFacts>
   };
 }
 
-const STATE_NAMES = ['Open', 'Full', 'Expired', 'Auction', 'Settled'] as const;
-const ethText = (wei: bigint) => `${(Number(wei) / 1e18).toFixed(4).replace(/\.?0+$/, '')} ETH`;
 
-/// What a link card needs from a party: its summary and its Credits in sheet order.
-async function readParty(env: Env, batch: Address): Promise<PartyCard> {
-  const c = client(env);
-  const [s, slots] = await Promise.all([
-    c.readContract({ address: batch, abi: batchAbi, functionName: 'summary' }),
-    c.readContract({ address: batch, abi: batchAbi, functionName: 'slots' }),
-  ]);
-  const sum = s as unknown as { name: string; state: number; count: bigint; split: number; highBid: bigint; auctionEnd: bigint; phase: number };
-  return {
-    name: [...sum.name].slice(0, 64).join(''), // names are the creator's; cards and tags show at most 64 characters
-    state: STATE_NAMES[Number(sum.state)],
-    count: Number(sum.count),
-    ids: (slots[0] as readonly bigint[]).map(Number),
-    early: Number(sum.split) === 1,
-    highBid: sum.highBid,
-    auctionEnd: Number(sum.auctionEnd),
-    canBurn: Number(sum.phase) === 3, // Batch.Phase.Burnable: locked, anyone can burn now
+/// What a link card needs from a Credit Union: only what never changes, its name and its rule.
+type UnionFacts = { name: string; filter: Filter; allowlistSize: number };
+async function readParty(env: Env, batch: Address): Promise<UnionFacts> {
+  const s = (await client(env).readContract({ address: batch, abi: batchAbi, functionName: 'summary' })) as unknown as {
+    name: string;
+    filter: Filter;
+    allowlistSize: bigint;
   };
+  // names are the creator's; cards and tags show at most 64 characters
+  return { name: [...s.name].slice(0, 64).join(''), filter: s.filter, allowlistSize: Number(s.allowlistSize) };
+}
+
+/// A rule as the matcher's Rules, to pick the card's wall.
+const rulesOf = (f: Filter) => ({
+  palettes: f.palettes, prints: f.prints, weights: f.weights, eights: f.eights,
+  paidFrom: Number(f.paidFrom), paidTo: Number(f.paidTo), idFrom: Number(f.idFrom), idTo: Number(f.idTo),
+  minScore: f.minScore, maxScore: f.maxScore, bitsFrom: f.bitsFrom, bitsTo: f.bitsTo,
+});
+
+/// Every Credit the rules let in, in Credit order.
+async function admitted(env: Env, url: URL, rules: Record<string, number>): Promise<number[]> {
+  const [t, ok] = await Promise.all([load(env.ASSETS, url.origin), predicate(env.ASSETS, url.origin, rules)]);
+  const out: number[] = [];
+  for (let id = 1; id <= t.length; id++) if (ok(id)) out.push(id);
+  return out;
 }
 
 const MULTICALL3: Address = '0xcA11bde05977b3631167028862bE2a173976CA11'; // same address on every chain
@@ -799,23 +834,31 @@ async function printsFor(env: Env, ids: number[], real = false): Promise<(Rect[]
   }
 }
 
-/// /og/party/<address>.png and /og/sample/<kind>.png. Party cards are cached a minute: they change as it fills.
-/// Cached by path plus the `s` stamp only, so made-up query strings can't force a redraw.
+/// /og/party/<address>.png and /og/sample/<kind>.png. A union's card never changes (name and rule are fixed), so
+/// it's cached a day. Cached by path plus the `v` design version only, so made-up query strings can't force a redraw.
 async function linkCard(req: Request, env: Env, url: URL, ctx: ExecutionContext, kind: string, key: string): Promise<Response> {
   const cache = caches.default;
-  const s = kind === 'party' ? (url.searchParams.get('s') ?? '') : '';
-  const cacheKey = `${url.origin}${url.pathname.toLowerCase()}${/^[0-9a-z.]{1,24}$/.test(s) ? `?s=${s}` : ''}`;
+  const v = url.searchParams.get('v') ?? '';
+  const cacheKey = `${url.origin}${url.pathname.toLowerCase()}${/^\d{1,3}$/.test(v) ? `?v=${v}` : ''}`;
   const hit = await cache.match(cacheKey);
   if (hit) return hit;
   const generic = () => env.ASSETS.fetch(new Request(new URL('/og/party.png', url)));
   if (await limited(env.RL_MISC, req)) return generic();
-  let p: PartyCard | null;
-  if (kind === 'sample') p = sample(key);
-  else if (/^0x[0-9a-fA-F]{40}$/.test(key) && (await isBatch(env, url, key.toLowerCase() as Address))) p = await readParty(env, key as Address).catch(() => null);
-  else p = null;
-  if (!p) return generic();
-  const body = await drawParty(env.ASSETS, url.origin, p, await printsFor(env, p.ids, kind === 'sample'));
-  const res = new Response(body, { headers: { 'content-type': 'image/png', 'cache-control': `public, max-age=${kind === 'sample' ? 3600 : 60}` } });
+  let u: UnionCard | null = null;
+  try {
+    if (kind === 'sample') {
+      const x = sample(key);
+      if (x) u = { name: x.name, rule: x.rule, ids: await admitted(env, url, x.rules) };
+    } else if (/^0x[0-9a-fA-F]{40}$/.test(key) && (await isBatch(env, url, key.toLowerCase() as Address))) {
+      const p = await readParty(env, key as Address);
+      u = { name: p.name, rule: ruleLine(p.filter, p.allowlistSize), ids: await admitted(env, url, rulesOf(p.filter)) };
+    }
+  } catch {
+    u = null;
+  }
+  if (!u) return generic();
+  const body = await drawUnion(env.ASSETS, url.origin, u);
+  const res = new Response(body, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } });
   ctx.waitUntil(cache.put(cacheKey, res.clone()));
   return res;
 }

@@ -124,7 +124,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         tab === 'parties'
           ? [{ label: 'All <span class="num muted" id="n-all"></span>', attrs: 'data-view="all"' }, { label: 'For you <span class="num muted" id="n-you"></span>', attrs: 'data-view="you"' }]
           : STAGES.map(([k, l]) => ({ label: `${l} <span class="num muted" id="n-${k}"></span>`, attrs: `data-stage="${k}"` })),
-      tools: tab === 'parties' ? sort : undefined,
+      tools: tab === 'parties' ? `${sort}<a class="btn primary" href="/create">Start a Credit Union</a>` : undefined,
       label: 'Show',
     })}
     <div id="batches"><p class="muted">Loading from chain…</p></div>

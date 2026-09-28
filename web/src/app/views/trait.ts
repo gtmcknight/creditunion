@@ -292,10 +292,13 @@ function valuesOf(kind: TraitKind): TraitValue[] {
 export const creditsHead = (current: string, value?: string) => {
   const sections: [string, string][] = [['credits', 'Overview'], ...TRAIT_KINDS.map((k): [string, string] => [k, valuesOf(k)[0].label]), ['time', 'Time'], ['rating', 'Rating'], ['bits', 'Bits']];
   const label = sections.find(([k]) => k === current)?.[1] ?? '';
+  // A single Credit (current 'credit') sits right under Credits, with no tab lit.
   const crumb =
     current === 'credits'
       ? '<b>Credits</b>'
-      : `<a href="/credits">Credits</a><span>/</span>${value ? `<a href="/${current}">${esc(label)}</a><span>/</span><b>${esc(value)}</b>` : `<b>${esc(label)}</b>`}`;
+      : !label
+        ? `<a href="/credits">Credits</a><span>/</span><b>${esc(value ?? '')}</b>`
+        : `<a href="/credits">Credits</a><span>/</span>${value ? `<a href="/${current}">${esc(label)}</a><span>/</span><b>${esc(value)}</b>` : `<b>${esc(label)}</b>`}`;
   return `<header class="jb-head">
       <nav class="jb-crumb" aria-label="Where">${crumb}</nav>
       <nav class="jb-kinds" aria-label="Credits by">${sections.map(([k, l]) => `<a href="/${k}"${k === current ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</nav>
