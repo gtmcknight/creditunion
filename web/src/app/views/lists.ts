@@ -137,7 +137,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yo
   const corner = s.state === 'Open' ? `<span class="count num">${s.count}/80</span>` : `<span class="tag state corner ${s.state.toLowerCase()}">${s.state}</span>`;
   const members = new Set(depositors.map((d) => d.toLowerCase())).size;
   const last = lastIn.get(s.address.toLowerCase());
-  const momentum = `${members} ${members === 1 ? 'member' : 'members'}${last ? ` · last joined ${ago(last)}` : ''}`;
+  const momentum = `${members} ${members === 1 ? 'member' : 'members'}${last ? ` · <span class="lj-word">last joined </span>${ago(last)}` : ''}`;
   registerFilter(s.address, s.filter);
   registerDeposits(ids, depositors, s.split === 1);
   return `<a class="card${canJoin ? ' can-join' : ''}" href="/union/${s.address}">
@@ -146,7 +146,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yo
       <div class="meta-text">
         <strong>${esc(s.name || 'Untitled')}</strong>
         <span class="meta-by">${who(s.creator, 'sm', 'nested')}</span>
-        <span class="meta-line num">${payGlyph(s.split === 1)}${s.state === 'Open' ? momentum : s.state === 'Full' ? `${members} ${members === 1 ? 'member' : 'members'} · ${esc(s.phase === 'Waiting' ? 'waiting for Jack' : fullStatus(s))}` : esc(status(s))}</span>
+        <span class="meta-line num">${payGlyph(s.split === 1)}<span class="meta-line-text">${s.state === 'Open' ? momentum : s.state === 'Full' ? `${members} ${members === 1 ? 'member' : 'members'} · ${esc(s.phase === 'Waiting' ? 'waiting for Jack' : fullStatus(s))}` : esc(status(s))}</span></span>
       </div>
       ${cta && !(s.state === 'Open' && mine.size) ? `<span class="btn sm primary cta">${cta}</span>` : ''}
     </div>
