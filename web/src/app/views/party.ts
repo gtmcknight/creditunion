@@ -1,7 +1,7 @@
 import { parseAbi, parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi } from '../abi';
 import { canBatch, config, explorer, pub, send, sendBatch, session } from '../chain';
-import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, forgetBatches, getBatch, getSummary, hasLayout, indexedBatch, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
+import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, forgetBatches, getBatch, hasLayout, indexedBatch, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { hydrate, pct, who } from '../ens';
 import { examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
@@ -241,7 +241,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     });
   });
   bind(b, m, myIds, rerender, keyed);
-  watchLive(app, address, b.s, rerender, !!indexed);
+  watchLive(app, address, b, rerender, !!indexed);
   // Just made on the create page: congratulate once. The flag goes as soon as it's read, so a refresh won't reshow it.
   try {
     if (sessionStorage.getItem('cu-created')?.toLowerCase() === address.toLowerCase()) {
@@ -257,13 +257,15 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   } catch {}
 }
 
-/// Keep the page current while someone sits on it: every block or so, read the summary and redraw when the
-/// Credit Union changed (someone deposited, withdrew, bid, or it locked). Waits while the tab is hidden, a
+/// Keep the page current while someone sits on it: every block or so, read the union and redraw when it changed
+/// (someone deposited, withdrew, bid, or it locked). Which Credits are in and whose they are count too, so a deposit
+/// and a withdrawal in the same block, which leave the count where it was, still show. Waits while the tab is hidden, a
 /// transaction is in flight or a dialog is open. New Credits drop in with the usual animation. `now`: look once
 /// straight away too (the page was drawn from the index, which can be a few seconds old).
-function watchLive(app: HTMLElement, address: Address, s: Ctx['s'], rerender: () => void, now = false) {
+function watchLive(app: HTMLElement, address: Address, b: Ctx, rerender: () => void, now = false) {
   if (live) clearInterval(live);
-  const was = `${stamp(s.state, s.count, s.highBid)}:${s.lockAt}:${s.state}`;
+  const mark = ({ s, ids, depositors }: Ctx) => `${stamp(s.state, s.count, s.highBid)}:${s.lockAt}:${s.state}:${ids.join()}:${depositors.join().toLowerCase()}`;
+  const was = mark(b);
   const path = location.pathname;
   const look = async () => {
     if (location.pathname !== path || !app.isConnected) {
@@ -273,9 +275,9 @@ function watchLive(app: HTMLElement, address: Address, s: Ctx['s'], rerender: ()
     }
     if (document.hidden || busy || document.querySelector('dialog[open]')) return;
     try {
-      const n = await getSummary(address);
+      const n = await getBatch(address);
       if (location.pathname !== path || busy) return;
-      if (`${stamp(n.state, n.count, n.highBid)}:${n.lockAt}:${n.state}` !== was) {
+      if (mark(n) !== was) {
         clearInterval(live!);
         live = null;
         forgetBatches(); // the lists should show it changed too

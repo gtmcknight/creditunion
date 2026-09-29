@@ -10,6 +10,7 @@ import { mint } from './views/mint';
 import { previews } from './views/previews';
 import { live } from './views/live';
 import { profile } from './views/profile';
+import { printer } from './views/printer';
 import { credit } from './views/credit';
 import { traitPage } from './views/trait';
 import { timePage } from './views/time';
@@ -70,6 +71,7 @@ async function route() {
     else if (page === 'me') await profile(app, route);
     else if (page === 'member' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await profile(app, route, arg as Address);
     else if (page === 'create') await create(app);
+    else if (page === 'printer' && (!arg || arg === 'mine' || /^[A-Za-z0-9]{10}$/.test(arg))) await printer(app, arg, route);
     else if (page === 'credit') await credit(app, arg ?? '');
     else if (page === 'time') await timePage(app);
     else if (page === 'rating') await ratingPage(app);

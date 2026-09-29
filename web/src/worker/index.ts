@@ -13,6 +13,7 @@
 /// what the asset layer serves on its own).
 import { createPublicClient, fallback, hexToBytes, http, type Address, type Hex, parseAbiItem } from 'viem';
 import { mainnet } from 'viem/chains';
+import { normalize } from 'viem/ens';
 import { batchAbi, creditsAbi, creditArtAbi, factoryAbi } from '../app/abi';
 import { best, bestPage, quote, scan, type Extra, type Listing } from './opensea';
 import { cacheStore, confirmListing, marketListings, type FwaListing } from './fwa';
@@ -54,6 +55,8 @@ interface Env {
   RL_QUOTE?: RateLimit;
   RL_MISC?: RateLimit;
   RL_ART?: RateLimit;
+  /// Plans (/plan/<id>): a design's 80 Credits in slot order and who buys and deposits which. Unset: plans are off.
+  PLANS?: KVNamespace;
   /// FWA's marketplace on mainnet: a second Buy Credits source. Empty to turn it off.
   FWA_MARKET?: string;
   /// CreditStrategy (nftstrategy.fun) on mainnet: the Credits it holds for sale are a third Buy Credits source.
@@ -199,6 +202,15 @@ export default {
 
   // Every 5 minutes: the keeper (keeper.ts), once KEEPER_KEY is set.
   async scheduled(_event, env, ctx) {
+    // The Printer's book of listings, kept fresh for /market.json.
+    if (env.PLANS) {
+      const plans = env.PLANS;
+      ctx.waitUntil(
+        readMarket(env, new URL('https://creditunion.fun/market.json'), ctx)
+          .then((body) => plans.put('market', body))
+          .catch((e) => console.error('[market] refresh failed', safeError(e))),
+      );
+    }
     if (!env.KEEPER_KEY) return;
     ctx.waitUntil(
       keep({
@@ -318,6 +330,133 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
     try {
       return Response.json(await match(env.ASSETS, url.origin, rules, page >= 0 ? 120 : 80, page), { headers: { 'cache-control': 'no-store' } });
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502 });
+    }
+  }
+
+  // The whole book for the Printer: every Credit for sale (OpenSea, CreditStrategy, FWA), cheapest listing each, as
+  // [id, price in wei, source]. Rebuilt every 5 minutes by the cron (reading it cold takes a minute or more), so
+  // this is one storage read; buying re-prices each Credit anyway.
+  if (url.pathname === '/market.json') {
+    if (!sameSite(req)) return text('forbidden', 403);
+    const kept = env.PLANS ? await env.PLANS.get('market', { cacheTtl: 60 }) : null;
+    if (kept) return new Response(kept, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=60' } });
+    if (await limited(env.RL_MISC, req, 20)) return text('slow down', 429);
+    try {
+      const body = await readMarket(env, url, ctx);
+      if (env.PLANS) ctx.waitUntil(env.PLANS.put('market', body));
+      return new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=60' } });
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502 });
+    }
+  }
+
+  // Printer plans: a picture's 80 Credits, rising by number (the union burns them in Number order), each slot with
+  // the friend who brings it and whether they already own it. Friends buy theirs; a slot whose listing sold before
+  // it was bought takes a replacement (signed by a plan wallet); once every Credit is held, a plan wallet opens the
+  // union with these 80 as its allowlist. The union stays off the site's lists until it fills.
+  // A wallet's plans, for its own page. Plans are private until their union fills, so the list needs the wallet's
+  // signature on "Credit Union: my plans <day>" (a day's signature, so one signing lasts the visit).
+  if (url.pathname === '/plans/mine' && req.method === 'POST') {
+    if (!env.PLANS) return text('plans are off here', 501);
+    if (!sameSite(req)) return text('forbidden', 403);
+    if (await limited(env.RL_MISC, req, 5)) return text('slow down', 429);
+    try {
+      const b = JSON.parse((await readBody(req, 4_000)) ?? '') as { address?: string; day?: number; sig?: string };
+      const address = String(b.address ?? '').toLowerCase(), day = Number(b.day);
+      if (!/^0x[0-9a-f]{40}$/.test(address) || !Number.isInteger(day) || Math.abs(day - Math.floor(Date.now() / 86_400_000)) > 1) throw 0;
+      if (!(await client(env).verifyMessage({ address: address as Address, message: `Credit Union: my plans ${day}`, signature: String(b.sig) as Hex }))) return text('bad signature', 400);
+      const ids = (await env.PLANS.get<string[]>(`w:${address}`, 'json')) ?? [];
+      const plans = (await Promise.all(ids.map((id) => env.PLANS!.get<{ id: string; name: string; createdAt: number; union: Address | null; wallets: unknown[] }>(id, 'json'))))
+        .filter((x) => !!x)
+        .map((x) => ({ id: x!.id, name: x!.name, createdAt: x!.createdAt, union: x!.union, people: x!.wallets.length }));
+      return Response.json({ plans }, { headers: { 'cache-control': 'no-store' } });
+    } catch {
+      return text('bad request', 400);
+    }
+  }
+
+  const planPath = url.pathname.match(/^\/plans(?:\/([A-Za-z0-9]{10})(\.json|\/union|\/swap)?)?$/);
+  if (planPath) {
+    if (!env.PLANS) return text('plans are off here', 501);
+    if (!sameSite(req)) return text('forbidden', 403);
+    const [, id, rest] = planPath;
+    if (req.method === 'GET' && id && rest === '.json') {
+      const plan = await env.PLANS.get(id);
+      return plan ? new Response(plan, { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } }) : text('no such plan', 404);
+    }
+    if (req.method !== 'POST' || (id ? !rest || rest === '.json' : !!rest)) return text('bad request', 400);
+    if (await limited(env.RL_MISC, req, 10)) return text('slow down', 429);
+    const raw = await readBody(req, 64_000);
+    if (raw === null) return text('too large', 413);
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(raw) as Record<string, unknown>;
+      if (!body || typeof body !== 'object') throw 0;
+    } catch {
+      return text('bad request', 400);
+    }
+    const addr = (x: unknown) => (typeof x === 'string' && /^0x[0-9a-fA-F]{40}$/.test(x) ? (x.toLowerCase() as Address) : null);
+    if (!id) {
+      try {
+        const plan = checkPlan(body);
+        const key = Array.from(crypto.getRandomValues(new Uint8Array(10)), (b) => 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b % 56]).join('');
+        const saved = { id: key, ...plan, union: null as Address | null, createdAt: Date.now() };
+        await env.PLANS.put(key, JSON.stringify(saved));
+        // Each wallet's plans, so it can find them again from its own page.
+        await Promise.all(
+          plan.wallets.map(async (w) => {
+            const had = (await env.PLANS!.get<string[]>(`w:${w.address}`, 'json')) ?? [];
+            await env.PLANS!.put(`w:${w.address}`, JSON.stringify([key, ...had.filter((x) => x !== key)].slice(0, 200)));
+          }),
+        );
+        return Response.json(saved, { status: 201 });
+      } catch {
+        return text('bad request', 400);
+      }
+    }
+    const stored = await env.PLANS.get(id);
+    if (!stored) return text('no such plan', 404);
+    const plan = JSON.parse(stored) as Plan;
+    const c = client(env);
+    const inPlan = (a: string) => plan.wallets.some((w) => w.address === a.toLowerCase());
+    if (rest === '/swap') {
+      // A replacement for a slot whose Credit nobody in the plan holds (it sold, or was delisted). Signed by a plan
+      // wallet; the new Credit must be new to the plan and keep the numbers rising.
+      if (plan.union) return text('the union is open: the 80 are fixed', 400);
+      const slot = Number(body.slot), next = String(body.id ?? ''), by = addr(body.by);
+      if (!Number.isInteger(slot) || slot < 0 || slot > 79 || !/^\d{1,6}$/.test(next) || !inSupply(Number(next)) || !by || !inPlan(by)) return text('bad request', 400);
+      if (plan.slots.some((s) => s.id === next)) return text('already in the plan', 400);
+      const lo = slot > 0 ? Number(plan.slots[slot - 1].id) : 0, hi = slot < 79 ? Number(plan.slots[slot + 1].id) : Infinity;
+      if (plan.order !== 'deposit' && !(Number(next) > lo && Number(next) < hi)) return text('numbers must keep rising', 400);
+      const message = `Credit Union plan ${id}: slot ${slot + 1} takes #${next} instead of #${plan.slots[slot].id}`;
+      try {
+        if (!(await c.verifyMessage({ address: by, message, signature: String(body.sig) as Hex }))) return text('bad signature', 400);
+        const owner = ((await c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'ownerOf', args: [BigInt(plan.slots[slot].id)] })) as string).toLowerCase();
+        if (inPlan(owner)) return text('someone in the plan already holds that Credit', 400);
+      } catch (e) {
+        return Response.json({ error: safeError(e) }, { status: 502 });
+      }
+      plan.slots[slot] = { ...plan.slots[slot], id: next, owned: false };
+      await env.PLANS.put(id, JSON.stringify(plan));
+      return Response.json(plan);
+    }
+    // The union the plan opened: our factory's, opened by a plan wallet, Number order, equal payout (early bird would
+  // turn depositing into a race between friends), exactly the plan's 80. Once.
+    if (plan.union) return Response.json(plan);
+    const batch = addr(body.union);
+    if (!batch) return text('bad request', 400);
+    try {
+      if (!(await c.readContract({ address: env.FACTORY, abi: factoryAbi, functionName: 'isBatch', args: [batch] }))) return text('not a union', 400);
+      const s = (await c.readContract({ address: batch, abi: batchAbi, functionName: 'summary' })) as unknown as { creator: Address; arrangement: number; split: number; allowlistSize: bigint };
+      const all = await Promise.all(plan.slots.map((x) => c.readContract({ address: batch, abi: batchAbi, functionName: 'allowed', args: [BigInt(x.id)] })));
+      if (!inPlan(s.creator) || Number(s.arrangement) !== (plan.order === 'deposit' ? 0 : 2) || Number(s.split) !== 0 || Number(s.allowlistSize) !== 80 || all.some((ok) => !ok)) return text('that union does not match this plan', 400);
+      const next = { ...plan, union: batch };
+      const hidden = new Set((await env.PLANS.get<string[]>('hidden', 'json')) ?? []);
+      hidden.add(batch);
+      await Promise.all([env.PLANS.put(id, JSON.stringify(next)), env.PLANS.put('hidden', JSON.stringify([...hidden]))]);
+      return Response.json(next);
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502 });
     }
@@ -592,7 +731,17 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         credits: env.CREDITS,
         from: from < 0n ? 0n : from,
       });
-      const res = Response.json({ items }, { headers: { 'cache-control': 'public, max-age=15' } });
+      // A plan's union stays out of Activity until it fills.
+      const hidden = await hiddenUnions(env);
+      const filling = new Set<string>();
+      await Promise.all(
+        [...hidden].map(async (a) => {
+          const s = (await c.readContract({ address: a as Address, abi: batchAbi, functionName: 'summary' }).catch(() => null)) as { count: bigint } | null;
+          if (!s || Number(s.count) < 80) filling.add(a);
+        }),
+      );
+      const shown = filling.size ? items.filter((x) => !(x as { union?: string }).union || !filling.has(String((x as { union?: string }).union).toLowerCase())) : items;
+      const res = Response.json({ items: shown }, { headers: { 'cache-control': 'public, max-age=15' } });
       ctx.waitUntil(cache.put(key, res.clone()));
       return res;
     } catch (e) {
@@ -662,6 +811,26 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const res = Response.json({ owner: who }, { headers: { 'cache-control': `public, max-age=${who ? 300 : 60}` } });
     ctx.waitUntil(cache.put(key, res.clone()));
     return res;
+  }
+
+  // A name's address (always from mainnet), for typing friends' names on the Printer. Cached an hour.
+  const named = url.pathname.match(/^\/ens\/name\/([a-z0-9\-_.]{3,100}\.[a-z]{2,20})$/i);
+  if (named) {
+    const cache = caches.default;
+    const key = new Request(url.origin + url.pathname.toLowerCase());
+    const hit = await cache.match(key);
+    if (hit) return hit;
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    const rpc = env.ENS_RPC || (env.CHAIN_ID === '1' ? rpcUrl(env) : 'https://eth.drpc.org');
+    const c = createPublicClient({ chain: mainnet, transport: http(rpc, { timeout: 5_000 }) });
+    try {
+      const address = await c.getEnsAddress({ name: normalize(named[1]) });
+      const res = Response.json({ address }, { headers: { 'cache-control': `public, max-age=${address ? 3600 : 300}` } });
+      ctx.waitUntil(cache.put(key, res.clone()));
+      return res;
+    } catch {
+      return Response.json({ address: null }, { headers: { 'cache-control': 'no-store' } });
+    }
   }
 
   const ens = url.pathname.match(/^\/ens\/(0x[0-9a-fA-F]{40})$/);
@@ -788,7 +957,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   }
   if (card) {
     const shell = await env.ASSETS.fetch(new Request(new URL('/', url), req));
-    if (shell.ok && (shell.headers.get('content-type') ?? '').includes('text/html')) return withCard(shell, card, url, bootHead(env, url));
+    // The Printer is unlisted: nothing links to it, and search engines leave it out.
+    const unlisted = /^\/printer(\/|$)/.test(url.pathname) ? '\n  <meta name="robots" content="noindex, nofollow">' : '';
+    if (shell.ok && (shell.headers.get('content-type') ?? '').includes('text/html')) return withCard(shell, card, url, bootHead(env, url) + unlisted);
     return shell;
   }
 
@@ -860,6 +1031,64 @@ async function unionsBody(env: Env, url: URL, ctx: ExecutionContext, fresh = fal
   return body;
 }
 
+
+/// A printer plan as stored (plus id, union and createdAt).
+type Plan = {
+  name: string;
+  target: string; // the framed picture, 64 x 80, as a PNG data URL: replacements are matched against it
+  wallets: { address: Address; label: string; cap: number }[]; // cap: most of the 80 this wallet brings, in percent
+  slots: { id: string; wallet: number; owned: boolean }[]; // slot order; ids rise unless `order` is deposit
+  order: 'deposit' | 'number'; // deposit: one wallet deposits all 80 in slot order; number: the union sorts them
+  union: Address | null;
+};
+function checkPlan(b: Record<string, unknown>): Omit<Plan, 'union'> {
+  const name = String(b.name ?? '').trim().slice(0, 64);
+  const target = String(b.target ?? '');
+  if (!name || !/^data:image\/png;base64,[A-Za-z0-9+/=]{100,40000}$/.test(target)) throw 0;
+  const wallets = (b.wallets as { address?: unknown; label?: unknown; cap?: unknown }[]).map((w) => ({
+    address: (typeof w.address === 'string' && /^0x[0-9a-fA-F]{40}$/.test(w.address) ? w.address.toLowerCase() : '') as Address,
+    label: String(w.label ?? '').trim().slice(0, 32),
+    cap: Number(w.cap),
+  }));
+  if (!wallets.length || wallets.length > 8 || wallets.some((w) => !w.address || !Number.isInteger(w.cap) || w.cap < 1 || w.cap > 100)) throw 0;
+  if (new Set(wallets.map((w) => w.address)).size !== wallets.length) throw 0;
+  const order = b.order === 'deposit' ? 'deposit' : 'number';
+  if (order === 'deposit' && wallets.length !== 1) throw 0; // only one wallet can deposit in exact order without turns
+  const slots = (b.slots as { id?: unknown; wallet?: unknown; owned?: unknown }[]).map((s) => ({ id: String(s.id), wallet: Number(s.wallet), owned: !!s.owned }));
+  if (slots.length !== 80 || new Set(slots.map((s) => s.id)).size !== 80) throw 0;
+  if (slots.some((s, k) => !/^\d{1,6}$/.test(s.id) || !inSupply(Number(s.id)) || (order === 'number' && k > 0 && Number(s.id) <= Number(slots[k - 1].id)))) throw 0;
+  if (slots.some((s) => !Number.isInteger(s.wallet) || s.wallet < 0 || s.wallet >= wallets.length)) throw 0;
+  if (wallets.some((w, i) => slots.filter((s) => s.wallet === i).length > Math.ceil((w.cap * 80) / 100))) throw 0;
+  return { name, target, wallets, slots, order };
+}
+
+/// Unions a plan opened, kept off the lists until they fill.
+async function hiddenUnions(env: Env): Promise<Set<string>> {
+  if (!env.PLANS) return new Set();
+  return new Set(((await env.PLANS.get<string[]>('hidden', { type: 'json', cacheTtl: 60 })) ?? []).map((a) => a.toLowerCase()));
+}
+
+/// Every Credit for sale, cheapest listing each: FWA and CreditStrategy, then OpenSea's pages to the end.
+async function readMarket(env: Env, url: URL, ctx: ExecutionContext): Promise<string> {
+  const credits = hasSweeper(env) ? env.CREDITS : MAINNET_CREDITS;
+  const best = new Map<string, [string, string, string]>();
+  const add = (id: string, price: string, source: string) => {
+    const had = best.get(id);
+    if (!had || BigInt(price) < BigInt(had[1])) best.set(id, [id, price, source]);
+  };
+  for (const e of (await extras(env, url, ctx)).extra) add(e.id, e.price, e.source);
+  if (env.OPENSEA_API_KEY) {
+    let next = '';
+    for (let page = 0; page < 200; page++) {
+      const pg = await bestPageCached(env, url, ctx, credits, next);
+      for (const l of pg.items) add(l.id, l.price, 'opensea');
+      if (!pg.next) break;
+      next = pg.next;
+    }
+  }
+  return JSON.stringify({ at: Date.now(), items: [...best.values()] });
+}
+
 async function readUnions(env: Env): Promise<string> {
   return toJson({ at: Math.floor(Date.now() / 1000), unions: await unionList(env) });
 }
@@ -879,10 +1108,12 @@ async function unionList(env: Env) {
   const res = hasMulticall(env)
     ? await c.multicall({ contracts, allowFailure: true, multicallAddress: MULTICALL3, batchSize: 8_192 }) // ~25 unions a call: a full one's slots cost ~350k gas to read
     : await Promise.all(contracts.map((x) => c.readContract(x).then((result) => ({ status: 'success' as const, result }), () => ({ status: 'failure' as const, result: undefined }))));
+  const hidden = await hiddenUnions(env);
   const unions = addrs.flatMap((address, i) => {
     const [s, sl] = [res[2 * i], res[2 * i + 1]];
     if (s.status !== 'success' || sl.status !== 'success') return [];
     const [ids, depositors] = sl.result as readonly [readonly bigint[], readonly Address[]];
+    if (ids.length < 80 && hidden.has(address.toLowerCase())) return []; // a plan's union, still filling
     return [{ address, summary: s.result, ids: ids.map(Number), depositors }];
   });
   return unions;
@@ -1134,8 +1365,8 @@ function openseaTrait(t: NonNullable<ReturnType<typeof parseTrait>>): { traitTyp
 /// today, as a guard.
 const RANGE_DEPTH = 150;
 
-/// The most Credits one sweep takes.
-const MAX_SWEEP = 24;
+/// The most Credits one quote takes: the Printer buys 40 at a time; the site's own Buy sliders stop at 24.
+const MAX_SWEEP = 40;
 /// Listed Credits per page of /opensea/listed (before a trait filters them).
 const LISTED_CHUNK = 60;
 const offOpenSea = (env: Env) => !!(addrOrNull(env.FWA_MARKET) || addrOrNull(env.STRATEGY));
