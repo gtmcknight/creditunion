@@ -82,12 +82,15 @@ type Pen = {
 /// Paints marks onto a canvas `W` device pixels wide, on white. Rects snap to device pixels, as Jack's mock does.
 export function paint(g: Pen, W: number, marks: readonly Mark[]) {
   const k = W / PAGE.w;
+  // Neighbouring cells reach their shared edge by different sums; trimming the float noise first keeps both
+  // snapping to the same pixel, so no hairline of paper shows between them.
+  const snap = (v: number) => Math.round(Math.round(v * 1e3) * 1e-3 * k);
   g.fillStyle = '#fff';
   g.fillRect(0, 0, W, Math.round((W * PAGE.h) / PAGE.w));
   for (const m of marks) {
     if (Array.isArray(m)) {
       const [x, y, w, h, colour] = m;
-      const x0 = Math.round(x * k), y0 = Math.round(y * k), x1 = Math.round((x + w) * k), y1 = Math.round((y + h) * k);
+      const x0 = snap(x), y0 = snap(y), x1 = snap(x + w), y1 = snap(y + h);
       if (x1 > x0 && y1 > y0) (g.fillStyle = colour), g.fillRect(x0, y0, x1 - x0, y1 - y0);
       continue;
     }
