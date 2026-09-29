@@ -315,6 +315,12 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     replans.set(s.address.toLowerCase(), (gone) => planPicture(b, slots, placed, who, held, gone).catch(() => null));
     void plan.then((p) => {
       if (!p || !host?.isConnected) return;
+      // A picture reads best finished: open on Finished (its planned Credits at full ink; Now fades all but the few
+      // bought so far) unless you picked a view.
+      if (!shown.has(s.address.toLowerCase()) && s.count < 80) {
+        host.dataset.show = 'finished';
+        host.querySelectorAll('[data-show]').forEach((b) => b.setAttribute('aria-checked', String((b as HTMLElement).dataset.show === 'finished')));
+      }
       // …and in Consolidated, the direction a picture is matched in, unless you picked another.
       if (!pickedDirection(s.address)) showDirection(host.querySelector<HTMLElement>('.dirs'), 'Consolidated');
       if (config.sweeper) {
