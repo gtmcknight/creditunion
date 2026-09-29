@@ -291,6 +291,19 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       if (!r.ok || !host?.isConnected) return;
       isPictureUnion.add(s.address.toLowerCase());
       app.querySelectorAll('.layout-name').forEach((e) => (e.textContent = 'Picture'));
+      // Who can join: a picture union takes exactly the Credits that draw it, so the Colors chips say nothing useful.
+      const takes = app.querySelector('.takes');
+      if (takes) takes.innerHTML = '<h3>Picture</h3><p class="muted">A special Credit Union made from a picture.</p>';
+      if (config.sweeper) {
+        // Bought into only; withdrawing through the site is off too, since it would shift the picture (the contract
+        // still allows it).
+        document.querySelector<HTMLElement>('[data-add="withdraw"]')?.setAttribute('hidden', '');
+        document.querySelector<HTMLElement>('[data-pane="withdraw"]')?.setAttribute('hidden', '');
+        document.querySelector<HTMLElement>('[data-add="buy"]')?.parentElement?.setAttribute('hidden', ''); // Buy alone needs no tabs
+        const note = document.querySelector('.pane-note');
+        if (note) note.innerHTML = '<span id="buy-line"></span>Credit Union is unofficial and experimental, so use it at your own risk. <a href="/faq">Questions?</a>';
+        document.querySelector('[data-pane="buy"]')?.insertAdjacentHTML('afterbegin', '<div class="picture-rules"><p>You can only buy into this Credit Union. An algorithm matches each part of the picture to the Credits for sale, so Credits you already hold can’t be deposited.</p><p>You can’t withdraw here either: taking a Credit out would shift the order of the picture.</p></div>');
+      }
       if (config.sweeper) {
         const tab = document.querySelector<HTMLButtonElement>('[data-add="mine"]');
         if (tab) tab.hidden = true;
@@ -302,11 +315,6 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     replans.set(s.address.toLowerCase(), (gone) => planPicture(b, slots, placed, who, held, gone).catch(() => null));
     void plan.then((p) => {
       if (!p || !host?.isConnected) return;
-      // A picture reads best finished: open on Finished (the planned Credits at full ink) unless you picked a view.
-      if (!shown.has(s.address.toLowerCase()) && s.count < 80) {
-        host.dataset.show = 'finished';
-        host.querySelectorAll('[data-show]').forEach((b) => b.setAttribute('aria-checked', String((b as HTMLElement).dataset.show === 'finished')));
-      }
       // …and in Consolidated, the direction a picture is matched in, unless you picked another.
       if (!pickedDirection(s.address)) showDirection(host.querySelector<HTMLElement>('.dirs'), 'Consolidated');
       if (config.sweeper) {
@@ -315,7 +323,6 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         if (tab) tab.hidden = true;
         document.querySelector<HTMLButtonElement>('[data-add="buy"]:not([aria-selected="true"])')?.click();
       }
-      app.querySelector('.takes')?.insertAdjacentHTML('beforeend', `<p class="small muted picture-note">Made from a picture. Each open slot shows the Credit that draws it best, and only those go in, in order${config.sweeper ? ', bought here' : ''}.</p>`);
       fillGhosts(app);
     });
   }
