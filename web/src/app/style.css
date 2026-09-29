@@ -669,47 +669,43 @@ nav a .num {
   transition: opacity 200ms var(--ease);
 }
 /* Fade the art, not the cell, so the sheet stays paper-white */
-.batch-art.spotlight .cell:not(.mine) img {
+.dir-host[data-show='yours'] .cell:not(.mine) img {
   filter: grayscale(1);
-  opacity: 0.35;
+  opacity: 0.28;
+}
+/* Finished: the examples at full ink, eights and all, as the sheet will look at 80. */
+.dir-host[data-show='finished'] .cell.ghost img {
+  opacity: 1;
+  filter: none;
+  clip-path: none;
 }
 .batch-art .cell img {
   transition: opacity 200ms var(--ease), filter 200ms var(--ease);
 }
-.spot {
-  position: relative;
+.show {
   display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  gap: 14px;
+}
+.show button {
   height: 32px;
-  padding: 0 12px 0 10px;
+  padding: 0;
   border: 0;
-  border-radius: var(--r);
   background: none;
-  color: var(--fg);
-  font: 500 13px/1 var(--sans);
-  box-shadow: inset 0 0 0 1px var(--line-strong);
-  cursor: pointer;
-  transition-property: background-color, color, box-shadow, scale;
-  transition-duration: 150ms;
-  transition-timing-function: var(--ease);
-}
-.spot:active {
-  scale: 0.96;
-}
-.spot[aria-pressed='true'] {
-  background: var(--fg);
-  color: var(--bg);
-  box-shadow: none;
-}
-.spot[aria-pressed='true'] .muted {
   color: inherit;
-  opacity: 0.6;
+  font: inherit;
+  cursor: pointer;
+  transition: color 150ms var(--ease);
 }
-.spot::after {
-  content: '';
-  position: absolute;
-  inset: -12px -8px;
+.show button:hover,
+.show button[aria-checked='true'] {
+  color: var(--fg);
+}
+.show button[aria-checked='true'] {
+  box-shadow: inset 0 -1px 0 currentColor;
+}
+.show .num {
+  margin-left: 2px;
+  opacity: 0.6;
 }
 .statement {
   margin: 0;
@@ -734,7 +730,7 @@ nav a .num {
 .dir-canvas[hidden] {
   display: none;
 }
-.dir-host.dir-on :is(.sheet, .spot) {
+.dir-host.dir-on .sheet {
   visibility: hidden;
 }
 /* The create page: Rules joins the directions row on a wide screen; its phone bar keeps Rules · Credits only. */
@@ -754,13 +750,17 @@ nav a .num {
     visibility: visible;
   }
 }
+/* One row under the sheet: the glyphs end flush with its right edge, and the one showing carries the same 1px
+   line as All · Filled · Yours on the left. Names show in a tooltip. */
 .dirs {
   display: inline-flex;
-  flex-wrap: wrap;
-  gap: 0 14px;
+  align-items: center;
+  gap: 4px;
   margin-left: auto;
+  margin-right: -4px; /* the last glyph's own padding */
 }
 .dirs button {
+  position: relative;
   height: 32px;
   padding: 0;
   border: 0;
@@ -770,14 +770,71 @@ nav a .num {
   cursor: pointer;
   transition: color 150ms var(--ease);
 }
+.dirs .dir-word {
+  margin-right: 12px;
+}
+.dirs .dir-glyph {
+  display: grid;
+  place-items: center;
+  width: 24px;
+}
+/* Solid glyphs read heavier than words at the same colour: the ones not showing sit back further. */
+.dirs .dir-glyph svg {
+  opacity: 0.4;
+  transition: opacity 150ms var(--ease);
+}
+.dirs .dir-glyph:is(:hover, :focus-visible, [aria-checked='true']) svg {
+  opacity: 1;
+}
 .dirs button:hover,
 .dirs button[aria-checked='true'] {
   color: var(--fg);
 }
-.dirs button[aria-checked='true'] {
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 6px;
+.dirs .dir-word[aria-checked='true'] {
+  box-shadow: inset 0 -1px 0 currentColor;
+}
+/* The line under a glyph is the glyph's width, as the line under a word is the word's. */
+.dirs .dir-glyph[aria-checked='true'] {
+  background: linear-gradient(currentColor, currentColor) center bottom / 16px 1px no-repeat;
+}
+.dirs button:focus-visible {
+  outline: 1px solid var(--fg);
+  outline-offset: 2px;
+}
+.dirs .dir-glyph::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  translate: -50% -2px;
+  padding: 4px 8px;
+  border-radius: var(--r);
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms var(--ease), translate 120ms var(--ease);
+  z-index: 2;
+}
+.dirs .dir-glyph:last-child::after {
+  left: auto;
+  right: 0;
+  translate: 0 -2px;
+}
+.dirs .dir-glyph:is(:hover, :focus-visible)::after {
+  opacity: 1;
+  translate: -50% 0;
+}
+.dirs .dir-glyph:last-child:is(:hover, :focus-visible)::after {
+  translate: 0 0;
+}
+@media (hover: none) {
+  .dirs .dir-glyph::after {
+    display: none;
+  }
 }
 
 /* ---------------------------------------------------------------- batch page */

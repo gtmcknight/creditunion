@@ -84,6 +84,21 @@ let busy = 0;
 let live: ReturnType<typeof setInterval> | null = null;
 const LIVE_MS = 12_000; // about one block
 
+/// What each union's sheet is showing, for the visit: the page re-renders as Credits come in.
+const shown = new Map<string, string>();
+
+/// Now · Finished · Yours over a union's sheet: as it stands (examples faded in the empty slots), as it will look
+/// at 80, or only your Credits in ink. Finished only while there are empty slots; Yours only with Credits in.
+function showSwitch(count: number, mine: number, on: string) {
+  const opts: [string, string][] = [['now', 'Now']];
+  if (count < 80) opts.push(['finished', 'Finished']);
+  if (mine) opts.push(['yours', `Yours <span class="num">${mine}</span>`]);
+  if (opts.length < 2) return '<span></span>';
+  return `<div class="show" role="radiogroup" aria-label="Show">${opts
+    .map(([v, label]) => `<button type="button" role="radio" data-show="${v}" aria-checked="${v === on}">${label}</button>`)
+    .join('')}</div>`;
+}
+
 export async function party(app: HTMLElement, address: Address, rerender: () => void) {
   let b: Ctx;
   const account = session.account;
@@ -148,15 +163,18 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     for (const r of rules) if (r.slots) r.value = String(r.slots.filter((i) => placed![i] == null).length);
   registerFilter(s.address, s.filter);
   registerDeposits(b.ids, b.depositors, b.s.split === 1);
+  // A choice that no longer applies (the union filled, or your Credits left) falls back to Now.
+  const picked = shown.get(s.address.toLowerCase()) ?? 'now';
+  const show = (picked === 'finished' && s.count < 80) || (picked === 'yours' && myIds.size) ? picked : 'now';
   const artHtml = burned
     ? `<figure class="statement">${sheet(b.ids, { closed: true })}<figcaption class="legend muted small"><span>Statement #${s.statementId}</span></figcaption></figure>`
     : `${sheet(b.ids, { mine: myIds, fresh: placed ? undefined : seen < s.count ? seen : undefined, closing: s.state === 'Full', placed, batch: s.state === 'Open' ? s.address : undefined })}${directionCanvas}
-       <div class="legend muted small">${myIds.size ? `<button type="button" class="spot" aria-pressed="false"><i class="dot mine"></i><span>Highlight yours</span><span class="num muted">${myIds.size}</span></button>` : ''}${directions(s.address)}</div>`;
+       <div class="legend muted small">${showSwitch(s.count, myIds.size, show)}${directions(s.address)}</div>`;
 
   app.innerHTML = `
   
   <section class="batch">
-    <div class="batch-art dir-host">${artHtml}</div>
+    <div class="batch-art dir-host" data-show="${show}">${artHtml}</div>
     <div class="batch-side">
       <header>
         <div class="row"><span class="tag ${s.state.toLowerCase()}">${s.state}</span><button type="button" class="link small" id="share">Share</button></div>
@@ -630,12 +648,15 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
 
   mountDirections();
 
-  // Spotlight your Credits (tap on touch; hover handled in CSS)
-  document.querySelector('.spot')?.addEventListener('click', (e) => {
-    const btn = e.currentTarget as HTMLElement;
-    const on = btn.getAttribute('aria-pressed') !== 'true';
-    btn.setAttribute('aria-pressed', String(on));
-    btn.closest('.batch-art')?.classList.toggle('spotlight', on);
+  // Now · Finished · Yours: what the sheet and its directions show.
+  document.querySelector('.show')?.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-show]');
+    const host = btn?.closest<HTMLElement>('.dir-host');
+    if (!btn || !host) return;
+    host.dataset.show = btn.dataset.show;
+    shown.set(s.address.toLowerCase(), btn.dataset.show!);
+    btn.parentElement!.querySelectorAll('[data-show]').forEach((b) => b.setAttribute('aria-checked', String(b === btn)));
+    host.dispatchEvent(new CustomEvent('ghosts', { bubbles: true }));
   });
 
   // A full batch's sheet closes its gaps: 80 become one image.

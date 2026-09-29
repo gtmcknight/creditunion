@@ -8,7 +8,7 @@ import { creatorFeeBps, factoryRatings, forgetBatches, getBatch, isApproved, myC
 import { hydrate, who } from '../ens';
 import { sweepToWallet, type Listed } from '../forsale';
 import { errText, esc, pageHead, same, toast } from '../ui';
-import { compose, DIRECTIONS, inkOf, PAGE, type Ink } from '../../shared/statement';
+import { compose, DIRECTIONS, inkOf, paint as paintMarks, PAGE, type Ink } from '../../shared/statement';
 import { print, replace, type Candidate, type Pick, type Printed } from '../printer-match';
 import { creditCell } from './trait';
 
@@ -89,16 +89,10 @@ async function candidates(wallets: Address[]) {
 /// One direction of the sheet, cells snapped to device pixels. `ghosts` draw faded.
 function paint(c: HTMLCanvasElement, d: (typeof DIRECTIONS)[number], inks: (Ink | null)[], ghosts: ReadonlySet<number> = new Set()) {
   const w = c.clientWidth || 240;
-  const W = Math.round(w * Math.min(3, devicePixelRatio || 1)), H = Math.round((W * PAGE.h) / PAGE.w), k = W / PAGE.w;
+  const W = Math.round(w * Math.min(3, devicePixelRatio || 1)), H = Math.round((W * PAGE.h) / PAGE.w);
   c.width = W;
   c.height = H;
-  const g = c.getContext('2d')!;
-  g.fillStyle = '#fff';
-  g.fillRect(0, 0, W, H);
-  for (const [x, y, rw, rh, colour] of compose(d, inks, ghosts)) {
-    const x0 = Math.round(x * k), y0 = Math.round(y * k), x1 = Math.round((x + rw) * k), y1 = Math.round((y + rh) * k);
-    if (x1 > x0 && y1 > y0) (g.fillStyle = colour), g.fillRect(x0, y0, x1 - x0, y1 - y0);
-  }
+  paintMarks(c.getContext('2d')!, W, compose(d, inks, ghosts));
 }
 const sheets = (key: string) => `<div class="printer-sheets" id="${key}">${DIRECTIONS.map((d) => `<figure><canvas data-dir="${d}" aria-label="${d}"></canvas><figcaption>${d}</figcaption></figure>`).join('')}</div>`;
 /// A registered Credit's ink, straight from the edition files: its print (wall.bin) is exactly its plates, since

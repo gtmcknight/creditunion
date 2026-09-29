@@ -1,7 +1,7 @@
-/// The four Statement directions under a sheet (a union's, or the create page's preview). Issued is the sheet
-/// itself; Consolidated, Balance and Reconciled are drawn from the Credits' ink (shared/statement.ts), read with
-/// their ratings. Previews until Jack's Statement contract is out.
-import { compose, DIRECTIONS, inkOf, PAGE, type Direction, type Ink } from '../shared/statement';
+/// The eight Statement directions under a sheet (a union's, or the create page's preview). Issued is the sheet
+/// itself; the other seven are drawn from the Credits' ink (shared/statement.ts), read with their ratings.
+/// Previews until Jack's Statement contract is out.
+import { compose, DIRECTIONS, inkOf, paint as paintMarks, PAGE, type Direction, type Ink } from '../shared/statement';
 import { ratings } from './data';
 
 /// The create page adds its Rules view to the same row.
@@ -26,12 +26,30 @@ const sized = new ResizeObserver((entries) => {
 /// The canvas the three drawn directions share; it sits over the sheet, inside the same `.dir-host`.
 export const directionCanvas = '<canvas class="dir-canvas" hidden aria-hidden="true"></canvas>';
 
-/// The four words. `rules` adds the create page's Rules view in front, hidden until a design is painted.
+/// A 16-pixel glyph for each direction: what its sheet looks like, in one colour.
+const GLYPH: Record<Direction, string> = {
+  Issued: '<path fill="currentColor" d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z"/>',
+  Consolidated: '<path fill="currentColor" d="M2 2h12v12H2zM5 5v2h2V5zm4 2v2h2V7zM5 10v2h2v-2z" fill-rule="evenodd"/>',
+  Accrued: '<path fill="none" stroke="currentColor" stroke-width="1.5" d="M4 3.5c2-1 3 .5 5 0s4.5 0 4.5 2.5-2 2.5-1.5 4.5-1 3-3.5 2.5-2.5 1-4.5 0S2 10 3 8 2 4.5 4 3.5z"/>',
+  Allocated: '<path fill="none" stroke="currentColor" stroke-width="1.5" d="M2.75 2.75h10.5v10.5H2.75zM7 2.75 6 7.5l-3.25 1M6 7.5l3.5 2 1 3.75M9.5 9.5l3.75-2.5M9.5 2.75 11 7"/>',
+  Balanced: '<path fill="currentColor" d="M2 2h5v12H2zM8 2h6v6H8zM8 9h3v5H8zM12 9h2v5h-2z"/>',
+  Amortized: '<path fill="none" stroke="currentColor" stroke-width="1.5" d="M2.75 2.75h10.5v10.5H2.75zM5.75 5.75h4.5v4.5h-4.5z"/>',
+  Reconciled: '<path fill="currentColor" d="M2 2h12v2H2zM2 5.5h8v2H2zM2 9h10v2H2zM2 12.5h6v2H2z"/>',
+  Voided: '<path fill="none" stroke="currentColor" stroke-width="1.25" d="M2.6 2.6h3.8v3.8H2.6zM9.6 2.6h3.8v3.8H9.6zM2.6 9.6h3.8v3.8H2.6zM9.6 9.6h3.8v3.8H9.6z"/>',
+};
+
+/// The directions as one row of glyphs, each named in its tooltip. `rules` adds the create page's Rules view in
+/// front, hidden until a design is painted.
 export function directions(key: string, rules = false) {
   const k = key.toLowerCase(), on = showing.get(k) ?? 'Issued';
   const all: Shown[] = rules ? ['Rules', ...DIRECTIONS] : [...DIRECTIONS];
   return `<div class="dirs" role="radiogroup" aria-label="Statement direction" data-key="${k}">${all
-    .map((d) => `<button type="button" role="radio" data-dir="${d}" aria-checked="${d === on}" tabindex="${d === on ? 0 : -1}"${d === 'Rules' ? ' hidden' : ''}>${d}</button>`)
+    .map((d) => {
+      const attrs = `type="button" role="radio" data-dir="${d}" aria-checked="${d === on}" tabindex="${d === on ? 0 : -1}"`;
+      return d === 'Rules'
+        ? `<button ${attrs} class="dir-word" hidden>Rules</button>`
+        : `<button ${attrs} class="dir-glyph" aria-label="${d}" data-tip="${d}"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">${GLYPH[d]}</svg></button>`;
+    })
     .join('')}</div>`;
 }
 
@@ -51,11 +69,16 @@ export function rulesView(g: HTMLElement | null, on: boolean) {
   if (!on && now === 'Rules') void show(g, before.get(key) ?? 'Issued', false, true);
 }
 
-/// The sheet's 80 slots in burn order: each Credit in it, or the example Credit shown faded in an empty slot.
+/// The sheet's 80 slots in burn order: each Credit in it, or the example Credit shown faded in an empty slot. The
+/// host's `data-show` changes what's faded: `finished` draws the examples at full ink, `yours` fades everyone else's.
 function slotsOf(g: HTMLElement) {
-  const cells = [...(g.closest('.dir-host')?.querySelector('.sheet')?.children ?? [])] as HTMLElement[];
+  const host = g.closest<HTMLElement>('.dir-host');
+  const cells = [...(host?.querySelector('.sheet')?.children ?? [])] as HTMLElement[];
   const ids = cells.map((c) => c.dataset.id ?? c.dataset.ghost ?? null);
-  const ghosts = new Set(cells.flatMap((c, i) => (c.dataset.ghost ? [i] : [])));
+  // A host marked solid-ghosts draws its examples at full ink (the create page's picture preview).
+  const show = host?.classList.contains('solid-ghosts') ? 'finished' : (host?.dataset.show ?? 'now');
+  const faded = (c: HTMLElement) => (show === 'yours' ? !c.classList.contains('mine') : show === 'now' && !!c.dataset.ghost);
+  const ghosts = new Set(cells.flatMap((c, i) => (faded(c) ? [i] : [])));
   return { ids, ghosts };
 }
 
@@ -69,7 +92,7 @@ function load(slots: readonly (string | null)[]): Promise<(Ink | null)[]> {
         return {} as Awaited<ReturnType<typeof ratings>>['ratings'];
       },
     );
-    for (const id of need) inks.set(id, read.then((r) => (r[id]?.seed ? inkOf(r[id].seed, r[id].paidAt) : null)));
+    for (const id of need) inks.set(id, read.then((r) => (r[id]?.seed ? inkOf(r[id].seed, r[id].paidAt, r[id].score) : null)));
   }
   return Promise.all(slots.map((s) => (s ? (inks.get(s) ?? null) : null)));
 }
@@ -105,18 +128,10 @@ function paint(canvas: HTMLCanvasElement, d: Direction, list: (Ink | null)[], gh
   drawn.set(canvas, { d, list, ghosts });
   const w = canvas.clientWidth;
   if (!w) return;
-  const W = Math.round(w * Math.min(3, devicePixelRatio || 1)), H = Math.round((W * PAGE.h) / PAGE.w), k = W / PAGE.w;
+  const W = Math.round(w * Math.min(3, devicePixelRatio || 1)), H = Math.round((W * PAGE.h) / PAGE.w);
   if (canvas.width !== W) canvas.width = W;
   if (canvas.height !== H) canvas.height = H;
-  const g = canvas.getContext('2d')!;
-  g.fillStyle = '#fff';
-  g.fillRect(0, 0, W, H);
-  for (const [x, y, rw, rh, colour] of compose(d, list, ghosts)) {
-    const x0 = Math.round(x * k), y0 = Math.round(y * k), x1 = Math.round((x + rw) * k), y1 = Math.round((y + rh) * k);
-    if (x1 <= x0 || y1 <= y0) continue;
-    g.fillStyle = colour;
-    g.fillRect(x0, y0, x1 - x0, y1 - y0);
-  }
+  paintMarks(canvas.getContext('2d')!, W, compose(d, list, ghosts));
 }
 
 document.addEventListener('click', (e) => {
