@@ -2,6 +2,7 @@ import {
   createPublicClient,
   createWalletClient,
   custom,
+  formatEther,
   http,
   type Address,
   type Chain,
@@ -119,6 +120,11 @@ export async function send(
 ) {
   if (!session.wallet || !session.account) throw new Error('Connect a wallet first.');
   await ensureChain();
+  // Short of ETH, the node's simulation only says "Transaction creation failed." Say what's missing instead.
+  if (req.value) {
+    const have = BigInt((await session.provider!.request({ method: 'eth_getBalance', params: [session.account, 'latest'] })) as string);
+    if (have < req.value) throw new Error(`Not enough ETH. This needs ${short(req.value)} plus gas; your wallet has ${short(have)}.`);
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { request } = await pub.simulateContract({ ...(req as any), account: session.account });
   try {
@@ -143,6 +149,8 @@ export async function send(
     settled();
   }
 }
+
+const short = (wei: bigint) => `${Number(formatEther(wei)).toFixed(4)} ETH`;
 
 /// Rejects once the network has gone UNSEEN_MS without seeing `hash`, pending or mined: the wallet signed it
 /// but never sent it, or it was dropped. Rabby then keeps it as pending and fails every retry's simulation.
