@@ -302,7 +302,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         document.querySelector<HTMLElement>('[data-add="buy"]')?.parentElement?.setAttribute('hidden', ''); // Buy alone needs no tabs
         const note = document.querySelector('.pane-note');
         if (note) note.innerHTML = '<span id="buy-line"></span>Credit Union is unofficial and experimental, so use it at your own risk. <a href="/faq">Questions?</a>';
-        document.querySelector('[data-pane="buy"]')?.insertAdjacentHTML('afterbegin', '<div class="picture-rules"><p>You can only buy into this Credit Union. An algorithm matches each part of the picture to the Credits for sale, so Credits you already hold can’t be deposited.</p><p>You can’t withdraw here either: taking a Credit out would shift the order of the picture.</p></div>');
+        document.querySelector('[data-pane="buy"]')?.insertAdjacentHTML('afterbegin', '<div class="picture-rules"><p><strong>Buy only.</strong> Each open slot has one Credit for sale picked to draw that part of the picture. You buy those, in order. Credits you already own can’t go in.</p><p><strong>No withdrawals here.</strong> Taking a Credit out would shift the picture.</p></div>');
       }
       if (config.sweeper) {
         const tab = document.querySelector<HTMLButtonElement>('[data-add="mine"]');
