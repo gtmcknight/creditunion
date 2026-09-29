@@ -53,23 +53,26 @@ export function directions(key: string, rules = false) {
     .join('')}</div>`;
 }
 
-/// A still Statement over a sheet with no switch (a picture union's card): its Credits, planned ones at full ink,
+/// A still Statement over a sheet with no switch (a picture union's card): its Credits as Now shows them,
 /// drawn in `d` on a canvas laid over the sheet. Redrawn when the sheet's example Credits land.
 export async function drawStill(host: HTMLElement, d: Direction) {
+  const cells = [...(host.querySelector('.sheet')?.children ?? [])] as HTMLElement[];
+  const ids = cells.map((c) => c.dataset.id ?? c.dataset.ghost ?? null);
+  // As Now shows it: the Credits already in at full ink, the planned ones still to come faded.
+  const faded = new Set(cells.flatMap((c, i) => (c.dataset.ghost && !c.dataset.id ? [i] : [])));
+  // The sheet's own grid stays up until every Credit's ink is read, then the Statement replaces it whole: no grey
+  // frames while it loads.
+  const list = await load(ids);
+  if (!host.isConnected) return;
   let canvas = host.querySelector<HTMLCanvasElement>(':scope > .dir-canvas');
   if (!canvas) {
     canvas = document.createElement('canvas');
     canvas.className = 'dir-canvas still';
     host.append(canvas);
   }
-  const cells = [...(host.querySelector('.sheet')?.children ?? [])] as HTMLElement[];
-  const ids = cells.map((c) => c.dataset.id ?? c.dataset.ghost ?? null);
   host.classList.add('dir-on');
   sized.observe(canvas);
-  const last = drawn.get(canvas);
-  paint(canvas, d, last?.list ?? ids.map(() => null), new Set());
-  const list = await load(ids);
-  if (canvas.isConnected) paint(canvas, d, list, new Set());
+  paint(canvas, d, list, faded);
 }
 
 /// After a render: redraw whatever direction each switch was showing.
@@ -146,8 +149,12 @@ async function show(g: HTMLElement, d: Shown, focus = false, quiet = false) {
   // Faint frames at once; the ink as soon as it's read (the first time only).
   const last = drawn.get(canvas);
   paint(canvas, d, last?.list ?? ids.map(() => null), last?.ghosts ?? ghosts);
+  // Only the latest draw paints: an earlier one (say, of the example Credits before a picture's plan filled the
+  // sheet) whose ink arrives late must not paint over it.
+  const turn = (turns.get(canvas) ?? 0) + 1;
+  turns.set(canvas, turn);
   const list = await load(ids);
-  if (showing.get(key) !== d || !canvas.isConnected) return;
+  if (showing.get(key) !== d || !canvas.isConnected || turns.get(canvas) !== turn) return;
   paint(canvas, d, list, ghosts);
   // A Credit whose ink didn't come (a failed or throttled read) would stay a grey frame: read it again, twice at most.
   const tries = retries.get(canvas) ?? 0;
@@ -157,6 +164,7 @@ async function show(g: HTMLElement, d: Shown, focus = false, quiet = false) {
   } else retries.delete(canvas);
 }
 const retries = new WeakMap<HTMLCanvasElement, number>();
+const turns = new WeakMap<HTMLCanvasElement, number>();
 
 /// Crisp cells, snapped to device pixels, as Jack's mock draws them.
 function paint(canvas: HTMLCanvasElement, d: Direction, list: (Ink | null)[], ghosts: ReadonlySet<number>) {

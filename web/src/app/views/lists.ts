@@ -248,7 +248,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
             : note + (views[v].length ? shownGrid(v, views[v]) : `<p class="muted">${empty[v]}</p>`);
         el.querySelector('#show-empty')?.addEventListener('click', () => ((showEmpty = true), draw()));
         hydrate(el);
-        // A picture union's card shows its picture as it will print: Consolidated, its planned Credits at full ink.
+        // A picture union's card shows its picture in Consolidated, as Now: what's in at full ink, the rest faded.
         void fillGhosts(el).then(() => el.querySelectorAll<HTMLElement>('.card-art.picture').forEach((h) => void drawStill(h, 'Consolidated')));
         return;
       }
