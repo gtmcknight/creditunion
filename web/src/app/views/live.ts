@@ -60,7 +60,7 @@ function what(x: Item, here = false) {
 let recent: { at: number; p: Promise<Item[]> } | null = null;
 function readActivity(fresh = false): Promise<Item[]> {
   if (!fresh && recent && Date.now() - recent.at < 15_000) return recent.p;
-  const p = fetch('/activity.json').then(async (r) => {
+  const p = fetch('/activity.json', { cache: 'no-cache' }).then(async (r) => {
     const j = (await r.json()) as { items?: Item[]; error?: string };
     if (!r.ok || j.error) throw new Error(j.error ?? 'unavailable');
     return j.items ?? [];
