@@ -75,18 +75,19 @@ function sortList(list: Listed[], k: SortKey) {
 
 
 /// Layout batches before the burn: each Credit in the slot it will burn into, as the union page shows it.
-const placements = new Map<Address, (bigint | null)[]>();
+const placements = new Map<string, (bigint | null)[]>(); // by address:count, so a new deposit re-places
+const placeKey = (b: { s: { address: Address }; ids: readonly bigint[] }) => `${b.s.address.toLowerCase()}:${b.ids.length}`;
 export async function placeCards(list: Listed[]) {
-  const todo = list.filter((b) => b.ids.length && hasLayout(b.s.filter) && (b.s.state === 'Open' || b.s.state === 'Full') && !placements.has(b.s.address));
+  const todo = list.filter((b) => b.ids.length && hasLayout(b.s.filter) && (b.s.state === 'Open' || b.s.state === 'Full') && !placements.has(placeKey(b)));
   await Promise.all(
     todo.map(async (b) => {
       const keys = await depositedKeys(b.s.address, b.ids).catch(() => null);
       if (!keys) return;
       const slots = Array.from({ length: 80 }, (_, i) => layoutSlot(b.s.filter, i));
-      placements.set(b.s.address, placeOnLayout(slots, b.ids, (id) => keys.get(id.toString()) ?? 0));
+      placements.set(placeKey(b), placeOnLayout(slots, b.ids, (id) => keys.get(id.toString()) ?? 0));
     }),
   );
-  return todo.some((b) => placements.has(b.s.address));
+  return todo.some((b) => placements.has(placeKey(b)));
 }
 
 /// Picture unions: the Credit picked for each slot when it was made (saved with its picture), drawn in its open
@@ -142,7 +143,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yo
   registerFilter(s.address, s.filter);
   registerDeposits(ids, depositors, s.split === 1);
   return `<a class="card${canJoin ? ' can-join' : ''}" href="/union/${s.address}">
-    <div class="card-art${picture ? ' picture dir-host' : ''}">${sheet(ids, { size: 'sm', mine, placed: placements.get(s.address), batch: s.state === 'Open' ? s.address : undefined })}${corner}${state}</div>
+    <div class="card-art${picture ? ' picture dir-host' : ''}">${sheet(ids, { size: 'sm', mine, placed: placements.get(placeKey({ s, ids })), batch: s.state === 'Open' ? s.address : undefined })}${corner}${state}</div>
     <div class="card-meta">
       <div class="meta-text">
         <strong>${esc(s.name || 'Untitled')}</strong>
@@ -288,6 +289,24 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       }),
     );
     draw();
+    // Live: read the list again every 20 seconds while the page is showing, and redraw only when a union changed
+    // (a deposit, a withdrawal, a new one, a state change).
+    const sig = (xs: Listed[]) => xs.map((b) => `${b.s.address}:${b.ids.length}:${b.s.state}:${b.s.phase}:${b.s.highBid}`).join('|');
+    let seen = sig(all);
+    const poll = setInterval(async () => {
+      if (document.getElementById('batches') !== el) return clearInterval(poll);
+      if (document.visibilityState !== 'visible') return;
+      const next = await listBatches().catch(() => null);
+      if (!next || sig(next) === seen || document.getElementById('batches') !== el) return;
+      seen = sig(next);
+      const nextParties = next.filter((b) => PARTY_STATES.has(b.s.state));
+      const nextList = want ? nextParties.filter((b) => b.s.state === 'Open' && want.test(b)) : tab === 'parties' ? nextParties : next.filter((b) => b.s.state !== 'Open' && b.s.state !== 'Expired');
+      list.splice(0, list.length, ...nextList);
+      parties.splice(0, parties.length, ...nextParties);
+      await Promise.all([placeCards(list), pictureCards(list)]);
+      if (tab === 'parties') lastIn = await lastJoined();
+      if (document.getElementById('batches') === el) draw();
+    }, 20_000);
     Promise.all([placeCards(list), pictureCards(list)]).then((got) => {
       if (got.some(Boolean) && document.getElementById('batches') === el) draw();
     });
