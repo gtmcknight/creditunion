@@ -1,6 +1,6 @@
 import { go } from '../main';
 import { listBatches, type Listed } from '../data';
-import { fromUtcInput, toUtcInput, utc } from '../ui';
+import { fromTimeText, mintEdgeNote, toTimeText, typedToMinute, zoned, zoneName, zoneToggle } from '../ui';
 import { loadTimes, mintSpan, paidAtOrAfter, PAL32, printsFor, tile } from '../wall';
 import { rangeStrip, stripHTML } from './range';
 import { buyGrid, buyRow, creditsHead, pct, unionsLink } from './trait';
@@ -19,7 +19,7 @@ export async function timePage(app: HTMLElement) {
     <div class="time-stream"><canvas aria-label="The Credits paid in this window, each second a column"></canvas><span class="time-scale small muted"></span></div>
     ${stripHTML()}
     <div class="time-controls">
-      <div class="win-inputs"><label><span>Start (UTC)</span><input type="datetime-local" id="time-from" step="60"></label><label><span>End (UTC)</span><input type="datetime-local" id="time-to" step="60"></label></div>
+      <div class="win-inputs"><label><span>Start</span><input type="text" id="time-from" autocomplete="off" spellcheck="false" placeholder="2026-09-20 22:15"></label><label><span>End</span><input type="text" id="time-to" autocomplete="off" spellcheck="false" placeholder="2026-09-20 23:15"></label>${zoneToggle()}</div>
       <div class="win-presets"><button type="button" data-pick="first">First hour</button><button type="button" data-pick="last">Last hour</button></div>
     </div>
     ${buyRow('Buy Credits paid in this window')}
@@ -52,9 +52,9 @@ export async function timePage(app: HTMLElement) {
   const lo = () => paidAtOrAfter(e, fromT());
   const hi = () => paidAtOrAfter(e, toT() + 1);
 
-  const sec = utc({ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const min = utc({ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  const at = (t: number) => `${sec.format(new Date(t * 1000))} UTC`;
+  let sec = zoned({ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  let min = zoned({ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const at = (t: number) => `${sec.format(new Date(t * 1000))} ${zoneName()}`;
 
   const readout = document.getElementById('time-readout')!;
   const startBtn = document.getElementById('time-start') as HTMLAnchorElement;
@@ -191,23 +191,40 @@ export async function timePage(app: HTMLElement) {
   // ---- Start and End: typed to the minute; End is where the window ends (exclusive), as the readout says
   const fromIn = document.getElementById('time-from') as HTMLInputElement;
   const toIn = document.getElementById('time-to') as HTMLInputElement;
-  fromIn.min = toIn.min = toUtcInput(BASE);
-  fromIn.max = toIn.max = toUtcInput(BASE + M * 60);
-  fromIn.addEventListener('change', () => {
-    const t = fromUtcInput(fromIn.value);
-    if (t !== null) {
-      a = clampM(Math.floor((t - BASE) / 60));
-      if (a > b) b = a;
-    }
+  const onZone = () => {
+    if (!fromIn.isConnected) return document.removeEventListener('zone', onZone);
+    sec = zoned({ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    min = zoned({ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     update();
+  };
+  document.addEventListener('zone', onZone);
+  // Applied as you type once a time reaches its minutes (leaving the box as typed); Enter or leaving the box
+  // tidies it. A half-typed Start past End waits for Enter rather than dragging End along.
+  const typed = (el: HTMLInputElement, set: (t: number, final: boolean) => boolean) => {
+    el.addEventListener('input', () => {
+      const t = typedToMinute(el.value) ? fromTimeText(el.value) : null;
+      if (t !== null && set(t, false)) update(false, el);
+    });
+    el.addEventListener('change', () => {
+      const t = fromTimeText(el.value);
+      if (t !== null) set(t, true);
+      mintEdgeNote(el.closest('.win-inputs')!, t ?? BASE, BASE, BASE + M * 60);
+      update();
+    });
+  };
+  typed(fromIn, (t, final) => {
+    const na = clampM(Math.floor((t - BASE) / 60));
+    if (!final && na > b) return false;
+    a = na;
+    if (a > b) b = a;
+    return true;
   });
-  toIn.addEventListener('change', () => {
-    const t = fromUtcInput(toIn.value);
-    if (t !== null) {
-      b = clampM(Math.ceil((t - BASE) / 60) - 1);
-      if (b < a) a = b;
-    }
-    update();
+  typed(toIn, (t, final) => {
+    const nb = clampM(Math.ceil((t - BASE) / 60) - 1);
+    if (!final && nb < a) return false;
+    b = nb;
+    if (b < a) a = b;
+    return true;
   });
   const picks = app.querySelector<HTMLElement>('.win-presets')!;
   const PICKS: Record<string, [number, number]> = { first: [0, Math.min(M - 1, 59)], last: [Math.max(0, M - 60), M - 1] };
@@ -242,11 +259,12 @@ export async function timePage(app: HTMLElement) {
       if (sv.isConnected) drawStream();
     });
   };
-  function update(now = false) {
+  /// `typing`: the box being typed in, left as it is.
+  function update(now = false, typing?: HTMLInputElement) {
     strip.set(a, b);
     drawReadout();
-    fromIn.value = toUtcInput(fromT());
-    toIn.value = toUtcInput(toT() + 1);
+    if (typing !== fromIn) fromIn.value = toTimeText(fromT());
+    if (typing !== toIn) toIn.value = toTimeText(toT() + 1);
     picks.querySelectorAll<HTMLButtonElement>('[data-pick]').forEach((p) => {
       const [pa, pb] = PICKS[p.dataset.pick!];
       p.setAttribute('aria-pressed', String(pa === a && pb === b));

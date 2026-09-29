@@ -136,14 +136,67 @@ export type { Address };
 /// Payment times read the same for everyone: UTC, 24-hour, as Jack's site shows them. (Auction clocks stay local.)
 export const utc = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-US', { ...o, timeZone: 'UTC', hourCycle: 'h23' });
 export const sameUtcDay = (a: Date, b: Date) => a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10);
-/// datetime-local inputs for payment windows, read and written as UTC (their label says so).
-export function toUtcInput(unix: number) {
-  return new Date(unix * 1000).toISOString().slice(0, 16);
+
+/// Payment windows are shown and typed in UTC (as Jack's site) or the viewer's own time. The choice sticks.
+type Zone = 'utc' | 'local';
+let zone: Zone = 'utc';
+try {
+  if (localStorage.getItem('zone') === 'local') zone = 'local';
+} catch {}
+const utcZone = () => zone === 'utc';
+/// A formatter in the chosen zone, 24-hour.
+export const zoned = (o: Intl.DateTimeFormatOptions) =>
+  new Intl.DateTimeFormat('en-US', { ...o, hourCycle: 'h23', ...(utcZone() ? { timeZone: 'UTC' } : {}) });
+/// "UTC", or the local zone's short name ("EDT").
+export const zoneName = () =>
+  utcZone() ? 'UTC' : (new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' }).formatToParts(new Date()).find((p) => p.type === 'timeZoneName')?.value ?? 'local');
+export const sameZoneDay = (a: Date, b: Date) => {
+  const d = zoned({ year: 'numeric', month: 'numeric', day: 'numeric' });
+  return d.format(a) === d.format(b);
+};
+/// Unix seconds as "2026-09-20 22:15" in the chosen zone: what the Start and End boxes show and take back.
+export function toTimeText(unix: number) {
+  const d = new Date(unix * 1000);
+  if (utcZone()) return d.toISOString().slice(0, 16).replace('T', ' ');
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
-export function fromUtcInput(v: string) {
-  const t = Date.parse(`${v}Z`);
-  return Number.isFinite(t) ? Math.floor(t / 1000) : null;
+/// A typed time in the chosen zone: "2026-09-20 22:15", "9/20/2026 10:15 pm", "Sep 20 2026 22:15". Null if unreadable.
+export function fromTimeText(v: string) {
+  let s = v.trim().replace(/\s*(utc|gmt|z)$/i, '');
+  if (!s) return null;
+  if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(s)) s += ' 00:00'; // date alone: midnight, not the parser's UTC
+  s = s.replace(/(\d)\s*([ap])\.?m?\.?$/i, '$1 $2m'); // "10:15pm", "10:15 p"
+  // Read without a zone (as local), then take those same wall-clock numbers in the chosen zone. The box's own
+  // format is read by hand: Safari's parser won't take "2026-09-20 22:15".
+  const m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})$/);
+  const d = m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) : new Date(s);
+  if (!Number.isFinite(d.getTime())) return null;
+  const t = utcZone() ? Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()) : d.getTime();
+  return Math.floor(t / 1000);
 }
+/// A time typed as far as its minutes ("…22:4" isn't yet): safe to apply while the box still has focus.
+export const typedToMinute = (v: string) => /\d:\d\d\s*([ap]\.?m?\.?)?\s*(utc|gmt|z)?$/i.test(v.trim());
+/// Under Start and End when a typed time fell outside the mint and was pulled in: say where the mint starts or ends.
+export function mintEdgeNote(box: HTMLElement, t: number, first: number, end: number) {
+  const note = box.querySelector<HTMLElement>('.win-note') ?? box.appendChild(Object.assign(document.createElement('p'), { className: 'win-note' }));
+  const f = zoned({ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  note.textContent = t < first ? `The mint started ${f.format(first * 1000)} ${zoneName()}` : t > end ? `The mint ended ${f.format(end * 1000)} ${zoneName()}` : '';
+  note.hidden = !note.textContent;
+}
+/// The UTC · Local switch beside Start and End. Every open time view redraws on the 'zone' event.
+export const zoneToggle = () =>
+  `<span class="zone-toggle" role="group" aria-label="Time zone"><button type="button" data-zone="utc" aria-pressed="${utcZone()}">UTC</button><button type="button" data-zone="local" aria-pressed="${!utcZone()}">Local</button></span>`;
+document.addEventListener('click', (ev) => {
+  const b = (ev.target as HTMLElement).closest?.<HTMLButtonElement>('.zone-toggle [data-zone]');
+  if (!b || b.dataset.zone === zone) return;
+  zone = b.dataset.zone as Zone;
+  try {
+    localStorage.setItem('zone', zone);
+  } catch {}
+  document.querySelectorAll('.zone-toggle [data-zone]').forEach((x) => x.setAttribute('aria-pressed', String((x as HTMLElement).dataset.zone === zone)));
+  document.dispatchEvent(new Event('zone'));
+});
 
 /// A sub-nav item: a link (`href`, `current` marks the page) or a tab button (`attrs` carries its data-*).
 export type SubTab = { label: string; href?: string; current?: boolean; attrs?: string };

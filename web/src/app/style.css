@@ -6172,7 +6172,8 @@ dialog.eligible::backdrop {
 /* Payment Time, typed: Start and End to the minute. On the create page and /time. */
 .win-inputs {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(172px, 1fr));
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
   gap: 8px;
 }
 .win-inputs label {
@@ -6187,6 +6188,45 @@ dialog.eligible::backdrop {
 .win-inputs input {
   height: 36px;
   font: 400 14px var(--sans);
+  font-variant-numeric: tabular-nums;
+}
+.win-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+/* UTC · Local: one pair of joined buttons, the height of the boxes beside it. */
+.zone-toggle {
+  display: flex;
+  height: 36px;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  border-radius: var(--r);
+}
+.zone-toggle button {
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r);
+  background: none;
+  font: 400 12px var(--sans);
+  color: var(--muted);
+  cursor: pointer;
+}
+.zone-toggle button:hover {
+  color: var(--fg);
+}
+.zone-toggle button[aria-pressed='true'] {
+  background: var(--fg);
+  color: var(--bg);
+}
+@media (max-width: 480px) {
+  .win-inputs {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .zone-toggle {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
 }
 
 /* /time: the window's Stream, the mint's strip with two handles, then the same sections as a trait page. */
