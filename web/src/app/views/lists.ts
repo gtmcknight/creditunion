@@ -1,5 +1,6 @@
 import { session } from '../chain';
-import { ARRANGEMENTS, listBatches, type Listed, type Summary, hasLayout, layoutSlot } from '../data';
+import { ARRANGEMENTS, listBatches, type Listed, type Summary, hasLayout, layoutSlot, placeOnLayout } from '../data';
+import { depositedKeys } from '../slots';
 import { hydrate, pct, who } from '../ens';
 import { fitByBatch } from '../fit';
 import { editionArt, examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
@@ -51,9 +52,13 @@ function sortKey(): SortKey {
 
 const STAGE: Record<string, number> = { Open: 0, Full: 1, Auction: 2, Settled: 3, Expired: 4 };
 
+/// Each list's arrival order (newest first), kept apart from `list` itself, which sorting rearranges.
+const ages = new WeakMap<Listed[], Map<Address, number>>();
+
 /// Live batches first, always; the chosen sort orders within each stage. `list` arrives newest first.
 function sortList(list: Listed[], k: SortKey) {
-  const age = new Map(list.map((x, i) => [x.s.address, i]));
+  let age = ages.get(list);
+  if (!age) ages.set(list, (age = new Map(list.map((x, i) => [x.s.address, i]))));
   list.sort(
     (a, b) =>
       STAGE[a.s.state] - STAGE[b.s.state] ||
@@ -64,6 +69,21 @@ function sortList(list: Listed[], k: SortKey) {
   );
 }
 
+
+/// Layout batches before the burn: each Credit in the slot it will burn into, as the union page shows it.
+const placements = new Map<Address, (bigint | null)[]>();
+export async function placeCards(list: Listed[]) {
+  const todo = list.filter((b) => b.ids.length && hasLayout(b.s.filter) && (b.s.state === 'Open' || b.s.state === 'Full') && !placements.has(b.s.address));
+  await Promise.all(
+    todo.map(async (b) => {
+      const keys = await depositedKeys(b.s.address, b.ids).catch(() => null);
+      if (!keys) return;
+      const slots = Array.from({ length: 80 }, (_, i) => layoutSlot(b.s.filter, i));
+      placements.set(b.s.address, placeOnLayout(slots, b.ids, (id) => keys.get(id.toString()) ?? 0));
+    }),
+  );
+  return todo.some((b) => placements.has(b.s.address));
+}
 
 /// Ids in this batch deposited by `by` (the connected wallet by default).
 export function mineIn(b: Listed, by = session.account) {
@@ -86,7 +106,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yo
   registerFilter(s.address, s.filter);
   registerDeposits(ids, depositors, s.split === 1);
   return `<a class="card${canJoin ? ' can-join' : ''}" href="/union/${s.address}">
-    <div class="card-art">${sheet(ids, { size: 'sm', mine, batch: s.state === 'Open' ? s.address : undefined })}<span class="count num">${s.count}/80</span>${state}</div>
+    <div class="card-art">${sheet(ids, { size: 'sm', mine, placed: placements.get(s.address), batch: s.state === 'Open' ? s.address : undefined })}<span class="count num">${s.count}/80</span>${state}</div>
     <div class="card-meta">
       <div class="meta-text">
         <strong>${esc(s.name || 'Untitled')}</strong>
@@ -219,6 +239,9 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       }),
     );
     draw();
+    placeCards(list).then((any) => {
+      if (any && document.getElementById('batches') === el) draw();
+    });
     if (session.account && tab === 'parties') {
       fitByBatch(parties).then((m) => {
         fit = m;
