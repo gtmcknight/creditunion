@@ -124,16 +124,41 @@ export async function send(
   try {
     const hash = await session.wallet.writeContract({ ...request, chain } as never);
     onHash?.(hash);
-    // No time limit: a slow transaction is still pending, and calling it failed would invite a second one. A
-    // speed-up in the wallet lands as this one; a cancel, or another transaction on its nonce, doesn't.
+    // No time limit while the network can see it: a slow transaction is still pending, and calling it failed would
+    // invite a second one. A speed-up in the wallet lands as this one; a cancel, or another transaction on its
+    // nonce, doesn't. A hash the network never sees stops the wait instead, so the page isn't stuck on it.
     let replaced = '';
-    const receipt = await pub.waitForTransactionReceipt({ hash, timeout: 0, onReplaced: (r) => void (replaced = r.reason) });
+    let over = false;
+    const landing = pub.waitForTransactionReceipt({ hash, timeout: 0, onReplaced: (r) => void (replaced = r.reason) });
+    landing.finally(() => (over = true)).catch(() => {});
+    const receipt = await Promise.race([landing, unseen(hash, () => over)]).catch((e) => {
+      landing.then(settled, () => {}); // if it lands after all, reads still refresh
+      throw e;
+    });
     if (replaced === 'cancelled') throw new Error('Cancelled in wallet.');
     if (replaced === 'replaced') throw new Error('Replaced by another transaction in your wallet.');
     if (receipt.status !== 'success') throw new Error('Transaction reverted.');
     return receipt;
   } finally {
     settled();
+  }
+}
+
+/// Rejects once the network has gone UNSEEN_MS without seeing `hash`, pending or mined: the wallet signed it
+/// but never sent it, or it was dropped. Rabby then keeps it as pending and fails every retry's simulation.
+const UNSEEN_MS = 2 * 60_000;
+async function unseen(hash: Hash, landed: () => boolean): Promise<never> {
+  let since = Date.now();
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 15_000));
+    if (landed()) return new Promise<never>(() => {}); // the race is already over
+    const seen = await pub.getTransaction({ hash }).then(
+      () => true,
+      (e: { name?: string }) => e?.name !== 'TransactionNotFoundError', // an RPC hiccup isn't evidence
+    );
+    if (seen) since = Date.now();
+    else if (Date.now() - since >= UNSEEN_MS)
+      throw new Error('Your wallet signed this but it never reached the network. Clear or cancel the pending transaction in your wallet, then try again.');
   }
 }
 
