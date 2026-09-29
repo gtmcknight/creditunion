@@ -76,7 +76,9 @@ const RPC_METHODS = new Set([
   'eth_getTransactionByHash',
   'eth_getBlockByNumber',
 ]);
-const MAX_RPC_BODY = 64_000;
+/// A full sweep's simulation is the biggest body: 40 Seaport orders are ~65 KB of calldata, ~130 KB as hex.
+const MAX_RPC_BODY = 200_000;
+const MAX_CALL_BYTES = 96_000;
 const MAINNET_CREDITS: Address = '0x97630aA70AB14ed9883B41dAfccBc11349723043';
 const MAX_RPC_BATCH = 50;
 /// The mainnet factory's deploy block (contracts/DEPLOY.md); /activity.json scans from here.
@@ -1240,7 +1242,7 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
       const call = (p[0] ?? {}) as { to?: string; data?: string; from?: string; value?: string };
       const to = String(call.to ?? '').toLowerCase();
       const data = String(call.data ?? '0x');
-      if (!/^0x[0-9a-f]{40}$/.test(to) || !/^0x([0-9a-fA-F]{2}){0,8192}$/.test(data)) return text('bad call', 400);
+      if (!/^0x[0-9a-f]{40}$/.test(to) || !/^0x([0-9a-fA-F]{2})*$/.test(data) || data.length > 2 + 2 * MAX_CALL_BYTES) return text('bad call', 400);
       if (!allowed.has(to) && !others.has(to)) others.set(to, clean.length);
       // `from` rides along (only as an address): simulating a write needs the real sender, or msg.sender is 0x0.
       const from = String(call.from ?? '').toLowerCase();
