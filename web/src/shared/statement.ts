@@ -236,7 +236,9 @@ function amortized(inks: readonly (Ink | null)[], ghosts: ReadonlySet<number>, f
 }
 
 /// What the ink has accrued: plates per butted cell, blurred (1 6 15 20 15 6 1 / 64 each way), and the line where
-/// that reaches 1.055, drawn in the ink of the cell it crosses. Loops smaller than one cell are left out.
+/// that reaches its median over the butted grid (1.055 on the misprint mock, 0.477 on the all-black one), drawn in
+/// the ink of the cell it crosses; over bare paper, in black, or in the sheet's one ink if it has only one. Loops
+/// under 0.6 of a cell are left out (both mocks fit anything from 0.55 to 0.7).
 function accrued(inks: readonly (Ink | null)[], ghosts: ReadonlySet<number>): Path[] {
   const { real, ghost } = butted(inks, ghosts);
   const P = 6, FW = 68 + 2 * P, FH = 84 + 2 * P, K = [1, 6, 15, 20, 15, 6, 1].map((v) => v / 64);
@@ -256,6 +258,13 @@ function accrued(inks: readonly (Ink | null)[], ghosts: ReadonlySet<number>): Pa
     return out;
   };
   f = blur(blur(f, 1, 0), 0, 1);
+  const grid: number[] = [];
+  for (let y = P; y < P + 84; y++) for (let x = P; x < P + 68; x++) grid.push(f[y * FW + x]);
+  grid.sort((a, b) => a - b);
+  const LEVEL = (grid[grid.length / 2 - 1] + grid[grid.length / 2]) / 2;
+  const mixes = new Set<string>();
+  real.forEach((_, k) => { const s = shade(real, ghost, k); if (s) mixes.add(s); });
+  const bare = mixes.size === 1 ? [...mixes][0] : MIX[8];
 
   // Catmull-Rom up to four samples a cell, then marching squares.
   const S = 4, UW = (FW - 1) * S + 1, UH = (FH - 1) * S + 1;
@@ -275,7 +284,6 @@ function accrued(inks: readonly (Ink | null)[], ghosts: ReadonlySet<number>): Pa
   const v = new Float64Array(UH * UW);
   for (let j = 0; j < UH; j++) for (const [y, w] of ty[j]) for (let i = 0; i < UW; i++) v[j * UW + i] += w * rows[y * UW + i];
 
-  const LEVEL = 1.055;
   // Crossing points on the sample grid's edges, keyed by edge: horizontal edges 2k, vertical edges 2k + 1.
   const cross = (a: number, b: number) => (LEVEL - a) / (b - a);
   const point = (e: number): [number, number] => {
@@ -316,13 +324,13 @@ function accrued(inks: readonly (Ink | null)[], ghosts: ReadonlySet<number>): Pa
       const [x2, y2] = loop[(i + 1) % loop.length];
       area += x * y2 - x2 * y;
     });
-    if (Math.abs(area) / 2 / (S * S) < 1) continue;
+    if (Math.abs(area) / 2 / (S * S) < 0.6) continue;
     // Sample point (x, y) is field cell x / S − P, i.e. butted cell x / S − P + 0.5 from the grid's corner.
     const paper = ([x, y]: [number, number]) => [BOX.x + (x / S - P - 2 + 0.5) * CELL, BOX.y + (y / S - P - 2 + 0.5) * CELL];
     const inkAt = (x: number, y: number) => {
       const gx = Math.floor(x / S - P + 0.5), gy = Math.floor(y / S - P + 0.5);
       const k = gy * 68 + gx;
-      return (gx >= 0 && gy >= 0 && gx < 68 && gy < 84 && shade(real, ghost, k)) || MIX[8];
+      return (gx >= 0 && gy >= 0 && gx < 68 && gy < 84 && shade(real, ghost, k)) || bare;
     };
     // One polyline per run of one ink.
     let run: number[] = [], colour = '';
