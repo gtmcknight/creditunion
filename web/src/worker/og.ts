@@ -21,6 +21,7 @@ const CARDS: Record<string, Card> = {
   rating: { title: 'Rating · Credit Union', description: 'Pick a range of ratings and see every Credit in it.', image: '/og/home.png' },
   bits: { title: 'Bits · Credit Union', description: 'Pick a range of Bits and see every Credit in it.', image: '/og/home.png' },
   activity: { title: 'Activity · Credit Union', description: 'Every deposit, buy, bid and new Credit Union, as it happens.', image: '/og/home.png' },
+  printer: { title: 'Printer · Credit Union', description: 'Turn a picture into a Statement, drawn by Credits you and your friends own and Credits for sale.', image: '/og/create.png' },
   og: { title: 'Link previews · Credit Union', description: 'Every page’s link card.', image: '/og/home.png' },
 };
 

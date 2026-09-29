@@ -6,7 +6,7 @@
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/rpc", "/unions.json", "/passes", "/bids/*", "/activity", "/activity.json", "/live", "/ratings", "/edition/*", "/art/*", "/config.json", "/opensea/*", "/ens/*", "/owner/*", "/", "/parties", "/about", "/about/*", "/auctions", "/create", "/unions", "/union/*", "/party/*", "/b/*", "/mint", "/og", "/og/party/*", "/og/sample/*", "/me", "/member/*", "/credit/*", "/og/credit/*", "/credits", "/palette", "/palette/*", "/eights", "/eights/*", "/print", "/print/*", "/weight", "/weight/*", "/time", "/rating", "/bits", "/*.bin", "/wall/*"]
+    "run_worker_first": ["/rpc", "/unions.json", "/passes", "/bids/*", "/activity", "/activity.json", "/live", "/ratings", "/edition/*", "/art/*", "/config.json", "/opensea/*", "/ens/*", "/owner/*", "/", "/parties", "/about", "/about/*", "/auctions", "/create", "/unions", "/union/*", "/party/*", "/b/*", "/mint", "/og", "/og/party/*", "/og/sample/*", "/me", "/member/*", "/credit/*", "/og/credit/*", "/credits", "/palette", "/palette/*", "/eights", "/eights/*", "/print", "/print/*", "/weight", "/weight/*", "/time", "/rating", "/bits", "/*.bin", "/wall/*", "/plans", "/plans/*", "/printer", "/printer/*", "/market.json"]
   },
   // Public config served at /config.json. Secrets: `wrangler secret put RPC_URL` and `wrangler secret put OPENSEA_API_KEY`.
   "vars": {
@@ -30,6 +30,8 @@
     { "pattern": "eighty.fun", "custom_domain": true },
     { "pattern": "eighty.rhps.fun", "custom_domain": true }
   ],
+  // Printer plans and the listings book (/printer): `wrangler kv namespace create PLANS`, then put its id here.
+  "kv_namespaces": [{ "binding": "PLANS", "id": "REPLACE_WITH_PLANS_KV_ID" }],
   "observability": { "enabled": true },
   // The keeper (src/worker/keeper.ts) runs every 5 minutes; it does nothing until `wrangler secret put KEEPER_KEY`.
   "triggers": { "crons": ["*/5 * * * *"] },
