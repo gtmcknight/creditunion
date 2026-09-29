@@ -24,7 +24,7 @@ import { cardFor, creditCard, creditsCard, partyCard, rangeCard, ruleLine, timeC
 import { parseTrait } from '../shared/trait';
 import { drawCredit, drawUnion, sample, type CreditFacts, type UnionCard } from './card';
 import { printOf, type Rect } from './print';
-import { readActivity } from './activity';
+import { readActivity, type Activity } from './activity';
 import { keyOf, ruleFor } from '../shared/layout';
 import { ALWAYS, CSP, HSTS } from './headers';
 import { fromJson, toJson } from '../shared/json';
@@ -45,6 +45,7 @@ interface Env {
   OPENSEA_API_KEY?: string;
   RPC_URL?: string;
   FALLBACK_RPC: string;
+  ACTIVITY_MIRROR?: string; // local dev only: serve /activity.json from this URL
   /// Mainnet RPC for ENS when the app runs on another chain. Defaults to RPC_URL on mainnet.
   ENS_RPC?: string;
   /// The keeper's private key (keeper.ts), a secret. Unset: the keeper does nothing.
@@ -57,6 +58,8 @@ interface Env {
   RL_ART?: RateLimit;
   /// Plans (/plan/<id>): a design's 80 Credits in slot order and who buys and deposits which. Unset: plans are off.
   PLANS?: KVNamespace;
+  /// Buy locks for Picture unions (locks.ts), one object per union.
+  LOCKS?: DurableObjectNamespace<import('./locks').BuyLocks>;
   /// FWA's marketplace on mainnet: a second Buy Credits source. Empty to turn it off.
   FWA_MARKET?: string;
   /// CreditStrategy (nftstrategy.fun) on mainnet: the Credits it holds for sale are a third Buy Credits source.
@@ -184,6 +187,8 @@ function sameSite(req: Request) {
   const s = req.headers.get('sec-fetch-site');
   return s === null || s === 'same-origin' || s === 'none';
 }
+export { BuyLocks } from './locks';
+
 export default {
   async fetch(req, env, ctx): Promise<Response> {
     const url = new URL(req.url);
@@ -222,10 +227,48 @@ export default {
         maxGwei: Number(env.KEEPER_MAX_GWEI) || 20,
         transport: rpcTransport(env),
         unions: () => unionList(env) as Promise<Kept[]>,
+        burnsOpen: () => burnsOpen(env),
       }).catch((e) => console.error('[keeper] run failed', safeError(e))),
     );
   },
 } satisfies ExportedHandler<Env>;
+
+/// Every Activity row (newest first) with plans' unions left out until they fill: built at most once per 15 seconds
+/// per colo and kept in the colo cache, so /activity.json's slices never rescan.
+async function activityAll(env: Env, url: URL, ctx: ExecutionContext): Promise<Activity[]> {
+  const cache = caches.default;
+  const key = new Request(`${url.origin}/activity-all`);
+  const hit = await cache.match(key);
+  if (hit) return (await hit.json()) as Activity[];
+  const c = client(env);
+  // Mainnet scans from the factory's deploy block; elsewhere, the last ~2 weeks.
+  const from = env.CHAIN_ID === '1' ? ACTIVITY_FROM : (await c.getBlockNumber()) - 100_000n;
+  const items = await readActivity(c as never, cache, `${url.origin}/activity-state/${env.FACTORY.toLowerCase()}`, {
+    factory: env.FACTORY,
+    sweeper: hasSweeper(env) ? env.SWEEPER : null,
+    credits: env.CREDITS,
+    from: from < 0n ? 0n : from,
+  });
+  // A plan's union stays out of Activity until it fills.
+  const hidden = await hiddenUnions(env);
+  const filling = new Set<string>();
+  await Promise.all(
+    [...hidden].map(async (a) => {
+      const s = (await c.readContract({ address: a as Address, abi: batchAbi, functionName: 'summary' }).catch(() => null)) as { count: bigint } | null;
+      if (!s || Number(s.count) < 80) filling.add(a);
+    }),
+  );
+  const shown = filling.size ? items.filter((x) => !x.union || !filling.has(x.union.toLowerCase())) : items;
+  ctx.waitUntil(cache.put(key, Response.json(shown, { headers: { 'cache-control': 'public, max-age=15' } })));
+  return shown;
+}
+
+/// Burn day's hold: until the PLANS key `burns-open` is "1", the keeper doesn't burn and the page hides Make Statement
+/// (anyone can still call assemble() directly). Flip it once the first Statement checks out, no deploy needed:
+///   pnpm wrangler kv key put --binding PLANS burns-open 1 --remote
+async function burnsOpen(env: Env) {
+  return (await env.PLANS?.get('burns-open', { cacheTtl: 30 })) === '1';
+}
 
 /// Chain and addresses for the app: at /config.json, and written into every page the Worker serves (#config).
 const publicConfig = (env: Env) => ({
@@ -238,6 +281,7 @@ const publicConfig = (env: Env) => ({
 });
 
 async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): Promise<Response> {
+  if (url.pathname === '/burns') return Response.json({ open: await burnsOpen(env) }, { headers: { 'cache-control': 'public, max-age=15' } });
   if (url.pathname === '/config.json') return Response.json(publicConfig(env), { headers: { 'cache-control': 'public, max-age=60' } });
 
   if (url.pathname === '/rpc') return rpc(req, env, url);
@@ -377,6 +421,65 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     } catch {
       return text('bad request', 400);
     }
+  }
+
+  // A Picture union's picture (64 × 80 RGBA, base64, and the Detail it was matched with): the page it was made on keeps it here, so every visitor's union
+  // page can recommend the Credit that draws each open slot best. Once per union: the first save stands.
+  const picPath = url.pathname.match(/^\/pictures\/(0x[0-9a-fA-F]{40})$/);
+  if (picPath) {
+    if (!env.PLANS) return text('pictures are off here', 501);
+    const batch = picPath[1].toLowerCase() as Address;
+    const key = `picture:${batch}`;
+    if (req.method === 'GET') {
+      const stored = await env.PLANS.get(key);
+      return stored ? new Response(stored, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=300' } }) : new Response('no picture', { status: 404, headers: { 'cache-control': 'public, max-age=30' } });
+    }
+    if (req.method !== 'POST') return text('bad request', 400);
+    if (!sameSite(req)) return text('forbidden', 403);
+    if (await limited(env.RL_MISC, req, 5)) return text('slow down', 429);
+    const raw = await readBody(req, 40_000);
+    let px = '', detail = NaN, ids: (number | null)[] | null = null;
+    try {
+      const b = JSON.parse(raw ?? '') as { px?: unknown; detail?: unknown; ids?: unknown };
+      px = String(b.px ?? '');
+      detail = Number(b.detail);
+      // The Credit picked for each slot, for list cards: 80 of them (null where none was for sale).
+      if (Array.isArray(b.ids) && b.ids.length === 80 && b.ids.every((x) => x === null || (Number.isInteger(x) && inSupply(x as number)))) ids = b.ids as (number | null)[];
+    } catch {}
+    if (!/^[A-Za-z0-9+/]{27307}=$/.test(px) || !(detail >= 0 && detail <= 4)) return text('bad picture', 400); // 20,480 bytes
+    if (!(await isBatch(env, url, batch))) return text('not a batch', 404);
+    // Only a sheet painted by Colors can use one.
+    const f = ((await client(env).readContract({ address: batch, abi: batchAbi, functionName: 'summary' })) as { filter: { layout0: bigint; layout1: bigint; layoutTrait: number } }).filter;
+    if ((!f.layout0 && !f.layout1) || Number(f.layoutTrait) !== 0) return text('not a painted union', 400);
+    if (await env.PLANS.get(key)) return text('already has a picture', 409);
+    await env.PLANS.put(key, JSON.stringify({ px, detail, ...(ids ? { ids } : {}) }));
+    return new Response(null, { status: 201 });
+  }
+
+  // A Picture union's buy locks (locks.ts): GET the Colors being bought; POST { op, id, colours } to acquire (60 s to
+  // confirm in the wallet), hold (2 min while the transaction is pending) or release them.
+  const lockPath = url.pathname.match(/^\/locks\/(0x[0-9a-fA-F]{40})$/);
+  if (lockPath) {
+    if (!env.LOCKS) return text('locks are off here', 501);
+    const batch = lockPath[1].toLowerCase() as Address;
+    const stub = env.LOCKS.get(env.LOCKS.idFromName(batch));
+    if (req.method === 'GET') return Response.json({ held: await stub.held() }, { headers: { 'cache-control': 'no-store' } });
+    if (req.method !== 'POST' || !sameSite(req)) return text('forbidden', 403);
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    let b: { op?: unknown; id?: unknown; colours?: unknown };
+    try {
+      b = JSON.parse((await readBody(req, 2_000)) ?? '');
+    } catch {
+      return text('bad request', 400);
+    }
+    const id = String(b.id ?? '');
+    if (!/^[A-Za-z0-9]{16,64}$/.test(id)) return text('bad request', 400);
+    if (b.op === 'release') return (await stub.release(id), new Response(null, { status: 204 }));
+    if (b.op === 'hold') return (await stub.hold(id, 120_000), new Response(null, { status: 204 }));
+    const colours = Array.isArray(b.colours) ? b.colours.map(Number) : [];
+    if (b.op !== 'acquire' || !colours.length || colours.length > 15 || colours.some((c) => !Number.isInteger(c) || c < 1 || c > 15)) return text('bad request', 400);
+    if (!(await isBatch(env, url, batch))) return text('not a batch', 404);
+    return Response.json(await stub.acquire(id, [...new Set(colours)], 60_000), { headers: { 'cache-control': 'no-store' } });
   }
 
   const planPath = url.pathname.match(/^\/plans(?:\/([A-Za-z0-9]{10})(\.json|\/union|\/swap)?)?$/);
@@ -721,36 +824,29 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   // The Activity page moved from /live: old links land on it.
   if (url.pathname === '/live') return Response.redirect(`${url.origin}/activity${url.search}`, 301);
 
-  // /activity.json: what wallets have done on the site, newest first (activity.ts). Fifteen seconds per colo.
+  // /activity.json: what wallets have done on the site, newest first (activity.ts), served in slices:
+  //   ?limit=100 (max 1000)  ?after=<tx>:<i>:<kind> (the last row you have)  ?union=0x… or ?member=0x…  ?last
+  // The whole list is built at most once per 15 seconds per colo; every slice is cut from it.
   if (url.pathname === '/activity.json') {
-    const cache = caches.default;
-    const key = new Request(`${url.origin}/activity.json`);
-    const hit = await cache.match(key);
-    if (hit) return hit;
-    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    // Local preview without an RPC key: .dev.vars can point this at the live site's feed.
+    if (env.ACTIVITY_MIRROR) return fetch(env.ACTIVITY_MIRROR + url.search);
     try {
-      const c = client(env);
-      // Mainnet scans from the factory's deploy block; elsewhere, the last ~2 weeks.
-      const from = env.CHAIN_ID === '1' ? ACTIVITY_FROM : (await c.getBlockNumber()) - 100_000n;
-      const items = await readActivity(c as never, cache, `${url.origin}/activity-state/${env.FACTORY.toLowerCase()}`, {
-        factory: env.FACTORY,
-        sweeper: hasSweeper(env) ? env.SWEEPER : null,
-        credits: env.CREDITS,
-        from: from < 0n ? 0n : from,
-      });
-      // A plan's union stays out of Activity until it fills.
-      const hidden = await hiddenUnions(env);
-      const filling = new Set<string>();
-      await Promise.all(
-        [...hidden].map(async (a) => {
-          const s = (await c.readContract({ address: a as Address, abi: batchAbi, functionName: 'summary' }).catch(() => null)) as { count: bigint } | null;
-          if (!s || Number(s.count) < 80) filling.add(a);
-        }),
-      );
-      const shown = filling.size ? items.filter((x) => !(x as { union?: string }).union || !filling.has(String((x as { union?: string }).union).toLowerCase())) : items;
-      const res = Response.json({ items: shown }, { headers: { 'cache-control': 'public, max-age=15' } });
-      ctx.waitUntil(cache.put(key, res.clone()));
-      return res;
+      const all = await activityAll(env, url, ctx);
+      const q = url.searchParams;
+      // ?last: when each union last took a Credit (a deposit, or a buy straight into it): { union: unix seconds }.
+      if (q.has('last')) {
+        const last: Record<string, number> = {};
+        for (const x of all) if (x.union && x.time && (x.kind === 'deposited' || (x.kind === 'bought' && x.intoUnion))) last[x.union.toLowerCase()] ??= x.time;
+        return Response.json({ last }, { headers: { 'cache-control': 'public, max-age=15' } });
+      }
+      const union = q.get('union')?.toLowerCase(), member = q.get('member')?.toLowerCase(), after = q.get('after');
+      const limit = Math.min(Math.max(Number(q.get('limit')) || 100, 1), 1000);
+      let rows = union ? all.filter((x) => x.union?.toLowerCase() === union) : member ? all.filter((x) => x.who.toLowerCase() === member) : all;
+      if (after) {
+        const k = rows.findIndex((x) => `${x.tx}:${x.i}:${x.kind}` === after);
+        rows = k < 0 ? [] : rows.slice(k + 1);
+      }
+      return Response.json({ items: rows.slice(0, limit), more: rows.length > limit }, { headers: { 'cache-control': 'public, max-age=15' } });
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
     }

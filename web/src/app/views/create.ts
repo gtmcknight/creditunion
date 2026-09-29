@@ -4,36 +4,47 @@ import { decodeEventLog, parseEther } from 'viem';
 import { creditsAbi, factoryAbi } from '../abi';
 import { canBatch, config, send, sendBatch, session } from '../chain';
 import { INK, maskInks, maskLabel } from '../traits';
-import { SPLITS, creatorFeeBps, factoryRatings, isApproved, listBatches, minOpen, myCredits, protocolFeeBps, ratings, type Listed, type Rated, type Summary } from '../data';
+import { earlyWeight, placeOnLayout, SPLITS, creatorFeeBps, factoryRatings, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Listed, type Rated, type Summary } from '../data';
 import { paletteBit, TRAITS } from '../traits';
 import { $$, art, errText, esc, fromTimeText, openModal, sameZoneDay, sheet, toast, toTimeText, typedToMinute, mintEdgeNote, zoned, zoneName, zoneToggle } from '../ui';
 import { LAYOUT_TRAITS, keyOf, ruleFor, slotMark, slotName, type LayoutTrait } from '../../shared/layout';
 import { bitsPath, ratingPath, setPath, timePath } from '../../shared/trait';
 import { editionArt } from '../ghosts';
-import { listedPager, live, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepToWallet, type Listed as Listing } from '../forsale';
+import { listedById, listedPager, live, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepToWallet, type Listed as Listing, type Sale } from '../forsale';
 import { creditCell } from './trait';
-import { directionCanvas, directions, mountDirections, rulesView } from '../directions';
+import { directionCanvas, directions, mountDirections, rulesView, showDirection } from '../directions';
 import { Room, booksOf, noRoomReason } from '../slots';
 import { bin } from '../bins';
 import { TRAIT_KINDS, eightsName, parseTrait } from '../../shared/trait';
+import { DETAIL, gapOf, Guide, framer, packPicture, planOf, type Framer, type Plan } from '../picture';
 
 const CHUNK = 40;
 /// The layouts a new party can pick, by the contract's burn-order number (1 Mint time and 3 Creator's order are retired).
 const ARR_OPTS: [number, string, string][] = [
-  [0, 'Deposit', 'In the order they were deposited.'],
-  [2, 'Number ↑', 'By Credit number (token ID), lowest to highest.'],
-  [5, 'Number ↓', 'By Credit number (token ID), highest to lowest.'],
-  [4, 'Painted', 'You paint the sheet; each Credit goes to its slot.'],
+  [0, 'Joined', 'In the order they joined.'],
+  [2, 'Number', 'By Credit number (token ID).'],
+  [4, 'Painted', 'Pick a color, then click or drag on the sheet.'],
+  [6, 'Picture', 'Uses the Credits for sale that draw your picture best.'],
 ];
+/// Number's two directions, by the contract's burn-order number.
+const NUMBER_DIRS: [number, string, string][] = [
+  [2, '↑ Low to high', 'By Credit number (token ID), lowest to highest.'],
+  [5, '↓ High to low', 'By Credit number (token ID), highest to lowest.'],
+];
+/// Picture is Painted on-chain: the tile only changes how the paint is made.
+const PICTURE = 6;
 /// A 4×5 thumbnail per layout: shade steps show the order the sheet fills in.
 const arrIcon = (v: number) => {
   const cells = Array.from({ length: 20 }, (_, i) => {
     const k = v === 2 ? i : v === 5 ? 19 - i : v === 0 ? [3, 11, 7, 15, 0, 18, 9, 5, 13, 1, 16, 6, 10, 2, 19, 8, 14, 4, 17, 12][i] : -1;
+    if (v === PICTURE) return `<rect x="${(i % 4) * 7}" y="${((i / 4) | 0) * 7}" width="6" height="6" fill="${PICTURE_ICON[i]}"/>`;
     const fill = v === 4 ? ([0, 3, 5, 6, 9, 10, 13, 14, 16, 19].includes(i) ? '#00b5e2' : '#e4007c') : `rgba(17,17,17,${(0.12 + (0.88 * (19 - k)) / 19).toFixed(2)})`;
     return `<rect x="${(i % 4) * 7}" y="${((i / 4) | 0) * 7}" width="6" height="6" fill="${fill}"/>`;
   }).join('');
   return `<svg viewBox="0 0 27 34" aria-hidden="true">${cells}</svg>`;
 };
+/// Picture's tile: a sun over a horizon, in Credit tones.
+const PICTURE_ICON = ['#80daf1', '#ffe87f', '#ffe87f', '#80daf1', '#80daf1', '#f1745f', '#f1745f', '#80daf1', '#80daf1', '#80daf1', '#80daf1', '#80daf1', '#80c678', '#80c678', '#446a40', '#446a40', '#446a40', '#403a5f', '#446a40', '#403a5f'];
 /// Layout presets: which slots take brush A, brush B, or stay open (any palette).
 /// A shape drawn on the 8×10 sheet, row by row: # takes brush A, . takes brush B.
 const bitmap = (rows: string) => {
@@ -61,16 +72,6 @@ const LAYOUTS: Record<string, (i: number) => 'A' | 'B' | 0> = {
   Solid: () => 'A',
   Clear: () => 0,
 };
-/// A pattern as a tiny 8×10 sheet: brush A dark, brush B light, open slots empty.
-const patternIcon = (name: string) => {
-  const fn = LAYOUTS[name];
-  let r = '';
-  for (let i = 0; i < 80; i++) {
-    const v = fn(i);
-    if (v) r += `<rect x="${(i % 8) * 3}" y="${Math.floor(i / 8) * 3}" width="2.4" height="2.4" fill="${v === 'A' ? 'currentColor' : 'var(--line-strong)'}"/>`;
-  }
-  return `<svg viewBox="0 0 24 30" aria-hidden="true">${r}</svg>`;
-};
 /// Ready-made designs for an empty painter: a pattern in two Colors (CMYK masks: C 1, M 2, Y 4, K 8).
 const DESIGNS: [string, number, number][] = [
   ['Opepen', 8, 4],
@@ -90,21 +91,6 @@ const DESIGNS: [string, number, number][] = [
   ['X', 8, 2],
   ['Stairs', 2, 8],
 ];
-const INK_OF = (m: number) => [...'CMYK'].filter((_, b) => m & (1 << b)).map((c) => INKS[c])[0] ?? '#111';
-/// A design as a tiny sheet in two colours (B '' leaves those slots open).
-/// `a` and `b` are each a colour, or several side by side (a palette's inks, split like its brush swatch).
-const designIcon = (name: string, a: string[], b: string[]) => {
-  const fn = LAYOUTS[name];
-  let r = '';
-  for (let i = 0; i < 80; i++) {
-    const v = fn(i);
-    const cs = v === 'A' ? a : v === 'B' ? b : [];
-    const x = (i % 8) * 3, y = Math.floor(i / 8) * 3;
-    if (!cs.length) r += `<rect x="${x}" y="${y}" width="2.6" height="2.6" fill="#e9e9e7"/>`;
-    else cs.forEach((c, k) => (r += `<rect x="${x + (2.6 * k) / cs.length}" y="${y}" width="${2.6 / cs.length}" height="2.6" fill="${c}"/>`));
-  }
-  return `<svg viewBox="0 0 24 30" aria-hidden="true" shape-rendering="crispEdges">${r}</svg>`;
-};
 const fmt = (n: number) => n.toFixed(4).replace(/\.?0+$/, '');
 const INKS: Record<string, string> = { C: '#00B5E2', M: '#E4007C', Y: '#FFD100', K: '#111111' };
 const PRINTS = TRAITS.print; // Registered … Loose, in contract order
@@ -159,20 +145,23 @@ const PIPS: [number, number][][] = [[], [[2, 2]], [[1, 1], [3, 3]], [[1, 1], [2,
 const eightsPips = (n: number) => `<span class="pips">${PIPS[n].map(([r, c]) => `<i style="grid-area:${r}/${c}">8</i>`).join('')}</span>`;
 /// What each payout means, in one line.
 const PAYOUT_HINTS = [
-  'When the Statement sells, every Credit gets an equal 1/80 of the sale.',
-  'When the Statement sells, earlier deposits get more: the first Credit 1.5×, sliding to 0.5× for the last.',
+  'All 80 get 1/80',
+  'First 1.5× · Last 0.5×',
 ];
 const EIGHT_NAMES = ['none', 'one', 'two', 'three', 'four', 'five'];
+/// Each payout as 80 thin bars, one per Credit in deposit order: Equal flat at 1×, Early bird sliding from 1.5× to
+/// 0.5× (earlyWeight). Drawn to the same scale, so the two read against each other.
+const payoutChart = (split: number) =>
+  `<svg class="pay-chart" viewBox="0 0 160 24" preserveAspectRatio="none" aria-hidden="true">${Array.from({ length: 80 }, (_, i) => {
+    const h = ((split === 1 ? earlyWeight(i) : 1) / 1.5) * 24;
+    return `<rect x="${i * 2}" y="${(24 - h).toFixed(2)}" width="1.4" height="${h.toFixed(2)}"/>`;
+  }).join('')}</svg>`;
 const eightsChip = (n: number) => (n === 0 ? 'no 8s' : '8'.repeat(n));
 
 /// Palettes by ink count, one row each (C M Y K · the pairs · the triples · CMYK), in CMYK order within a row.
 const inkKey = (p: string) => [...p].map((c) => 'CMYK'.indexOf(c)).join('');
 const PALETTE_ROWS = [1, 2, 3, 4].map((n) => TRAITS.colors.filter((p) => p.length === n).sort((a, b) => inkKey(a).localeCompare(inkKey(b))));
 
-/// Paint key: every painted value gets its own colour, used as a ring on its slots and on its brush, so the
-/// layout reads at a glance even with real Credits in the slots. Deliberately not the CMYK inks.
-const KEY_COLORS = ['#2f6bff', '#ff6a00', '#12a150', '#a24dff', '#00a3a3', '#c79100', '#e11d48', '#0ea5e9', '#7c3aed', '#65a30d', '#db2777', '#0f766e', '#b45309', '#4f46e5', '#15803d', '#be123c'];
-const keyColor = (v: number) => KEY_COLORS[(v - 1) % KEY_COLORS.length];
 
 /// Badge a preview slot with its paint's icon, the same one its brush shows ('' clears it).
 function markPaint(cell: HTMLElement, icon: string) {
@@ -190,7 +179,7 @@ export async function create(app: HTMLElement) {
     return;
   }
 
-  const [held, approved, min, protocolBps, creatorBps, table, minutes, unions] = await Promise.all([
+  const [held, approved, min, protocolBps, creatorBps, table, minutes] = await Promise.all([
     myCredits(session.account),
     isApproved(session.account),
     minOpen(),
@@ -198,7 +187,6 @@ export async function create(app: HTMLElement) {
     creatorFeeBps(),
     factoryRatings(),
     fetch('/minutes.json').then((r) => r.json() as Promise<Minutes>).catch(() => [] as Minutes),
-    listBatches().catch(() => [] as Listed[]),
   ]);
   const owned = [...held]; // what you buy on this page joins it
   const rules: Rules = { palettes: 0, prints: 0, weights: 0, eights: 0, minuteFrom: -1, minuteTo: -1, idFrom: 0, idTo: 0, minScore: 0, maxScore: 0, bitsFrom: 0, bitsTo: 0, list: [] };
@@ -220,6 +208,18 @@ export async function create(app: HTMLElement) {
   const overText = (o: { m: number; c: number; have: number }) =>
     `Only ${o.have.toLocaleString()} ${o.have === 1 ? 'Credit fits' : 'Credits fit'} ${slotName(layoutTrait, o.m)}, but ${o.c} slots ask for it.`;
   let pattern: 'none' | 'checkered' = 'none';
+  let pic: Framer | null = null; // the Picture layout's framer, made when it's first picked
+  let guide: Guide | null = null; // the framed picture against every Credit that could draw it
+  let picPx: Uint8ClampedArray | null = null; // the picture the sheet was designed from (saved with the union)
+  const picGone = new Set<number>(); // planned Credits found no longer for sale
+  let picPlan: Plan | null = null; // what can go in first: yours that are next in their Colors, and listings
+  /// Where Credits can be bought here (mainnet), a picture union starts by buying its first Credits: the picture is
+  /// the market's best, not bent toward what you hold, and yours can join from its page when they're next. Testnets
+  /// can't buy, so there it's designed with yours too.
+  const buyToStart = !!config.sweeper;
+  /// Picture is the layout and its sheet is designed: only the picture's own Credits go in, each Colors in order.
+  const picturing = () => !!picPlan && layout.some(Boolean) && app.querySelector<HTMLInputElement>('input[name=arr]:checked')?.value === String(PICTURE);
+  const bySlot = (ids: string[]) => (picPlan ? [...ids].sort((a, b) => (picPlan!.slot.get(a) ?? 99) - (picPlan!.slot.get(b) ?? 99)) : ids);
   const layout: number[] = new Array(80).fill(0); // slot values of the painted trait, 0 = any
   let panesReady = false; // the rule tabs exist (refresh() redraws them once they do)
   let layoutTrait: LayoutTrait = 0; // which trait the sheet is painted with (shared/layout.ts)
@@ -234,17 +234,43 @@ export async function create(app: HTMLElement) {
     <div class="design-preview dir-host">
       <div id="preview">${sheet([])}</div>${directionCanvas}
       <div class="preview-foot">
-        <div class="view-toggle" role="radiogroup" aria-label="Show" hidden><label><input type="radio" name="view" value="rules"><span>Rules</span></label><label><input type="radio" name="view" value="credits" checked><span>Credits</span></label></div>
+        <div class="view-toggle" role="radiogroup" aria-label="Show" hidden><label><input type="radio" name="view" value="rules"><span>Painted</span></label><label><input type="radio" name="view" value="credits" checked><span>Credits</span></label></div>
         <div class="muted small">${directions('create', true)}</div>
-        <span class="muted small num" id="layout-pick"></span>
       </div>
     </div>
 
     <form id="create" class="design-form" novalidate>
-      <h2 class="form-title">Who can join <button type="button" class="link small join-count" id="see-eligible"><span class="num" id="st-edition">–</span> <span id="st-edition-label">eligible</span></button></h2>
+      <label class="name-field"><span>Name</span><input id="name" type="text" maxlength="64" placeholder="e.g. Cyan Minute" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"></label>
+      <h2 class="form-title">Layout</h2>
+      <section class="rule layout-opts" data-tab="order" data-pane="order">
+        <div class="arr-tiles" role="radiogroup" aria-label="Layout">${ARR_OPTS.map(([v, l, h]) => `<label class="arr-tile" title="${h}"><input type="radio" name="arr" value="${v}" ${v === 0 ? 'checked' : ''}>${arrIcon(v)}<b>${l}</b></label>`).join('')}</div>
+        <div class="seg sm num-dir" role="radiogroup" aria-label="Number order" id="num-dir" hidden>${NUMBER_DIRS.map(([v, l, h], i) => `<label title="${h}"><input type="radio" name="num-dir" value="${v}" ${i === 0 ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
+        <p class="term-desc muted" id="arr-hint">${ARR_OPTS[0][2]}</p>
+        <div class="picture-block" id="picture-block" hidden>
+          <input type="file" id="pic-file" accept="image/*" hidden>
+          <div class="picture-frame">
+            <div class="printer-crop" title="Drag to move, pinch or scroll to zoom"><canvas id="pic-crop" width="256" height="320" aria-label="The picture: drag to move, pinch or scroll to zoom"></canvas><div class="printer-zoom"><button type="button" data-zoom="out" aria-label="Zoom out">−</button><button type="button" data-zoom="in" aria-label="Zoom in">+</button></div></div>
+            <div class="picture-side">
+              <label class="picture-contrast"><span>Brightness</span><input type="range" id="pic-brightness" min="0.5" max="1.3" step="0.05" value="1" aria-label="Brightness"></label>
+              <label class="picture-contrast"><span>Contrast</span><input type="range" id="pic-contrast" min="0.8" max="1.8" step="0.05" value="1.2" aria-label="Contrast"></label>
+              <label class="picture-contrast"><span>Saturation</span><input type="range" id="pic-saturation" min="0" max="2.5" step="0.05" value="1" aria-label="Saturation"></label>
+              <p class="term-desc muted">Shown as the Credits see it, one square each. Drag to frame it, zoom out to shrink it onto white.</p>
+              <div class="pic-links" id="pic-links" hidden><button type="button" class="link small" id="pic-replace">Choose another picture</button><button type="button" class="link small" id="pic-reset">Reset</button></div>
+              <p class="term-desc muted num" id="pic-status" aria-live="polite"></p>
+            </div>
+          </div>
+        </div>
+        <div class="paint-block" id="paint-block" hidden>
+          <div class="brushes" id="brushes"></div>
+          <div class="lgrid" id="lgrid" hidden>${Array.from({ length: 80 }, (_, i) => `<button type="button" class="lcell" data-i="${i}" aria-label="Slot ${i + 1}"></button>`).join('')}</div>
+        </div>
+      </section>
+
+      <h2 class="form-title">Eligible Credits <button type="button" class="link small join-count" id="see-eligible" title="See them"><span class="num" id="st-edition">–</span> <span id="st-edition-label">→</span></button></h2>
       <section class="rule who-bar" data-pane="who">
         <p class="rule-sentence" id="rule-sentence"></p>
-        <div class="rule-list" id="add-rule"></div>
+        <div class="rule-list" id="add-rule" hidden></div>
+        <div class="rule-adds" id="rule-adds" aria-label="Add a rule"></div>
       </section>
 
       <section class="rule" data-tab="eights" data-pane="who"><div class="rule-head">Eights <span class="muted" id="eights-pick">Any</span></div>
@@ -312,34 +338,11 @@ export async function create(app: HTMLElement) {
 
 
 
-      <h2 class="form-title">Layout</h2>
-      <section class="rule layout-opts" data-tab="order" data-pane="order">
-        <div class="arr-tiles" role="radiogroup" aria-label="Layout">${ARR_OPTS.map(([v, l, h]) => `<label class="arr-tile" title="${h}"><input type="radio" name="arr" value="${v}" ${v === 0 ? 'checked' : ''}>${arrIcon(v)}<b>${l}</b></label>`).join('')}</div>
-        <p class="term-desc muted" id="arr-hint">${ARR_OPTS[0][2]}</p>
-        <div class="paint-block" id="paint-block" hidden>
-          <div class="brushes" id="brushes"></div>
-          <div class="paint-bar">
-            <p class="term-desc muted" id="paint-hint">Pick a color, then click or drag on the sheet.</p>
-          </div>
-          <div id="designs"></div>
-          <div class="lgrid" id="lgrid" hidden>${Array.from({ length: 80 }, (_, i) => `<button type="button" class="lcell" data-i="${i}" aria-label="Slot ${i + 1}"></button>`).join('')}</div>
-        </div>
-      </section>
-
-      <h2 class="form-title">Settings</h2>
-      <div class="rule-list party-list">
-        <div class="rrow">
-          <label class="rrow-head name-row"><span class="rrow-name">Name</span><input id="name" type="text" maxlength="64" placeholder="e.g. Cyan Minute" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"></label>
-        </div>
-        <div class="rrow" data-prow="terms">
-          <div class="rrow-head"><button type="button" class="rrow-toggle" data-party-btn="terms" aria-expanded="false"><span class="rrow-name">Payout</span><span class="rrow-value" id="split-value">Equal</span><svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button></div>
-          <section class="rule" data-tab="terms" data-pane="terms" hidden>
-            <div class="opt-list">${SPLITS.map((l, i) => `<label class="opt"><input type="radio" name="split" value="${i}" ${i === 0 ? 'checked' : ''}><span class="opt-body"><b>${l}</b><span>${PAYOUT_HINTS[i]}</span></span></label>`).join('')}</div>
-          </section>
-        </div>
+      <div class="pay-field" role="radiogroup" aria-label="Payout"><span>Payout</span>
+        <div class="pay-opts">${SPLITS.map((l, i) => `<label class="pay-opt"><input type="radio" name="split" value="${i}" ${i === 0 ? 'checked' : ''}><span class="pay-head"><b>${l}</b><span class="num">${PAYOUT_HINTS[i]}</span></span>${payoutChart(i)}</label>`).join('')}</div>
       </div>
 
-      <h2 class="form-title">Deposit Credits <span class="muted num" id="n">Min ${min}</span><button type="button" class="link small" id="all">Select all that fit</button></h2>
+      <h2 class="form-title"><span id="dep-title">Deposit Credits</span> <span class="muted num" id="n">Min ${min}</span><button type="button" class="link small" id="all">Select all that fit</button></h2>
       <section class="rule" data-tab="credits" data-pane="always">
         <div class="picker lg" id="picker">${
           owned.length
@@ -347,12 +350,12 @@ export async function create(app: HTMLElement) {
             : `<p class="muted">You don’t hold any Credits.${config.chainId !== 1 ? ' <a href="/mint">Mint test Credits →</a>' : ''}</p>`
         }</div>
         <details class="picker-off" id="picker-off-wrap" hidden><summary class="muted small" id="picker-off-sum"></summary><div class="picker lg" id="picker-off"></div></details>
+        <div class="picture-callout" id="picture-callout" hidden><b>Buy to join</b><span>Only the Credits that draw this picture can join. Buy them here, in order, so each lands in its spot.</span></div>
         <div class="create-buy" id="create-buy" hidden></div>
       </section>
 
 
       <div class="submit">
-        <p class="hint" id="same" hidden></p>
         <p class="gate-warn" id="warn" hidden></p>
         <button class="btn primary block" id="go" disabled>Start Credit Union</button>
         <p class="hint" id="why"></p>
@@ -380,6 +383,7 @@ export async function create(app: HTMLElement) {
     }
     traitsIn = true;
     refresh();
+    if (!buyToStart) void paintFromPicture(); // a picture framed while they were read, with yours in it
   })();
 
   // ---------------------------------------------------------------- buy Credits that fit, when none of yours do
@@ -396,6 +400,7 @@ export async function create(app: HTMLElement) {
   };
   async function drawBuy(fits: number) {
     const el = document.getElementById('create-buy')!;
+    if (picturing()) return drawPictureBuy(el);
     if (fits || !traitsIn || rules.list.length || !config.sweeper) {
       el.hidden = true;
       buyFor = '';
@@ -441,6 +446,39 @@ export async function create(app: HTMLElement) {
       relist(grid, sale, sale.ls.filter(sourceShown), tile, mine);
       void tick();
     });
+  }
+  /// A picture: its first Credits for sale, in the order they go in (only these can start it), when none of yours are.
+  async function drawPictureBuy(el: HTMLElement) {
+    if ((picPlan!.mine.size && !buyToStart) || !config.sweeper) {
+      el.hidden = true;
+      buyFor = '';
+      buyer = null;
+      return;
+    }
+    const key = `picture:${picSeq}`;
+    if (key === buyFor) return;
+    buyFor = key;
+    // The market read can be minutes old: a planned Credit that's no longer for sale leaves the plan, and its slot
+    // takes the next best, until the first eight are all really for sale.
+    let ls: Listing[] = [];
+    for (let tries = 0; tries < 5; tries++) {
+      const want = bySlot([...picPlan!.buy]).slice(0, 8);
+      ls = await listedById(want);
+      if (buyFor !== key || !el.isConnected) return;
+      const sold = want.filter((id) => !ls.some((l) => l.id === id));
+      if (!sold.length) break;
+      sold.forEach((id) => picGone.add(Number(id)));
+      picPlan = planOf(guide!.fill(layout, layout.map(() => null), picGone), layout);
+    }
+    ls = bySlot(ls.map((l) => l.id)).map((id) => ls.find((l) => l.id === id)!);
+    drawPreview(owned.filter(qualifies));
+    el.hidden = !ls.length;
+    if (!ls.length) return;
+    const tile = (l: Listing) => creditCell(Number(l.id), priceTag(l));
+    el.innerHTML = `<div class="jb"><div class="jb-sweep" id="cb-act"></div>
+      <div class="trait-grid" id="cb-grid">${ls.map(tile).join('')}</div></div>`;
+    const sale: Sale = { ls, all: [...ls], byId: new Map(ls.map((l) => [l.id, l])), mine: new Set(), preview: false };
+    buyer = sweepControls(el.querySelector<HTMLElement>('#cb-act')!, sale, el.querySelector<HTMLElement>('#cb-grid')!, { button: false, onPick: () => refresh() });
   }
   /// Bought here: into the picker, picked.
   async function gotCredits(ids: string[]) {
@@ -519,9 +557,17 @@ export async function create(app: HTMLElement) {
   /// The Name field's placeholder: until you type one, it suggests a name from what you've set.
   function drawSummary() {
     const who = describe();
-    (document.getElementById('name') as HTMLInputElement).placeholder = who === 'Any Credit' ? 'All Credits' : who.split(' · ')[0];
+    // A picture's union is named for the picture until you name it.
+    const fromPicture = pic?.ready() && app.querySelector<HTMLInputElement>('input[name=arr]:checked')?.value === String(PICTURE) ? pictureName(pic.label()) : '';
+    (document.getElementById('name') as HTMLInputElement).placeholder = fromPicture || (who === 'Any Credit' ? 'All Credits' : who.split(' · ')[0]);
   }
 
+  /// A file name as a union's name: "sunset_beach" → "sunset beach"; one that's mostly a timestamp or camera number
+  /// ("IMG_4032", "ChatGPT Image Sep 29, 2026, 08_17_51 AM") → "Picture".
+  const pictureName = (file: string) => {
+    const n = file.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return !n || (n.match(/\d/g) ?? []).length > 3 ? 'Picture' : n.slice(0, 64);
+  };
   /// The button says what it does: how many of your Credits go in.
   const startLabel = () => {
     const b = buying().length;
@@ -566,27 +612,20 @@ export async function create(app: HTMLElement) {
       layoutTrait: layout.some(Boolean) ? layoutTrait : 0,
     };
   }
-  /// An open Credit Union that already takes exactly these Credits, so a second one doesn't split them.
-  const sameAs = (f: ReturnType<typeof filterOf>, g: Summary['filter']) =>
-    (['palettes', 'prints', 'weights', 'eights', 'minScore', 'maxScore', 'bitsFrom', 'bitsTo', 'layoutTrait'] as const).every((k) => Number(f[k]) === Number(g[k])) &&
-    (['paidFrom', 'paidTo', 'idFrom', 'idTo', 'layout0', 'layout1'] as const).every((k) => BigInt(f[k]) === BigInt(g[k]));
-  function drawSame() {
-    const el = document.getElementById('same')!;
-    const f = filterOf();
-    const twin = rules.list.length ? null : unions.find(({ s }) => s.state === 'Open' && s.count < 80 && !s.allowlistSize && sameAs(f, s.filter));
-    el.hidden = !twin;
-    if (twin) el.innerHTML = `<a href="/union/${twin.s.address}">${esc(twin.s.name || 'Untitled')}</a> already takes these Credits, ${twin.s.count} of 80 in.`;
-  }
-
   function refresh() {
     if (panesReady) applyPanes();
-    drawSame();
     drawSee();
-    const fit = owned.filter(qualifies);
+    // A picture takes only its own Credits: yours that are next in their Colors, and any bought here for it.
+    const fit = owned.filter((id) => qualifies(id) && (!picturing() || picPlan!.mine.has(id.toString()) || picPlan!.buy.has(id.toString())));
+    // Buying to start: yours stay out of the way here (bought ones go in, picked, unseen).
+    const buyOnly = picturing() && buyToStart;
+    for (const id of ['picker', 'n']) document.getElementById(id)!.hidden = buyOnly;
+    document.getElementById('picture-callout')!.hidden = !buyOnly;
+    document.getElementById('dep-title')!.textContent = buyOnly ? 'Buy to start' : 'Deposit Credits';
     for (const id of [...picks]) if (!fit.some((f) => f.toString() === id)) picks.delete(id);
     // Until you pick yourself, the least it takes to start is picked for you (Min 1: one of yours that fits), so
     // Start is ready as soon as the rules are; picked again if the rules change under it.
-    if (!pickedByHand && !picks.size && traitsIn) {
+    if (!pickedByHand && !picks.size && traitsIn && !picturing()) {
       const take = capacity();
       for (const id of fit) {
         if (picks.size >= min) break;
@@ -617,13 +656,17 @@ export async function create(app: HTMLElement) {
     if (owned.length) {
 
       const wrap = document.getElementById('picker-off-wrap')!;
-      wrap.hidden = offCount === 0;
+      wrap.hidden = offCount === 0 || buyOnly;
       document.getElementById('picker-off-sum')!.textContent = fit.length
-        ? `You also have ${offCount} ${offCount === 1 ? 'Credit' : 'Credits'} that don’t fit these rules`
-        : `None of your ${offCount === 1 ? 'Credit fits' : `${offCount} Credits fit`} these rules`;
+        ? picturing()
+          ? `${offCount} of yours ${offCount === 1 ? 'isn’t' : 'aren’t'} next in the picture`
+          : `You also have ${offCount} ${offCount === 1 ? 'Credit' : 'Credits'} that don’t fit these rules`
+        : picturing()
+          ? `None of your ${offCount === 1 ? 'Credit is' : `${offCount} Credits are`} next in the picture: buy its first Credits below to start it`
+          : `None of your ${offCount === 1 ? 'Credit fits' : `${offCount} Credits fit`} these rules`;
     }
     document.getElementById('n')!.textContent = picks.size ? `${picks.size} selected` : `Min ${min}`;
-    document.getElementById('all')!.hidden = !fit.length;
+    document.getElementById('all')!.hidden = !fit.length || buyOnly;
     void drawBuy(fit.length);
     const n = picks.size + buying().length; // Credits being bought here count toward the minimum
     const over = overPainted();
@@ -631,7 +674,9 @@ export async function create(app: HTMLElement) {
     const tooNarrow = rules.list.length && rules.list.length < 80 ? 'A named list needs at least 80 Credits.'
       : rules.idTo && rules.idTo - rules.idFrom + 1 < 80 ? 'A number range needs at least 80 numbers.' : '';
     const short = eligible >= 0 && eligible < 80 ? `Only ${eligible} ${eligible === 1 ? 'Credit' : 'Credits'} can ever join, and a Credit Union needs 80. Widen the rules.` : '';
-    const reason = tooNarrow || short || (n < min ? `Select at least ${min} of your qualifying Credits.` : n > 80 ? 'At most 80.' : over ? overText(over) : '');
+    // A picture: none of its Colors may skip a slot.
+    const gap = picturing() ? gapOf(picPlan!, [...picks, ...buying().map((l) => l.id)]) : null;
+    const reason = tooNarrow || short || (gap ? `Add #${gap} too: it goes in before the ones you picked.` : '') || (n < min ? (picturing() ? (picPlan!.mine.size ? 'Pick at least one of yours above.' : 'Buy at least one of the picture’s first Credits to start it.') : `Select at least ${min} of your qualifying Credits.`) : n > 80 ? 'At most 80.' : over ? overText(over) : '');
     // One line under the button: what blocks it, else how it plays out.
     // What blocks Start sits above it as a warning; the line under it always says how it plays out.
     const warn = document.getElementById('warn')!;
@@ -645,7 +690,8 @@ export async function create(app: HTMLElement) {
     clearTimeout(editionTimer);
     editionTimer = window.setTimeout(async () => {
       const seq = ++editionSeq;
-      const el = document.getElementById('st-edition')!;
+      const el = document.getElementById('st-edition');
+      if (!el) return; // left the page
       try {
         const r = await fetch('/edition/match', {
           method: 'POST',
@@ -677,7 +723,7 @@ export async function create(app: HTMLElement) {
             refresh();
           }
           // With no rules it's the whole edition; with rules, how many Credits pass them.
-          document.getElementById('st-edition-label')!.textContent = d.count === d.total ? 'Credits, all eligible' : d.count === 1 ? 'eligible Credit' : 'eligible Credits';
+          document.getElementById('st-edition-label')!.textContent = '→';
         }
         ghosts = (d.sample ?? []).map((id, i) => ({ id: BigInt(id), palette: d.palettes?.[i] ?? 0, t: d.traits?.[i] ?? 0 }));
         // A painted sheet needs samples of each painted value, not just whatever the overall sample holds: ask for
@@ -705,9 +751,10 @@ export async function create(app: HTMLElement) {
             go.disabled = true;
           }
         }
+        if (!el.isConnected) return;
         drawPreview(owned.filter(qualifies));
       } catch {
-        if (seq === editionSeq) el.textContent = '–';
+        if (seq === editionSeq && el.isConnected) el.textContent = '–';
       }
     }, 200);
   }
@@ -715,7 +762,28 @@ export async function create(app: HTMLElement) {
   // ---------------------------------------------------------------- trait tiles (tap to pick, tap again to clear)
   /// Your qualifying Credits solid, then real matching Credits from the edition, faded, up to 80.
   /// The checkered design alternates the two palettes so the pattern is visible before anyone joins.
+  /// A picture's sheet as it stands: yours where the contract will put them, Credits picked to buy in the slots
+  /// they'll land in, and in every other slot the Credit that draws it best.
+  function pictureSlots(fit: bigint[]) {
+    const order = [...picks].filter((id) => fit.some((f) => f.toString() === id)).map(BigInt);
+    const placed = placeOnLayout(layout, order, (id) => keyOfMine(id.toString()));
+    const toBuy = buying().map((l) => l.id).filter((id) => picPlan?.slot.has(id));
+    for (const id of toBuy) placed[picPlan!.slot.get(id)!] ??= BigInt(id);
+    const rec = guide!.fill(layout, placed.map((x) => (x === null ? null : Number(x))), picGone);
+    return { order, placed, toBuy, rec, ids: placed.map((x, i) => (x !== null ? Number(x) : (rec[i]?.id ?? null))) };
+  }
   function drawPreview(fit: bigint[]) {
+    // A picture: yours where the contract will put them (each Colors' slots in the order they go in), and in every
+    // other slot the Credit that draws it best, as the union page will recommend it.
+    if (guide && layout.some(Boolean) && app.querySelector<HTMLInputElement>('input[name=arr]:checked')?.value === String(PICTURE) && view === 'credits') {
+      const { order, placed, toBuy, rec } = pictureSlots(fit);
+      // Nothing picked: the whole picture at full ink. Some picked: they show solid and the rest fades back, so you
+      // see what's going in.
+      app.querySelector('.design-preview')!.classList.toggle('solid-ghosts', !order.length && !toBuy.length);
+      document.getElementById('preview')!.innerHTML = sheet(order, { mine: new Set([...picks, ...toBuy]), placed, slotGhosts: rec.map((c) => (c ? { id: BigInt(c.id), src: artOf(BigInt(c.id)) } : null)) });
+      mountDirections(app);
+      return;
+    }
     // Only the Credits you've selected go in solid; the rest of yours read like any other possible match.
     const mineIds = fit.filter((id) => picks.has(id.toString())).slice(0, 80);
     const mineSet = new Set(mineIds.map(String));
@@ -734,10 +802,20 @@ export async function create(app: HTMLElement) {
       }
       const out: typeof rest = [];
       const leftovers = () => [...pools.values()].flat();
+      // A value asked for in more slots than it has samples shows its samples again, so no painted slot is blank.
+      const again = new Map([...pools].map(([key, list]) => [key, [...list]]));
+      const reused = new Map<number, number>();
+      const repeat = (want: number) => {
+        const list = again.get(want);
+        if (!list?.length) return undefined;
+        const n = reused.get(want) ?? 0;
+        reused.set(want, n + 1);
+        return list[n % list.length];
+      };
       for (let i = mineIds.length; i < 80; i++) {
         const want = layout[i];
-        const g = want ? pools.get(want)?.shift() : leftovers().shift();
-        // No sample left for this palette: keep the slot empty (its paint still shows) rather than stop.
+        const g = want ? (pools.get(want)?.shift() ?? repeat(want)) : leftovers().shift();
+        // No sample for this palette at all: keep the slot empty (its paint still shows) rather than stop.
         if (!g) {
           out.push({ id: 0n, palette: 0, t: 0 });
           continue;
@@ -763,7 +841,7 @@ export async function create(app: HTMLElement) {
     // fits); Credits shows real Credits that would fill it.
     const preview = document.getElementById('preview')!;
     if (view === 'rules') {
-      preview.innerHTML = `<div class="sheet lg rules-sheet">${layout.map((v) => `<i class="cell rule-cell">${v ? glyphFor(layoutTrait, v) : ''}</i>`).join('')}</div>`;
+      preview.innerHTML = `<div class="sheet lg rules-sheet">${layout.map((v) => `<i class="cell rule-cell" data-v="${v}">${v ? glyphFor(layoutTrait, v) : ''}</i>`).join('')}</div>`;
       return;
     }
     preview.innerHTML = sheet(mineIds, {
@@ -813,11 +891,6 @@ export async function create(app: HTMLElement) {
       const used = layout.reduce((s, m) => (m ? s | (1 << m) : s), 0);
       rules.palettes = picked || (painted && !anyOpen ? used : 0);
     } else rules.palettes = picked;
-    const counts = new Map<number, number>();
-    for (const m of layout) if (m) counts.set(m, (counts.get(m) ?? 0) + 1);
-    document.getElementById('layout-pick')!.textContent = painted
-      ? [...counts.entries()].map(([m, n]) => `${n} ${slotName(layoutTrait, m)}`).join(' · ') + (anyOpen ? ` · ${layout.filter((m) => !m).length} open` : '')
-      : '';
     pattern = 'none';
     syncTiles();
     refresh();
@@ -849,7 +922,9 @@ export async function create(app: HTMLElement) {
   const PAINTABLE: [string, LayoutTrait][] = [['palette', 0], ['eights', 1], ['print', 2], ['weight', 3]];
   const valuesOf = (t: LayoutTrait): number[] => {
     if (t === 0) {
-      const set = pal();
+      // Every Colors value is a brush, unless you picked Colors yourself. What the sheet uses becomes the rule
+      // (syncLayout), so the brushes don't narrow as you paint.
+      const set = picked;
       return PALETTE_ROWS.flat().map(paletteBit).filter((m) => !set || set & (1 << m));
     }
     if (t === 1) return Array.from({ length: EIGHTS_MAX + 1 }, (_, n) => n).filter((n) => !rules.eights || rules.eights & (1 << n)).map((n) => n + 1);
@@ -861,35 +936,9 @@ export async function create(app: HTMLElement) {
     t === 0 ? swatch(slotName(0, v)) : t === 1 ? `<b class="n">${v - 1}×8</b>` : t === 2 ? printGlyph(PRINTS[v - 1]) : t === 3 ? weightGlyph(WEIGHTS[v - 1]) : platesGlyph(v);
   const groups = () => {
     const set = isSet();
-    return PAINTABLE.filter(([k, t]) => set[k] && valuesOf(t).length); // only what you picked above, with something in it
+    // Colors always (every value a brush); Eights, Print and Weight once you've added them above.
+    return PAINTABLE.filter(([k, t]) => (t === 0 || set[k]) && valuesOf(t).length);
   };
-  /// Key colours are handed out across every brush on screen, in order, so no two brushes share one.
-  function keyOfPaint(t: number, v: number) {
-    let n = 0;
-    for (const [, g] of groups()) {
-      for (const x of valuesOf(g)) {
-        if (g === t && x === v) return KEY_COLORS[n % KEY_COLORS.length];
-        n++;
-      }
-    }
-    return KEY_COLORS[(v - 1) % KEY_COLORS.length];
-  }
-  /// The two values a design fills with: your brush and the one before it (or the next picked value), else open.
-  const pair = (): [number, number] => {
-    const vals = valuesOf(layoutTrait);
-    const A = brush && vals.includes(brush) ? brush : vals[0] ?? 0;
-    const B = brushB && brushB !== A && vals.includes(brushB) ? brushB : vals.find((v) => v !== A) ?? 0;
-    return [A, B];
-  };
-  /// A Colors value as its inks side by side (as its brush shows it); any other trait as its key colour.
-  const inksOf = (m: number) => [...'CMYK'].filter((_, b) => m & (1 << b)).map((l) => INKS[l]);
-  const paintHex = (v: number): string[] => (!v ? [] : layoutTrait === 0 ? inksOf(v) : [keyOfPaint(layoutTrait, v)]);
-  /// Two rows of ready-made designs, drawn in the colours they'd paint with.
-  const gallery = (colours: (a: number, b: number) => [string[], string[]]) =>
-    `<div class="paint-designs">${DESIGNS.map(([n, a, b], i) => {
-      const [ca, cb] = colours(a, b);
-      return `<button type="button" class="paint-design" data-design="${i}" aria-label="${n}" title="${n}">${designIcon(n, ca, cb)}</button>`;
-    }).join('')}</div>`;
   /// Once a sheet has paint, it's that trait's sheet: the other traits' brushes wait until it's cleared.
   const locked = (t: number) => t !== layoutTrait && layout.some(Boolean);
   function drawBrushes() {
@@ -904,30 +953,42 @@ export async function create(app: HTMLElement) {
         wiped = true;
       }
     });
-    if (!gs.length) {
-      document.getElementById('brushes')!.innerHTML = `<p class="term-desc">Pick Colors, Eights, Print or Weight above to paint with them, or start from a design.</p>
-        ${gallery((a, b) => [inksOf(a), inksOf(b)])}`;
-      app.querySelector<HTMLElement>('.paint-bar')!.hidden = true;
-      document.getElementById('designs')!.innerHTML = '';
-      if (wiped) syncLayout();
-      return;
-    }
-    app.querySelector<HTMLElement>('.paint-bar')!.hidden = false;
     if (!gs.some(([, t]) => t === layoutTrait)) layoutTrait = gs[0][1];
     if (brush && !valuesOf(layoutTrait).includes(brush)) brush = valuesOf(layoutTrait)[0] ?? 0;
     // One row per trait you picked; erase leads the first row.
     // One category at a time: pick it, then its brushes. A sheet paints with one trait, so the choice is explicit.
     const withSeg = gs.length > 1
       ? `<div class="paint-with"><span class="eyebrow">Paint with</span><div class="seg sm">${gs.map(([, t]) => `<label><input type="radio" name="paint-with" value="${t}" ${t === layoutTrait ? 'checked' : ''}><span>${LAYOUT_TRAITS[t]}</span></label>`).join('')}</div>${layout.some(Boolean) ? '<span class="muted small">Switching clears the sheet.</span>' : ''}</div>`
-      : `<div class="paint-with"><span class="eyebrow">Paint with ${LAYOUT_TRAITS[gs[0][1]]}</span></div>`;
+      : ''; // one trait to paint with: the hint above already says so
     document.getElementById('brushes')!.innerHTML =
       withSeg +
       `<div class="paint-swatches"><span class="brush-group">${valuesOf(layoutTrait)
         .map((v) => `<button type="button" class="brush" data-trait="${layoutTrait}" data-v="${v}" title="${slotName(layoutTrait, v)}" aria-label="${slotName(layoutTrait, v)}" aria-pressed="${v === brush}">${glyphFor(layoutTrait, v)}</button>`)
-        .join('')}</span><button type="button" class="link small clear-all" data-layout="Clear">Clear all</button></div>`;
-    document.getElementById('designs')!.innerHTML =
-      `<span class="eyebrow">Or start from a design</span>` + gallery(() => { const [A, B] = pair(); return [paintHex(A), paintHex(B)]; });
+        .join('')}</span><span class="paint-actions"><button type="button" class="link small" data-shuffle>Shuffle</button><button type="button" class="link small clear-all" data-layout="Clear">Clear all</button></span></div>`;
     if (wiped) syncLayout();
+  }
+  /// A random design in two values that go together: the designs' own Colors pairs (any two brushes when Colors are
+  /// narrowed, or another trait is painted). Picking Painted starts with one; Shuffle deals another.
+  let lastDesign = '';
+  function shuffleDesign() {
+    const vals = valuesOf(layoutTrait);
+    const pick = <T,>(xs: T[]) => xs[Math.floor(Math.random() * xs.length)];
+    const name = pick(DESIGNS.map(([n]) => n).filter((n) => n !== lastDesign));
+    const pairs = DESIGNS.map(([, a, b]) => [a, b]).filter(([a, b]) => layoutTrait === 0 && vals.includes(a) && vals.includes(b));
+    let [A, B] = pairs.length ? pick(pairs) : [pick(vals) ?? 0, 0];
+    if (!pairs.length && vals.length > 1) B = pick(vals.filter((v) => v !== A));
+    if (B && Math.random() < 0.5) [A, B] = [B, A]; // either way round
+    lastDesign = name;
+    const fn = LAYOUTS[name];
+    for (let i = 0; i < 80; i++) {
+      const v = fn(i);
+      layout[i] = v === 'A' ? A : v === 'B' ? B : 0;
+      paintCell(i);
+    }
+    brush = brushA = A;
+    brushB = B;
+    drawBrushes();
+    syncLayout();
   }
   let painting = false;
   lgrid.addEventListener('pointerdown', (e) => {
@@ -967,30 +1028,7 @@ export async function create(app: HTMLElement) {
     syncLayout();
   });
   document.getElementById('paint-block')!.addEventListener('click', (e) => {
-    const d = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-design]');
-    if (d) {
-      // A design paints the sheet in two Colors and adds them to Who can join, so their brushes appear.
-      const [name, dA, dB] = DESIGNS[Number(d.dataset.design)];
-      let A = dA, B = dB;
-      if (groups().length) [A, B] = pair(); // fill with what you picked
-      else {
-        layoutTrait = 0;
-        designAdded |= ((1 << A) | (1 << B)) & ~picked; // remembered so Clear all can take them back off
-        picked |= (1 << A) | (1 << B);
-        rules.palettes = picked;
-      }
-      const fn = LAYOUTS[name];
-      for (let i = 0; i < 80; i++) {
-        const v = fn(i);
-        layout[i] = v === 'A' ? A : v === 'B' ? B : 0;
-        paintCell(i);
-      }
-      brush = brushA = A;
-      if (B) brushB = B;
-      drawBrushes();
-      syncLayout();
-      return;
-    }
+    if ((e.target as HTMLElement).closest('[data-shuffle]')) return shuffleDesign();
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-v]');
     if (!b) return;
     const t = Number(b.dataset.trait) as LayoutTrait, v = Number(b.dataset.v);
@@ -1051,6 +1089,14 @@ export async function create(app: HTMLElement) {
         else if (brush && brush !== v) brushB = brush;
         layoutTrait = t;
         brush = brushA = v;
+      }
+      // On a picture, the Colors tiles are its palette: what's on them now is yours, and it repaints with just those
+      // (any of the 15 when none are left).
+      if (key === 'palettes' && app.querySelector<HTMLInputElement>('input[name=arr]:checked')?.value === String(PICTURE)) {
+        designAdded = 0;
+        paintFromPicture();
+        syncTiles();
+        return;
       }
       drawBrushes(); // paint in a value you just took off the rule goes with it
       syncTiles();
@@ -1304,6 +1350,8 @@ export async function create(app: HTMLElement) {
   pickerEl.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.pick');
     if (!b || b.classList.contains('off') || b.classList.contains('full')) return;
+    // A picture takes only its own Credits, each Colors from its first slot.
+    if (picturing() && !picks.has(b.dataset.id!) && !picPlan!.mine.has(b.dataset.id!)) return toast('Not next in the picture: another Credit draws that Colors’ first slot better.', 'info', 4000);
     pickedByHand = true;
     picks.has(b.dataset.id!) ? picks.delete(b.dataset.id!) : picks.add(b.dataset.id!);
     refresh();
@@ -1311,13 +1359,14 @@ export async function create(app: HTMLElement) {
   document.getElementById('all')!.addEventListener('click', () => {
     pickedByHand = true;
     picks.clear();
+    if (picturing()) {
+      for (const id of bySlot([...picPlan!.mine])) picks.add(id);
+      return refresh();
+    }
     const room = capacity();
     for (const id of owned.filter(qualifies)) if (room.take(keyOfMine(id.toString()))) picks.add(id.toString());
     refresh();
   });
-  app.querySelectorAll<HTMLInputElement>('input[name=split]').forEach((r) =>
-    r.addEventListener('change', () => (document.getElementById('split-value')!.textContent = SPLITS[Number(r.value)])),
-  );
   // Name, order, payout and deadline changes update the recap and the step marks.
   document.getElementById('create')!.addEventListener('input', drawSummary);
   document.getElementById('create')!.addEventListener('change', drawSummary);
@@ -1327,21 +1376,132 @@ export async function create(app: HTMLElement) {
   const preview = document.getElementById('preview')!;
   const syncOrder = () => {
     const v = arrRadios.find((r) => r.checked)?.value;
-    document.getElementById('arr-hint')!.textContent = ARR_OPTS.find(([x]) => String(x) === v)?.[2] ?? '';
-    const on = v === '4';
-    paintBlock.hidden = !on;
+    // Number: one tile, its direction underneath; the line under them says what the pick does.
+    const dir = app.querySelector<HTMLInputElement>('input[name=num-dir]:checked')!.value;
+    document.getElementById('num-dir')!.hidden = v !== '2';
+    document.getElementById('arr-hint')!.textContent = (v === '2' ? NUMBER_DIRS.find(([x]) => String(x) === dir)?.[2] : ARR_OPTS.find(([x]) => String(x) === v)?.[2]) ?? '';
+    const isPicture = v === String(PICTURE);
+    const on = v === '4' || isPicture;
+    paintBlock.hidden = !on || isPicture;
+    document.getElementById('picture-block')!.hidden = !isPicture;
+    // A picture previews as it will print: examples at full ink, packed together (Consolidated), as the Printer
+    // matches it.
+    app.querySelector('.design-preview')!.classList.toggle('solid-ghosts', isPicture);
+    if (isPicture) showDirection(app.querySelector<HTMLElement>('.dirs'), 'Consolidated');
     // Rules only mean something slot by slot on a painted sheet; otherwise every slot takes the same Credits.
-    app.querySelector<HTMLElement>('.view-toggle')!.hidden = !on;
-    app.querySelector<HTMLElement>('.dirs [data-dir="Rules"]')!.hidden = !on;
-    preview.classList.toggle('paintable', on);
-    setView(on ? 'rules' : 'credits');
-    if (on) drawBrushes();
-    else if (layout.some(Boolean)) {
+    // The painted view (and its phone toggle) is for a sheet you paint by hand; a picture shows as its Credits.
+    app.querySelector<HTMLElement>('.view-toggle')!.hidden = !on || isPicture;
+    app.querySelector<HTMLElement>('.dirs [data-dir="Rules"]')!.hidden = !on || isPicture;
+    preview.classList.toggle('paintable', on && !isPicture); // a picture's sheet comes from its Credits, not a brush
+    // A picture shows as the Credits that would draw it; a sheet you paint by hand, as its rules.
+    setView(on && !isPicture ? 'rules' : 'credits');
+    if (isPicture) {
+      if (!pic) pic = mountPicture(); // paints once its first picture loads
+      else paintFromPicture();
+    } else if (on) {
+      drawBrushes();
+      if (!layout.some(Boolean)) shuffleDesign(); // a blank sheet starts from a design
+    }
+    else if (layout.some(Boolean) || designAdded) {
+      // Off the painted layouts: the paint goes, and so do the Colors a design or picture put on Who can join, and
+      // the picture's own picks.
+      if (picPlan) {
+        picPlan = null;
+        picks.clear();
+        pickedByHand = false;
+      }
+      picked &= ~designAdded;
+      rules.palettes = picked;
+      designAdded = 0;
       layout.fill(0);
       for (let i = 0; i < 80; i++) paintCell(i);
+      drawBrushes();
       syncLayout();
     }
   };
+  // ---------------------------------------------------------------- picture
+  const mountPicture = () =>
+    framer({
+      crop: document.getElementById('pic-crop') as HTMLCanvasElement,
+      file: document.getElementById('pic-file') as HTMLInputElement,
+      contrast: () => +(document.getElementById('pic-contrast') as HTMLInputElement).value,
+      brightness: () => +(document.getElementById('pic-brightness') as HTMLInputElement).value,
+      saturation: () => +(document.getElementById('pic-saturation') as HTMLInputElement).value,
+      pixelate: true,
+      settle: () => paintFromPicture(),
+    });
+  // Brightness, Contrast and Saturation: the picture changes as you drag, the Credits once you let go.
+  for (const id of ['pic-brightness', 'pic-contrast', 'pic-saturation']) {
+    document.getElementById(id)!.addEventListener('input', () => pic?.frame());
+    document.getElementById(id)!.addEventListener('change', () => paintFromPicture());
+  }
+  document.getElementById('pic-replace')!.addEventListener('click', () => (document.getElementById('pic-file') as HTMLInputElement).click());
+  // Reset: the sliders where they started, the whole picture framed again, and the Credits picked for that.
+  document.getElementById('pic-reset')!.addEventListener('click', () => {
+    for (const el of app.querySelectorAll<HTMLInputElement>('.picture-contrast input')) el.value = el.defaultValue;
+    pic?.reset();
+    void paintFromPicture();
+  });
+  /// Design the sheet from the framed picture: the Credits that draw it best (yours, and listings), each slot painted
+  /// with its Credit's Colors. Only the Colors you picked on Who can join when you've picked some. Its Colors go on
+  /// Who can join the way a design's do (Clear all takes them back off). Your Credits it uses at the front of their
+  /// Colors go in with you, in slot order, so each lands in its slot; the union page recommends the rest.
+  let picSeq = 0;
+  async function paintFromPicture() {
+    if (!pic?.ready() || !preview.isConnected || arrRadios.find((r) => r.checked)?.value !== String(PICTURE)) return;
+    const seq = ++picSeq;
+    if (!traitsIn && !buyToStart) return void (document.getElementById('pic-status')!.textContent = 'Reading your Credits…'); // designed once they're in
+    const status = document.getElementById('pic-status')!;
+    const px = pic.pixels();
+    let g: Guide;
+    try {
+      status.textContent = guide ? 'Matching…' : 'Reading every Credit for sale…';
+      // Only yours the page can put in (the ones it has read the traits of).
+      const held = owned.filter((id) => mine.has(id.toString()));
+      const progress = (f: number) => seq === picSeq && (status.textContent = `Matching… ${Math.round(f * 100)}%`);
+      const detail = DETAIL; // the Printer's tested balance of likeness and edges
+      g = buyToStart
+        ? await Guide.of(px, { detail, progress })
+        : await Guide.of(px, { wallets: [session.account!], held, colours: (id) => paletteBit(mine.get(id.toString())!.traits.palette), detail, progress });
+    } catch (e) {
+      if (seq === picSeq) status.textContent = errText(e);
+      return;
+    }
+    if (seq !== picSeq || !preview.isConnected) return;
+    const yours = picked & ~designAdded; // Colors you picked yourself
+    let design: ReturnType<Guide['design']>;
+    try {
+      design = g.design(yours ? new Set(PALETTE_ROWS.flat().map(paletteBit).filter((m) => yours & (1 << m))) : undefined);
+    } catch (e) {
+      status.textContent = errText(e);
+      return;
+    }
+    guide = g;
+    picPx = px;
+    document.getElementById('pic-links')!.hidden = false;
+    status.textContent = '';
+    layoutTrait = 0;
+    const used = design.layout.reduce((u, m) => u | (1 << m), 0);
+    picked = yours | used;
+    designAdded = used & ~yours;
+    rules.palettes = picked;
+    design.layout.forEach((m, i) => {
+      layout[i] = m;
+      paintCell(i);
+    });
+    // Yours that the picture puts first in their Colors' slots go in now, in slot order.
+    picPlan = planOf(g.fill(layout, layout.map(() => null), picGone), layout);
+    picks.clear();
+    pickedByHand = false;
+    for (const id of bySlot([...picPlan.mine])) picks.add(id);
+    buyFor = '';
+    const n = new Map<number, number>();
+    for (const m of design.layout) n.set(m, (n.get(m) ?? 0) + 1);
+    brush = brushA = [...n].sort((a, b) => b[1] - a[1])[0][0];
+    brushB = 0;
+    drawBrushes();
+    syncLayout();
+  }
   app.querySelectorAll<HTMLInputElement>('input[name=view]').forEach((r) => r.addEventListener('change', () => setView(r.value as 'rules' | 'credits')));
   // On a wide screen Rules sits in the directions row: picking it shows the rules, any direction the Credits.
   app.addEventListener('direction', (e) => {
@@ -1349,6 +1509,7 @@ export async function create(app: HTMLElement) {
     if ((d === 'Rules') !== (view === 'rules')) setView(d === 'Rules' ? 'rules' : 'credits');
   });
   arrRadios.forEach((r) => r.addEventListener('change', syncOrder));
+  app.querySelectorAll<HTMLInputElement>('input[name=num-dir]').forEach((r) => r.addEventListener('change', syncOrder));
   // Paint straight onto the preview sheet: tap or drag across its slots.
   const slotAt = (x: number, y: number) => {
     const c = document.elementFromPoint(x, y)?.closest<HTMLElement>('#preview .cell');
@@ -1401,7 +1562,9 @@ export async function create(app: HTMLElement) {
     const name = nameEl.value.trim() || nameEl.placeholder; // left blank: take the suggested name
     const days = 90; // required by the factory, no longer enforced: open parties don't expire, full ones follow the countdown and burn hour
     const chosen = Number((app.querySelector('input[name=arr]:checked') as HTMLInputElement).value);
-    const arr = chosen === 4 && !layout.some(Boolean) ? 0 : chosen; // Painted with nothing painted burns in deposit order
+    const painted = chosen === 4 || chosen === PICTURE;
+    const numberDir = Number(app.querySelector<HTMLInputElement>('input[name=num-dir]:checked')!.value); // Number ↑ (2) or ↓ (5)
+    const arr = chosen === 2 ? numberDir : !painted ? chosen : layout.some(Boolean) ? 4 : 0; // Painted with nothing painted burns in deposit order
     const split = Number((app.querySelector('input[name=split]:checked') as HTMLInputElement).value);
     go.disabled = true;
     go.dataset.busy = '1'; // progress labels below own the button until this finishes
@@ -1409,7 +1572,12 @@ export async function create(app: HTMLElement) {
     // then picked here, then the union opens with them.
     const toBuy = buying();
     if (toBuy.length) {
-      const got = await sweepToWallet(toBuy, go);
+      // A picture's first Credits: all or none, so none lands a slot early; a sold one gives its slot to the next best.
+      const got = await sweepToWallet(toBuy, go, undefined, picturing() ? { onSold: (ids) => {
+        ids.forEach((id) => picGone.add(Number(id)));
+        picPlan = planOf(guide!.fill(layout, layout.map(() => null), picGone), layout);
+        buyFor = '';
+      } } : undefined);
       if (!got?.length) {
         delete go.dataset.busy;
         return refresh();
@@ -1417,7 +1585,10 @@ export async function create(app: HTMLElement) {
       await gotCredits(got);
       go.disabled = true;
     }
-    const ids = [...picks].map(BigInt);
+    // A picture's Credits go in slot order, so each lands in its slot.
+    const ids = (picturing() ? bySlot([...picks]) : [...picks]).map(BigInt);
+    // The picture's 80 Credits as picked now (its list card draws them), before the page moves on.
+    const pictureIds = picturing() && guide ? pictureSlots(owned.filter(qualifies)).ids : null;
     const f = filterOf();
     try {
       const open = {
@@ -1461,6 +1632,9 @@ export async function create(app: HTMLElement) {
         go.textContent = `Depositing ${i}–${Math.min(i + CHUNK, ids.length)}…`;
         await send({ address: config.factory, abi: factoryAbi, functionName: 'deposit', args: [batch, ids.slice(i, i + CHUNK)] });
       }
+      // A Picture union keeps its picture, so its page can recommend the Credit for each open slot.
+      if (painted && chosen === PICTURE && picPx && layout.some(Boolean))
+        await fetch(`/pictures/${batch}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...packPicture(picPx, DETAIL), ids: pictureIds }) }).catch(() => {});
       // The party page picks this up and shows the congrats and share dialog, once.
       try {
         sessionStorage.setItem('cu-created', batch);
@@ -1476,7 +1650,7 @@ export async function create(app: HTMLElement) {
 
   // Sections: who can join, layout, settings. Rules start hidden; you add the ones you want, and each
   // added rule can be removed (which also clears it).
-  const RULES: Record<string, string> = { eights: 'Eights', weight: 'Weight', print: 'Print', palette: 'Colors', time: 'Time', rating: 'Rating', bits: 'Bits', numbers: 'Token' };
+  const RULES: Record<string, string> = { palette: 'Colors', eights: 'Eights', weight: 'Weight', print: 'Print', time: 'Time', rating: 'Rating', bits: 'Bits', numbers: 'Token' };
   const sections = [...app.querySelectorAll<HTMLElement>('.rule[data-pane]')];
   const added = new Set<string>();
   const isSet = (): Record<string, boolean> => ({
@@ -1560,18 +1734,32 @@ export async function create(app: HTMLElement) {
   const chips = (k: string): string | null => {
     const bits = (m: number, n: number) => Array.from({ length: n }, (_, i) => i).filter((i) => m & (1 << i));
     const chip = (g: string, l: string) => `<span class="vchip">${g}<span>${esc(l)}</span></span>`;
-    if (k === 'palette') return bits(pal(), 16).map((m) => chip(swatch(slotName(0, m)), slotName(0, m))).join('');
+    // Many Colors: just their swatches, on one line (their names are in each swatch's title).
+    const many = bits(pal(), 16).length > 4;
+    if (k === 'palette') return bits(pal(), 16).map((m) => (many ? `<span class="vchip bare" title="${slotName(0, m)}">${swatch(slotName(0, m))}</span>` : chip(swatch(slotName(0, m)), slotName(0, m)))).join('');
     if (k === 'print') return bits(rules.prints, PRINTS.length).map((i) => chip(printGlyph(PRINTS[i]), PRINTS[i])).join('');
     if (k === 'weight') return bits(rules.weights, WEIGHTS.length).map((i) => chip(weightGlyph(WEIGHTS[i]), WEIGHTS[i])).join('');
     if (k === 'eights') return bits(rules.eights, EIGHTS_MAX + 1).map((n) => chip(dice(n), eightsName(n))).join('');
     return null;
   };
   const applyPanes = () => {
-    document.getElementById('rule-sentence')!.innerHTML = sentence();
     const set = isSet();
+    // The form says "Any Credit can join." until a rule is set; then the rows say it, and the full sentence (OR within
+    // a rule, AND across them) opens with the eligible Credits.
+    const line = document.getElementById('rule-sentence')!;
+    line.innerHTML = sentence();
+    line.hidden = Object.values(set).some(Boolean);
+    // Rules you haven't set wait as "+ Colors"-style chips under the sentence; tapping one opens its row. Set or
+    // open rules show as rows; clearing one sends it back to a chip.
+    document.getElementById('rule-adds')!.innerHTML = Object.entries(RULES)
+      .filter(([k]) => !set[k] && k !== tab)
+      .map(([k, l]) => `<button type="button" class="rule-add" data-tab-btn="${k}">+ ${l}</button>`)
+      .join('');
+    list.hidden = !Object.keys(RULES).some((k) => set[k] || k === tab);
     for (const row of list.querySelectorAll<HTMLElement>('.rrow')) {
       const k = row.dataset.row!;
       const open = k === tab;
+      row.hidden = !set[k] && !open;
       const sec = row.querySelector<HTMLElement>('.rule');
       if (sec) sec.hidden = !open;
       row.classList.toggle('open', open);
@@ -1619,18 +1807,6 @@ export async function create(app: HTMLElement) {
   // toggle the same rows a second time.
   document.getElementById('create')!.addEventListener('click', (e) => {
     const t = e.target as HTMLElement;
-    const pb = t.closest<HTMLButtonElement>('[data-party-btn]');
-    if (pb) {
-      // The party's rows open like the rules do, one at a time.
-      const k = pb.dataset.partyBtn!;
-      app.querySelectorAll<HTMLElement>('[data-prow]').forEach((row) => {
-        const open = row.dataset.prow === k && !row.classList.contains('open');
-        row.classList.toggle('open', open);
-        row.querySelector('.rrow-toggle')!.setAttribute('aria-expanded', String(open));
-        row.querySelector<HTMLElement>(':scope > .rule')!.hidden = !open;
-      });
-      return;
-    }
     const tb = t.closest<HTMLButtonElement>('[data-tab-btn]');
     if (tb) {
       tab = tab === tb.dataset.tabBtn ? '' : tb.dataset.tabBtn!; // tap the open tab to close it

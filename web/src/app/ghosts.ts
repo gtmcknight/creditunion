@@ -21,6 +21,10 @@ const deposits = new Map<string, { by: Address; pos: number; early: boolean }>()
 export function registerDeposits(ids: readonly bigint[], by: readonly Address[], early = false) {
   ids.forEach((id, i) => deposits.set(id.toString(), { by: by[i], pos: i + 1, early }));
 }
+/// A Picture union's recommended Credit for each slot (null: none for sale), so its open slots show the picture.
+const plans = new Map<string, readonly (number | null)[]>();
+export const planGhosts = (address: string, ids: readonly (number | null)[]) => plans.set(address.toLowerCase(), ids);
+
 /// Remember a batch's filter so `fillGhosts` can find it from the sheet's `data-batch`.
 export const registerFilter = (address: string, f: Filter) => filters.set(address.toLowerCase(), f);
 
@@ -69,7 +73,9 @@ async function fillSheet(el: HTMLElement) {
   if (!f) return;
   const cells = [...el.children] as HTMLElement[];
   const want = cells.map((_, i) => (hasLayout(f) ? layoutSlot(f, i) : 0));
-  const empties = cells.map((c, i) => [c, i] as const).filter(([c]) => c.classList.contains('empty'));
+  const plan = plans.get(el.dataset.batch!.toLowerCase());
+  // With a picture, every slot not yet filled takes its recommended Credit, placeholders included.
+  const empties = cells.map((c, i) => [c, i] as const).filter(([c]) => (plan ? !c.dataset.id : c.classList.contains('empty')));
   if (!empties.length) return;
   // An Eights rule is what these Credits are about: keep their marks (the bottom row) on the placeholders too.
   el.classList.toggle('eights-rule', !!f.eights || (hasLayout(f) && f.layoutTrait === 1));
@@ -93,8 +99,8 @@ async function fillSheet(el: HTMLElement) {
     const from = own.length ? own : pool;
     const n = used.get(want[i]) ?? 0;
     used.set(want[i], n + 1);
-    const id = from[(seed + n) % from.length];
-    c.className = 'cell ghost';
+    const id = plan?.[i] ?? from[(seed + n) % from.length];
+    c.className = plan?.[i] ? 'cell ghost planned' : 'cell ghost';
     c.dataset.ghost = String(id);
     c.removeAttribute('title');
     c.innerHTML = `<img src="${editionArt(id)}" alt="" loading="lazy" decoding="async">`;
@@ -125,10 +131,11 @@ function tip() {
     }
     if (cell === shown) return;
     shown = cell;
-    tipEl!.innerHTML = s ? card(s) : filled((cell as HTMLElement).dataset.id!, d!, (cell as HTMLElement).dataset.rating, !!cell.closest('.batch-art'));
+    tipEl!.innerHTML = s ? card(s) : creditCard((cell as HTMLElement).dataset.id!, { rating: (cell as HTMLElement).dataset.rating, pos: d!.pos, early: d!.early, by: d!.by });
     tipEl!.classList.add('compact');
     hydrate(tipEl!);
-    place(cell.getBoundingClientRect());
+    // A union sheet's cell zooms 1.2× on hover (style.css): place the card beside where it will end up.
+    place(grown(cell as HTMLElement, cell.closest('.batch-art') && (cell as HTMLElement).dataset.id ? 1.2 : 1));
     tipEl!.classList.add('in');
   });
   addEventListener('scroll', () => {
@@ -154,17 +161,25 @@ function card({ want, f, fit }: Slot) {
 
 const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
 
-/// `opens`: the cell is a link to the Credit's page (the Credit Union page's sheet), so say so.
-function filled(id: string, d: { by: Address; pos: number; early: boolean }, rating?: string, opens = false) {
-  // A small row: the Credit, then which one, whose, and where it sits in deposit order.
-  const you = same(d.by, session.account);
-  return `<div class="filled"><img src="${art(BigInt(id))}" alt="">
-    <div><p class="takes">#${Number(id).toLocaleString()} ${rating ? `<span class="muted">· rating ${rating}</span>` : ''}</p>
-    <p class="muted small">${ordinal(d.pos)} in${d.early ? ` · ${pct(earlyShare(d.pos - 1))} of the payout` : ''}</p>
-    <p class="small">${you ? 'Yours' : who(d.by)}</p>${opens ? '<p class="muted small">Click to view</p>' : ''}</div></div>`;
+/// One Credit's hover card, the same wherever a Credit is hovered (the sheet's cells, your pickers): text only (the
+/// hovered Credit itself zooms), its number and rating, where it sits in this union (and its early-bird share), and whose it is. One small size.
+export function creditCard(id: string, o: { rating?: string; pos?: number; early?: boolean; by?: Address | null }) {
+  const yours = !o.by || same(o.by, session.account);
+  const where = o.pos ? `${ordinal(o.pos)} in${o.early ? ` · ${pct(earlyShare(o.pos - 1))} of the payout` : ''}` : '';
+  return `<div class="filled credit-card">
+    <div><p><span class="num">#${Number(id).toLocaleString()}</span>${o.rating ? ` <span class="muted">· rating ${o.rating}</span>` : ''}</p>
+    ${where ? `<p class="muted">${where}</p>` : ''}
+    <p class="muted">${yours ? 'Yours' : who(o.by!)}</p></div></div>`;
 }
 
 /// Beside the cell, flipping to the other side or below when it would leave the viewport.
+const grown = (el: HTMLElement, k: number) => {
+  const r = el.getBoundingClientRect();
+  if (k === 1) return r;
+  const w = el.offsetWidth * k, h = el.offsetHeight * k, cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  return new DOMRect(cx - w / 2, cy - h / 2, w, h);
+};
+
 function place(r: DOMRect) {
   const t = tipEl!;
   const w = t.offsetWidth, h = t.offsetHeight, pad = 12;

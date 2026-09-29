@@ -1,14 +1,17 @@
 import { session } from '../chain';
-import { ARRANGEMENTS, listBatches, type Listed, type Summary, hasLayout, layoutSlot, placeOnLayout } from '../data';
+import { listBatches, type Listed, type Summary, hasLayout, layoutSlot, placeOnLayout } from '../data';
 import { depositedKeys } from '../slots';
-import { hydrate, pct, who } from '../ens';
+import { hydrate, who } from '../ens';
 import { fitByBatch } from '../fit';
-import { editionArt, examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
+import { editionArt, examples, fillGhosts, planGhosts, registerDeposits, registerFilter } from '../ghosts';
 import type { Address } from 'viem';
-import { describeFilter } from '../traits';
-import { clock, eth, esc, pageHead, same, sheet, until } from '../ui';
+import { clock, eth, esc, openModal, pageHead, same, sheet, until } from '../ui';
 import { TRAIT_KINDS, parseTrait, type TraitValue } from '../../shared/trait';
 import { creditsOf, takes } from './trait';
+import { ago, lastJoined } from './live';
+
+/// Last deposit per union, from the activity feed (filled in after the first draw).
+let lastIn = new Map<string, number>();
 
 function status(s: Summary) {
   switch (s.state) {
@@ -85,36 +88,67 @@ export async function placeCards(list: Listed[]) {
   return todo.some((b) => placements.has(b.s.address));
 }
 
+/// Picture unions: the Credit picked for each slot when it was made (saved with its picture), drawn in its open
+/// slots so the card shows the picture, and "Picture" where a painted one says "Painted".
+const pictures = new Set<Address>();
+export async function pictureCards(list: Listed[]) {
+  const todo = list.filter((b) => (b.s.state === 'Open' || b.s.state === 'Full') && hasLayout(b.s.filter) && !Number(b.s.filter.layoutTrait ?? 0) && !pictures.has(b.s.address));
+  const found = await Promise.all(
+    todo.map(async (b) => {
+      const d = await fetch(`/pictures/${b.s.address}`)
+        .then((r) => (r.ok ? (r.json() as Promise<{ ids?: (number | null)[] }>) : null))
+        .catch(() => null);
+      if (!d) return false;
+      pictures.add(b.s.address);
+      if (d.ids) planGhosts(b.s.address, d.ids);
+      return true;
+    }),
+  );
+  return found.some(Boolean);
+}
+
 /// Ids in this batch deposited by `by` (the connected wallet by default).
 export function mineIn(b: Listed, by = session.account) {
   return new Set(b.ids.filter((_, i) => same(b.depositors[i], by)).map(String));
 }
 
+/// The payout at a glance, beside the creator: five level bars for Equal, five stepping down for Early bird.
+const payGlyph = (early: boolean) =>
+  `<span class="pay-glyph" data-tip="${early ? 'Early bird · first in 1.5×, last 0.5×' : 'Equal · every Credit gets 1/80'}" aria-label="${early ? 'Early bird payout' : 'Equal payout'}"><svg viewBox="0 0 19 12" width="16" height="10" preserveAspectRatio="none" aria-hidden="true">${[0, 1, 2, 3, 4].map((i) => { const h = early ? 12 - i * 2 : 8; return `<rect x="${i * 4}" y="${12 - h}" width="3" height="${h}"/>`; }).join('')}</svg></span>`;
+
 /// `whose`: who the fit count is about ("yours" for the connected wallet, "theirs" on someone else's page).
 export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yours') {
-  const f = describeFilter(s.filter, s.allowlistSize);
   const mine = mineIn({ s, ids, depositors });
   const room = 80 - s.count;
   const canJoin = fit?.length ? Math.min(fit.length, room) : 0;
-  const rule = [f || 'Any Credit', s.arrangement ? ARRANGEMENTS[s.arrangement] : '', s.split === 1 ? 'Early bird payout' : 'Equal payout', s.creatorFeeBps ? `${pct(s.creatorFeeBps)} creator fee` : ''].filter(Boolean).join(' · ');
+  const picture = pictures.has(s.address);
   const live = s.state === 'Auction' && !(s.highBid && Date.now() / 1000 >= s.auctionEnd);
   const cta = s.state === 'Open' ? 'Join' : live ? 'Bid' : '';
   const fits = fit?.length ?? 0;
   const fitText =
-    s.state !== 'Open' ? '' : mine.size ? `You’re in · ${mine.size}` : !session.account && !fit ? '' : fits ? `${fits} of ${whose} fit` : '';
-  const state = s.state === 'Open' ? '' : `<span class="tag state ${s.state.toLowerCase()}">${s.state}</span>`;
+    s.state !== 'Open' ? '' : mine.size ? (fits && whose === 'yours' ? `${mine.size} in · ${fits} more fit` : `${mine.size} of ${whose} in`) : !session.account && !fit ? '' : fits ? `${fits} of ${whose} fit` : '';
+  // Open: your fit in the art's top-right corner, across from the count. Otherwise the state tag sits there.
+  // Top right: your fit while it's open; once it's past Open, how many of yours are in.
+  // Top right: a JOINED tag with your count once you're in (any state); before that, your fit while it's open.
+  const state = mine.size && whose === 'yours'
+    ? `<span class="tag joined-tag"><span>You joined</span><span class="jn num">${mine.size}</span></span>`
+    : s.state === 'Open' && fitText ? `<span class="fit-corner${fits || mine.size ? ' on' : ''}">${fitText}</span>` : '';
+  // Past Open, the state tag takes the count's corner: FULL says 80/80 already.
+  const corner = s.state === 'Open' ? `<span class="count num">${s.count}/80</span>` : `<span class="tag state corner ${s.state.toLowerCase()}">${s.state}</span>`;
+  const members = new Set(depositors.map((d) => d.toLowerCase())).size;
+  const last = lastIn.get(s.address.toLowerCase());
+  const momentum = `${members} ${members === 1 ? 'member' : 'members'}${last ? ` · last joined ${ago(last)}` : ''}`;
   registerFilter(s.address, s.filter);
   registerDeposits(ids, depositors, s.split === 1);
   return `<a class="card${canJoin ? ' can-join' : ''}" href="/union/${s.address}">
-    <div class="card-art">${sheet(ids, { size: 'sm', mine, placed: placements.get(s.address), batch: s.state === 'Open' ? s.address : undefined })}<span class="count num">${s.count}/80</span>${state}</div>
+    <div class="card-art${picture ? ' picture' : ''}">${sheet(ids, { size: 'sm', mine, placed: placements.get(s.address), batch: s.state === 'Open' ? s.address : undefined })}${corner}${state}</div>
     <div class="card-meta">
       <div class="meta-text">
         <strong>${esc(s.name || 'Untitled')}</strong>
         <span class="meta-by">${who(s.creator, 'sm', 'nested')}</span>
-        <span class="meta-rule" title="${esc(rule)}">${esc(rule)}</span>
-        ${fitText ? `<span class="${fits || mine.size ? 'fit' : ''}">${fitText}</span>` : s.state !== 'Open' ? `<span>${esc(status(s))}</span>` : `<span class="num">${80 - s.count} to go</span>`}
+        <span class="meta-line num">${payGlyph(s.split === 1)}${s.state === 'Open' ? momentum : s.state === 'Full' ? `${members} ${members === 1 ? 'member' : 'members'} · ${esc(s.phase === 'Waiting' ? 'waiting for Jack' : fullStatus(s))}` : esc(status(s))}</span>
       </div>
-      ${cta ? (s.state === 'Open' && mine.size ? `<span class="btn sm cta joined">Joined</span>` : `<span class="btn sm primary cta">${cta}</span>`) : ''}
+      ${cta && !(s.state === 'Open' && mine.size) ? `<span class="btn sm primary cta">${cta}</span>` : ''}
     </div>
   </a>`;
 }
@@ -126,7 +160,7 @@ const stageOf = (b: Listed): Stage => (b.s.state === 'Full' ? 'upcoming' : b.s.s
 export type HomeTab = 'parties' | 'auctions';
 
 
-/// Two pages over one list: Credit Unions still pooling (All, Invited, Yours, Filled), and Statements at or past
+/// Two pages over one list: Credit Unions still pooling (All, Invited, Yours, Full), and Statements at or past
 /// auction (by stage).
 export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
   const head =
@@ -143,14 +177,15 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       lede: head[1],
       tabs:
         tab === 'parties'
-          ? [{ label: 'All <span class="num muted" id="n-all"></span>', attrs: 'data-view="all"' }, { label: 'Invited <span class="num muted" id="n-invited"></span>', attrs: 'data-view="invited"' }, { label: 'Yours <span class="num muted" id="n-yours"></span>', attrs: 'data-view="yours"' }, { label: 'Filled <span class="num muted" id="n-filled"></span>', attrs: 'data-view="filled"' }]
+          ? [{ label: 'All <span class="num muted" id="n-all"></span>', attrs: 'data-view="all"' }, { label: 'Invited <span class="num muted" id="n-invited"></span>', attrs: 'data-view="invited"' }, { label: 'Yours <span class="num muted" id="n-yours"></span>', attrs: 'data-view="yours"' }, { label: 'Full <span class="num muted" id="n-filled"></span>', attrs: 'data-view="filled"' }]
           : STAGES.map(([k, l]) => ({ label: `${l} <span class="num muted" id="n-${k}"></span>`, attrs: `data-stage="${k}"` })),
       tools: tab === 'parties' ? sort : undefined,
-      action: tab === 'parties' ? '<a class="btn primary" href="/create">Start a Credit Union</a>' : undefined,
+      action: tab === 'parties' ? '<a class="btn primary" href="/create">Start a Credit Union</a>' : '<button type="button" class="btn" id="how-auctions">How it works</button>',
       label: 'Show',
     })}
     <div id="batches"><p class="muted">Loading from chain…</p></div>
   </section>`;
+  document.getElementById('how-auctions')?.addEventListener('click', howAuctions);
 
   try {
     const all = await listBatches();
@@ -166,14 +201,20 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       app.querySelector('.page-head')?.insertAdjacentHTML('beforeend', `<p class="filter-line">Open to ${esc(want.label)} · <a href="/unions">Show all</a></p>`);
     }
     const bar = app.querySelector<HTMLElement>('.page-bar');
-    // All / Invited / Yours / Filled: opens on All, the first tab, until someone picks. All is the ones still
+    // All / Invited / Yours / Full: opens on All, the first tab, until someone picks. All is the ones still
     // taking Credits; Invited, open ones your Credits fit that you haven't joined; Yours, ones you're in or
-    // started; Filled, full ones until their auction starts.
+    // started; Full, full ones until their auction starts.
     type View = 'all' | 'invited' | 'yours' | 'filled';
     let view: View | null = null;
     let stage: Stage | null = null;
     let fit = new Map<Address, bigint[]>();
+    let showEmpty = false; // All tabs its empty (0/80) unions behind a button: they're mostly abandoned
     const grid = (items: Listed[]) => `<div class="grid">${items.map((b) => card(b, fit.get(b.s.address))).join('')}</div>`;
+    const shownGrid = (v: string, items: Listed[]) => {
+      if (v !== 'all' || showEmpty) return grid(items);
+      const live = items.filter((b) => b.s.count > 0), gone = items.length - live.length;
+      return (live.length ? grid(live) : '') + (gone ? `<button type="button" class="btn show-empty" id="show-empty">Show ${gone} empty ${gone === 1 ? 'union' : 'unions'}</button>` : '');
+    };
     const draw = () => {
       sortList(list, tab === 'parties' ? sortKey() : 'new');
       if (tab === 'parties') {
@@ -203,7 +244,8 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
           ? `<div class="empty-state"><p>No Credit Unions yet.</p><a class="btn primary" href="/create">Start a Credit Union</a></div>`
           : (v === 'invited' || v === 'yours') && !acct
             ? `<div class="empty-state"><p>Connect to see the Credit Unions ${v === 'invited' ? 'your Credits qualify for' : 'you’re in'}.</p><button class="btn primary" data-connect>Connect wallet</button></div>`
-            : note + (views[v].length ? grid(views[v]) : `<p class="muted">${empty[v]}</p>`);
+            : note + (views[v].length ? shownGrid(v, views[v]) : `<p class="muted">${empty[v]}</p>`);
+        el.querySelector('#show-empty')?.addEventListener('click', () => ((showEmpty = true), draw()));
         hydrate(el);
         fillGhosts(el);
         return;
@@ -244,9 +286,14 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       }),
     );
     draw();
-    placeCards(list).then((any) => {
-      if (any && document.getElementById('batches') === el) draw();
+    Promise.all([placeCards(list), pictureCards(list)]).then((got) => {
+      if (got.some(Boolean) && document.getElementById('batches') === el) draw();
     });
+    if (tab === 'parties')
+      lastJoined().then((m) => {
+        lastIn = m;
+        if (m.size && document.getElementById('batches') === el) draw();
+      });
     if (session.account && tab === 'parties') {
       fitByBatch(parties).then((m) => {
         fit = m;
@@ -324,4 +371,33 @@ function filterFromQuery(): { label: string; test: (b: Listed) => boolean } | nu
     return { label: `Credits paid ${d.format(pLo * 1000)} to ${d.format(pHi * 1000)}`, test: ({ s: { filter: f } }) => overlap(f.paidFrom, f.paidTo, pLo, pHi) };
   }
   return null;
+}
+
+/// Auctions → How it works: burn day in order, then the auction and the split. Same steps as the launch thread.
+const HOW_STEPS: [string, string][] = [
+  ['Oct 1: Jack publishes the Statement contract', 'From then on, 80 Credits can burn into one Statement.'],
+  ['We build our burn contract', 'It lets Credit Unions use Jack’s contract. We test it first.'],
+  ['We launch it: 35 minute warning', 'Full unions (80/80) lock in 35 minutes. Until then, anyone can leave.'],
+  ['Full unions (80/80) lock and burn', 'Withdrawals close. Within minutes, the 80 Credits become one Statement.'],
+  ['The auction starts', 'No reserve. The 24 hour clock starts at the first bid.'],
+  ['The auction ends', 'The Statement goes to the winner. The ETH goes to every member.'],
+];
+function howAuctions() {
+  const d = document.createElement('dialog');
+  d.className = 'how';
+  d.innerHTML = `<h3>How auctions work</h3>
+    <ol class="how-steps">${HOW_STEPS.map(([a, b]) => `<li><b>${a}</b><span class="muted">${b}</span></li>`).join('')}</ol>
+    <h4>Bidding</h4>
+    <ul class="how-rules">
+      <li>Anyone can bid, members too.</li>
+      <li>Every bid beats the last by at least 5%.</li>
+      <li>A bid in the last 15 minutes adds 15 minutes.</li>
+      <li>Outbid? Your ETH comes back in the same transaction.</li>
+    </ul>
+    <h4>The split</h4>
+    <p class="muted">2% fee, then the rest goes to the 80 Credits that made it: 1/80 each, or 1.5× for the first in down to 0.5× for the last on Early bird. Every member is paid when the auction settles.</p>
+    <p class="small muted">Hits 80/80 after launch? It gets 5 minutes to leave from that moment, then burns. <a href="/faq">More questions</a></p>`;
+  document.body.append(d);
+  d.addEventListener('close', () => d.remove());
+  openModal(d);
 }

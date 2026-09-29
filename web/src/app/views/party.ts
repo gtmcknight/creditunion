@@ -3,15 +3,17 @@ import { batchAbi, creditsAbi, factoryAbi, sweeperAbi } from '../abi';
 import { canBatch, config, explorer, pub, send, sendBatch, session } from '../chain';
 import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, forgetBatches, getBatch, hasLayout, indexedBatch, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
-import { hydrate, pct, who } from '../ens';
-import { examples, fillGhosts, registerDeposits, registerFilter } from '../ghosts';
+import { hydrate, identicon, pct, who } from '../ens';
+import { creditCard, examples, fillGhosts, planGhosts, registerDeposits, registerFilter } from '../ghosts';
+import { gapOf, Guide, planOf, unpackPicture, type Plan, type Stored } from '../picture';
 import { Room, books, depositedKeys, keysOf, noRoomReason, type Books } from '../slots';
-import { MAX_SWEEP, buying, checkQuote, connectToBuy, live as keepLive, minEth, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepRow, type Listed, type Quote, type Sale, type Source } from '../forsale';
+import { MAX_SWEEP, buying, checkQuote, listedById, connectToBuy, live as keepLive, minEth, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepRow, type Listed, type Quote, type Sale, type Source } from '../forsale';
 import { creditCell, creditSkel } from './trait';
 import { directionCanvas, directions, mountDirections } from '../directions';
 import { activityFold } from './live';
 import { $$, art, clock, errText, esc, eth, openModal, same, setRange, sheet, short, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
+import { slotName } from '../../shared/layout';
 import { go as navigate } from '../main';
 
 const CHUNK = 40; // Credits per transaction; keeps each one well under the block gas limit
@@ -24,21 +26,17 @@ const directAbi = [
 const RATING_URL = 'https://jack.art/credits/rating';
 const fmtScore = (s: number) => (Math.floor(s * 100) / 100).toFixed(2);
 
-/// Hovering one of your Credits in the picker: its number, rating and rank, and its traits. Ratings are read once
-/// for the whole picker, the first time you hover.
+/// Hovering one of your Credits in a picker: the same card as the sheet's cells (ghosts.ts): its number and rating,
+/// where it sits (`pos`, when it's already in), and that it's yours. Ratings are read once, the first time you hover.
 let pickTip: HTMLElement | null = null;
-function pickTips(el: HTMLElement, ids: bigint[]) {
+function pickTips(el: HTMLElement, ids: bigint[], pos?: Map<string, number>, earlyOf?: () => boolean) {
   let rated: Record<string, Rated> | null = null, n = 0, loading: Promise<void> | null = null;
   const load = () => (loading ??= ratings(ids).then((r) => { rated = r.ratings; n = r.n; }).catch(() => {}));
   const tip = (pickTip ??= Object.assign(document.createElement('div'), { className: 'slot-tip pick-tip' }));
   if (!tip.isConnected) document.body.append(tip);
   const body = (id: string) => {
     const r = rated?.[id];
-    const traits = r ? [r.traits.palette, `${r.traits.eights} ${r.traits.eights === 1 ? 'eight' : 'eights'}`, r.traits.registration].filter(Boolean).join(' · ') : '';
-    return `<div class="filled"><img src="${art(BigInt(id))}" alt="">
-      <div><p class="takes">#${Number(id).toLocaleString()}${r ? ` <span class="muted">· rating ${fmtScore(r.score)}</span>` : ''}</p>
-      <p class="muted small">${r ? `Rank ${r.rank.toLocaleString()} of ${n.toLocaleString()}` : 'Loading rating…'}</p>
-      ${traits ? `<p class="small">${esc(traits)}</p>` : ''}</div></div>`;
+    return creditCard(id, { rating: r ? fmtScore(r.score) : undefined, pos: pos?.get(id), early: pos?.has(id) ? earlyOf?.() : false });
   };
   let shown: string | null = null;
   const place = (b: HTMLElement) => {
@@ -74,6 +72,45 @@ type Mine = Awaited<ReturnType<typeof me>> | null;
 const shareUrl = (s: Ctx['s']) => `${location.origin}/union/${s.address}?s=${stamp(s.state, s.count, s.highBid)}`;
 
 let picks = new Set<string>();
+
+// ---------------------------------------------------------------- picture unions
+const plansOf = new Map<string, Promise<Plan | null>>();
+/// The same plan again without some listings (sold since the market was read), per union.
+const replans = new Map<string, (gone: ReadonlySet<number>) => Promise<Plan | null>>();
+/// The picture against every Credit that could draw it, per union and viewer (reading them is the slow part).
+const guides = new Map<string, Promise<Guide | null>>();
+/// `held`: the viewer's Credits, whose Colors are read as this union reads them (Batch._keyOf).
+/// `gone`: planned listings no longer for sale.
+async function planPicture(b: Ctx, slots: number[], placed: (bigint | null)[] | undefined, account: Address | undefined, held: readonly bigint[] = [], gone: ReadonlySet<number> = new Set()) {
+  const key = `${b.s.address.toLowerCase()}:${account?.toLowerCase() ?? ''}`;
+  let g = guides.get(key);
+  if (!g) {
+    g = fetch(`/pictures/${b.s.address}`)
+      .then((r) => (r.ok ? (r.json() as Promise<Stored>) : null))
+      .then(async (d) => {
+        if (!d) return null;
+        const keys = held.length ? await keysOf(0, held).catch(() => new Map<string, number>()) : new Map<string, number>();
+        return Guide.of(unpackPicture(d.px), { wallets: account ? [account] : [], held: account ? held : undefined, colours: (id) => keys.get(id.toString()) ?? 0, detail: d.detail });
+      });
+    guides.set(key, g);
+    g.catch(() => guides.delete(key));
+  }
+  const guide = await g;
+  if (!guide) return null;
+  const rec = guide.fill(slots, placed ? placed.map((x) => (x === null ? null : Number(x))) : slots.map(() => null), gone);
+  planGhosts(b.s.address, rec.map((c) => c?.id ?? null));
+  return planOf(rec, slots, placed);
+}
+/// A Picture union's buy locks (worker/locks.ts): Colors someone is buying right now can't be bought by anyone else
+/// until their transaction lands, so no Credit lands a slot late. Null answers mean locks are off (testnets, local).
+async function locks(batch: string, body?: { op: 'acquire' | 'hold' | 'release'; id: string; colours?: number[] }) {
+  const r = await fetch(`/locks/${batch}`, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}).catch(() => null);
+  if (!r?.ok || r.status === 204) return null;
+  return r.json() as Promise<{ held?: number[]; ok?: boolean; busy?: number[]; until?: number }>;
+}
+/// Listings (or Credits) in the order the picture wants them: its recommended ones by slot, then the rest as they were.
+const byPlan = <T extends { id: string }>(list: T[], plan: Plan | null | undefined) =>
+  !plan ? list : [...list.filter((l) => plan.slot.has(l.id)).sort((x, y) => plan.slot.get(x.id)! - plan.slot.get(y.id)!), ...list.filter((l) => !plan.slot.has(l.id))];
 /// A Credit to preselect once its picker draws (the ?pick= link).
 let pickAsk: { at: string; id: string } | null = null;
 /// Which Add Credits tab is open, per Credit Union, so a live refresh doesn't flip it back.
@@ -140,6 +177,18 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   const myIds = new Set(b.ids.filter((_, i) => same(b.depositors[i], account)).map(String));
   const rules = filterRules(s.filter, s.allowlistSize, (i) => layoutSlot(s.filter, i));
   const depositors = new Set(b.depositors.map((d) => d.toLowerCase())).size;
+  // Faces beside the member count: the 8 who put in the most Credits (avatars and names fill in by hydrate).
+  const byCredits = new Map<string, { a: Address; n: number }>();
+  for (const d of b.depositors) {
+    const r = byCredits.get(d.toLowerCase()) ?? { a: d, n: 0 };
+    r.n++;
+    byCredits.set(d.toLowerCase(), r);
+  }
+  const faces = [...byCredits.values()]
+    .sort((x, y) => y.n - x.n)
+    .slice(0, 8)
+    .map((r) => `<span class="face" data-ens="${esc(r.a)}"><img src="${identicon(r.a)}" alt=""><span class="who-name" hidden></span></span>`)
+    .join('');
 
   // Cells added since this browser last saw the batch drop in, in deposit order.
   const seenKey = `cu-seen-${address}`;
@@ -185,7 +234,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         s.state === 'Open' || s.state === 'Full' || s.state === 'Expired'
           ? `<div class="progress">
           <div class="slots" aria-hidden="true">${Array.from({ length: 80 }, (_, i) => `<i${i < s.count ? ' class="in"' : ''}></i>`).join('')}</div>
-          <div class="row small"><span class="num">${s.count} of 80 Credits in${depositors ? ` · <button type="button" class="link" id="depositors-btn">${depositors} ${depositors === 1 ? 'member' : 'members'}</button>` : ''}</span><span class="muted num" id="to-go">${s.state === 'Open' ? `${80 - s.count} to go` : s.state === 'Full' ? stage(s) : 'Expired'}</span></div>
+          <div class="row small"><span class="num">${s.count} of 80 Credits in${depositors ? ` · <button type="button" class="link members-btn" id="depositors-btn"><span class="faces" aria-hidden="true">${faces}</span>${depositors} ${depositors === 1 ? 'member' : 'members'}</button>` : ''}</span><span class="muted num" id="to-go">${s.state === 'Open' ? `${80 - s.count} to go` : s.state === 'Full' ? '' : 'Expired'}</span></div>
         </div>`
           : ''
       }
@@ -206,9 +255,9 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         <ol class="live-list fold-list" id="activity-list"><li class="muted live-empty">Loading…</li></ol>
       </details>
       <details class="more">
-        <summary><span>Details</span><span class="muted small">${ARRANGEMENTS[s.arrangement] ?? 'Deposit order'} · ${s.split === 1 ? 'Early bird' : 'Equal'} payout</span></summary>
+        <summary><span>Details</span><span class="muted small">${ARRANGEMENTS[s.arrangement] ?? 'Order joined'} · ${s.split === 1 ? 'Early bird' : 'Equal'} payout</span></summary>
         <dl class="facts">
-          ${fact('Layout', ARRANGEMENTS[s.arrangement] ?? 'Deposit order')}
+          ${fact('Layout', ARRANGEMENTS[s.arrangement] ?? 'Order joined')}
           ${fact('Payout', payout(b, myIds))}
           ${s.state === 'Auction' || s.state === 'Settled' ? fact('Members', `<button type="button" class="link num" id="depositors-btn">${depositors}</button>`) : ''}
           ${s.count ? fact('Credit rating', `<span id="rating" class="muted">…</span>`) : ''}
@@ -228,6 +277,32 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   // Chrome keeps a focus ring on <summary> after a mouse click; drop it for pointer use only.
   app.querySelectorAll<HTMLElement>('.more summary').forEach((el) => el.addEventListener('pointerup', () => setTimeout(() => el.blur(), 0)));
   fillGhosts(app);
+  // A Picture union: its open slots show the Credits that draw it best, and Buy and Deposit lead with them.
+  if (s.state === 'Open' && slots && !Number(s.filter.layoutTrait ?? 0)) {
+    const host = app.querySelector<HTMLElement>('.batch-art');
+    // Where Credits can be bought (mainnet) a picture union is bought into, never deposited from a wallet: one plan,
+    // from the listings, the same for everyone. Testnets can't buy, so there it plans with the viewer's Credits.
+    const who = config.sweeper ? undefined : (account ?? undefined), held = config.sweeper ? [] : (m?.owned ?? []);
+    const plan = planPicture(b, slots, placed, who, held).catch(() => null);
+    plansOf.set(s.address.toLowerCase(), plan);
+    replans.set(s.address.toLowerCase(), (gone) => planPicture(b, slots, placed, who, held, gone).catch(() => null));
+    void plan.then((p) => {
+      if (!p || !host?.isConnected) return;
+      // A picture reads best finished: open on Finished (the planned Credits at full ink) unless you picked a view.
+      if (!shown.has(s.address.toLowerCase()) && s.count < 80) {
+        host.dataset.show = 'finished';
+        host.querySelectorAll('[data-show]').forEach((b) => b.setAttribute('aria-checked', String((b as HTMLElement).dataset.show === 'finished')));
+      }
+      if (config.sweeper) {
+        // Bought into, never deposited: no Deposit tab for anyone.
+        const tab = document.querySelector<HTMLButtonElement>('[data-add="mine"]');
+        if (tab) tab.hidden = true;
+        document.querySelector<HTMLButtonElement>('[data-add="buy"]:not([aria-selected="true"])')?.click();
+      }
+      app.querySelector('.takes')?.insertAdjacentHTML('beforeend', `<p class="small muted picture-note">Made from a picture. Each open slot shows the Credit that draws it best, and only those go in, in order${config.sweeper ? ', bought here' : ''}.</p>`);
+      fillGhosts(app);
+    });
+  }
   // A Credit on the sheet opens its own page.
   app.querySelector('.batch-art')?.addEventListener('click', (e) => {
     const c = (e.target as HTMLElement).closest<HTMLElement>('.cell[data-id]');
@@ -391,20 +466,6 @@ function livePhase(s: Ctx['s']): PhaseName {
   return s.phase;
 }
 
-/// The progress row's note for a full party.
-function stage(s: Ctx['s']) {
-  switch (livePhase(s)) {
-    case 'Waiting':
-      return 'Waiting for Jack to launch Statements';
-    case 'Countdown':
-      return `Locks in <span data-clock="${s.lockAt}">${clock(s.lockAt)}</span>`;
-    case 'Burnable':
-      return `Locked · <span data-clock="${s.deadline}">${clock(s.deadline)}</span>`;
-    default:
-      return 'Unlocked';
-  }
-}
-
 /// Factory deposits revert with the batch's own errors (Excluded, NoSlot…); include them so they decode.
 const depositAbi = [...factoryAbi, ...batchAbi.filter((x) => x.type === 'error')];
 /// The Credit a NoSlot revert names, or null for any other error.
@@ -424,7 +485,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
   const withdraw = (primary = false) =>
     myIds.size
       ? `<div class="yours-in"><p class="small fit-row"><span><strong class="num">${myIds.size}</strong> of your Credits ${myIds.size === 1 ? 'is' : 'are'} in this Credit Union.</span><span id="w-actions"><button type="button" class="link small" id="w-clear" hidden>Clear</button></span></p>
-        <div class="picker" id="w-picker">${[...myIds].map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="false" aria-label="Credit #${id}"><img src="${art(BigInt(id))}" alt="" loading="lazy"></button>`).join('')}</div>
+        <div class="picker captioned" id="w-picker">${[...myIds].map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="false" aria-label="Credit #${id}"><img src="${art(BigInt(id))}" alt="" loading="lazy"><span class="pick-id num">#${Number(id).toLocaleString()}</span></button>`).join('')}</div>
         <button class="btn block${primary ? ' primary' : ''}" id="withdraw">Withdraw all ${plural(myIds.size)}</button></div>`
       : '';
 
@@ -474,8 +535,8 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
         return `<div class="box">
           <h3>Ready to burn</h3>
           <p class="muted">Burn within <span class="num" data-clock="${s.deadline}">${clock(s.deadline)}</span> or it unlocks.</p>
-          ${m ? `<button class="btn primary block" id="assemble">Make Statement</button>` : connect}
-          <p class="small muted">Anyone can press it and pays the gas. Nobody can leave during this hour.</p>
+          <div id="assemble-slot"><p class="muted">Burning opens in a few minutes, once we’ve checked the first Statement.</p></div>
+          <p class="small muted">Nobody can leave during this hour.</p>
         </div>`;
       default:
         return `<div class="box">
@@ -587,7 +648,7 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
     if (clr) clr.hidden = !wPicks.size;
   };
   if (wPicker) {
-    pickTips(wPicker, [...myIds].map(BigInt));
+    pickTips(wPicker, [...myIds].map(BigInt), new Map(b.ids.map((id, i) => [id.toString(), i + 1])), () => s.split === 1);
     wPicker.addEventListener('click', (e) => {
       const t = (e.target as HTMLElement).closest<HTMLElement>('.pick');
       if (!t) return;
@@ -605,11 +666,22 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
     }, 'Credits returned to your wallet.'),
   );
 
-  document.getElementById('assemble')?.addEventListener('click', (e) =>
-    run(e.currentTarget as HTMLElement, 'Burning…', () =>
-      send({ address: s.address, abi: batchAbi, functionName: 'assemble', gas: 12_000_000n }, txNote),
-    'The Statement exists. Auction is open.'),
-  );
+  // Make Statement waits for the burns-open flag (?burn shows it anyway, for our own first burn).
+  const slot = document.getElementById('assemble-slot');
+  if (slot) {
+    const show = () => {
+      if (!slot.isConnected) return;
+      slot.innerHTML = `${m ? `<button class="btn primary block" id="assemble">Make Statement</button>` : `<button class="btn primary block" data-connect>Connect wallet</button>`}
+        <p class="small muted">Anyone can press it and pays the gas.</p>`;
+      document.getElementById('assemble')?.addEventListener('click', (e) =>
+        run(e.currentTarget as HTMLElement, 'Burning…', () =>
+          send({ address: s.address, abi: batchAbi, functionName: 'assemble', gas: 12_000_000n }, txNote),
+        'The Statement exists. Auction is open.'),
+      );
+    };
+    if (new URLSearchParams(location.search).has('burn')) show();
+    else fetch('/burns').then((r) => r.json()).then((b: { open?: boolean }) => b.open && show()).catch(() => {});
+  }
 
   document.getElementById('settle')?.addEventListener('click', (e) =>
     run(e.currentTarget as HTMLElement, 'Settling…', () =>
@@ -770,7 +842,18 @@ async function drawPicker(
   // Fits: passes the rules and has room as the sheet stands. Most: how many go in together; filling greedily
   // gets there, since a Credit only spills into an open slot once its own value's slots are taken.
   const base = new Room(bk, room);
-  const fits = passing.filter((id) => base.fits(keyOf(id)));
+  // A picture union takes only the Credits that draw its next slots: yours that are next in their Colors.
+  const plan = await (plansOf.get(s.address.toLowerCase()) ?? Promise.resolve(null));
+  if (!el.isConnected) return;
+  // A picture union on mainnet is bought into, never deposited: no Deposit tab, straight to Buy.
+  if (plan && config.sweeper) {
+    const tab = document.querySelector<HTMLButtonElement>('[data-add="mine"]');
+    if (tab) tab.hidden = true;
+    document.querySelector<HTMLButtonElement>('[data-add="buy"]:not([aria-selected="true"])')?.click();
+    return;
+  }
+  const roomy = passing.filter((id) => base.fits(keyOf(id)));
+  const fits = plan ? roomy.filter((id) => plan.mine.has(id.toString())) : roomy;
   const most = (() => {
     const r = new Room(bk, room);
     return fits.filter((id) => r.take(keyOf(id)));
@@ -793,6 +876,8 @@ async function drawPicker(
     const why = bk ? noRoomReason(bk, keyOf(id)) : 'No room left';
     off.set(why, [...(off.get(why) ?? []), id]);
   }
+  const notNext = plan ? roomy.filter((id) => !plan.mine.has(id.toString())) : [];
+  if (notNext.length) off.set('Not next in the picture: another Credit draws its Colors’ next slot better', notNext);
   const outside = m.owned.filter((id) => !inRules.has(id.toString()));
   if (outside.length) off.set('Outside this Credit Union’s rules', outside);
   const offCount = [...off.values()].reduce((n, x) => n + x.length, 0);
@@ -821,7 +906,9 @@ async function drawPicker(
   }
   if (line) line.innerHTML = `<span><strong class="num">${most.length}</strong> of your ${m.owned.length} Credits fit this Credit Union.</span><span class="fit-actions" id="fit-actions"></span>`;
 
-  el.innerHTML = fits
+  // A picture union: yours in the order they go in.
+  const shown = byPlan(fits.map((id) => ({ id: id.toString() })), plan).map((x) => BigInt(x.id));
+  el.innerHTML = shown
     .map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="${picks.has(id.toString())}" aria-label="Credit #${id}"><img src="${art(id)}" alt="" loading="lazy"></button>`)
     .join('');
   if (offCount) el.insertAdjacentHTML('afterend', fold(`<summary class="muted small">${offCount} of yours ${offCount === 1 ? 'doesn’t' : 'don’t'} fit</summary>`));
@@ -872,7 +959,8 @@ async function drawPicker(
     );
     document.getElementById('deposit')?.addEventListener('click', (e) =>
       run(e.currentTarget as HTMLElement, 'Depositing…', async () => {
-        const ids = [...picks].map(BigInt);
+        // A picture union's recommended Credits go in slot order, so each lands where it draws.
+        const ids = byPlan([...picks].map((id) => ({ id })), plan).map((x) => BigInt(x.id));
         const chunks = Array.from({ length: Math.ceil(ids.length / CHUNK) }, (_, i) => ids.slice(i * CHUNK, (i + 1) * CHUNK));
         const deposit = (chunk: bigint[]) => ({ address: config.factory, abi: depositAbi, functionName: 'deposit', args: [s.address, chunk] });
         // A painted sheet takes each Credit only while a slot of its kind (or an open slot) is free, which the
@@ -997,7 +1085,52 @@ async function bindBuy(
   let all = listings;
   const marks = document.getElementById('buy-sources');
   if (marks) sourceMarks(marks, [...sources, ...all.map((l) => l.source)]);
-  const showing = (picked: Set<string>) => all.filter(sourceShown).filter((l, i) => i < MAX_SWEEP || picked.has(l.id));
+  const plan = plansOf.get(batch.toLowerCase());
+  let order: Plan | null = null;
+  let held = new Set<number>(); // Colors someone else is buying right now: they sit out until that buy lands
+  // A picture union sells only its planned Credits, read one by one (the union's usual listings are the cheapest
+  // that fit, which the picture's may not be). The market read can be minutes old: one no longer for sale leaves the
+  // plan, and its slot takes the next best, so nothing waits on a Credit that can't be bought.
+  const gone = new Set<number>();
+  const pictureListings = async (p: Plan) => {
+    for (let tries = 0; tries < 5; tries++) {
+      const want = byPlan([...p.buy].map((id) => ({ id })), p).slice(0, MAX_SWEEP).map((x) => x.id);
+      const ls = await listedById(want);
+      const sold = want.filter((id) => !ls.some((l) => l.id === id));
+      if (!sold.length) return { p, ls };
+      sold.forEach((id) => gone.add(Number(id)));
+      p = (await replans.get(batch.toLowerCase())?.(gone)) ?? p;
+    }
+    return { p, ls: await listedById(byPlan([...p.buy].map((id) => ({ id })), p).slice(0, MAX_SWEEP).map((x) => x.id)) };
+  };
+  const repicture = async (p: Plan) => {
+    const [got, lk] = await Promise.all([pictureListings(p), locks(batch)]);
+    if (!grid.isConnected) return;
+    order = got.p;
+    all = got.ls;
+    held = new Set(lk?.held ?? []);
+    reshow();
+  };
+  // A picture union: nothing is offered until its plan is worked out, then only its planned Credits.
+  if (plan) {
+    // Most painted unions have no picture and say so at once: only a real wait says what it's doing.
+    const slow = setTimeout(() => ((line.textContent = 'Finding the Credits that draw the picture’s next slots… '), (line.hidden = false)), 300);
+    const p = await plan;
+    clearTimeout(slow);
+    if (!grid.isConnected) return;
+    if (p) {
+      const [got, lk] = await Promise.all([pictureListings(p), locks(batch)]);
+      if (!grid.isConnected) return;
+      order = got.p;
+      all = got.ls;
+      held = new Set(lk?.held ?? []);
+    }
+  }
+  // A picture's, in the order they go in; any other union's, cheapest first.
+  const pictureLine = (n: number) =>
+    (n ? 'The Credits that draw the picture’s next slots, in the order they go in. ' : 'Nothing for sale draws the picture’s next slots right now. ') +
+    (held.size ? `Someone is buying ${[...held].map((m) => slotName(0, m)).join(', ')} right now; those are back in a moment. ` : '');
+  const showing = (picked: Set<string>) => byPlan(order ? all.filter((l) => order!.buy.has(l.id) && !held.has(order!.colour.get(l.id)!)) : all, order).filter(sourceShown).filter((l, i) => i < MAX_SWEEP || picked.has(l.id));
   const shown = showing(new Set());
   const sale: Sale = { ls: [...shown], preview: mainnetOnly, byId: new Map(shown.map((l) => [l.id, l])), all: shown, mine: new Set() };
   // Credits whose price went up at the last click: their new price shows in red until the next.
@@ -1008,7 +1141,7 @@ async function bindBuy(
   };
   tiles();
   // Testnet: the banner already says it's a preview.
-  line.textContent = shown.length || mainnetOnly ? '' : 'No listings fit right now. ';
+  line.textContent = order ? pictureLine(shown.length) : shown.length || mainnetOnly ? '' : 'No listings fit right now. ';
   line.hidden = !line.textContent;
   let chosen: () => Listed[] = () => [];
   const label = () => {
@@ -1029,6 +1162,7 @@ async function bindBuy(
   // Live: the listings that fit, read again every 20 s (the worker's scan of them is cached 30 s). The cheapest that
   // many show, and any you picked stay while they're listed.
   keepLive(grid, async () => {
+    if (order) return repicture(order);
     const r = await fetch(`/opensea/listings?batch=${batch}`);
     const d = r.ok ? ((await r.json()) as { listings?: Listed[]; sources?: Source[]; error?: string }) : null;
     if (!d?.listings || d.error || !grid.isConnected) return;
@@ -1039,7 +1173,7 @@ async function bindBuy(
   const reshow = () => {
     relist(grid, sale, showing(new Set(ctl.chosen().map((l) => l.id))), tile, ctl);
     if (marks) sourceMarks(marks, [...sources, ...all.map((l) => l.source)]);
-    line.textContent = sale.ls.length || mainnetOnly ? '' : 'No listings fit right now. ';
+    line.textContent = order ? pictureLine(sale.ls.length) : sale.ls.length || mainnetOnly ? '' : 'No listings fit right now. ';
     line.hidden = !line.textContent;
   };
   // A marketplace hidden or shown: its listings leave or slide in.
@@ -1051,14 +1185,50 @@ async function bindBuy(
   go.addEventListener('click', async () => {
     const picked = ctl.chosen();
     if (!picked.length) return;
+    // A picture union: each Colors' Credits go in from its first open slot, so none may be skipped over.
+    const gap = order && gapOf(order, picked.map((l) => l.id));
+    if (gap) return toast(`Add #${gap} too: it goes in before the ones you picked.`, 'info', 5000);
     let repriced = false;
     let newFee = ctl.fee();
     buying.n++;
+    // A picture union: lock the Colors being bought first, so nobody else's buy lands in these slots meanwhile.
+    const lockId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (x) => x.toString(16).padStart(2, '0')).join('');
+    let locked = false;
     await run(go, 'Buying…', async () => {
-      const r = await fetch(`/opensea/quote?batch=${batch}&ids=${picked.map((l) => l.id).join(',')}`);
+      if (order) {
+        const colours = [...new Set(picked.map((l) => order!.colour.get(l.id)!))];
+        const lk = await locks(batch, { op: 'acquire', id: lockId, colours });
+        if (lk && lk.ok === false) {
+          held = new Set([...held, ...(lk.busy ?? [])]);
+          reshow();
+          throw new Error(`Someone is buying ${(lk.busy ?? []).map((m) => slotName(0, m)).join(', ')} for this picture right now. Try again in a minute, or buy other Colors.`);
+        }
+        locked = !!lk;
+      }
+      // A picture union's Credits are priced one by one (they needn't be among the cheapest that fit).
+      const r = order
+        ? await fetch('/opensea/buyquote', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ listings: picked }) })
+        : await fetch(`/opensea/quote?batch=${batch}&ids=${picked.map((l) => l.id).join(',')}`);
       const q = (await r.json()) as Quote;
       if (!r.ok || q.error) throw new Error(q.error ?? 'No price right now. Try again.');
       checkQuote(q);
+      // All of them or none: one missing would shift the rest of its Colors a slot early.
+      if (order) {
+        const have = new Set([...q.ids, ...(q.fwa ?? []).map((f) => f.id), ...(q.strategy ?? []).map((f) => f.id)]);
+        const sold = picked.map((l) => l.id).filter((id) => !have.has(id));
+        if (sold.length) {
+          sold.forEach((id) => gone.add(Number(id)));
+          const next = await replans.get(batch.toLowerCase())?.(gone);
+          if (next) void repicture(next);
+          throw new Error(`${sold.map((id) => `#${id}`).join(', ')} just sold. The picture picked another for ${sold.length === 1 ? 'its slot' : 'their slots'}: check and buy again.`);
+        }
+      }
+      // A picture union: OpenSea's Credits deposit in the order sent, so send them in slot order.
+      if (order) {
+        const at = (i: number) => order!.slot.get(q.ids[i]) ?? 99;
+        const idx = q.ids.map((_, i) => i).sort((x, y) => at(x) - at(y));
+        [q.orders, q.ids, q.prices] = [idx.map((i) => q.orders[i]), idx.map((i) => q.ids[i]), idx.map((i) => q.prices[i])];
+      }
       const [value, fee] = (await Promise.all([
         pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'quote', args: [BigInt(q.total)] }),
         pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'feeBps' }),
@@ -1086,18 +1256,23 @@ async function bindBuy(
         repriced = true;
         throw new Error('Prices went up since this page loaded. Check the new total, then buy.');
       }
+      const least = order ? BigInt(quotedCount(q)) : 1n; // a picture's: all or none
       const fwa = (q.fwa ?? []).map((f) => ({ listingId: BigInt(f.listingId), price: BigInt(f.price) }));
       const strategy = (q.strategy ?? []).map((f) => ({ tokenId: BigInt(f.id), price: BigInt(f.price) }));
       await send(
         fwa.length || strategy.length
-          ? { address: config.sweeper!, abi: sweeperAbi, functionName: 'sweepAll', args: [batch, q.orders, fwa, strategy, 1n, fee], value }
-          : { address: config.sweeper!, abi: sweeperAbi, functionName: 'sweep', args: [batch, q.orders, 1n, fee], value },
-        txNote,
+          ? { address: config.sweeper!, abi: sweeperAbi, functionName: 'sweepAll', args: [batch, q.orders, fwa, strategy, least, fee], value }
+          : { address: config.sweeper!, abi: sweeperAbi, functionName: 'sweep', args: [batch, q.orders, least, fee], value },
+        (h) => {
+          txNote(h);
+          if (locked) void locks(batch, { op: 'hold', id: lockId }); // sent: keep the Colors while it's pending
+        },
       );
       const n = quotedCount(q);
       if (n < picked.length) toast(`${picked.length - n} sold before you got to them.`, 'info', 8000);
       justJoined(batch, n);
     }, '');
+    if (locked) void locks(batch, { op: 'release', id: lockId }); // landed, failed or cancelled: the Colors are free
     buying.n--;
     // After run() puts the button back, so it takes the new count.
     if (repriced) {
@@ -1206,9 +1381,9 @@ function openDepositors(b: Ctx, account: string | null) {
     <ol class="people-list">${list
       .map(
         (r) => `<li class="person" data-owner="${esc(r.addr.toLowerCase())}">
-          <div class="row">${who(r.addr, 'sm', true)}<span class="tags">${same(r.addr, s.creator) ? '<span class="tag">Creator</span>' : ''}${account && same(r.addr, account) ? '<span class="tag you">You</span>' : ''}</span></div>
-          <div class="row muted small"><span class="num">${r.ids.length} Credit${r.ids.length === 1 ? '' : 's'}</span><span class="num">${s.split === 1 ? `${r.shares.toFixed(2)} shares · ` : ''}${sharePct(r.shares / total)} of the sale</span></div>
-          <div class="person-art">${r.ids.slice(0, 8).map((id) => `<img src="${art(id)}" alt="" title="Credit #${id}" loading="lazy">`).join('')}${r.ids.length > 8 ? `<span class="muted small num">+${r.ids.length - 8}</span>` : ''}</div>
+          <div class="person-top">${who(r.addr, 'sm', true)}${same(r.addr, s.creator) ? '<span class="tag">Creator</span>' : ''}${account && same(r.addr, account) ? '<span class="tag you">You</span>' : ''}</div>
+          <div class="person-art">${r.ids.slice(0, 5).map((id) => `<img src="${art(id)}" alt="" title="Credit #${id}" loading="lazy">`).join('')}${r.ids.length > 5 ? `<span class="muted small num">+${r.ids.length - 5}</span>` : ''}</div>
+          <span class="muted small num person-share">${r.ids.length} Credit${r.ids.length === 1 ? '' : 's'} · ${s.split === 1 ? `${r.shares.toFixed(2)} shares · ` : ''}${sharePct(r.shares / total)}</span>
         </li>`,
       )
       .join('')}</ol>

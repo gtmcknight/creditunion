@@ -470,11 +470,28 @@ export function checkQuote(q: Quote) {
   if (sum !== BigInt(q.total)) throw new Error('Bad quote.');
 }
 
+/// The live listing for each of these Credits (skipping ones not for sale), ready to buy.
+export async function listedById(ids: string[]): Promise<Listed[]> {
+  const got = await Promise.all(
+    ids.map((x) =>
+      fetch(`/opensea/credit/${x}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((l: { price: string | null; source?: Listed['source']; hash?: string | null; protocol?: string | null; listingId?: string | null; preview?: boolean } | null) =>
+          l?.price && !l.preview ? ({ id: x, price: l.price, source: l.source!, hash: l.hash ?? undefined, protocol: l.protocol ?? undefined, listingId: l.listingId ?? undefined } as Listed) : null,
+        )
+        .catch(() => null),
+    ),
+  );
+  return got.filter((l): l is Listed => !!l);
+}
+
 /// Sweep these listings into the connected wallet (Sweeper.buy): a fresh price for exactly them, checked
 /// against what it shows, the fee read now, then one transaction. Credits sold since drop out of the price.
 /// Resolves to the ids bought, or null if nothing was.
 /// `onSubmit` runs once the wallet has sent it (the Credits' squares start their buying pulse then).
-export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement, onSubmit?: () => void): Promise<string[] | null> {
+/// `whole`: all of them or none (a picture's Credits: one missing would shift the rest out of their slots). A quote
+/// short of any refuses before the wallet, naming them in `onSold`; the transaction itself reverts if one sells after.
+export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement, onSubmit?: () => void, whole?: { onSold: (ids: string[]) => void }): Promise<string[] | null> {
   const label = btn.textContent ?? '';
   btn.disabled = true;
   btn.textContent = 'Pricing…';
@@ -484,6 +501,14 @@ export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement, on
     const q = (await r.json()) as Quote;
     if (!r.ok || q.error) throw new Error(q.error ?? 'No price right now.');
     checkQuote(q);
+    if (whole) {
+      const have = new Set([...q.ids, ...(q.fwa ?? []).map((f) => f.id), ...(q.strategy ?? []).map((f) => f.id)]);
+      const sold = picked.map((l) => l.id).filter((id) => !have.has(id));
+      if (sold.length) {
+        whole.onSold(sold);
+        throw new Error(`${sold.map((id) => `#${id}`).join(', ')} just sold. The picture picked another for ${sold.length === 1 ? 'its slot' : 'their slots'}: check and buy again.`);
+      }
+    }
     const total = BigInt(q.total);
     const [value, feeBps] = (await Promise.all([
       pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'quote', args: [total] }),
@@ -499,7 +524,7 @@ export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement, on
           q.orders,
           (q.fwa ?? []).map((f) => ({ listingId: BigInt(f.listingId), price: BigInt(f.price) })),
           (q.strategy ?? []).map((f) => ({ tokenId: BigInt(f.id), price: BigInt(f.price) })),
-          1n,
+          whole ? BigInt(picked.length) : 1n,
           feeBps,
         ],
         value,

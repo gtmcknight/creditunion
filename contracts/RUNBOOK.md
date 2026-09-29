@@ -35,11 +35,12 @@ early Wednesday. This is the checklist from his publish to the first Statement. 
 
 | ET | UTC | |
 |---|---|---|
-| by 6:00pm | 22:00 | The keeper is on: `KEEPER_KEY` is set (`wrangler secret put KEEPER_KEY`) and the key holds enough ETH for every full union's burn. `KEEPER_MAX_GWEI` isn't below the day's gas price. |
+| by 6:00pm | 22:00 | The keeper is on: `KEEPER_KEY` is set (`wrangler secret put KEEPER_KEY`) and the key holds enough ETH for every full union's burn. `KEEPER_MAX_GWEI` isn't below the day's gas price. **Burns are held:** `pnpm wrangler kv key get --binding PLANS burns-open --remote` is empty (not `1`). While held, the keeper still turns burning on and settles, but burns nothing, and union pages hide Make Statement. |
 | **7:30pm** | 23:30 | **Execute the Safe's `proposeAssembler`.** Not earlier: the keeper switches it on as soon as the 30-minute notice ends, and a union that locks before Jack's contract opens only fails its burn and loses its hour. The site shows the notice bar; anyone can still leave any union. |
 | 8:00pm | 00:00 | Burning switches on: anyone calls `activateAssembler()`, the keeper within 5 minutes, or press it ourselves at 8:00. Every full union starts its 5-minute countdown. |
-| ~8:05pm | 00:05 | The first union can burn. Press **Make Statement** on it ourselves and check: the Statement is on the union page, the 80 are gone, the direction is right, the auction is open. Then post. |
-| 8:05pm on | | The keeper burns every full union during its hour. Watch `wrangler tail` for `[keeper] can't burn`. |
+| ~8:05pm | 00:05 | The first union can burn. Open it with `?burn` on the URL (`/union/<address>?burn`), press **Make Statement** ourselves and check: the Statement is on the union page, the 80 are gone, the direction is right, the auction is open. |
+| once it checks out | | **Open burns:** `pnpm wrangler kv key put --binding PLANS burns-open 1 --remote`. Within 5 minutes the keeper burns every other full union, and Make Statement shows on every union page. Then post. Watch `wrangler tail` for `[keeper] can't burn`. |
+| if it doesn't | | Leave burns held. Every other union's hour runs out and it unlocks; members can leave. Nothing is lost but the hour. Fix, then anyone restarts the countdowns. |
 
 ## If something goes wrong
 

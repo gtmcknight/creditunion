@@ -7,3 +7,6 @@ RPC_URL=https://eth-sepolia.example/your-key
 OPENSEA_API_KEY=your-opensea-api-key
 # Optional. Mainnet RPC for ENS names when CHAIN_ID is not 1 (defaults to a public node).
 ENS_RPC=https://eth-mainnet.example/your-key
+
+# Local preview of Activity without an RPC key (never set in production)
+# ACTIVITY_MIRROR=https://creditunion.fun/activity.json

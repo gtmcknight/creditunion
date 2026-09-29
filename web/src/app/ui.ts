@@ -60,12 +60,14 @@ export function sheet(
     placed?: (bigint | null)[];
     /// Batch address: `fillGhosts` fills the empty slots with example Credits that fit.
     batch?: string;
+    /// With `placed`: the Credit to show faded in each empty slot, by slot.
+    slotGhosts?: ({ id: bigint; src: string } | null)[];
   } = {},
 ) {
   const cells = Array.from({ length: 80 }, (_, i) => {
     const id = opts.placed ? (opts.placed[i] ?? undefined) : ids[i];
     if (id === undefined) {
-      const g = opts.ghosts?.[i - ids.length];
+      const g = opts.placed ? opts.slotGhosts?.[i] : opts.ghosts?.[i - ids.length];
       if (g?.src) return `<i class="cell ghost"${g.id ? ` data-ghost="${g.id}"` : ''}><img src="${g.src}" alt="" loading="lazy" decoding="async"></i>`;
       return `<i class="cell empty"></i>`;
     }
@@ -206,7 +208,7 @@ export type SubTab = { label: string; href?: string; current?: boolean; attrs?: 
 /// Every section page opens the same way: the h1, one muted line, then a bar with sub-nav tabs on the left and
 /// the page's controls on the right. `title` and `lede` are HTML; callers escape.
 /// `action`: the page's one call to action, to the right of the title and lede.
-export function pageHead({ title, lede, tabs, tools, action, label = 'Sections' }: { title: string; lede?: string; tabs?: SubTab[]; tools?: string; action?: string; label?: string }) {
+export function pageHead({ title, lede, tabs, tools, action, label = 'Sections', under }: { title: string; lede?: string; tabs?: SubTab[]; tools?: string; action?: string; label?: string; under?: string }) {
   const links = !!tabs?.[0]?.href;
   const items = (tabs ?? [])
     .map((t) =>
@@ -218,7 +220,7 @@ export function pageHead({ title, lede, tabs, tools, action, label = 'Sections' 
   const nav = !tabs?.length ? '' : links ? `<nav class="subtabs" aria-label="${label}">${items}</nav>` : `<div class="subtabs" role="tablist" aria-label="${label}">${items}</div>`;
   const bar = nav || tools ? `<div class="page-bar">${nav}${tools ? `<div class="page-tools">${tools}</div>` : ''}</div>` : '';
   const words = `<h1>${title}</h1>${lede ? `<p class="page-lede">${lede}</p>` : ''}`;
-  return `<header class="page-head">${action ? `<div class="page-top"><div>${words}</div><div class="page-action">${action}</div></div>` : words}${bar}</header>`;
+  return `<header class="page-head">${action ? `<div class="page-top"><div>${words}</div><div class="page-action">${action}</div></div>` : words}${under ?? ''}${bar}</header>`;
 }
 
 /// Pickers fade at the bottom only when they scroll (`.overflows`); a short row of tiles gets no dead space.

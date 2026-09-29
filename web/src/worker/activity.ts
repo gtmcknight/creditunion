@@ -19,7 +19,8 @@ export type Activity = {
   i: number; // log index, for a stable order within a block
 };
 
-type State = { v: 1; last: number; unions: Record<string, string>; items: Activity[] };
+/// v2: keeps every row (v1 kept 200); a v1 state is rescanned so older history comes back.
+type State = { v: 2; last: number; unions: Record<string, string>; items: Activity[] };
 
 const FACTORY_EVENTS = parseAbi(['event BatchCreated(address indexed batch, address indexed creator, string name, uint256 index)']);
 const BATCH_EVENTS = parseAbi([
@@ -38,8 +39,12 @@ const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523
 
 /// Public RPCs cap a getLogs range; this fits the ones the site falls back to.
 const WINDOW = 45_000n;
-/// Rows kept and served.
-const KEEP = 200;
+/// Every row since the factory's deploy is kept (the scan state grows with history; /activity.json serves slices of
+/// it). A cold scan can find thousands of rows; only the newest this many get an RPC call each (block time, buy
+/// receipt), so one request stays well inside the Worker's subrequest limit. Older rows get a time estimated from
+/// the block number (12-second slots) and a buy's count without its ids.
+const EXACT = 200;
+const SLOT = 12;
 
 export async function readActivity(
   c: PublicClient,
@@ -48,8 +53,8 @@ export async function readActivity(
   cfg: { factory: Address; sweeper: Address | null; credits: Address; from: bigint },
 ): Promise<Activity[]> {
   const hit = await cache.match(stateKey);
-  let st: State = hit ? ((await hit.json()) as State) : { v: 1, last: Number(cfg.from) - 1, unions: {}, items: [] };
-  if (st.v !== 1) st = { v: 1, last: Number(cfg.from) - 1, unions: {}, items: [] };
+  let st: State = hit ? ((await hit.json()) as State) : { v: 2, last: Number(cfg.from) - 1, unions: {}, items: [] };
+  if (st.v !== 2) st = { v: 2, last: Number(cfg.from) - 1, unions: {}, items: [] };
   const head = await c.getBlockNumber();
   const fresh: Omit<Activity, 'time'>[] = [];
   // Swept buys land in a union: Batch emits the Deposited rows, the Sweeper says who paid. Keyed by tx + union.
@@ -113,9 +118,9 @@ export async function readActivity(
   }
 
   // Buys to a wallet: which Credits, from the Credits contract's transfers to the buyer in that transaction.
-  const recent = boughtTx.slice(-KEEP);
-  const receipts = await Promise.all(recent.map((b) => c.getTransactionReceipt({ hash: b.tx }).catch(() => null)));
-  recent.forEach((b, k) => {
+  const exact = boughtTx.length - EXACT;
+  const receipts = await Promise.all(boughtTx.map((b, k) => (k >= exact ? c.getTransactionReceipt({ hash: b.tx }).catch(() => null) : null)));
+  boughtTx.forEach((b, k) => {
     const r = receipts[k];
     const me = b.who.toLowerCase();
     const ids = r
@@ -126,14 +131,18 @@ export async function readActivity(
     fresh.push({ kind: 'bought', who: b.who, ids, count: ids.length || b.count, eth: String(b.eth), block: b.block, tx: b.tx, i: b.i });
   });
 
-  const newest = fresh.sort((a, b) => b.block - a.block || b.i - a.i).slice(0, KEEP);
+  const newest = fresh.sort((a, b) => b.block - a.block || b.i - a.i);
   const blocks = [...new Set(newest.map((x) => x.block))];
   const times = new Map<number, number>();
-  await Promise.all(blocks.map(async (n) => times.set(n, Number((await c.getBlock({ blockNumber: BigInt(n) })).timestamp))));
-  const items = [...newest.map((x) => ({ ...x, time: times.get(x.block) ?? 0 })), ...st.items].slice(0, KEEP);
+  await Promise.all(blocks.slice(0, EXACT).map(async (n) => times.set(n, Number((await c.getBlock({ blockNumber: BigInt(n) })).timestamp))));
+  if (blocks.length > EXACT) {
+    const top = blocks[0], topTime = times.get(top)!;
+    for (const n of blocks.slice(EXACT)) times.set(n, topTime - (top - n) * SLOT);
+  }
+  const items = [...newest.map((x) => ({ ...x, time: times.get(x.block) ?? 0 })), ...st.items];
   for (const x of items) if (x.union) x.name = st.unions[x.union.toLowerCase()] ?? x.name;
 
-  st = { v: 1, last: Number(head), unions: st.unions, items };
+  st = { v: 2, last: Number(head), unions: st.unions, items };
   await cache.put(stateKey, Response.json(st, { headers: { 'cache-control': 'public, max-age=86400' } }));
   return items;
 }

@@ -2,7 +2,7 @@
 /// on a stranger (contracts/ADAPTER.md). A burn hour gets about a dozen tries. Each run sends up to five
 /// transactions, most urgent first, each only if it would land:
 ///   1. factory.activateAssembler(), once the 30-minute notice has run;
-///   2. assemble() on a Credit Union in its burn hour;
+///   2. assemble() on a Credit Union in its burn hour, once burns are open (the `burns-open` flag, see burnsOpen);
 ///   3. settle() on an auction that has ended;
 ///   4. claim(member) for a member whose payout failed at settle (anyone may send it for them), for three days.
 /// It never restarts a countdown: with the keeper running, a burn hour only lapses when the burn itself fails, and a
@@ -32,7 +32,7 @@ const PER_RUN = 5;
 
 type Job = { what: string; address: Address; abi: typeof batchAbi | typeof factoryAbi; functionName: string; args?: readonly unknown[]; gas?: bigint };
 
-export async function keep(o: { key: string; chainId: number; factory: Address; maxGwei: number; transport: Transport; unions: () => Promise<Kept[]> }) {
+export async function keep(o: { key: string; chainId: number; factory: Address; maxGwei: number; transport: Transport; unions: () => Promise<Kept[]>; burnsOpen: () => Promise<boolean> }) {
   if (!/^0x[0-9a-fA-F]{64}$/.test(o.key)) return console.error('[keeper] KEEPER_KEY is not a private key');
   const chain = o.chainId === 1 ? mainnet : o.chainId === 11_155_111 ? sepolia : { ...mainnet, id: o.chainId };
   const account = privateKeyToAccount(o.key as Hex);
@@ -54,8 +54,12 @@ export async function keep(o: { key: string; chainId: number; factory: Address; 
   if (active === ZERO && next !== ZERO && now >= BigInt(until)) jobs.push({ what: 'turn burning on', address: o.factory, abi: factoryAbi, functionName: 'activateAssembler' });
 
   const unions = await o.unions();
-  for (const u of unions)
-    if (u.summary.phase === BURNABLE) jobs.push({ what: `burn ${u.address}`, address: u.address, abi: batchAbi, functionName: 'assemble', gas: ASSEMBLE_GAS });
+  // Burns wait for the flag: we burn the first union by hand and check its Statement before the keeper does the rest.
+  const burnable = unions.filter((u) => u.summary.phase === BURNABLE);
+  const open = burnable.length ? await o.burnsOpen() : false;
+  if (burnable.length && !open) console.warn(`[keeper] ${burnable.length} burnable, holding: burns-open is off`);
+  if (open) for (const u of burnable)
+    jobs.push({ what: `burn ${u.address}`, address: u.address, abi: batchAbi, functionName: 'assemble', gas: ASSEMBLE_GAS });
   for (const u of unions)
     if (u.summary.state === AUCTION && u.summary.highBid > 0n && now >= u.summary.auctionEnd) jobs.push({ what: `settle ${u.address}`, address: u.address, abi: batchAbi, functionName: 'settle' });
   for (const u of unions) {

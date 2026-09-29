@@ -2,6 +2,7 @@ import type { Address, Hex } from 'viem';
 import { explorer, session } from '../chain';
 import { hydrate, who } from '../ens';
 import { art, esc, eth, pageHead, same } from '../ui';
+import { listBatches } from '../data';
 
 /// /activity.json's rows (worker/activity.ts).
 type Item = {
@@ -19,6 +20,8 @@ type Item = {
 };
 
 const POLL = 20_000;
+/// Rows shown on /activity before Show more.
+const PAGE = 100;
 /// Credits shown per row; the rest are counted in the words.
 const THUMBS = 6;
 
@@ -55,25 +58,30 @@ function what(x: Item, here = false) {
   }
 }
 
-/// /activity.json's rows (the Worker's newest 200 across the site, cached 15 s), read once per page view: /activity polls
-/// it, and the Activity folds on union and member pages take their own rows from it.
-let recent: { at: number; p: Promise<Item[]> } | null = null;
-function readActivity(fresh = false): Promise<Item[]> {
-  if (!fresh && recent && Date.now() - recent.at < 15_000) return recent.p;
-  const p = fetch('/activity.json', { cache: 'no-cache' }).then(async (r) => {
-    const j = (await r.json()) as { items?: Item[]; error?: string };
+/// /activity.json slices (the Worker cuts them from its full list, cached 15 s). Each query is read at most once
+/// per 15 seconds per page view, unless `fresh`.
+type Slice = { items: Item[]; more: boolean };
+const reads = new Map<string, { at: number; p: Promise<Slice> }>();
+function readActivity(query: string, fresh = false): Promise<Slice> {
+  const hit = reads.get(query);
+  if (!fresh && hit && Date.now() - hit.at < 15_000) return hit.p;
+  const p = fetch(`/activity.json?${query}`, { cache: 'no-cache' }).then(async (r) => {
+    const j = (await r.json()) as { items?: Item[]; more?: boolean; error?: string };
     if (!r.ok || j.error) throw new Error(j.error ?? 'unavailable');
-    return j.items ?? [];
+    return { items: j.items ?? [], more: !!j.more };
   });
-  const entry = (recent = { at: Date.now(), p });
-  p.catch(() => recent === entry && (recent = null));
+  const entry = { at: Date.now(), p };
+  reads.set(query, entry);
+  p.catch(() => reads.get(query) === entry && reads.delete(query));
   return p;
 }
 
-/// A union's rows (`union`) or a wallet's (`member`), newest first; null when the feed can't be read.
+/// A union's rows (`union`) or a wallet's (`member`), newest first, all of them; null when the feed can't be read.
 export async function activityOf(o: { union?: Address; member?: Address }): Promise<Item[] | null> {
-  const items = await readActivity().catch(() => null);
-  return items && items.filter((x) => (o.union ? !!x.union && same(x.union, o.union) : o.member ? same(x.who, o.member) : false));
+  const q = o.union ? `union=${o.union}` : o.member ? `member=${o.member}` : '';
+  if (!q) return [];
+  const got = await readActivity(`${q}&limit=1000`).catch(() => null);
+  return got && got.items.filter((x) => (o.union ? !!x.union && same(x.union, o.union) : same(x.who, o.member!)));
 }
 /// Those rows as list items: on a union's page the union goes without saying; on a member's page, who does.
 export const activityItems = (rows: Item[] | null, o: { union?: boolean; member?: boolean }) =>
@@ -118,17 +126,66 @@ function row(x: Item, o: { here?: boolean; who?: boolean } = {}) {
 /// /activity: every deposit, withdrawal, buy, new union, burn, bid, sale and claim, newest first. New rows slide in at
 /// the top every 20 seconds; if you've scrolled down, the page holds still under you.
 export async function live(app: HTMLElement) {
+  const board = new URLSearchParams(location.search).get('tab') === 'leaderboard';
   app.innerHTML = `<section class="home">
-    ${pageHead({ title: 'Activity', lede: 'Everything wallets do on Credit Union, as it happens.' })}
-    <ol class="live-list" id="live-list"><li class="muted live-empty">Loading…</li></ol>
+    ${pageHead({
+      title: 'Activity',
+      lede: 'Everything wallets do on Credit Union, as it happens.',
+      tabs: [
+        { label: 'Activity', attrs: 'data-tab="activity"', current: !board },
+        { label: 'Leaderboard', attrs: 'data-tab="leaderboard"', current: board },
+      ],
+      label: 'Show',
+    })}
+    <ol class="live-list" id="live-list"${board ? ' hidden' : ''}><li class="muted live-empty">Loading…</li></ol>
+    <div id="leaderboard"${board ? '' : ' hidden'}><p class="muted">Loading…</p></div>
   </section>`;
   const list = app.querySelector<HTMLOListElement>('#live-list')!;
   const seen = new Set<string>();
-
+  // 100 rows at a time; Show more asks the Worker for the next 100.
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'btn live-more';
+  more.textContent = 'Show more';
+  more.hidden = true;
+  list.after(more);
+  let hasMore = false;
+  const page = () => (more.hidden = list.hidden || !hasMore);
+  more.addEventListener('click', async () => {
+    const last = list.querySelector<HTMLElement>('.live-row:last-child')?.dataset.key;
+    if (!last) return;
+    more.disabled = true;
+    try {
+      const got = await readActivity(`limit=${PAGE}&after=${encodeURIComponent(last)}`);
+      const rows = got.items.filter((x) => !seen.has(keyOf(x)));
+      rows.forEach((x) => seen.add(keyOf(x)));
+      list.insertAdjacentHTML('beforeend', rows.map((x) => row(x)).join(''));
+      hydrate(list);
+      hasMore = got.more;
+    } catch {
+      /* the button stays; try again */
+    }
+    more.disabled = false;
+    page();
+  });
+  const boardEl = app.querySelector<HTMLElement>('#leaderboard')!;
+  let boardDrawn = false;
+  const show = (tab: string) => {
+    app.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
+    list.hidden = tab !== 'activity';
+    boardEl.hidden = tab !== 'leaderboard';
+    page();
+    history.replaceState(null, '', tab === 'leaderboard' ? '/activity?tab=leaderboard' : '/activity');
+    if (tab === 'leaderboard' && !boardDrawn) (boardDrawn = true), void leaderboard(boardEl);
+  };
+  app.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) => b.addEventListener('click', () => show(b.dataset.tab!)));
+  if (board) (boardDrawn = true), void leaderboard(boardEl);
   const load = async (first: boolean) => {
     let items: Item[];
     try {
-      items = await readActivity(!first);
+      const got = await readActivity(`limit=${PAGE}`, !first);
+      items = got.items;
+      if (first) hasMore = got.more;
     } catch {
       if (first) list.innerHTML = '<li class="muted live-empty">Couldn’t load activity. Try again in a minute.</li>';
       return;
@@ -145,6 +202,7 @@ export async function live(app: HTMLElement) {
       const before = list.offsetHeight;
       list.querySelector('.live-empty')?.remove();
       list.insertAdjacentHTML('afterbegin', fresh.map((x) => row(x)).join(''));
+      page();
       if (!first) {
         const added = list.offsetHeight - before;
         if (top < 0) window.scrollBy(0, added);
@@ -164,3 +222,80 @@ export async function live(app: HTMLElement) {
     if (document.visibilityState === 'visible') void load(false);
   }, POLL);
 }
+
+/// Leaderboard: who has the most Credits in Credit Unions right now, across every union (from the union index:
+/// a Credit counts for whoever deposited it, until they take it out).
+async function leaderboard(el: HTMLElement) {
+  let unions;
+  try {
+    unions = await listBatches();
+  } catch {
+    el.innerHTML = '<p class="muted">Couldn’t load the leaderboard. Try again in a minute.</p>';
+    return;
+  }
+  const by = new Map<string, { who: Address; credits: number; unions: Set<string> }>();
+  for (const u of unions)
+    for (const d of u.depositors) {
+      const k = d.toLowerCase();
+      const r = by.get(k) ?? { who: d, credits: 0, unions: new Set<string>() };
+      r.credits++;
+      r.unions.add(u.s.address.toLowerCase());
+      by.set(k, r);
+    }
+  const rows = [...by.values()].sort((a, b) => b.credits - a.credits || b.unions.size - a.unions.size);
+  if (!el.isConnected) return;
+  if (!rows.length) return void (el.innerHTML = '<p class="muted">Nothing yet.</p>');
+  const mine = session.account ? rows.findIndex((r) => same(r.who, session.account!)) : -1;
+  const line = (r: (typeof rows)[number], i: number) => `<li class="board-row${i === mine ? ' mine' : ''}">
+      <span class="board-rank num">${i + 1}</span>
+      <span class="board-who">${who(r.who, 'sm', true)}${i === mine ? '<span class="tag you">You</span>' : ''}</span>
+      <span class="board-n num">${r.credits} ${r.credits === 1 ? 'Credit' : 'Credits'}</span>
+      <span class="board-u num muted">${r.unions.size} ${r.unions.size === 1 ? 'union' : 'unions'}</span>
+    </li>`;
+  const TOP = 50;
+  el.innerHTML = `<ol class="board">${rows.slice(0, TOP).map(line).join('')}${mine >= TOP ? line(rows[mine], mine) : ''}</ol>
+    <p class="small muted board-note">${rows.length} depositors · Credits in Credit Unions now, across every union</p>`;
+  hydrate(el);
+}
+
+/// The ticker's markup (homepage under the hero, /unions under the lede); activityTicker fills it.
+export const tickerHtml = (id: string, kind = '') =>
+  `<div class="home-ticker empty${kind ? ` ${kind}` : ''}" id="${id}"><span class="tick-label">Latest</span><span class="tick-dot" aria-hidden="true"></span><span class="tick-line" aria-live="off"></span><a class="tick-all" href="/activity">All activity →</a></div>`;
+
+/// The ticker: the newest event, one line. Checked every 20 seconds; a new one fades in, and its "ago" keeps
+/// counting in between. It always holds its line (no layout shift); while the feed can't be read, the line is blank.
+export async function activityTicker(el: HTMLElement) {
+  const line = el.querySelector<HTMLElement>('.tick-line')!;
+  let shown = '';
+  let time = 0;
+  const load = async (fresh: boolean) => {
+    const x = (await readActivity('limit=1', fresh).catch(() => null))?.items[0];
+    if (!el.isConnected) return;
+    if (!x) return void el.classList.toggle('empty', !shown);
+    el.classList.remove('empty');
+    time = x.time;
+    if (keyOf(x) === shown) return;
+    shown = keyOf(x);
+    line.classList.remove('in');
+    line.innerHTML = `<span class="tick-who">${who(x.who, 'sm', true)}</span><span class="tick-what">${what(x)}</span><span class="muted tick-when">${x.time ? ago(x.time) : ''}</span>`;
+    hydrate(line);
+    requestAnimationFrame(() => line.classList.add('in'));
+  };
+  await load(false);
+  const timer = setInterval(() => {
+    if (!el.isConnected) return clearInterval(timer);
+    if (document.visibilityState !== 'visible') return;
+    void load(true);
+    const when = line.querySelector('.tick-when');
+    if (when && time) when.textContent = ago(time);
+  }, POLL);
+}
+
+/// When each union last took a Credit (a deposit or a buy into it), unix seconds by lowercased address: the
+/// Worker's ?last summary, a few KB for the whole list page.
+export async function lastJoined(): Promise<Map<string, number>> {
+  const r = await fetch('/activity.json?last', { cache: 'no-cache' }).catch(() => null);
+  const j = r?.ok ? ((await r.json().catch(() => null)) as { last?: Record<string, number> } | null) : null;
+  return new Map(Object.entries(j?.last ?? {}));
+}
+export { ago };

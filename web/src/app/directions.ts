@@ -38,8 +38,8 @@ const GLYPH: Record<Direction, string> = {
   Voided: '<path fill="none" stroke="currentColor" stroke-width="1.25" d="M2.6 2.6h3.8v3.8H2.6zM9.6 2.6h3.8v3.8H9.6zM2.6 9.6h3.8v3.8H2.6zM9.6 9.6h3.8v3.8H9.6z"/>',
 };
 
-/// The directions as one row of glyphs, each named in its tooltip. `rules` adds the create page's Rules view in
-/// front, hidden until a design is painted.
+/// The directions as one row of glyphs, each named in its tooltip. `rules` adds the create page's Painted view (the
+/// hand-painted design; 'Rules' inside) in front, hidden until a design is painted.
 export function directions(key: string, rules = false) {
   const k = key.toLowerCase(), on = showing.get(k) ?? 'Issued';
   const all: Shown[] = rules ? ['Rules', ...DIRECTIONS] : [...DIRECTIONS];
@@ -47,7 +47,7 @@ export function directions(key: string, rules = false) {
     .map((d) => {
       const attrs = `type="button" role="radio" data-dir="${d}" aria-checked="${d === on}" tabindex="${d === on ? 0 : -1}"`;
       return d === 'Rules'
-        ? `<button ${attrs} class="dir-word" hidden>Rules</button>`
+        ? `<button ${attrs} class="dir-word" hidden>Painted</button>`
         : `<button ${attrs} class="dir-glyph" aria-label="${d}" data-tip="${d}"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">${GLYPH[d]}</svg></button>`;
     })
     .join('')}</div>`;
@@ -67,6 +67,11 @@ export function rulesView(g: HTMLElement | null, on: boolean) {
   const key = g.dataset.key!, now = showing.get(key) ?? 'Issued';
   if (on && now !== 'Rules') before.set(key, now), void show(g, 'Rules', false, true);
   if (!on && now === 'Rules') void show(g, before.get(key) ?? 'Issued', false, true);
+}
+
+/// Switch a row to a direction from the page's own controls (no `direction` event back).
+export function showDirection(g: HTMLElement | null, d: Direction) {
+  if (g && showing.get(g.dataset.key!) !== d) void show(g, d, false, true);
 }
 
 /// The sheet's 80 slots in burn order: each Credit in it, or the example Credit shown faded in an empty slot. The
@@ -120,8 +125,16 @@ async function show(g: HTMLElement, d: Shown, focus = false, quiet = false) {
   const last = drawn.get(canvas);
   paint(canvas, d, last?.list ?? ids.map(() => null), last?.ghosts ?? ghosts);
   const list = await load(ids);
-  if (showing.get(key) === d && canvas.isConnected) paint(canvas, d, list, ghosts);
+  if (showing.get(key) !== d || !canvas.isConnected) return;
+  paint(canvas, d, list, ghosts);
+  // A Credit whose ink didn't come (a failed or throttled read) would stay a grey frame: read it again, twice at most.
+  const tries = retries.get(canvas) ?? 0;
+  if (tries < 2 && list.some((ink, i) => ids[i] && !ink)) {
+    retries.set(canvas, tries + 1);
+    setTimeout(() => showing.get(key) === d && canvas.isConnected && void show(g, d, false, true), 1500 * (tries + 1));
+  } else retries.delete(canvas);
 }
+const retries = new WeakMap<HTMLCanvasElement, number>();
 
 /// Crisp cells, snapped to device pixels, as Jack's mock draws them.
 function paint(canvas: HTMLCanvasElement, d: Direction, list: (Ink | null)[], ghosts: ReadonlySet<number>) {

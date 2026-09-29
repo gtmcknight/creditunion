@@ -8,7 +8,8 @@ import { invalidateFit } from './fit';
 import { hydrate, who } from './ens';
 import { mint } from './views/mint';
 import { previews } from './views/previews';
-import { live } from './views/live';
+import { activityTicker, live, tickerHtml } from './views/live';
+import { faq } from './views/faq';
 import { profile } from './views/profile';
 import { printer } from './views/printer';
 import { credit } from './views/credit';
@@ -22,7 +23,7 @@ import { me } from './data';
 const app = document.getElementById('app')!;
 let seq = 0;
 
-/// Real paths: / (how it works; /faq is it at the Questions), /unions, /auctions, /credits, /create, /union/0x…, /credit/123, /mint, /me,
+/// Real paths: / (how it works and live activity), /faq, /unions, /auctions, /credits, /create, /union/0x…, /credit/123, /mint, /me,
 /// trait pages /palette/CMYK, /eights/3, /print/slip, /weight/sparse, and /time?from=&to=, /rating, /bits. Pages keep their old
 /// internal names (party, parties). Old #/ links and old paths (/party, /parties, /new, /b, /docs, /how) still land.
 const LEGACY: Record<string, string> = { union: 'party', unions: 'parties', new: 'create', b: 'party', docs: '', how: '', about: '' };
@@ -54,7 +55,8 @@ let lastPage = '';
 async function route() {
   const run = ++seq;
   const [page, arg] = pagePath();
-  const current = page === 'party' ? 'parties' : EXPLORER.has(page) ? 'credits' : page === '' || page === 'faq' ? 'home' : page;
+  siteTicker(page);
+  const current = page === 'party' ? 'parties' : EXPLORER.has(page) ? 'credits' : page === '' ? 'home' : page;
   document.querySelectorAll<HTMLAnchorElement>('[data-nav]').forEach((a) => a.toggleAttribute('aria-current', a.dataset.nav === current));
   document.querySelectorAll<HTMLAnchorElement>('#account [data-nav]').forEach((a) =>
     a.classList.toggle('current', page === 'me'),
@@ -64,7 +66,8 @@ async function route() {
   lastPage = page;
   if (!within) app.classList.remove('in');
   try {
-    if (page === '' || page === 'faq') home(app);
+    if (page === '') home(app);
+    else if (page === 'faq') faq(app);
     else if (page === 'mint') await mint(app, route);
     else if (page === 'og') await previews(app);
     else if (page === 'activity' || page === 'live') await live(app);
@@ -90,7 +93,7 @@ async function route() {
   const text = (e: Element | null) => (e?.textContent ?? '').replace(/\s+/g, ' ').trim();
   const title = () => {
     const crumb = [...app.querySelectorAll('.jb-crumb a, .jb-crumb b')].map(text);
-    const name = page === '' || page === 'faq' ? '' : text(app.querySelector('h1')) || (crumb.length > 1 ? crumb.slice(1).join(' ') : crumb[0] ?? '');
+    const name = page === '' ? '' : text(app.querySelector('h1')) || (crumb.length > 1 ? crumb.slice(1).join(' ') : crumb[0] ?? '');
     document.title = name && name !== 'Credit Union' ? `${name} · Credit Union` : 'Credit Union';
   };
   title();
@@ -295,11 +298,22 @@ document.addEventListener('click', (e) => {
   drawTestnet();
   void drawNotice();
   document.getElementById('magic-eye')?.addEventListener('click', () => import('./magic').then((m) => m.openMagic()));
-  const factoryUrl = explorer('address', config.factory);
-  if (factoryUrl) document.getElementById('foot-contract')?.setAttribute('href', factoryUrl);
   // Draw with the wallet if it answers quickly; never wait on it. A slow extension (Rainbow can take seconds to
   // answer eth_accounts) reconnects whenever it answers, and the page redraws then (onSession).
   await Promise.race([restore().catch(() => {}), new Promise((r) => setTimeout(r, 300))]);
   route();
   // Header counts. The Parties and Auctions pages fill them from their own read.
 })();
+
+/// The Latest band under the nav, on every page but /activity (the full list), /create, profiles and union pages. Drawn once and kept
+/// across page changes.
+let tickerEl: HTMLElement | null = null;
+function siteTicker(page: string) {
+  if (!tickerEl) {
+    document.querySelector('header.top')?.insertAdjacentHTML('afterend', `<div class="site-tick">${tickerHtml('site-ticker', 'tick-bar')}</div>`);
+    tickerEl = document.querySelector<HTMLElement>('.site-tick');
+    const t = document.getElementById('site-ticker');
+    if (t) void activityTicker(t);
+  }
+  if (tickerEl) tickerEl.hidden = ['activity', 'live', 'create', 'me', 'member', 'party'].includes(page);
+}

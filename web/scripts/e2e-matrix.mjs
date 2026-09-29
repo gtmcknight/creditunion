@@ -104,6 +104,9 @@ async function site(m) {
     main: join(WEB, 'src', 'worker', 'index.ts'),
     compatibility_date: '2026-09-01',
     assets: { binding: 'ASSETS', not_found_handling: 'single-page-application', run_worker_first: JSON.parse(readFileSync(join(WEB, 'wrangler.jsonc'), 'utf8').replace(/("(?:[^"\\]|\\.)*")|\/\/[^\n]*/g, (_, str) => str ?? '')).assets.run_worker_first },
+    kv_namespaces: [{ binding: 'PLANS', id: 'plans-e2e' }], // Picture unions keep their picture here
+    durable_objects: { bindings: [{ name: 'LOCKS', class_name: 'BuyLocks' }] },
+    migrations: [{ tag: 'v1', new_sqlite_classes: ['BuyLocks'] }],
     vars: { CHAIN_ID: '31337', CREDITS: m.credits, FACTORY: m.factory, RATINGS: m.ratings, SWEEPER: '0x0000000000000000000000000000000000000000', OPENSEA_SLUG: 'credits', RPC_URL: RPC, FALLBACK_RPC: RPC },
   };
   const path = join(OUT, 'wrangler.json');
@@ -369,11 +372,15 @@ async function createFlow(page, c) {
     const count = await countOf(made);
     r.deposit = count === picked.length ? `ok ${count} in` : `FAIL ${count}/${picked.length}`;
     if (count !== picked.length) err(`party holds ${count}, picked ${picked.length}`);
-    if (c.check) await c.check(made, picked, err);
+    if (c.check) await c.check(made, picked, err, page);
     // The new party's page shows the created dialog and its own picker; it must agree with the contract too.
     await page.keyboard.press('Escape').catch(() => {});
     if (count === 80) {
       r.refresh = 'ok full';
+      return r;
+    }
+    if (c.picture) {
+      r.refresh = 'picture (checked above)'; // a picture union offers only its next Credits, not all that fit
       return r;
     }
     const ui = await readPicker(page);
@@ -384,6 +391,7 @@ async function createFlow(page, c) {
     for (const t of await toasts(page)) if (t.kind === 'err') err(`toast: ${t.text}`);
   } catch (e) {
     err(`crash: ${e.message.split('\n')[0]}`);
+    await page.screenshot({ path: join(OUT, `fail-${c.name.replace(/\W+/g, '-')}.png`), fullPage: true }).catch(() => {});
   } finally {
     if (made) await withdrawAll(made).catch((e) => err(`cleanup: ${e.message}`));
   }
@@ -391,17 +399,81 @@ async function createFlow(page, c) {
 }
 
 /// Open a rule row and press some of its tiles.
+/// Rules not set wait as "+ Colors" chips (the same data-tab-btn as their rows): nothing to open first.
+async function openRules() {}
 async function rule(page, row, key, bits) {
-  await page.click(`[data-tab-btn="${row}"]`);
+  await openRules(page);
+  await page.click(`[data-tab-btn="${row}"]:visible`);
   for (const bit of bits) await page.click(`[data-rule="${key}"] [data-bit="${bit}"]`);
 }
 async function pickFirst(page, n) {
   const ids = await page.$$eval('#picker .pick:not(.off):not(.full)', (xs, n) => xs.slice(0, n).map((x) => x.dataset.id), n);
   for (const id of ids) await page.click(`#picker .pick[data-id="${id}"]`);
 }
-async function painted(page, design) {
+/// Painted: picking it paints a random design; Shuffle deals more. `trait`: paint with Eights/Print/Weight instead
+/// (switching clears the sheet, and Shuffle paints it again in that trait).
+async function painted(page, shuffles, trait) {
   await page.click('label.arr-tile:has(input[value="4"])');
-  await page.click(`[data-design="${design}"]`);
+  if (trait) {
+    await page.click(`label:has(input[name="paint-with"][value="${trait}"])`);
+    await page.click('[data-shuffle]');
+  }
+  for (let i = 0; i < shuffles; i++) await page.click('[data-shuffle]');
+}
+
+/// Picture: pick the layout, wait until the sheet is designed from the picture that opens on it (its Credits in the
+/// preview, every slot painted).
+async function picture(page) {
+  await page.click('label.arr-tile:has(input[value="6"])');
+  await page.setInputFiles('#pic-file', join(WEB, 'public', 'examples', 'jack.jpg')); // no examples: upload one
+  await page.waitForFunction(
+    () => !document.getElementById('pic-status')?.textContent && [...document.querySelectorAll('#preview .sheet .cell')].filter((c) => c.dataset.id || c.dataset.ghost).length === 80,
+    null,
+    { timeout: 120_000 },
+  );
+  await page.waitForTimeout(800);
+}
+/// The preview's Credit in each slot (yours going in, or the one the picture wants there).
+const planned = (page) => page.$$eval('#preview .sheet .cell', (cs) => cs.map((c) => c.dataset.id ?? c.dataset.ghost ?? null));
+/// Each slot's Colors, from the Rules view (then back to the Credits). Its button only shows on a hand-painted
+/// layout, so a picture's is pressed from script.
+async function colours(page) {
+  await page.$eval('.dirs [data-dir="Rules"]', (b) => b.click());
+  const v = await page.$$eval('#preview .rule-cell', (cs) => cs.map((c) => Number(c.dataset.v)));
+  await page.click('.dirs [data-dir="Consolidated"]');
+  await page.waitForTimeout(300);
+  return v;
+}
+/// The painted layout as the contract holds it: 80 slot values (CMYK masks for a Colors sheet).
+async function layoutOf(b) {
+  const s = await pub.readContract({ address: b, abi: batchAbi, functionName: 'summary' });
+  const f = s.filter;
+  return { arrangement: Number(s.arrangement), trait: Number(f.layoutTrait), palettes: Number(f.palettes), slots: Array.from({ length: 80 }, (_, i) => Number(((i < 64 ? f.layout0 : f.layout1) >> BigInt(4 * (i < 64 ? i : i - 64))) & 15n)) };
+}
+/// Where the contract puts each Credit in: each painted slot takes the earliest-deposited Credit of its Colors.
+async function slotsOnChain(b) {
+  const { slots } = await layoutOf(b);
+  const ids = (await pub.readContract({ address: b, abi: batchAbi, functionName: 'ids' })).map(String);
+  const keys = await Promise.all(ids.map((id) => pub.readContract({ address: b, abi: batchAbi, functionName: 'keyOf', args: [BigInt(id)] })));
+  const used = new Set();
+  return slots.map((m) => {
+    const j = ids.findIndex((_, k) => !used.has(k) && Number(keys[k]) === m);
+    if (j < 0) return null;
+    used.add(j);
+    return ids[j];
+  });
+}
+const pictureSeen = {};
+/// Every Credit in sits in the slot the page planned for it, and the sheet is Painted by Colors.
+async function checkPlaced(b, want, err) {
+  const l = await layoutOf(b);
+  if (l.arrangement !== 4) err(`arrangement ${l.arrangement}, want Painted (4)`);
+  if (l.trait !== 0) err(`layout trait ${l.trait}, want Colors (0)`);
+  if (l.slots.some((m) => !m)) err(`${l.slots.filter((m) => !m).length} slots left open`);
+  const on = await slotsOnChain(b);
+  const wrong = on.flatMap((id, i) => (id && id !== want[i] ? [`slot ${i}: #${id}, planned #${want[i]}`] : []));
+  if (wrong.length) err(`misplaced: ${wrong.slice(0, 4).join('; ')}${wrong.length > 4 ? '…' : ''}`);
+  return on;
 }
 
 const CREATES = [
@@ -419,10 +491,114 @@ const CREATES = [
   { name: 'painted design, all that fit', setup: async (page) => { await painted(page, 0); await page.click('#all'); } },
   { name: 'painted design 3, all that fit', setup: async (page) => { await painted(page, 3); await page.click('#all'); } },
   {
+    name: 'picture, all yours: each lands in its slot',
+    picture: true,
+    setup: async (page) => {
+      await picture(page);
+      pictureSeen.plan = await planned(page);
+    },
+    check: async (b, picked, err) => {
+      const on = await checkPlaced(b, pictureSeen.plan, err);
+      if (on.filter(Boolean).length !== picked.length) err(`${on.filter(Boolean).length} placed, ${picked.length} picked`);
+    },
+  },
+  {
+    name: 'picture, a skipped slot is refused, the first goes in',
+    picture: true,
+    setup: async (page) => {
+      await picture(page);
+      const plan = await planned(page), col = await colours(page);
+      const picked = await page.$$eval('#picker .pick[aria-pressed="true"]', (xs) => xs.map((x) => x.dataset.id));
+      // A picked Credit that's second in its Colors, and the one ahead of it.
+      const firstOf = new Map();
+      let second = null;
+      plan.forEach((id, i) => {
+        if (!firstOf.has(col[i])) firstOf.set(col[i], id);
+        else if (!second && picked.includes(id) && picked.includes(firstOf.get(col[i]))) second = { id, ahead: firstOf.get(col[i]) };
+      });
+      if (!second) throw new Error('no Colors with two of yours in a row');
+      for (const id of picked) await page.click(`#picker .pick[data-id="${id}"]`);
+      await page.click(`#picker .pick[data-id="${second.id}"]`);
+      await page.waitForTimeout(400);
+      const warn = await page.textContent('#warn');
+      if (!warn.includes(`#${second.ahead}`)) throw new Error(`skipping #${second.ahead} wasn't refused ("${warn}")`);
+      await page.click(`#picker .pick[data-id="${second.id}"]`);
+      await page.click(`#picker .pick[data-id="${second.ahead}"]`);
+      pictureSeen.plan = plan;
+    },
+    check: async (b, picked, err, page) => {
+      await checkPlaced(b, pictureSeen.plan, err);
+      // The union page: its Deposit offers only the Credits next in their Colors, and they land where it planned.
+      // The "Your Credit Union is live" card opens once the page is in: close it.
+      await page.waitForSelector('dialog[open]', { timeout: 15_000 }).then(() => page.keyboard.press('Escape')).catch(() => {});
+      await page.waitForFunction(() => document.querySelectorAll('.batch-art .cell.planned').length > 0 && !document.querySelector('dialog[open]'), null, { timeout: 120_000 });
+      const plan = await page.$$eval('.batch-art .sheet .cell', (cs) => cs.map((c) => c.dataset.id ?? c.dataset.ghost ?? null));
+      const ui = await readPicker(page);
+      if (!ui.offered.length) return err('union page offers none of the next Credits');
+      const stray = ui.offered.filter((id) => !plan.includes(id));
+      if (stray.length) err(`offered Credits the picture didn't plan: ${stray.slice(0, 5).join(',')}`);
+      if (!ui.groups.some((g) => /Not next in the picture/.test(g.why))) err('no "Not next in the picture" fold');
+      await page.click('#pick-all');
+      await page.click('#deposit');
+      await waitJoined(page);
+      await checkPlaced(b, plan, err);
+    },
+  },
+  {
+    name: 'picture, a Colors tile off repaints without it',
+    picture: true,
+    setup: async (page) => {
+      await picture(page);
+      const col = await colours(page);
+      const n = {};
+      for (const m of col) n[m] = (n[m] ?? 0) + 1;
+      const top = Number(Object.entries(n).sort((x, y) => y[1] - x[1])[0][0]);
+      await openRules(page);
+      await page.click('[data-tab-btn="palette"]:visible');
+      await page.click(`[data-rule="palettes"] [data-bit="${top}"]`);
+      await page.waitForFunction(() => !document.getElementById('pic-status')?.textContent, null, { timeout: 120_000 });
+      await page.waitForTimeout(1200);
+      if ((await colours(page)).includes(top)) throw new Error('its Colors still painted after the tile went off');
+      pictureSeen.gone = top;
+      pictureSeen.plan = await planned(page);
+    },
+    check: async (b, picked, err) => {
+      if ((await layoutOf(b)).slots.includes(pictureSeen.gone)) err('the Colors taken off are still on the sheet');
+      await checkPlaced(b, pictureSeen.plan, err);
+    },
+  },
+  {
+    name: 'picture, then back to Deposit',
+    setup: async (page) => {
+      await picture(page);
+      await page.click('label.arr-tile:has(input[value="0"])');
+      await page.waitForTimeout(500);
+      await pickFirst(page, 2);
+    },
+    check: async (b, picked, err) => {
+      const l = await layoutOf(b);
+      if (l.arrangement !== 0) err(`arrangement ${l.arrangement}, want Deposit (0)`);
+      if (l.slots.some(Boolean)) err('paint left on the sheet');
+      if (l.palettes) err(`Colors set ${l.palettes} left on Who can join`);
+    },
+  },
+  {
+    name: 'number, high to low',
+    setup: async (page) => {
+      await page.click('label.arr-tile:has(input[value="2"])');
+      await page.click('.num-dir label:nth-child(2)');
+      await pickFirst(page, 2);
+    },
+    check: async (b, picked, err) => {
+      const a = Number((await pub.readContract({ address: b, abi: batchAbi, functionName: 'summary' })).arrangement);
+      if (a !== 5) err(`arrangement ${a}, want Number ↓ (5)`);
+    },
+  },
+  {
     name: 'painted weight, all that fit',
     setup: async (page) => {
       await rule(page, 'weight', 'weights', [0, 1]);
-      await painted(page, 1);
+      await painted(page, 1, 3);
       await page.click('#all');
     },
   },

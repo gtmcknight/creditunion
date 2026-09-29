@@ -12,7 +12,7 @@ export const PHASES = ['Open', 'Waiting', 'Countdown', 'Burnable', 'Expired', 'A
 export type PhaseName = (typeof PHASES)[number];
 
 /// Indexed by the contract's burn order. Mint time (1) and Creator's order (3) are retired: only old parties show them.
-export const ARRANGEMENTS = ['Deposit order', 'Mint time', 'Credit number, low to high', 'Creator’s order', 'Painted', 'Credit number, high to low'] as const;
+export const ARRANGEMENTS = ['Order joined', 'Mint time', 'Credit number, low to high', 'Creator’s order', 'Painted', 'Credit number, high to low'] as const;
 /// Palette wanted at layout slot i (0 = any), from the packed Filter fields.
 export const layoutSlot = (f: { layout0: bigint; layout1: bigint }, i: number) =>
   Number(i < 64 ? (f.layout0 >> BigInt(4 * i)) & 15n : (f.layout1 >> BigInt(4 * (i - 64))) & 15n);

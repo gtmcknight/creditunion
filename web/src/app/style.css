@@ -8,6 +8,8 @@
   --line: rgba(0, 0, 0, 0.09);
   --line-strong: rgba(0, 0, 0, 0.18);
   --surface: #e6e6e3;
+  --raised: #ffffff; /* a picked option, lifted off the page */
+  --raised-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04);
   --empty: #e2e2df;
   --accent: #0a0a0a;
   --on-accent: #fff;
@@ -37,6 +39,8 @@
     --line: rgba(255, 255, 255, 0.08);
     --line-strong: rgba(255, 255, 255, 0.16);
     --surface: #141414;
+    --raised: #1f1f1f;
+    --raised-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
     --empty: #161616;
     --accent: #f5f5f5;
     --on-accent: #0a0a0a;
@@ -54,6 +58,8 @@
   --line: rgba(255, 255, 255, 0.08);
   --line-strong: rgba(255, 255, 255, 0.16);
   --surface: #141414;
+  --raised: #1f1f1f;
+  --raised-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
   --empty: #161616;
   --accent: #f5f5f5;
   --on-accent: #0a0a0a;
@@ -1272,7 +1278,7 @@ dialog {
   width: min(360px, calc(100vw - 2 * var(--gutter)));
   padding: 20px;
   border: 0;
-  border-radius: 16px;
+  border-radius: 0;
   background: var(--bg);
   color: var(--fg);
   box-shadow: 0 0 0 1px var(--line), 0 24px 64px -16px rgba(0, 0, 0, 0.35);
@@ -3002,7 +3008,7 @@ a.rule-chip:hover {
 /* Create form rhythm: every section heading sits the same distance below whatever ended the section before. */
 .design-form .form-title {
   margin: 0;
-  padding-top: 32px;
+  padding-top: 24px;
 }
 .design-form header + .form-title {
   padding-top: 8px;
@@ -3671,42 +3677,53 @@ a.rule-chip:hover {
 
 /* ---------------------------------------------------------------- who's in */
 dialog.people {
-  width: min(440px, calc(100vw - 2 * var(--gutter)));
+  width: min(540px, calc(100vw - 2 * var(--gutter)));
   max-height: min(80vh, 720px);
   overflow: auto;
 }
 dialog.people header h3 {
-  margin: 0;
+  margin: 0 0 8px;
   font-size: 18px;
 }
 .people-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  gap: 6px;
 }
+/* One member per line: who and tags, their Credits, their share. Square, no fill. */
 .person {
-  display: grid;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.person:hover .who-name,
+.person:focus-within .who-name {
+  text-decoration: underline;
+}
+.person-top {
+  flex: 1;
+  display: flex;
+  align-items: center;
   gap: 8px;
-  padding: 12px;
-  border-radius: 10px; /* 16 dialog − 6 */
-  background: var(--surface);
-  transition-property: box-shadow;
-  transition-duration: 120ms;
+  min-width: 0;
 }
-.person:hover,
-.person:focus-within {
-  box-shadow: inset 0 0 0 1px var(--fg);
+.person-share {
+  flex: none;
+  min-width: 9.5em;
+  text-align: right;
+  white-space: nowrap;
 }
+@media (max-width: 480px) { .person .person-art { display: none; } }
 .person-art {
   display: flex;
   align-items: center;
   gap: 4px;
 }
 .person-art img {
-  width: 28px;
-  height: 28px;
+  width: 20px;
+  height: 20px;
 }
 .facts .link.num {
   font: inherit;
@@ -5541,14 +5558,13 @@ dialog.created[open] {
   aspect-ratio: 1;
   padding: 10px;
   border-radius: var(--r);
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--line);
+  background: none; /* only the picked one is boxed */
   cursor: pointer;
   text-align: center;
-  transition: box-shadow 150ms var(--ease);
+  transition: box-shadow 150ms var(--ease), background 150ms var(--ease);
 }
 .arr-tile:hover {
-  box-shadow: inset 0 0 0 1px var(--line-strong);
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
 }
 .arr-tile input {
   position: absolute;
@@ -5566,17 +5582,19 @@ dialog.created[open] {
   font: 500 13px/1.2 var(--sans);
 }
 .arr-tile:has(input:checked) {
-  box-shadow: inset 0 0 0 2px var(--fg);
+  background: color-mix(in srgb, var(--fg) 8%, transparent); /* picked: a soft fill, no frame */
 }
 .arr-tile:has(input:focus-visible) {
   outline: 2px solid var(--fg);
   outline-offset: 2px;
 }
-#arr-hint {
-  margin-top: 8px;
-}
 
 /* A set rule's summary: its values as small chips with the same glyphs as the tiles. */
+.rrow-toggle:has(.vchip) {
+  height: auto; /* many values wrap: the row grows instead of spilling over its neighbours */
+  min-height: 36px;
+  padding-block: 8px;
+}
 .rrow-value:has(.vchip) {
   display: inline-flex;
   flex-wrap: wrap;
@@ -5759,11 +5777,19 @@ dialog.eligible::backdrop {
   color: var(--fg);
 }
 @media (max-width: 560px) {
+  .arr-tiles {
+    gap: 6px;
+  }
   .arr-tile {
     aspect-ratio: 1;
   }
   .arr-tile svg {
     width: 44%;
+  }
+  /* Five across on a phone: the labels stay on one line. */
+  .arr-tile b {
+    font-size: 11px;
+    white-space: nowrap;
   }
 }
 
@@ -5778,9 +5804,6 @@ dialog.eligible::backdrop {
   margin: 0;
   flex: 1;
 }
-.paint-bar #layout-pick {
-  margin: 0;
-}
 .paint-bar .patterns {
   margin: 0;
 }
@@ -5788,9 +5811,9 @@ dialog.eligible::backdrop {
   display: block;
   margin-bottom: 8px;
 }
-/* A painted sheet's counts sit under it, at the right. */
-.preview-foot #layout-pick {
-  margin-left: auto;
+/* The directions keep one line. */
+.preview-foot .dirs {
+  flex-wrap: nowrap;
 }
 .paint-swatches {
   display: flex;
@@ -7228,7 +7251,8 @@ a.quiet:hover { text-decoration: underline; text-underline-offset: 3px; }
   background: #fff;
   box-shadow: 0 0 0 1px var(--line);
 }
-#crop {
+#crop,
+#pic-crop {
   cursor: grab;
   touch-action: none;
 }
@@ -7715,4 +7739,560 @@ a.quiet:hover { text-decoration: underline; text-underline-offset: 3px; }
   gap: 12px;
   padding-block: 12px;
   border-bottom: 1px solid var(--line);
+}
+
+/* Picture layout: the examples, then the framed picture beside its one control. */
+.picture-block {
+  display: grid;
+  gap: 12px;
+  margin-top: 4px;
+}
+.picture-block[hidden] {
+  display: none;
+}
+.picture-block .printer-strip {
+  margin-top: 0;
+  grid-template-columns: repeat(6, 56px); /* small picks: the frame below is the picture that matters */
+}
+.picture-frame {
+  display: grid;
+  grid-template-columns: minmax(0, 200px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.picture-side {
+  display: grid;
+  gap: 12px;
+}
+.picture-contrast {
+  display: grid;
+  gap: 6px;
+  font: 500 13px var(--sans);
+}
+.picture-contrast input[type='range'] {
+  -webkit-appearance: auto;
+  appearance: auto;
+  width: 100%;
+  accent-color: var(--fg);
+  border: 0;
+  background: none;
+  padding: 0;
+  height: auto;
+}
+@media (max-width: 560px) {
+  .picture-frame {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 12px;
+  }
+}
+/* A picture's preview: its Credits at full ink, so it reads as the picture. */
+.solid-ghosts .cell.ghost img {
+  opacity: 1;
+  filter: none;
+}
+.picture-note {
+  margin: 8px 0 0;
+}
+/* The picture's zoom: two small square keys, black on white, like the site's buttons. */
+.picture-frame .printer-zoom {
+  gap: 0;
+  right: 6px;
+  bottom: 6px;
+}
+.picture-frame .printer-zoom button {
+  width: 22px;
+  height: 22px;
+  border-radius: 0;
+  background: #fff;
+  color: #111;
+  box-shadow: inset 0 0 0 1px #111;
+  font-size: 13px;
+  line-height: 1;
+}
+.picture-frame .printer-zoom button + button {
+  margin-left: -1px;
+}
+.picture-frame .printer-zoom button:hover {
+  background: #111;
+  color: #fff;
+}
+/* Name and Payout lead the form; the first section heading after them gets the same room as the rest. */
+
+.rule-list[hidden] {
+  display: none;
+}
+.num-dir {
+  justify-self: start;
+  margin-top: 10px;
+}
+.num-dir[hidden] {
+  display: none;
+}
+/* Rules not set yet: small chips under the sentence, one tap opens that rule. */
+.rule-adds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: -2px;
+}
+.rule-adds:empty {
+  display: none;
+}
+.rule-add {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  background: none;
+  color: var(--fg);
+  font: 400 13px var(--sans);
+  cursor: pointer;
+}
+.rule-add:hover {
+  border-color: var(--fg);
+}
+.rrow[hidden] {
+  display: none;
+}
+/* The union's name: a real field, full width, at the top of the form. */
+.name-field {
+  display: grid;
+  gap: 6px;
+  font: 500 13px var(--sans);
+}
+.name-field input {
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  background: transparent;
+  color: var(--fg);
+  font: 400 16px var(--sans);
+}
+.name-field input:focus {
+  outline: none;
+  border-color: var(--fg);
+}
+.name-field + .pay-field {
+  margin-top: 16px;
+}
+/* Payout: its two ways side by side, boxed only when picked (like Layout). */
+.pay-field {
+  display: grid;
+  gap: 6px;
+  font: 500 13px var(--sans);
+}
+.pay-opts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.pay-opt {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border-radius: var(--r);
+  cursor: pointer;
+  transition: box-shadow 150ms var(--ease), background 150ms var(--ease);
+}
+.pay-opt:hover {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.pay-opt input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.pay-opt b {
+  font: 500 14px var(--sans);
+}
+.pay-opt span {
+  font: 400 12px/1.4 var(--sans);
+  color: var(--muted);
+}
+.pay-opt:has(input:checked) {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+.pay-opt b {
+  color: var(--muted);
+}
+.pay-opt:has(input:checked) b {
+  color: var(--fg);
+}
+.pay-opt:has(input:focus-visible) {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+/* Layout: four even squares packed left, not stretched across the line; a phone shares the width. */
+.arr-tiles {
+  grid-template-columns: repeat(4, 104px);
+  justify-content: start;
+}
+@media (max-width: 560px) {
+  .arr-tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+/* Create: every section is labelled like Name, not headlined; the controls carry the weight. */
+#create .form-title {
+  font: 500 13px var(--sans);
+}
+/* Number's direction: two chips like "+ Colors", the picked one in the same soft fill as the tiles. */
+#num-dir {
+  display: flex;
+  gap: 6px;
+  padding: 0;
+  box-shadow: none;
+  overflow: visible;
+}
+#num-dir span {
+  height: 28px;
+  min-width: 0;
+  padding: 0 10px;
+  border-radius: var(--r);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  background: none;
+  font: 400 13px var(--sans);
+  color: var(--muted);
+}
+#num-dir input:checked + span {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  box-shadow: none;
+  color: var(--fg);
+}
+#num-dir span:hover {
+  color: var(--fg);
+}
+#num-dir[hidden] {
+  display: none; /* only under Number */
+}
+#arr-hint {
+  margin-top: 8px;
+}
+/* Create form rhythm, one rule for all of it: a label sits 8px above its control, and each section starts 28px
+   below the one before. */
+#create {
+  row-gap: 0;
+}
+#create .name-field,
+#create .pay-field {
+  gap: 8px;
+}
+#create .pay-field,
+#create .form-title {
+  margin-top: 28px;
+  padding-top: 0;
+}
+#create > .form-title + .rule {
+  margin-top: 8px;
+  padding-top: 0;
+}
+#create .who-bar {
+  gap: 8px;
+}
+#create .who-bar .rule-sentence {
+  margin: 0;
+}
+#create .rule-adds {
+  margin-top: 0;
+}
+#create .submit {
+  margin-top: 28px;
+}
+#create #arr-hint {
+  margin-top: 0;
+}
+#create .submit {
+  padding-top: 0;
+}
+/* The rule chips in four even columns: two tidy rows of four instead of seven and a straggler. */
+#create .rule-adds {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+#create .rule-adds:empty {
+  display: none;
+}
+/* Payout's picture: the 80 shares as bars. */
+.pay-chart {
+  width: 100%;
+  height: 20px;
+  margin-top: 6px;
+  fill: currentColor;
+  color: var(--faint);
+}
+.pay-opt:has(input:checked) .pay-chart {
+  color: var(--fg);
+}
+.pay-opt span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Payout: the name, and its numbers on the same line to the right. */
+.pay-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.pay-opt .pay-head span {
+  font: 400 12px var(--sans);
+  color: var(--muted);
+}
+.pay-opt .pay-chart {
+  margin-top: 10px;
+}
+/* All 15 Colors as brushes: they wrap, and Clear all keeps one line at the end. */
+.paint-swatches {
+  flex-wrap: wrap;
+}
+.paint-swatches .clear-all {
+  white-space: nowrap;
+}
+/* The 15 Colors brushes on one line: small squares, Clear all at the end. */
+#create .paint-swatches {
+  flex-wrap: nowrap;
+  gap: 12px;
+}
+#create .paint-swatches .brush-group {
+  flex-wrap: nowrap;
+  gap: 3px;
+}
+#create .paint-swatches .brush {
+  width: 26px;
+  height: 26px;
+  padding: 2px;
+  border-radius: 5px;
+}
+#create .paint-swatches .brush svg,
+#create .paint-swatches .brush .pips,
+#create .paint-swatches .brush .ink {
+  width: 20px;
+  height: 20px;
+}
+@media (max-width: 560px) {
+  #create .paint-swatches,
+  #create .paint-swatches .brush-group {
+    flex-wrap: wrap;
+  }
+}
+/* A rule with many values shows bare swatches, tight, on one line. */
+.rrow-value:has(.vchip.bare) {
+  flex-wrap: nowrap;
+  gap: 3px;
+}
+#create .rule-sentence[hidden] {
+  display: none;
+}
+/* Picked, like a segmented control: the chosen option is a raised tile on the page; the rest sit back, faded. */
+#create .arr-tile,
+#create .pay-opt {
+  background: none;
+  box-shadow: none;
+}
+#create .arr-tile:hover,
+#create .pay-opt:hover {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+#create .arr-tile:has(input:checked),
+#create .pay-opt:has(input:checked) {
+  background: var(--raised);
+  box-shadow: var(--raised-shadow);
+}
+#create .arr-tile:not(:has(input:checked)) svg,
+#create .pay-opt:not(:has(input:checked)) .pay-chart {
+  opacity: 0.55;
+}
+#create .arr-tile:has(input:focus-visible),
+#create .pay-opt:has(input:focus-visible) {
+  outline: none;
+  box-shadow: var(--raised-shadow), 0 0 0 3px color-mix(in srgb, var(--fg) 12%, transparent);
+}
+#create .pay-opt:has(input:checked) .pay-chart {
+  color: var(--muted);
+}
+/* The 15 Colors in two even rows (8 and 7); Shuffle and Clear all beside them. */
+#create .paint-swatches {
+  align-items: center;
+}
+#create .paint-swatches .brush-group {
+  display: grid;
+  grid-template-columns: repeat(8, 26px);
+  gap: 4px;
+}
+@media (max-width: 560px) {
+  #create .paint-swatches .brush-group {
+    display: grid;
+  }
+}
+/* Shuffle and Clear all: one pair at the top right of the brushes, on the form's right edge. */
+#create .paint-swatches {
+  justify-content: space-between;
+  align-items: start;
+}
+#create .paint-actions {
+  display: flex;
+  gap: 16px;
+  padding-top: 4px;
+  white-space: nowrap;
+}
+/* A Picture union's rule, said once, plainly, before anything else. */
+.picture-callout {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: var(--r);
+  background: var(--raised);
+  box-shadow: var(--raised-shadow);
+  font: 400 13px/1.45 var(--sans);
+  color: var(--muted);
+}
+.picture-callout b {
+  font-weight: 500;
+  color: var(--fg);
+}
+.picture-callout[hidden] {
+  display: none;
+}
+/* A Picture union's card: its open slots show the Credits picked for them, strong enough to read the picture. */
+.card-art.picture .cell.ghost img {
+  opacity: 0.6;
+  filter: none;
+}
+.pic-links {
+  display: flex;
+  gap: 16px;
+}
+.pic-links[hidden] {
+  display: none;
+}
+/* The picture's sliders: just the track and thumb, no box and no focus frame (the thumb shows where you are). */
+.picture-contrast input[type='range'],
+.picture-contrast input[type='range']:focus,
+.picture-contrast input[type='range']:focus-visible {
+  border: 0;
+  outline: none;
+  box-shadow: none;
+}
+
+/* Auctions → How it works. */
+dialog.how {
+  width: min(560px, calc(100vw - 2 * var(--gutter)));
+  padding: 28px;
+}
+dialog.how h3 { margin: 0 40px 18px 0; }
+dialog.how h4 { margin: 22px 0 8px; font-size: 15px; }
+dialog.how p { margin: 0; }
+dialog.how .small { margin-top: 16px; }
+.how-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 18px; }
+/* A timeline: a dot per step on one thin line. */
+.how-steps li { position: relative; display: grid; gap: 2px; padding-left: 26px; }
+.how-steps li::before { content: ''; position: absolute; left: 0; top: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--fg); }
+.how-steps li:not(:last-child)::after { content: ''; position: absolute; left: 4px; top: 16px; bottom: -24px; width: 2px; background: var(--line); }
+.how-rules { margin: 0; padding-left: 18px; display: grid; gap: 4px; color: var(--muted); }
+
+/* Homepage ticker: one event at a time under the hero. */
+.home-ticker { display: flex; align-items: center; gap: 12px; margin: 12px 0; padding: 12px 0; font-size: 14px; min-width: 0; }
+.home-ticker[hidden] { display: none; }
+.tick-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #00b67a; animation: tick-pulse 2s ease-in-out infinite; }
+@keyframes tick-pulse { 50% { opacity: 0.35; } }
+.tick-line { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; white-space: nowrap; overflow: hidden; opacity: 0; transform: translateY(3px); transition: opacity 300ms var(--ease), transform 300ms var(--ease); }
+.tick-line.in { opacity: 1; transform: none; }
+.tick-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tick-who, .tick-when { flex: none; }
+.tick-who { display: flex; align-items: center; }
+.tick-who .who { font-size: 14px; }
+.tick-line > span { line-height: 20px; }
+.tick-all { flex: none; color: var(--muted); }
+.tick-all:hover { color: var(--fg); }
+@media (max-width: 600px) { .tick-who { display: none; } .tick-all { font-size: 0; } .tick-all::after { content: '→'; font-size: 14px; } }
+@media (prefers-reduced-motion: reduce) { .tick-dot { animation: none; } .tick-line { transition: none; transform: none; } }
+/* /faq on its own page: one column. */
+.faq-page .faq { margin: 8px 0 0; max-width: 720px; }
+@media (min-width: 900px) { .faq-page .faq { max-width: 720px; } }
+
+/* Activity → Leaderboard: rank, who, Credits in unions now, how many unions. */
+.board { list-style: none; margin: 0; padding: 0; max-width: 880px; }
+.board-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto 96px; align-items: center; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.board-row .board-who, .board-row .board-who * { font-size: 14px; }
+.board-row:last-child { border-bottom: 1px solid var(--line); }
+.board-row.mine { background: var(--raised, transparent); }
+.board-rank { color: var(--muted); }
+.board-who { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.board-n { text-align: right; }
+.board-u { text-align: right; }
+.board-note { margin-top: 12px; }
+@media (max-width: 480px) { .board-row { grid-template-columns: 28px minmax(0, 1fr) auto; } .board-u { display: none; } }
+.live-list[hidden] { display: none; }
+.live-more { display: block; margin: 20px auto 0; }
+.live-row[hidden] { display: none; }
+.site-tick { width: 100%; max-width: var(--max); margin: 0 auto; padding: 0 var(--gutter); }
+.site-tick[hidden] { display: none; }
+.home-ticker.tick-bar { margin: 0 0 8px; padding: 8px 0; border-bottom: 1px solid var(--line); min-height: 38px; box-sizing: border-box; }
+.home-ticker.empty > * { visibility: hidden; }
+.tick-label { flex: none; color: var(--fg); font-weight: 500; margin-right: -4px; }
+@media (max-width: 600px) { .tick-label { display: none; } }
+/* A union's member count with its biggest members' faces, overlapping. */
+.members-btn { display: inline-flex; align-items: center; gap: 8px; vertical-align: middle; }
+.faces { display: inline-flex; }
+.face { display: inline-flex; margin-left: -6px; }
+.face:first-child { margin-left: 0; }
+.face img { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; box-shadow: 0 0 0 2px var(--bg); background: #fff; }
+/* Pickers of your Credits with each one's number under it, like the Eligible Credits grid. */
+.picker.captioned { grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 10px; max-height: none; }
+.picker.captioned .pick { aspect-ratio: auto; display: grid; gap: 4px; background: none; }
+.picker.captioned .pick img { aspect-ratio: 1; height: auto; background: #fff; }
+.pick-id { font-size: 11px; color: var(--muted); text-align: center; }
+.picker.captioned .pick[aria-pressed='true']::after { bottom: 19px; }
+/* The Credit hover card: every line the same small size; the number in ink, the rest muted. */
+.slot-tip .credit-card p, .slot-tip .credit-card p.small { font-size: 13px; font-weight: 400; line-height: 20px; }
+.slot-tip .credit-card .who { font-size: 13px; color: var(--muted); }
+/* Hovering a Credit on a union's sheet lifts it in place, so the hover card needn't show it again. */
+.batch-art .cell[data-id] { transition: scale 140ms var(--ease); }
+.batch-art .cell[data-id]:hover { z-index: 3; scale: 1.2; background: #fff; overflow: visible; }
+@media (prefers-reduced-motion: reduce) { .batch-art .cell[data-id] { transition: none; } }
+/* Open union cards: your fit in the art's top-right corner, across from the count. */
+.card-art .fit-corner { position: absolute; top: 10px; right: 10px; font-size: 12px; color: #6b6b6b; }
+.card-art .fit-corner.on { color: #0a0a0a; font-weight: 500; }
+@media (max-width: 600px) { .card-art .fit-corner { top: 8px; right: 8px; font-size: 11px; } }
+.card-art .tag.state.corner { position: absolute; top: 8px; left: 8px; right: auto; }
+.pay-glyph { display: inline-flex; color: var(--muted); }
+.pay-glyph svg { fill: currentColor; }
+.pay-glyph { position: relative; padding: 4px 0; }
+.pay-glyph[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  translate: 0 -2px;
+  padding: 5px 8px;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms var(--ease), translate 120ms var(--ease);
+  z-index: 5;
+}
+.pay-glyph[data-tip]:hover::after { opacity: 1; translate: 0 0; }
+.meta-line { display: flex; align-items: center; gap: 8px; overflow: visible !important; }
+.meta-text { overflow: visible; }
+.card-art .joined-tag { position: absolute; top: 8px; right: 8px; background: #fff; color: #0a0a0a; box-shadow: inset 0 0 0 1.5px #0a0a0a; }
+.card-art .joined-tag { padding: 0; }
+.card-art .joined-tag > span { display: inline-flex; align-items: center; height: 100%; padding: 0 8px; }
+.card-art .joined-tag .jn { box-shadow: inset 1.5px 0 0 #0a0a0a; }
+.show-empty { display: block; margin: 24px auto 0; }
+/* Create's preview bar, one line on a wide screen: Painted at the left (on the Painted layout),
+   the direction glyphs at the right edge as on a union page, so Painted appearing never moves them. */
+@media (min-width: 821px) {
+  .design-preview { gap: 8px; }
+  .preview-foot { flex-wrap: nowrap; align-items: center; }
+  .preview-foot > div:has(> .dirs), .preview-foot .dirs { display: contents; }
+  .preview-foot .dir-word { order: 1; }
+  .preview-foot .dir-glyph { order: 3; }
+  .preview-foot .dirs .dir-word + .dir-glyph { margin-left: auto; }
 }
