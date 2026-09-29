@@ -53,6 +53,25 @@ export function directions(key: string, rules = false) {
     .join('')}</div>`;
 }
 
+/// A still Statement over a sheet with no switch (a picture union's card): its Credits, planned ones at full ink,
+/// drawn in `d` on a canvas laid over the sheet. Redrawn when the sheet's example Credits land.
+export async function drawStill(host: HTMLElement, d: Direction) {
+  let canvas = host.querySelector<HTMLCanvasElement>(':scope > .dir-canvas');
+  if (!canvas) {
+    canvas = document.createElement('canvas');
+    canvas.className = 'dir-canvas still';
+    host.append(canvas);
+  }
+  const cells = [...(host.querySelector('.sheet')?.children ?? [])] as HTMLElement[];
+  const ids = cells.map((c) => c.dataset.id ?? c.dataset.ghost ?? null);
+  host.classList.add('dir-on');
+  sized.observe(canvas);
+  const last = drawn.get(canvas);
+  paint(canvas, d, last?.list ?? ids.map(() => null), new Set());
+  const list = await load(ids);
+  if (canvas.isConnected) paint(canvas, d, list, new Set());
+}
+
 /// After a render: redraw whatever direction each switch was showing.
 export function mountDirections(root: ParentNode = document) {
   root.querySelectorAll<HTMLElement>('.dirs').forEach((g) => {
@@ -70,6 +89,9 @@ export function rulesView(g: HTMLElement | null, on: boolean) {
 }
 
 /// Switch a row to a direction from the page's own controls (no `direction` event back).
+/// Whether a switch's direction was picked (by a click or a key) rather than left at its default.
+export const pickedDirection = (key: string) => showing.has(key.toLowerCase());
+
 export function showDirection(g: HTMLElement | null, d: Direction) {
   if (g && showing.get(g.dataset.key!) !== d) void show(g, d, false, true);
 }

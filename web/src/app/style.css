@@ -8307,3 +8307,6 @@ dialog.how .small { margin-top: 16px; }
 .card-meta .cta { grid-column: 2; grid-row: 1; }
 .card-meta .meta-text > :not(strong) { grid-column: 1 / -1; }
 @media (max-width: 600px) { .lj-word { display: none; } }
+.card-art > .dir-canvas.still { position: absolute; inset: 0; width: 100%; height: 100%; aspect-ratio: auto; box-shadow: none; }
+.card-art .fit-corner, .card-art .tag, .card-art .count { z-index: 1; }
+.withdraw-warn { margin: 0 0 8px; color: var(--fg); }

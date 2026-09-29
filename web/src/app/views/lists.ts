@@ -9,6 +9,7 @@ import { clock, eth, esc, openModal, pageHead, same, sheet, until } from '../ui'
 import { TRAIT_KINDS, parseTrait, type TraitValue } from '../../shared/trait';
 import { creditsOf, takes } from './trait';
 import { ago, lastJoined } from './live';
+import { drawStill } from '../directions';
 
 /// Last deposit per union, from the activity feed (filled in after the first draw).
 let lastIn = new Map<string, number>();
@@ -141,7 +142,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yo
   registerFilter(s.address, s.filter);
   registerDeposits(ids, depositors, s.split === 1);
   return `<a class="card${canJoin ? ' can-join' : ''}" href="/union/${s.address}">
-    <div class="card-art${picture ? ' picture' : ''}">${sheet(ids, { size: 'sm', mine, placed: placements.get(s.address), batch: s.state === 'Open' ? s.address : undefined })}${corner}${state}</div>
+    <div class="card-art${picture ? ' picture dir-host' : ''}">${sheet(ids, { size: 'sm', mine, placed: placements.get(s.address), batch: s.state === 'Open' ? s.address : undefined })}${corner}${state}</div>
     <div class="card-meta">
       <div class="meta-text">
         <strong>${esc(s.name || 'Untitled')}</strong>
@@ -247,7 +248,8 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
             : note + (views[v].length ? shownGrid(v, views[v]) : `<p class="muted">${empty[v]}</p>`);
         el.querySelector('#show-empty')?.addEventListener('click', () => ((showEmpty = true), draw()));
         hydrate(el);
-        fillGhosts(el);
+        // A picture union's card shows its picture as it will print: Consolidated, its planned Credits at full ink.
+        void fillGhosts(el).then(() => el.querySelectorAll<HTMLElement>('.card-art.picture').forEach((h) => void drawStill(h, 'Consolidated')));
         return;
       }
       const staged = STAGES.map(([k]) => [k, list.filter((b) => stageOf(b) === k)] as const);

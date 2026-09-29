@@ -9,7 +9,7 @@ import { gapOf, Guide, planOf, unpackPicture, type Plan, type Stored } from '../
 import { Room, books, depositedKeys, keysOf, noRoomReason, type Books } from '../slots';
 import { MAX_SWEEP, buying, checkQuote, listedById, connectToBuy, live as keepLive, minEth, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepRow, type Listed, type Quote, type Sale, type Source } from '../forsale';
 import { creditCell, creditSkel } from './trait';
-import { directionCanvas, directions, mountDirections } from '../directions';
+import { directionCanvas, directions, mountDirections, pickedDirection, showDirection } from '../directions';
 import { activityFold } from './live';
 import { $$, art, clock, errText, esc, eth, openModal, same, setRange, sheet, short, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
@@ -75,6 +75,8 @@ let picks = new Set<string>();
 
 // ---------------------------------------------------------------- picture unions
 const plansOf = new Map<string, Promise<Plan | null>>();
+/// Unions known (from their saved picture) to be Picture unions.
+const isPictureUnion = new Set<string>();
 /// The same plan again without some listings (sold since the market was read), per union.
 const replans = new Map<string, (gone: ReadonlySet<number>) => Promise<Plan | null>>();
 /// The picture against every Credit that could draw it, per union and viewer (reading them is the slow part).
@@ -255,9 +257,9 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         <ol class="live-list fold-list" id="activity-list"><li class="muted live-empty">Loading…</li></ol>
       </details>
       <details class="more">
-        <summary><span>Details</span><span class="muted small">${ARRANGEMENTS[s.arrangement] ?? 'Order joined'} · ${s.split === 1 ? 'Early bird' : 'Equal'} payout</span></summary>
+        <summary><span>Details</span><span class="muted small"><span class="layout-name">${ARRANGEMENTS[s.arrangement] ?? 'Order joined'}</span> · ${s.split === 1 ? 'Early bird' : 'Equal'} payout</span></summary>
         <dl class="facts">
-          ${fact('Layout', ARRANGEMENTS[s.arrangement] ?? 'Order joined')}
+          ${fact('Layout', `<span class="layout-name">${ARRANGEMENTS[s.arrangement] ?? 'Order joined'}</span>`)}
           ${fact('Payout', payout(b, myIds))}
           ${s.state === 'Auction' || s.state === 'Settled' ? fact('Members', `<button type="button" class="link num" id="depositors-btn">${depositors}</button>`) : ''}
           ${s.count ? fact('Credit rating', `<span id="rating" class="muted">…</span>`) : ''}
@@ -283,6 +285,18 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     // Where Credits can be bought (mainnet) a picture union is bought into, never deposited from a wallet: one plan,
     // from the listings, the same for everyone. Testnets can't buy, so there it plans with the viewer's Credits.
     const who = config.sweeper ? undefined : (account ?? undefined), held = config.sweeper ? [] : (m?.owned ?? []);
+    // Known to be a picture as soon as its saved picture answers (the plan itself takes seconds): say so, and on
+    // mainnet drop Deposit at once, so nobody sees a Painted union's Deposit tab in the meantime.
+    void fetch(`/pictures/${s.address}`).then((r) => {
+      if (!r.ok || !host?.isConnected) return;
+      isPictureUnion.add(s.address.toLowerCase());
+      app.querySelectorAll('.layout-name').forEach((e) => (e.textContent = 'Picture'));
+      if (config.sweeper) {
+        const tab = document.querySelector<HTMLButtonElement>('[data-add="mine"]');
+        if (tab) tab.hidden = true;
+        document.querySelector<HTMLButtonElement>('[data-add="buy"]:not([aria-selected="true"])')?.click();
+      }
+    }, () => {});
     const plan = planPicture(b, slots, placed, who, held).catch(() => null);
     plansOf.set(s.address.toLowerCase(), plan);
     replans.set(s.address.toLowerCase(), (gone) => planPicture(b, slots, placed, who, held, gone).catch(() => null));
@@ -293,6 +307,8 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         host.dataset.show = 'finished';
         host.querySelectorAll('[data-show]').forEach((b) => b.setAttribute('aria-checked', String((b as HTMLElement).dataset.show === 'finished')));
       }
+      // …and in Consolidated, the direction a picture is matched in, unless you picked another.
+      if (!pickedDirection(s.address)) showDirection(host.querySelector<HTMLElement>('.dirs'), 'Consolidated');
       if (config.sweeper) {
         // Bought into, never deposited: no Deposit tab for anyone.
         const tab = document.querySelector<HTMLButtonElement>('[data-add="mine"]');
@@ -658,13 +674,21 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
     });
     document.getElementById('w-clear')?.addEventListener('click', () => { wPicks.clear(); wDraw(); });
   }
-  document.getElementById('withdraw')?.addEventListener('click', (e) =>
-    run(e.currentTarget as HTMLElement, 'Withdrawing…', async () => {
+  document.getElementById('withdraw')?.addEventListener('click', (e) => {
+    const btn = e.currentTarget as HTMLElement;
+    // A picture union: a Credit taken out moves every later one of its Colors up a slot. Say so once, then go.
+    if (isPictureUnion.has(s.address.toLowerCase()) && !btn.dataset.warned) {
+      btn.dataset.warned = '1';
+      btn.textContent = 'Withdraw anyway';
+      btn.insertAdjacentHTML('beforebegin', '<p class="small withdraw-warn">Taking a Credit out moves every later Credit of its color up a slot, so part of the picture shifts for good.</p>');
+      return;
+    }
+    return run(btn, 'Withdrawing…', async () => {
       const ids = [...(wPicks.size ? wPicks : myIds)].map(BigInt);
       for (let i = 0; i < ids.length; i += CHUNK)
         await send({ address: s.address, abi: batchAbi, functionName: 'withdraw', args: [ids.slice(i, i + CHUNK)] }, txNote);
-    }, 'Credits returned to your wallet.'),
-  );
+    }, 'Credits returned to your wallet.');
+  });
 
   // Make Statement waits for the burns-open flag (?burn shows it anyway, for our own first burn).
   const slot = document.getElementById('assemble-slot');
