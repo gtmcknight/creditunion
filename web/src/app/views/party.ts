@@ -433,7 +433,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
       </div>
       <div data-pane="buy"${start === 'buy' ? '' : ' hidden'}>${buyPane(!!m)}</div>
       ${myIds.size ? `<div data-pane="withdraw"${start === 'withdraw' ? '' : ' hidden'}>${withdraw()}</div>` : ''}
-      <p class="muted small pane-note"><span id="buy-line">Finding the cheapest listings that fit… </span>Leave anytime until it locks. Credit Union is unofficial and experimental, so use it at your own risk. <a href="/about/faq">Questions?</a></p>
+      <p class="muted small pane-note"><span id="buy-line">Finding the cheapest listings that fit… </span>Leave anytime until it locks. Credit Union is unofficial and experimental, so use it at your own risk. <a href="/faq">Questions?</a></p>
     </div>`;
   }
 

@@ -6545,6 +6545,7 @@ a.quiet:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 .filter-line { margin: 8px 0 0; font-size: 15px; color: var(--muted); }
 .filter-line a { color: var(--fg); }
+.view-note { margin: 0 0 20px; font-size: 15px; }
 /* The Buy row stays under the header while the grid scrolls, so picks and the total are always in view. */
 .jb-controls { position: sticky; top: 64px; z-index: 5; margin-top: 12px; padding: 14px 0; background: var(--bg); border-top: 0; box-shadow: 0 1px 0 var(--line); }
 

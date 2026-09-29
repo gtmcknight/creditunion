@@ -186,14 +186,14 @@ export function home(app: HTMLElement) {
       e.stopPropagation();
       const id = a.getAttribute('href')!.slice(1);
       document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      history.replaceState(null, '', `/about/${id}`);
+      history.replaceState(null, '', id === 'faq' ? '/faq' : `/#${id}`);
     }),
   );
 
   mountWall(document.getElementById('wall')!);
 
-  // Deep link: /about/<chapter>.
-  const target = location.pathname.split('/')[2];
+  // Deep link: /faq, or /#<chapter>.
+  const target = location.pathname === '/faq' ? 'faq' : location.hash.slice(1);
   const el = target && document.getElementById(target);
   if (el) requestAnimationFrame(() => el.scrollIntoView({ block: 'start' }));
 }

@@ -126,8 +126,8 @@ const stageOf = (b: Listed): Stage => (b.s.state === 'Full' ? 'upcoming' : b.s.s
 export type HomeTab = 'parties' | 'auctions';
 
 
-/// Two tabs over one list: parties still pooling, and Statements at or past auction. Each leads with
-/// "For you" (what you're in, can join, or are bidding on), then everything else.
+/// Two pages over one list: Credit Unions still pooling (All, Invited, Yours, Filled), and Statements at or past
+/// auction (by stage).
 export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
   const head =
     tab === 'parties'
@@ -143,7 +143,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       lede: head[1],
       tabs:
         tab === 'parties'
-          ? [{ label: 'All <span class="num muted" id="n-all"></span>', attrs: 'data-view="all"' }, { label: 'For you <span class="num muted" id="n-you"></span>', attrs: 'data-view="you"' }]
+          ? [{ label: 'All <span class="num muted" id="n-all"></span>', attrs: 'data-view="all"' }, { label: 'Invited <span class="num muted" id="n-invited"></span>', attrs: 'data-view="invited"' }, { label: 'Yours <span class="num muted" id="n-yours"></span>', attrs: 'data-view="yours"' }, { label: 'Filled <span class="num muted" id="n-filled"></span>', attrs: 'data-view="filled"' }]
           : STAGES.map(([k, l]) => ({ label: `${l} <span class="num muted" id="n-${k}"></span>`, attrs: `data-stage="${k}"` })),
       tools: tab === 'parties' ? sort : undefined,
       action: tab === 'parties' ? '<a class="btn primary" href="/create">Start a Credit Union</a>' : undefined,
@@ -166,39 +166,44 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       app.querySelector('.page-head')?.insertAdjacentHTML('beforeend', `<p class="filter-line">Open to ${esc(want.label)} · <a href="/unions">Show all</a></p>`);
     }
     const bar = app.querySelector<HTMLElement>('.page-bar');
-    // All / For you: opens on All, the first tab, until someone picks.
-    let view: 'you' | 'all' | null = null;
+    // All / Invited / Yours / Filled: opens on All, the first tab, until someone picks. All is the ones still
+    // taking Credits; Invited, open ones your Credits fit that you haven't joined; Yours, ones you're in or
+    // started; Filled, full ones until their auction starts.
+    type View = 'all' | 'invited' | 'yours' | 'filled';
+    let view: View | null = null;
     let stage: Stage | null = null;
     let fit = new Map<Address, bigint[]>();
-    const forYou = (b: Listed) =>
-      !!session.account &&
-      (mineIn(b).size > 0 || same(b.s.creator, session.account) || fit.has(b.s.address) || (tab === 'auctions' && same(b.s.highBidder, session.account)));
     const grid = (items: Listed[]) => `<div class="grid">${items.map((b) => card(b, fit.get(b.s.address))).join('')}</div>`;
     const draw = () => {
       sortList(list, tab === 'parties' ? sortKey() : 'new');
-      const mine = list.filter(forYou);
-      const rest = list.filter((b) => !forYou(b));
-      const titled = (title: string, items: Listed[]) => (items.length ? `<h2 class="group-title">${title} <span class="num">${items.length}</span></h2>${grid(items)}` : '');
       if (tab === 'parties') {
-        // For you always shows; signed out it asks to connect.
+        // Invited and Yours always show; signed out they ask to connect.
         const v = view ?? 'all';
-        app.querySelectorAll<HTMLElement>('[data-stage]').forEach((b) =>
-      b.addEventListener('click', () => {
-        stage = b.dataset.stage as Stage;
-        draw();
-      }),
-    );
-    app.querySelectorAll<HTMLElement>('[data-view]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === v)));
-        const ny = document.getElementById('n-you'), na = document.getElementById('n-all');
-        if (ny) ny.textContent = session.account ? String(mine.length) : '';
-        if (na) na.textContent = String(list.length);
+        app.querySelectorAll<HTMLElement>('[data-view]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === v)));
+        const acct = session.account;
+        const isYours = (b: Listed) => !!acct && (mineIn(b).size > 0 || same(b.s.creator, acct));
+        const views: Record<View, Listed[]> = {
+          all: list.filter((b) => b.s.state !== 'Full'),
+          invited: list.filter((b) => b.s.state === 'Open' && fit.has(b.s.address) && !isYours(b)),
+          yours: list.filter(isYours),
+          filled: list.filter((b) => b.s.state === 'Full'),
+        };
+        for (const k of Object.keys(views) as View[]) {
+          const n = document.getElementById(`n-${k}`);
+          if (n) n.textContent = (k === 'invited' || k === 'yours') && !acct ? '' : String(views[k].length);
+        }
+        const empty: Record<View, string> = {
+          all: 'No Credit Union is taking Credits right now.',
+          invited: 'None of your Credits fit an open Credit Union right now.',
+          yours: 'You haven’t joined or started a Credit Union yet.',
+          filled: 'None full right now. A Credit Union stays here from 80/80 until its auction starts.',
+        };
+        const note = v === 'invited' ? '<p class="muted view-note">Open Credit Unions your Credits qualify for. You haven’t joined these yet.</p>' : '';
         el.innerHTML = !list.length
           ? `<div class="empty-state"><p>No Credit Unions yet.</p><a class="btn primary" href="/create">Start a Credit Union</a></div>`
-          : v === 'you' && !session.account
-            ? `<div class="empty-state"><p>Connect to see the Credit Unions you're invited to.</p><button class="btn primary" data-connect>Connect wallet</button></div>`
-            : v === 'you' && !mine.length
-              ? `<p class="muted">None of your Credits fit an open Credit Union right now.</p>`
-              : grid(v === 'you' ? mine : list);
+          : (v === 'invited' || v === 'yours') && !acct
+            ? `<div class="empty-state"><p>Connect to see the Credit Unions ${v === 'invited' ? 'your Credits qualify for' : 'you’re in'}.</p><button class="btn primary" data-connect>Connect wallet</button></div>`
+            : note + (views[v].length ? grid(views[v]) : `<p class="muted">${empty[v]}</p>`);
         hydrate(el);
         fillGhosts(el);
         return;
@@ -234,7 +239,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     );
     app.querySelectorAll<HTMLElement>('[data-view]').forEach((b) =>
       b.addEventListener('click', () => {
-        view = b.dataset.view as 'you' | 'all';
+        view = b.dataset.view as View;
         draw();
       }),
     );

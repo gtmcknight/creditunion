@@ -713,6 +713,11 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
   }
 
+  // About became the homepage: /about (and the older /docs, /how) land there, their FAQ on /faq, and any other
+  // chapter as the homepage scrolled to it.
+  const about = url.pathname.match(/^\/(?:about|docs|how)(?:\/([a-z-]+))?\/?$/);
+  if (about) return Response.redirect(`${url.origin}${about[1] === 'faq' ? '/faq' : '/'}${about[1] && about[1] !== 'faq' ? `#${about[1]}` : ''}`, 301);
+
   // The Activity page moved from /live: old links land on it.
   if (url.pathname === '/live') return Response.redirect(`${url.origin}/activity${url.search}`, 301);
 

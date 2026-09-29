@@ -22,10 +22,10 @@ import { me } from './data';
 const app = document.getElementById('app')!;
 let seq = 0;
 
-/// Real paths: / (how it works; /about too), /unions, /auctions, /credits, /create, /union/0x…, /credit/123, /mint, /me,
+/// Real paths: / (how it works; /faq is it at the Questions), /unions, /auctions, /credits, /create, /union/0x…, /credit/123, /mint, /me,
 /// trait pages /palette/CMYK, /eights/3, /print/slip, /weight/sparse, and /time?from=&to=, /rating, /bits. Pages keep their old
 /// internal names (party, parties). Old #/ links and old paths (/party, /parties, /new, /b, /docs, /how) still land.
-const LEGACY: Record<string, string> = { union: 'party', unions: 'parties', new: 'create', b: 'party', docs: 'about', how: 'about' };
+const LEGACY: Record<string, string> = { union: 'party', unions: 'parties', new: 'create', b: 'party', docs: '', how: '', about: '' };
 function pagePath(): string[] {
   const parts = location.pathname.replace(/^\/+|\/+$/g, '').split('/');
   parts[0] = LEGACY[parts[0]] ?? parts[0];
@@ -54,7 +54,7 @@ let lastPage = '';
 async function route() {
   const run = ++seq;
   const [page, arg] = pagePath();
-  const current = page === 'party' ? 'parties' : EXPLORER.has(page) ? 'credits' : page === '' || page === 'about' ? 'home' : page;
+  const current = page === 'party' ? 'parties' : EXPLORER.has(page) ? 'credits' : page === '' || page === 'faq' ? 'home' : page;
   document.querySelectorAll<HTMLAnchorElement>('[data-nav]').forEach((a) => a.toggleAttribute('aria-current', a.dataset.nav === current));
   document.querySelectorAll<HTMLAnchorElement>('#account [data-nav]').forEach((a) =>
     a.classList.toggle('current', page === 'me'),
@@ -64,7 +64,7 @@ async function route() {
   lastPage = page;
   if (!within) app.classList.remove('in');
   try {
-    if (page === '' || page === 'about') home(app);
+    if (page === '' || page === 'faq') home(app);
     else if (page === 'mint') await mint(app, route);
     else if (page === 'og') await previews(app);
     else if (page === 'activity' || page === 'live') await live(app);
@@ -90,7 +90,7 @@ async function route() {
   const text = (e: Element | null) => (e?.textContent ?? '').replace(/\s+/g, ' ').trim();
   const title = () => {
     const crumb = [...app.querySelectorAll('.jb-crumb a, .jb-crumb b')].map(text);
-    const name = page === '' || page === 'about' ? '' : text(app.querySelector('h1')) || (crumb.length > 1 ? crumb.slice(1).join(' ') : crumb[0] ?? '');
+    const name = page === '' || page === 'faq' ? '' : text(app.querySelector('h1')) || (crumb.length > 1 ? crumb.slice(1).join(' ') : crumb[0] ?? '');
     document.title = name && name !== 'Credit Union' ? `${name} · Credit Union` : 'Credit Union';
   };
   title();
