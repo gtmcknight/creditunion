@@ -31,7 +31,7 @@
     { "pattern": "eighty.rhps.fun", "custom_domain": true }
   ],
   // Printer plans and the listings book (/printer): `wrangler kv namespace create PLANS`, then put its id here.
-  "kv_namespaces": [{ "binding": "PLANS", "id": "REPLACE_WITH_PLANS_KV_ID" }],
+  "kv_namespaces": [{ "binding": "PLANS", "id": "87dc2ecb2eca465b84947eb80d2a402f" }],
   "observability": { "enabled": true },
   // The keeper (src/worker/keeper.ts) runs every 5 minutes; it does nothing until `wrangler secret put KEEPER_KEY`.
   "triggers": { "crons": ["*/5 * * * *"] },
