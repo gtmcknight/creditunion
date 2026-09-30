@@ -775,15 +775,17 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
   }
 
-  // Official ratings for up to 200 Credits, computed from the frozen edition (see shared/credits.ts).
+  // Official ratings for up to 200 Credits, computed from the frozen edition (see shared/credits.ts). `scores: true`
+  // returns just each score, for totals (the list's Top rated sort).
   if (url.pathname === '/ratings') {
     if (req.method !== 'POST' || !sameSite(req)) return text('forbidden', 403);
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
-    let ids: bigint[];
+    let ids: bigint[], only = false;
     try {
       const raw = await readBody(req, 16_000);
       if (raw === null) return text('too large', 413);
-      const body = JSON.parse(raw) as { ids?: unknown };
+      const body = JSON.parse(raw) as { ids?: unknown; scores?: unknown };
+      only = body.scores === true;
       if (!Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > 200) throw 0;
       ids = body.ids.map((x) => {
         if (!/^\d{1,6}$/.test(String(x)) || !inSupply(Number(x))) throw 0;
@@ -794,7 +796,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
     try {
       const r = await ratings({ assets: env.ASSETS, origin: url.origin, rpcs: rpcList(env), kv: env.PLANS, credits: env.CREDITS, ids });
-      return Response.json(r, { headers: { 'cache-control': 'no-store' } });
+      const out = only ? { n: r.n, version: r.version, scores: Object.fromEntries(Object.entries(r.ratings).map(([id, v]) => [id, v.score])) } : r;
+      return Response.json(out, { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502 });
     }

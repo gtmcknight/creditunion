@@ -1,5 +1,5 @@
 import { config, session } from '../chain';
-import { listBatches, type Listed, type Summary, hasLayout, layoutSlot, placeOnLayout } from '../data';
+import { listBatches, scores, type Listed, type Summary, hasLayout, layoutSlot, placeOnLayout } from '../data';
 import { placedKeys } from '../slots';
 import { hydrate, who } from '../ens';
 import { fitByBatch } from '../fit';
@@ -43,6 +43,8 @@ const SORTS = [
   ['emptiest', 'Emptiest'],
   ['new', 'Newest'],
   ['old', 'Oldest'],
+  ['members', 'Most members'],
+  ['rating', 'Top rated'],
 ] as const;
 type SortKey = (typeof SORTS)[number][0];
 
@@ -69,10 +71,24 @@ function sortList(list: Listed[], k: SortKey) {
       (k === 'new' ? age.get(a.s.address)! - age.get(b.s.address)!
       : k === 'old' ? age.get(b.s.address)! - age.get(a.s.address)!
       : k === 'emptiest' ? a.s.count - b.s.count
+      : k === 'members' ? membersOf(b) - membersOf(a)
+      : k === 'rating' ? (totalOf(b) ?? -1) - (totalOf(a) ?? -1)
       : b.s.count - a.s.count),
   );
 }
 
+const membersOf = (b: Pick<Listed, 'depositors'>) => new Set(b.depositors.map((d) => d.toLowerCase())).size;
+
+/// Each union's total rating (the sum of its Credits' scores), read only once someone sorts by rating.
+const totals = new Map<string, number>(); // by address:count, so a new deposit re-totals
+const totalOf = (b: Listed) => (b.ids.length ? totals.get(placeKey(b)) : 0);
+async function totalCards(list: Listed[]) {
+  const todo = list.filter((b) => totalOf(b) === undefined);
+  if (!todo.length) return false;
+  const got = await scores(todo.flatMap((b) => b.ids));
+  for (const b of todo) totals.set(placeKey(b), Math.round(b.ids.reduce((a, id) => a + (got.get(id.toString()) ?? 0), 0)));
+  return true;
+}
 
 /// Layout batches before the burn: each Credit in the slot it will burn into, as the union page shows it.
 const placements = new Map<string, (bigint | null)[]>(); // by address:count, so a new deposit re-places
@@ -172,7 +188,8 @@ function morph(el: HTMLElement, html: string): Set<Element> {
   return fresh;
 }
 
-export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yours') {
+/// `rating`: the union's total rating, shown as a fourth line (while sorting by it).
+export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yours', rating?: number) {
   const mine = mineIn({ s, ids, depositors });
   const room = 80 - s.count;
   const picture = pictures.has(s.address);
@@ -192,7 +209,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yo
     : s.state === 'Open' && fitText ? `<span class="fit-corner${fits || mine.size ? ' on' : ''}">${fitText}</span>` : '';
   // Past Open, the state tag takes the count's corner: FULL says 80/80 already.
   const corner = s.state === 'Open' ? `<span class="count num">${s.count}/80</span>` : `<span class="tag state corner ${s.state.toLowerCase()}">${s.state}</span>`;
-  const members = new Set(depositors.map((d) => d.toLowerCase())).size;
+  const members = membersOf({ depositors });
   const last = lastIn.get(s.address.toLowerCase());
   const momentum = `${members} ${members === 1 ? 'member' : 'members'}${last ? ` · <span class="lj-word">last joined </span>${ago(last)}` : ''}`;
   registerFilter(s.address, s.filter);
@@ -204,6 +221,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yo
         <strong>${esc(s.name || 'Untitled')}</strong>
         <span class="meta-by">${who(s.creator, 'sm', 'nested')}</span>
         <span class="meta-line num">${payGlyph(s.split === 1)}<span class="meta-line-text">${s.state === 'Open' ? momentum : s.state === 'Full' ? `${members} ${members === 1 ? 'member' : 'members'} · ${esc(s.phase === 'Waiting' ? 'waiting for Jack' : fullStatus(s))}` : esc(status(s))}</span></span>
+        ${rating === undefined ? '' : `<span class="meta-line num">Rating ${rating.toLocaleString()}</span>`}
       </div>
       ${cta && !(s.state === 'Open' && mine.size) ? `<span class="btn sm primary cta">${cta}</span>` : ''}
     </div>
@@ -276,7 +294,11 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     };
     let fit = new Map<Address, bigint[]>();
     let showEmpty = false; // All tabs its empty (0/80) unions behind a button: they're mostly abandoned
-    const grid = (items: Listed[]) => `<div class="grid">${items.map((b) => card(b, fit.get(b.s.address))).join('')}</div>`;
+    const grid = (items: Listed[]) => {
+      const rated = tab === 'parties' && sortKey() === 'rating';
+      return `<div class="grid">${items.map((b) => card(b, fit.get(b.s.address), 'yours', rated ? totalOf(b) : undefined)).join('')}</div>`;
+    };
+    let totaling = false;
     const shownGrid = (v: string, items: Listed[]) => {
       if (v !== 'all' || showEmpty) return grid(items);
       const live = items.filter((b) => b.s.count > 0), gone = items.length - live.length;
@@ -284,6 +306,13 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     };
     const draw = () => {
       sortList(list, tab === 'parties' ? sortKey() : 'new');
+      if (tab === 'parties' && sortKey() === 'rating' && !totaling && list.some((b) => totalOf(b) === undefined)) {
+        totaling = true;
+        totalCards(list)
+          .then((got) => got && document.getElementById('batches') === el && draw())
+          .catch(() => {})
+          .finally(() => (totaling = false));
+      }
       if (tab === 'parties') {
         // Invited and Yours always show; signed out they ask to connect.
         const v = view ?? 'all';

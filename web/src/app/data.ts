@@ -76,6 +76,21 @@ export async function ratings(ids: readonly bigint[]): Promise<{ n: number; vers
   return { ...ratedOf!, ratings: Object.fromEntries(all.flatMap((id) => (rated.has(id) ? [[id, rated.get(id)!]] : []))) };
 }
 
+/// Scores alone, for totals: a full rating carries its seed, traits and tails, ten times the bytes.
+const scored = new Map<string, number>();
+export async function scores(ids: readonly bigint[]): Promise<Map<string, number>> {
+  const all = [...new Set(ids.map(String))];
+  const want = all.filter((id) => !scored.has(id) && !rated.has(id));
+  await Promise.all(
+    Array.from({ length: Math.ceil(want.length / 200) }, async (_, i) => {
+      const r = await fetch('/ratings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: want.slice(i * 200, i * 200 + 200), scores: true }) });
+      if (!r.ok) throw new Error('Ratings unavailable.');
+      for (const [id, v] of Object.entries(((await r.json()) as { scores?: Record<string, number> }).scores ?? {})) scored.set(id, v);
+    }),
+  );
+  return new Map(all.flatMap((id) => { const v = scored.get(id) ?? rated.get(id)?.score; return v === undefined ? [] : [[id, v] as const]; }));
+}
+
 export type Summary = {
   address: Address;
   state: StateName;
