@@ -1,6 +1,6 @@
 import { go as navigate } from '../main';
 import { dice, printGlyph, swatch, weightGlyph } from '../glyphs';
-import { decodeEventLog, parseEther } from 'viem';
+import { decodeEventLog, parseEther, type Address } from 'viem';
 import { creditsAbi, factoryAbi } from '../abi';
 import { canBatch, config, send, sendBatch, session } from '../chain';
 import { INK, maskInks, maskLabel } from '../traits';
@@ -179,18 +179,21 @@ export async function create(app: HTMLElement) {
     return;
   }
 
-  // Something on screen at once while the wallet and the factory are read (usually well under a second).
-  app.innerHTML = `<header class="create-head"><h1>Start a Credit Union</h1><p class="create-lede">Set the rules, add your Credits, invite everyone. At 80 they burn into a Statement and everyone in splits the sale.</p></header><p class="muted">Reading your wallet…</p>`;
-  const [held, approved, min, protocolBps, creatorBps, table, minutes] = await Promise.all([
-    myCredits(session.account),
-    isApproved(session.account),
-    minOpen(),
-    protocolFeeBps(),
-    creatorFeeBps(),
-    factoryRatings(),
-    fetch('/minutes.json').then((r) => r.json() as Promise<Minutes>).catch(() => [] as Minutes),
-  ]);
-  const owned = [...held]; // what you buy on this page joins it
+  // The page draws at once. Your Credits come in when the wallet answers (the Deposit picker says so meanwhile), the
+  // factory's numbers (the minimum to open, the fees, the score table) behind them; Start waits for both.
+  app.innerHTML = `<header class="create-head"><h1>Start a Credit Union</h1><p class="create-lede">Set the rules, add your Credits, invite everyone. At 80 they burn into a Statement and everyone in splits the sale.</p></header>`;
+  const account = session.account;
+  const walletRead = Promise.all([myCredits(account), isApproved(account)]);
+  const factoryRead = Promise.all([minOpen(), protocolFeeBps(), creatorFeeBps(), factoryRatings()]);
+  walletRead.catch(() => {});
+  factoryRead.catch(() => {});
+  const minutes = await fetch('/minutes.json').then((r) => r.json() as Promise<Minutes>).catch(() => [] as Minutes);
+  let walletIn = false, factoryIn = false;
+  let isOk = false; // the factory may move your Credits (read with them)
+  let min = 1, protocolBps = 0, creatorBps = 0;
+  let table = '0x0000000000000000000000000000000000000000' as Address;
+  const owned: bigint[] = []; // yours, once the wallet answers; what you buy on this page joins it
+  const pickBtn = (id: bigint) => `<button type="button" class="pick" data-id="${id}" aria-pressed="false" title="Credit #${id}"><img src="${art(id)}" alt="Credit #${id}" loading="lazy"></button>`;
   const rules: Rules = { palettes: 0, prints: 0, weights: 0, eights: 0, minuteFrom: -1, minuteTo: -1, idFrom: 0, idTo: 0, minScore: 0, maxScore: 0, bitsFrom: 0, bitsTo: 0, list: [] };
   const artOf = (id: bigint) => (config.chainId === 1 ? art(id) : `/art/mainnet/${id}.svg`);
   let ghosts: { id: bigint; palette: number; t: number }[] = [];
@@ -346,11 +349,7 @@ export async function create(app: HTMLElement) {
 
       <h2 class="form-title"><span id="dep-title">Deposit Credits</span> <span class="muted num" id="n">Min ${min}</span><button type="button" class="link small" id="all">Select all that fit</button></h2>
       <section class="rule" data-tab="credits" data-pane="always">
-        <div class="picker lg" id="picker">${
-          owned.length
-            ? owned.map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="false" title="Credit #${id}"><img src="${art(id)}" alt="Credit #${id}" loading="lazy"></button>`).join('')
-            : `<p class="muted">You don’t hold any Credits.${config.chainId !== 1 ? ' <a href="/mint">Mint test Credits →</a>' : ''}</p>`
-        }</div>
+        <div class="picker lg" id="picker"><p class="muted">Reading your wallet…</p></div>
         <details class="picker-off" id="picker-off-wrap" hidden><summary class="muted small" id="picker-off-sum"></summary><div class="picker lg" id="picker-off"></div></details>
         <div class="picture-callout" id="picture-callout" hidden><b>Buy to join</b><span>Only the Credits that draw this picture can join. Buy them here, in order, so each lands in its spot.</span></div>
         <div class="create-buy" id="create-buy" hidden></div>
@@ -375,8 +374,21 @@ export async function create(app: HTMLElement) {
   /// Once you pick or unpick a Credit yourself, the page stops picking for you.
   let pickedByHand = false;
   (async () => {
-    // Yield first: with no Credits the loop never awaits, and refresh() would run before it's defined.
-    await Promise.resolve();
+    // Your Credits, once the wallet answers (awaiting it also lets the page finish setting up first).
+    let held: readonly bigint[];
+    try {
+      [held, isOk] = await walletRead;
+    } catch {
+      const p = document.getElementById('picker');
+      if (p) p.innerHTML = '<p class="muted">Couldn’t read your wallet. Refresh to try again.</p>';
+      return;
+    }
+    const picker = document.getElementById('picker');
+    if (!picker) return; // left the page
+    if (!isOk) void canBatch(); // ask early, so Start doesn't wait on the wallet
+    owned.push(...held.filter((id) => !owned.includes(id)));
+    walletIn = true;
+    picker.innerHTML = owned.length ? owned.map(pickBtn).join('') : `<p class="muted">You don’t hold any Credits.${config.chainId !== 1 ? ' <a href="/mint">Mint test Credits →</a>' : ''}</p>`;
     for (let i = 0; i < owned.length; i += 200) {
       try {
         const r = await ratings(owned.slice(i, i + 200));
@@ -493,7 +505,7 @@ export async function create(app: HTMLElement) {
     const picker = document.getElementById('picker')!;
     if (!owned.length) picker.innerHTML = '';
     owned.push(...fresh);
-    picker.insertAdjacentHTML('beforeend', fresh.map((id) => `<button type="button" class="pick" data-id="${id}" aria-pressed="false" title="Credit #${id}"><img src="${art(id)}" alt="Credit #${id}" loading="lazy"></button>`).join(''));
+    picker.insertAdjacentHTML('beforeend', fresh.map(pickBtn).join(''));
     for (const id of fresh) picks.add(id.toString());
     buyFor = '';
     refresh();
@@ -536,8 +548,6 @@ export async function create(app: HTMLElement) {
   // ---------------------------------------------------------------- live preview + counts
   const go = document.getElementById('go') as HTMLButtonElement;
   const why = document.getElementById('why')!;
-  let isOk = approved;
-  if (!approved) void canBatch(); // ask early, so Start doesn't wait on the wallet
   let editionTimer = 0;
   let editionSeq = 0;
   let eligible = -1; // how many edition Credits pass the rules; under 80 the party can never fill
@@ -678,14 +688,14 @@ export async function create(app: HTMLElement) {
     const short = eligible >= 0 && eligible < 80 ? `Only ${eligible} ${eligible === 1 ? 'Credit' : 'Credits'} can ever join, and a Credit Union needs 80. Widen the rules.` : '';
     // A picture: none of its Colors may skip a slot.
     const gap = picturing() ? gapOf(picPlan!, [...picks, ...buying().map((l) => l.id)]) : null;
-    const reason = tooNarrow || short || (gap ? `Add #${gap} too: it goes in before the ones you picked.` : '') || (n < min ? (picturing() ? (picPlan!.mine.size ? 'Pick at least one of yours above.' : 'Buy at least one of the picture’s first Credits to start it.') : `Select at least ${min} of your qualifying Credits.`) : n > 80 ? 'At most 80.' : over ? overText(over) : '');
+    const reason = tooNarrow || short || (gap ? `Add #${gap} too: it goes in before the ones you picked.` : '') || (n < min && walletIn ? (picturing() ? (picPlan!.mine.size ? 'Pick at least one of yours above.' : 'Buy at least one of the picture’s first Credits to start it.') : `Select at least ${min} of your qualifying Credits.`) : n > 80 ? 'At most 80.' : over ? overText(over) : '');
     // One line under the button: what blocks it, else how it plays out.
     // What blocks Start sits above it as a warning; the line under it always says how it plays out.
     const warn = document.getElementById('warn')!;
     warn.textContent = reason;
     warn.hidden = !reason;
-    why.innerHTML = `${n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions. ` : ''}Free to start a Credit Union. Withdraw your Credits anytime until it fills and locks.<br>${Number(protocolBps) / 100}% protocol fee, only if it sells. Unofficial and experimental.`;
-    go.disabled = !!reason;
+    why.innerHTML = `${n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions. ` : ''}Free to start a Credit Union. Withdraw your Credits anytime until it fills and locks.<br>${factoryIn ? `${protocolBps / 100}% protocol fee, only if it sells. ` : ''}Unofficial and experimental.`;
+    go.disabled = !!reason || !walletIn || !factoryIn;
     if (!go.dataset.busy) go.textContent = startLabel();
     drawSummary();
 
@@ -1883,4 +1893,16 @@ export async function create(app: HTMLElement) {
   applyPanes();
 
   refresh();
+  // The factory's numbers: the minimum shown and checked, the fee line, and what Start sends along.
+  void factoryRead.then(
+    ([m, p, c, t]) => {
+      [min, protocolBps, creatorBps, table] = [m, p, c, t];
+      factoryIn = true;
+      if (go.isConnected) refresh();
+    },
+    () => {
+      const warn = document.getElementById('warn');
+      if (warn && go.isConnected) (warn.textContent = 'Couldn’t reach the chain. Refresh to try again.'), (warn.hidden = false);
+    },
+  );
 }
