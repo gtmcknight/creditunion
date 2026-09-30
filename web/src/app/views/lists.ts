@@ -453,8 +453,11 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         if (document.getElementById('batches') === el) draw();
       });
     }
-    const pick = app.querySelector<HTMLElement>('.sort-pick');
+    // Bound once: a page drawn twice at once (a wallet reconnecting as it loads) would otherwise wire the one button
+    // twice, and a click would open the menu and close it again.
+    const pick = app.querySelector<HTMLElement>('.sort-pick:not([data-bound])');
     if (pick) {
+      pick.dataset.bound = '';
       const btn = pick.querySelector<HTMLButtonElement>('.sort-btn')!, menu = pick.querySelector<HTMLElement>('.sort-menu')!;
       const opts = [...menu.querySelectorAll<HTMLElement>('[data-sort]')];
       const open = (on: boolean) => {

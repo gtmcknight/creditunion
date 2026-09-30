@@ -1306,7 +1306,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
     if (!/^[^\s/?#]{1,255}$/.test(name)) return text('bad name', 400);
     const cache = caches.default;
-    const key = new Request(`${url.origin}/avatar/v1/${encodeURIComponent(name)}`);
+    const key = new Request(`${url.origin}/avatar/v2/${encodeURIComponent(name)}`); // v2: none is a 204
     const hit = await cache.match(key);
     if (hit) return hit;
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
@@ -1318,9 +1318,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       ctx.waitUntil(cache.put(key, res.clone()));
       return res;
     }
-    // No avatar (a 404 from ENS) is kept; a slow or failing resizer is not, so the next viewer tries again.
+    // No avatar (a 404 from ENS) is kept; a slow or failing resizer is not, so the next viewer tries again. An empty
+    // 204, not a 404: the face keeps its mark, and the console stays clean.
     const none = r?.status === 404;
-    const miss = new Response('no avatar', { status: 404, headers: { 'cache-control': none ? 'public, max-age=86400' : 'no-store' } });
+    const miss = new Response(null, { status: 204, headers: { 'cache-control': none ? 'public, max-age=86400' : 'no-store' } });
     if (none) ctx.waitUntil(cache.put(key, miss.clone()));
     return miss;
   }
@@ -2544,15 +2545,15 @@ async function allowlistOf(env: Env, batch: Address): Promise<number[] | null> {
 }
 
 /// A wallet's primary ENS name and its avatar (ENS's own metadata service, so this Worker never fetches a URL a name
-/// owner chose): the colo's copy, else another data center's from KV, else the chain. `ttl`: a day with a name, an
+/// owner chose), the avatar only when the name has an avatar record (most don't): the colo's copy, else another data center's from KV, else the chain. `ttl`: a day with a name, an
 /// hour without, a minute after a failed lookup. `gate`, asked before a chain lookup: true (over the rate limit) is
 /// null.
 async function ensOf(env: Env, url: URL, ctx: ExecutionContext, addr: Address, gate?: () => Promise<boolean>): Promise<{ name: string | null; avatar: string | null; ttl: number } | null> {
   const cache = caches.default;
-  const key = new Request(`${url.origin}/ens/${addr}`);
+  const key = new Request(`${url.origin}/ens/v2/${addr}`); // v2: avatar only with an avatar record
   const hit = await cache.match(key);
   if (hit) return { ...((await hit.json()) as { name: string | null; avatar: string | null }), ttl: Number(hit.headers.get('cache-control')?.match(/max-age=(\d+)/)?.[1] ?? 3600) };
-  const kvKey = `ens:${addr}`;
+  const kvKey = `ens2:${addr}`;
   const kept = await keptGet(env, kvKey);
   if (kept) {
     ctx.waitUntil(cache.put(key, new Response(kept, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=3600' } })));
@@ -2563,13 +2564,15 @@ async function ensOf(env: Env, url: URL, ctx: ExecutionContext, addr: Address, g
   const c = createPublicClient({ chain: mainnet, transport: http(rpc, { timeout: 5_000 }) });
   let name: string | null = null;
   let ttl = 86400;
+  let has = false;
   try {
     name = await c.getEnsName({ address: addr });
     if (!name) ttl = 3600;
+    else has = !!(await c.getEnsText({ name, key: 'avatar' }));
   } catch {
     ttl = 60;
   }
-  const avatar = name ? `https://metadata.ens.domains/mainnet/avatar/${encodeURIComponent(name)}` : null;
+  const avatar = name && has ? `https://metadata.ens.domains/mainnet/avatar/${encodeURIComponent(name)}` : null;
   const body = JSON.stringify({ name, avatar });
   ctx.waitUntil(Promise.all([cache.put(key, new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttl}` } })), ttl > 60 ? keptPut(env, kvKey, body, ttl) : null]));
   return { name, avatar, ttl };
