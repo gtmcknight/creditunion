@@ -143,6 +143,25 @@ const payGlyph = (early: boolean) =>
 const pictureReady = (b: Listed) => (!b.ids.length || placements.has(placeKey(b))) && (b.s.state !== 'Open' || hasPlan(b.s.address));
 
 /// `whose`: who the fit count is about ("yours" for the connected wallet, "theirs" on someone else's page).
+/// What each card on screen was drawn from. A redraw keeps the cards whose markup didn't change (their art, names and
+/// pictures already filled in) and swaps in only the rest; returns the cards that are new on screen.
+const drawnFrom = new WeakMap<Element, string>();
+function morph(el: HTMLElement, html: string): Set<Element> {
+  const t = document.createElement('template');
+  t.innerHTML = html;
+  const was = new Map<string, Element>();
+  el.querySelectorAll('.grid > a.card[href]').forEach((c) => was.set(c.getAttribute('href')!, c));
+  const fresh = new Set<Element>();
+  t.content.querySelectorAll('.grid > a.card[href]').forEach((c) => {
+    const src = c.outerHTML, old = was.get(c.getAttribute('href')!);
+    if (old && drawnFrom.get(old) === src) return c.replaceWith(old);
+    drawnFrom.set(c, src);
+    fresh.add(c);
+  });
+  el.replaceChildren(t.content);
+  return fresh;
+}
+
 export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yours') {
   const mine = mineIn({ s, ids, depositors });
   const room = 80 - s.count;
@@ -276,16 +295,21 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
           filled: 'None full right now. A Credit Union stays here from 80/80 until its auction starts.',
         };
         const note = v === 'invited' ? '<p class="muted view-note">Open Credit Unions your Credits qualify for. You haven’t joined these yet.</p>' : '';
-        el.innerHTML = !list.length
-          ? `<div class="empty-state"><p>No Credit Unions yet.</p><a class="btn primary" href="/create">Start a Credit Union</a></div>`
-          : (v === 'invited' || v === 'yours') && !acct
-            ? `<div class="empty-state"><p>Connect to see the Credit Unions ${v === 'invited' ? 'your Credits qualify for' : 'you’re in'}.</p><button class="btn primary" data-connect>Connect wallet</button></div>`
-            : note + (views[v].length ? shownGrid(v, views[v]) : `<p class="muted">${empty[v]}</p>`);
+        const fresh = morph(
+          el,
+          !list.length
+            ? `<div class="empty-state"><p>No Credit Unions yet.</p><a class="btn primary" href="/create">Start a Credit Union</a></div>`
+            : (v === 'invited' || v === 'yours') && !acct
+              ? `<div class="empty-state"><p>Connect to see the Credit Unions ${v === 'invited' ? 'your Credits qualify for' : 'you’re in'}.</p><button class="btn primary" data-connect>Connect wallet</button></div>`
+              : note + (views[v].length ? shownGrid(v, views[v]) : `<p class="muted">${empty[v]}</p>`),
+        );
         el.querySelector('#show-empty')?.addEventListener('click', () => ((showEmpty = true), draw()));
         hydrate(el);
         // A picture union's card shows its picture in Consolidated, as Now: what's in at full ink, the rest faded.
-        // Each picture card draws as soon as its own planned Credits are in, not after every card's examples.
+        // Each picture card draws as soon as its own planned Credits are in, not after every card's examples. A card
+        // kept from the last drawing already shows it.
         el.querySelectorAll<HTMLElement>('.card-art.picture').forEach((h) => {
+          if (!fresh.has(h.closest('.card')!)) return;
           showStill(h);
           if (h.dataset.ready) void fillGhosts(h).then(() => drawStill(h, 'Consolidated'));
         });
@@ -301,14 +325,18 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       const pick = stage ?? (staged.find(([k, items]) => k === 'live' && items.length) ?? staged.find(([, items]) => items.length) ?? staged[0])[0];
       app.querySelectorAll<HTMLElement>('[data-stage]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.stage === pick)));
       const shown = staged.find(([k]) => k === pick)![1];
-      el.innerHTML = !list.length
-        ? `<div class="grid"><div class="card placeholder" id="auction-placeholder">${sheet([], { size: 'sm' })}<div class="card-body"><strong>No auctions yet</strong><span class="muted small">When a Credit Union burns its 80, its Statement is auctioned here.</span></div></div></div>`
-        : shown.length
-          ? grid(shown)
-          : `<p class="muted">${pick === 'upcoming' ? 'No Credit Union is full right now.' : pick === 'live' ? 'Nothing at auction right now.' : 'Nothing sold yet.'}</p>`;
+      const fresh = morph(
+        el,
+        !list.length
+          ? `<div class="grid"><div class="card placeholder" id="auction-placeholder">${sheet([], { size: 'sm' })}<div class="card-body"><strong>No auctions yet</strong><span class="muted small">When a Credit Union burns its 80, its Statement is auctioned here.</span></div></div></div>`
+          : shown.length
+            ? grid(shown)
+            : `<p class="muted">${pick === 'upcoming' ? 'No Credit Union is full right now.' : pick === 'live' ? 'Nothing at auction right now.' : 'Nothing sold yet.'}</p>`,
+      );
       hydrate(el);
-      // Picture unions waiting to burn show their picture here too, as on /unions.
+      // Picture unions waiting to burn show their picture here too, as on /unions (a kept card already does).
       el.querySelectorAll<HTMLElement>('.card-art.picture').forEach((h) => {
+        if (!fresh.has(h.closest('.card')!)) return;
         showStill(h);
         if (h.dataset.ready) void fillGhosts(h).then(() => drawStill(h, 'Consolidated'));
       });

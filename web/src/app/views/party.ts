@@ -146,13 +146,14 @@ function showSwitch(count: number, mine: number, on: string) {
     .join('')}</div>`;
 }
 
-/// `got`: the union as a live refresh just read it, drawn without reading it again.
-export async function party(app: HTMLElement, address: Address, rerender: () => void, got?: Ctx & { at?: number }) {
+/// `got`: the union as a live refresh just read it, drawn without reading it again. `kept`: your side of it from the
+/// drawing before, when nothing that changed could have moved it.
+export async function party(app: HTMLElement, address: Address, rerender: () => void, got?: Ctx & { at?: number }, kept?: Mine) {
   let b: Ctx;
   let at = got?.at ?? 0;
   const account = session.account;
   // Your side of it (shares, what you're owed, your Credits), read alongside the Credit Union, not after it.
-  const mine = account ? me(address, account) : null;
+  const mine = account ? (kept ? Promise.resolve(kept) : me(address, account)) : null;
   // From the Credit Union index when a page read it in the last minute (being in it is being ours): the page shows at
   // once, and is checked against the chain right after. Otherwise from the Worker's index of it (a few seconds old,
   // no chain read), unless this wallet just sent a transaction the index may not have yet. Otherwise only parties our
@@ -409,7 +410,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     });
   });
   bind(b, m, myIds, rerender, keyed);
-  watchLive(app, address, b, rerender, !!indexed, at);
+  watchLive(app, address, b, rerender, !!indexed, at, m);
   // Just made on the create page: congratulate once. The flag goes as soon as it's read, so a refresh won't reshow it.
   try {
     if (sessionStorage.getItem('cu-created')?.toLowerCase() === address.toLowerCase()) {
@@ -432,7 +433,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
 /// straight away too (the page was drawn from the index, which can be a few seconds old). Reads the Worker's index
 /// of the union (one read for everyone watching), or the chain for a while after this wallet's own transaction;
 /// `at` is how new the page's read is, so an older index answer never takes the page back.
-function watchLive(app: HTMLElement, address: Address, b: Ctx, rerender: () => void, now = false, at = 0) {
+function watchLive(app: HTMLElement, address: Address, b: Ctx, rerender: () => void, now = false, at = 0, m: Mine = null) {
   if (live) clearInterval(live);
   const mark = ({ s, ids, depositors }: Ctx) => `${stamp(s.state, s.count, s.highBid)}:${s.lockAt}:${s.state}:${ids.join()}:${depositors.join().toLowerCase()}`;
   const was = mark(b);
@@ -453,7 +454,11 @@ function watchLive(app: HTMLElement, address: Address, b: Ctx, rerender: () => v
         clearInterval(live!);
         live = null;
         staleBatches(); // the lists should show it changed too
-        await party(app, address, rerender, n);
+        // Someone else's deposit or bid leaves your side as it was (your shares, your Credits): it's read again only
+        // when the union moves to another state (a settle makes a payout claimable) or your bid was just topped.
+        const you = session.account;
+        const topped = !!you && same(b.s.highBidder, you) && !same(n.s.highBidder, you);
+        await party(app, address, rerender, n, n.s.state === b.s.state && !topped ? m : undefined);
       }
     } catch {}
   };

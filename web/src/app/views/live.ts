@@ -101,7 +101,10 @@ export async function activityFold(union: Address) {
   const count = document.getElementById('activity-count');
   if (count) count.textContent = rows?.length ? String(rows.length) : '';
   list.innerHTML = activityItems(rows, { union: true });
-  hydrate(list);
+  // Its names are looked up once someone opens it, not for every row of a fold nobody opened.
+  const fold = list.closest('details');
+  if (fold && !fold.open) fold.addEventListener('toggle', () => fold.open && hydrate(list), { once: true });
+  else hydrate(list);
 }
 
 function row(x: Item, o: { here?: boolean; who?: boolean } = {}) {

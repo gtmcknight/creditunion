@@ -188,7 +188,7 @@ export async function create(app: HTMLElement) {
   walletRead.catch(() => {});
   factoryRead.catch(() => {});
   const minutes = await fetch('/minutes.json').then((r) => r.json() as Promise<Minutes>).catch(() => [] as Minutes);
-  let walletIn = false, factoryIn = false;
+  let factoryIn = false;
   let isOk = false; // the factory may move your Credits (read with them)
   let min = 1, protocolBps = 0, creatorBps = 0;
   let table = '0x0000000000000000000000000000000000000000' as Address;
@@ -387,7 +387,6 @@ export async function create(app: HTMLElement) {
     if (!picker) return; // left the page
     if (!isOk) void canBatch(); // ask early, so Start doesn't wait on the wallet
     owned.push(...held.filter((id) => !owned.includes(id)));
-    walletIn = true;
     picker.innerHTML = owned.length ? owned.map(pickBtn).join('') : `<p class="muted">You don’t hold any Credits.${config.chainId !== 1 ? ' <a href="/mint">Mint test Credits →</a>' : ''}</p>`;
     for (let i = 0; i < owned.length; i += 200) {
       try {
@@ -688,14 +687,14 @@ export async function create(app: HTMLElement) {
     const short = eligible >= 0 && eligible < 80 ? `Only ${eligible} ${eligible === 1 ? 'Credit' : 'Credits'} can ever join, and a Credit Union needs 80. Widen the rules.` : '';
     // A picture: none of its Colors may skip a slot.
     const gap = picturing() ? gapOf(picPlan!, [...picks, ...buying().map((l) => l.id)]) : null;
-    const reason = tooNarrow || short || (gap ? `Add #${gap} too: it goes in before the ones you picked.` : '') || (n < min && walletIn ? (picturing() ? (picPlan!.mine.size ? 'Pick at least one of yours above.' : 'Buy at least one of the picture’s first Credits to start it.') : `Select at least ${min} of your qualifying Credits.`) : n > 80 ? 'At most 80.' : over ? overText(over) : '');
+    const reason = tooNarrow || short || (gap ? `Add #${gap} too: it goes in before the ones you picked.` : '') || (n < min && traitsIn ? (picturing() ? (picPlan!.mine.size ? 'Pick at least one of yours above.' : 'Buy at least one of the picture’s first Credits to start it.') : `Select at least ${min} of your qualifying Credits.`) : n > 80 ? 'At most 80.' : over ? overText(over) : '');
     // One line under the button: what blocks it, else how it plays out.
     // What blocks Start sits above it as a warning; the line under it always says how it plays out.
     const warn = document.getElementById('warn')!;
     warn.textContent = reason;
     warn.hidden = !reason;
     why.innerHTML = `${n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions. ` : ''}Free to start a Credit Union. Withdraw your Credits anytime until it fills and locks.<br>${factoryIn ? `${protocolBps / 100}% protocol fee, only if it sells. ` : ''}Unofficial and experimental.`;
-    go.disabled = !!reason || !walletIn || !factoryIn;
+    go.disabled = !!reason || !traitsIn || !factoryIn; // your Credits and their traits are in (traitsIn), and the factory's numbers
     if (!go.dataset.busy) go.textContent = startLabel();
     drawSummary();
 

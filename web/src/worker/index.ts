@@ -123,8 +123,12 @@ const isDev = (url: URL) => url.hostname === 'localhost' || url.hostname === '12
 async function keptGet(env: Env, key: string): Promise<string | null> {
   return env.PLANS ? env.PLANS.get(key, { cacheTtl: 3600 }).catch(() => null) : null;
 }
-async function keptPut(env: Env, key: string, value: string, ttl?: number): Promise<void> {
+async function keptPut(env: Env, key: string, value: string | Uint8Array, ttl?: number): Promise<void> {
   await env.PLANS?.put(key, value, ttl ? { expirationTtl: ttl } : undefined).catch(() => {});
+}
+/// A drawn image kept in KV (a link card): drawn once for every data center, not once per data center.
+async function keptPng(env: Env, key: string): Promise<ArrayBuffer | null> {
+  return env.PLANS ? env.PLANS.get(key, { type: 'arrayBuffer', cacheTtl: 3600 }).catch(() => null) : null;
 }
 
 /// Responses whose body is already compressed (serveBin): passed on as they are, not encoded again.
@@ -879,12 +883,41 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       }
     }
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    // On mainnet, from the market book (every Credit for sale, kept current): no OpenSea call at all. The cursor is how
+    // many of the Credits that pass have been shown. Buying prices each listing again, so a sold one just drops out.
+    const bookCur = (() => {
+      try {
+        const c = url.searchParams.get('c');
+        const o = c ? (JSON.parse(atob(c)) as { b?: unknown }) : { b: 0 };
+        return typeof o.b === 'number' && Number.isInteger(o.b) && o.b >= 0 ? o.b : null;
+      } catch {
+        return null;
+      }
+    })();
+    if (hasSweeper(env) && env.MARKET && bookCur !== null) {
+      try {
+        const bk = await marketBook(env, url, ctx);
+        if (bk.rows.length && Date.now() - bk.at < 5 * 60_000) {
+          const ok = trait ? await predicate(env.ASSETS, url.origin, trait.rules) : rules ? await predicate(env.ASSETS, url.origin, rules) : () => true;
+          // An OpenSea row without its order can't be bought through the Sweeper: left out.
+          const pass = bk.rows.filter((r) => ok(Number(r[0])) && (r[2] !== 'opensea' || (r[3] && r[4])));
+          const items = pass.slice(bookCur, bookCur + LISTED_CHUNK).map((r) => {
+            const l: Listing = r[2] === 'opensea' ? { id: r[0], price: r[1], source: 'opensea', hash: r[3], protocol: r[4] } : { id: r[0], price: r[1], source: r[2] as Listing['source'], ...(r[3] ? { listingId: r[3] } : {}) };
+            return { ...l, url: listingUrl(env, true, l) };
+          });
+          const next = bookCur + LISTED_CHUNK < pass.length ? btoa(JSON.stringify({ b: bookCur + LISTED_CHUNK })) : null;
+          return Response.json({ items, next, preview: false, sources: sourcesOf(env, pass.map((r) => ({ source: r[2] }))) }, { headers: { 'cache-control': 'no-store' } });
+        }
+      } catch (e) {
+        console.warn('[listed] from OpenSea', safeError(e));
+      }
+    }
     // OpenSea's next page, the highest OpenSea price shown so far, OpenSea done, how many of the rest are shown.
     type Cursor = { n: string; w: string; d: boolean; i: number; p?: number };
     let cur: Cursor = { n: '', w: '-1', d: !env.OPENSEA_API_KEY, i: 0 };
     try {
       const c = url.searchParams.get('c');
-      if (c) cur = JSON.parse(atob(c)) as Cursor;
+      if (c && bookCur === null) cur = JSON.parse(atob(c)) as Cursor;
       if (typeof cur.n !== 'string' || !/^-?\d{1,40}$/.test(cur.w) || typeof cur.d !== 'boolean' || !Number.isInteger(cur.i) || cur.i < 0) throw 0;
     } catch {
       return text('bad cursor', 400);
@@ -1234,36 +1267,28 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
 
   const ens = url.pathname.match(/^\/ens\/(0x[0-9a-fA-F]{40})$/);
   if (ens) {
-    const cache = caches.default;
-    const key = new Request(url.origin + url.pathname.toLowerCase());
-    const hit = await cache.match(key);
-    if (hit) return hit;
-    // Another data center's answer, kept in KV for as long as its own cache keeps it: one lookup per address, not
-    // one per address per data center.
-    const kvKey = `ens:${ens[1].toLowerCase()}`;
-    const kept = await keptGet(env, kvKey);
-    if (kept) {
-      const res = new Response(kept, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=3600' } });
-      ctx.waitUntil(cache.put(key, res.clone()));
-      return res;
-    }
+    const r = await ensOf(env, url, ctx, ens[1].toLowerCase() as Address, () => limited(env.RL_MISC, req));
+    if (!r) return text('slow down', 429);
+    return new Response(JSON.stringify({ name: r.name, avatar: r.avatar }), { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${r.ttl}` } });
+  }
+  // Many at once, as a page's names come in one request: /ens?a=0x…,0x… (up to 50) → { "0x…": { name, avatar } }.
+  if (url.pathname === '/ens') {
+    if (!sameSite(req)) return text('forbidden', 403);
+    const list = [...new Set((url.searchParams.get('a') ?? '').toLowerCase().split(','))].filter((a) => /^0x[0-9a-f]{40}$/.test(a)).slice(0, 50) as Address[];
+    if (!list.length) return text('bad request', 400);
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
-    const rpc = env.ENS_RPC || (env.CHAIN_ID === '1' ? rpcUrl(env) : 'https://eth.drpc.org');
-    const c = createPublicClient({ chain: mainnet, transport: http(rpc, { timeout: 5_000 }) });
-    let name: string | null = null;
+    const out: Record<string, { name: string | null; avatar: string | null }> = {};
     let ttl = 86400;
-    try {
-      name = await c.getEnsName({ address: ens[1] as Address });
-      if (!name) ttl = 3600;
-    } catch {
-      ttl = 60;
-    }
-    // The avatar is served by ENS's own metadata service, so this Worker never fetches a URL a name owner chose.
-    const avatar = name ? `https://metadata.ens.domains/mainnet/avatar/${encodeURIComponent(name)}` : null;
-    const body = JSON.stringify({ name, avatar });
-    const res = new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttl}` } });
-    ctx.waitUntil(Promise.all([cache.put(key, res.clone()), ttl > 60 ? keptPut(env, kvKey, body, ttl) : null]));
-    return res;
+    for (let i = 0; i < list.length; i += 10)
+      await Promise.all(
+        list.slice(i, i + 10).map(async (a) => {
+          const r = await ensOf(env, url, ctx, a);
+          if (!r) return;
+          out[a] = { name: r.name, avatar: r.avatar };
+          ttl = Math.min(ttl, r.ttl);
+        }),
+      );
+    return Response.json(out, { headers: { 'cache-control': `public, max-age=${ttl}` } });
   }
 
   // /art/<id>.svg and /art/<contract>/<id>.svg: the configured Credits. /art/mainnet/<id>.svg: the real
@@ -1335,13 +1360,21 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const key = new Request(`${url.origin}/og/credit/v3/${id}.png`); // v: the card's design
     const hit = await cache.match(key);
     if (hit) return hit;
+    const pngHeaders = { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' };
+    const kept = await keptPng(env, `og:credit:v3:${id}`);
+    if (kept) {
+      const res = new Response(kept, { headers: pngHeaders });
+      ctx.waitUntil(cache.put(key, res.clone()));
+      return res;
+    }
     if (await limited(env.RL_MISC, req)) return generic();
     const [facts, [print]] = await Promise.all([creditFacts(env, url, id).catch(() => null), printsFor(env, [id])]);
     // Drawn from the chain it's exact for good. Without the chain there is no exact art (wall.bin keeps only the
     // registered grid: no misprints, paper or marks), and sites keep the first image they fetch, so the site's card.
     if (!print) return generic();
-    const res = new Response(await drawCredit(env.ASSETS, url.origin, id, facts, print), { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } });
-    ctx.waitUntil(cache.put(key, res.clone()));
+    const png = await drawCredit(env.ASSETS, url.origin, id, facts, print);
+    const res = new Response(png, { headers: pngHeaders });
+    ctx.waitUntil(Promise.all([cache.put(key, res.clone()), keptPut(env, `og:credit:v3:${id}`, png, 86400)]));
     return res;
   }
 
@@ -1816,6 +1849,14 @@ async function linkCard(req: Request, env: Env, url: URL, ctx: ExecutionContext,
   const cacheKey = `${url.origin}${url.pathname.toLowerCase()}${/^\d{1,3}$/.test(v) ? `?v=${v}` : ''}`;
   const hit = await cache.match(cacheKey);
   if (hit) return hit;
+  // Another data center's drawing, kept in KV the same day.
+  const kvKey = `og:${cacheKey.slice(url.origin.length)}`;
+  const kept = await keptPng(env, kvKey);
+  if (kept) {
+    const res = new Response(kept, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } });
+    ctx.waitUntil(cache.put(cacheKey, res.clone()));
+    return res;
+  }
   const generic = () => env.ASSETS.fetch(new Request(new URL('/og/party.png', url)));
   if (await limited(env.RL_MISC, req)) return generic();
   let u: UnionCard | null = null;
@@ -1833,7 +1874,7 @@ async function linkCard(req: Request, env: Env, url: URL, ctx: ExecutionContext,
   if (!u) return generic();
   const body = await drawUnion(env.ASSETS, url.origin, u);
   const res = new Response(body, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } });
-  ctx.waitUntil(cache.put(cacheKey, res.clone()));
+  ctx.waitUntil(Promise.all([cache.put(cacheKey, res.clone()), keptPut(env, kvKey, body, 86400)]));
   return res;
 }
 
@@ -2343,22 +2384,27 @@ async function deepCandidates(env: Env, url: URL, ctx: ExecutionContext, batch: 
     .slice(0, DEEP_MAX)
     .map((x) => String(x[0]));
 }
-/// The market book's rows (id, price, source, …) as /market.json has them: the colo's copy, parsed once per isolate
-/// for 30 s.
-let bookMemo: { at: number; rows: Promise<Row[]> } | null = null;
-function marketRows(env: Env, url: URL, ctx: ExecutionContext): Promise<Row[]> {
-  if (bookMemo && Date.now() - bookMemo.at < 30_000) return bookMemo.rows;
-  const rows = (async () => {
+/// The market book as /market.json has it: when it last changed, and its rows (id, price, source, a, b) cheapest first.
+/// The colo's copy, parsed and sorted once per isolate for 30 s.
+let bookMemo: { at: number; book: Promise<{ at: number; rows: Row[] }> } | null = null;
+function marketBook(env: Env, url: URL, ctx: ExecutionContext): Promise<{ at: number; rows: Row[] }> {
+  if (bookMemo && Date.now() - bookMemo.at < 30_000) return bookMemo.book;
+  const book_ = (async () => {
     const key = new Request(`${url.origin}/market.json/v2`);
     const hit = await caches.default.match(key);
     const body = hit ? await hit.text() : await book(env).snapshot();
     if (!hit) ctx.waitUntil(caches.default.put(key, new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=30' } })));
-    return (JSON.parse(body) as { items: string[][] }).items.map((x) => [x[0], x[1], x[2], x[3], x[4], '', 0] as Row);
+    const j = JSON.parse(body) as { at: number; items: string[][] };
+    const rows = j.items.map((x) => [x[0], x[1], x[2], x[3], x[4], '', 0] as Row);
+    rows.sort((a, b) => (BigInt(a[1]) < BigInt(b[1]) ? -1 : BigInt(a[1]) > BigInt(b[1]) ? 1 : 0));
+    return { at: j.at, rows };
   })();
-  bookMemo = { at: Date.now(), rows };
-  rows.catch(() => bookMemo?.rows === rows && (bookMemo = null));
-  return rows;
+  bookMemo = { at: Date.now(), book: book_ };
+  book_.catch(() => bookMemo?.book === book_ && (bookMemo = null));
+  return book_;
 }
+const marketRows = async (env: Env, url: URL, ctx: ExecutionContext) => (await marketBook(env, url, ctx)).rows;
+
 /// Orders the deep pass read, a minute each (in the ChainBook, where scans run, that's for the whole site).
 const orders = new Map<string, { at: number; p: Promise<Cand | null> }>();
 function orderOf(env: Env, id: string): Promise<Cand | null> {
@@ -2413,6 +2459,38 @@ async function allowlistOf(env: Env, batch: Address): Promise<number[] | null> {
   }
   if (ids) await keptPut(env, k, JSON.stringify(ids));
   return ids;
+}
+
+/// A wallet's primary ENS name and its avatar (ENS's own metadata service, so this Worker never fetches a URL a name
+/// owner chose): the colo's copy, else another data center's from KV, else the chain. `ttl`: a day with a name, an
+/// hour without, a minute after a failed lookup. `gate`, asked before a chain lookup: true (over the rate limit) is
+/// null.
+async function ensOf(env: Env, url: URL, ctx: ExecutionContext, addr: Address, gate?: () => Promise<boolean>): Promise<{ name: string | null; avatar: string | null; ttl: number } | null> {
+  const cache = caches.default;
+  const key = new Request(`${url.origin}/ens/${addr}`);
+  const hit = await cache.match(key);
+  if (hit) return { ...((await hit.json()) as { name: string | null; avatar: string | null }), ttl: Number(hit.headers.get('cache-control')?.match(/max-age=(\d+)/)?.[1] ?? 3600) };
+  const kvKey = `ens:${addr}`;
+  const kept = await keptGet(env, kvKey);
+  if (kept) {
+    ctx.waitUntil(cache.put(key, new Response(kept, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=3600' } })));
+    return { ...(JSON.parse(kept) as { name: string | null; avatar: string | null }), ttl: 3600 };
+  }
+  if (gate && (await gate())) return null;
+  const rpc = env.ENS_RPC || (env.CHAIN_ID === '1' ? rpcUrl(env) : 'https://eth.drpc.org');
+  const c = createPublicClient({ chain: mainnet, transport: http(rpc, { timeout: 5_000 }) });
+  let name: string | null = null;
+  let ttl = 86400;
+  try {
+    name = await c.getEnsName({ address: addr });
+    if (!name) ttl = 3600;
+  } catch {
+    ttl = 60;
+  }
+  const avatar = name ? `https://metadata.ens.domains/mainnet/avatar/${encodeURIComponent(name)}` : null;
+  const body = JSON.stringify({ name, avatar });
+  ctx.waitUntil(Promise.all([cache.put(key, new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttl}` } })), ttl > 60 ? keptPut(env, kvKey, body, ttl) : null]));
+  return { name, avatar, ttl };
 }
 
 /// A Credits contract's art contract, as Credits itself names it (`art()`): the app asks it for a Credit's traits

@@ -4,18 +4,37 @@ import { esc, short } from './ui';
 
 type Ens = { name: string | null; avatar: string | null };
 const memo = new Map<string, Promise<Ens>>();
+const none: Ens = { name: null, avatar: null };
 
+/// A wallet's name and avatar, once per visit. Asked for in the same moment (a page of names), they go to the Worker
+/// together, 50 to a request.
 export function ens(a: Address): Promise<Ens> {
   const k = a.toLowerCase();
-  if (!memo.has(k)) {
-    memo.set(
-      k,
-      fetch(`/ens/${k}`)
-        .then((r) => (r.ok ? r.json() : { name: null, avatar: null }))
-        .catch(() => ({ name: null, avatar: null })),
-    );
+  let p = memo.get(k);
+  if (!p) {
+    p = new Promise<Ens>((done) => {
+      if (!asking) {
+        asking = new Map();
+        setTimeout(ask, 0);
+      }
+      asking.set(k, done);
+    });
+    memo.set(k, p);
   }
-  return memo.get(k)!;
+  return p;
+}
+let asking: Map<string, (e: Ens) => void> | null = null;
+async function ask() {
+  const all = asking!;
+  asking = null;
+  const keys = [...all.keys()];
+  for (let i = 0; i < keys.length; i += 50) {
+    const part = keys.slice(i, i + 50);
+    const got = (await fetch(`/ens?a=${part.join(',')}`)
+      .then((r) => (r.ok ? r.json() : {}))
+      .catch(() => ({}))) as Record<string, Ens>;
+    for (const k of part) all.get(k)!(got[k] ?? none);
+  }
 }
 
 /// 8×8 mirrored mark from the address, in ink on paper: a tiny Credit for people without an avatar.
