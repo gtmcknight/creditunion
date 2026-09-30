@@ -757,7 +757,7 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
         <p class="small muted">Anyone can press it and pays the gas.</p>`;
       document.getElementById('assemble')?.addEventListener('click', (e) =>
         run(e.currentTarget as HTMLElement, 'Burning…', () =>
-          send({ address: s.address, abi: batchAbi, functionName: 'assemble', gas: 12_000_000n }, txNote),
+          send({ address: s.address, abi: batchAbi, functionName: 'assemble', gas: 16_000_000n }, txNote),
         'The Statement exists. Auction is open.'),
       );
     };

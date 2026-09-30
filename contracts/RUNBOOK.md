@@ -22,8 +22,9 @@ early Wednesday. This is the checklist from his publish to the first Statement. 
    - `forge test`: everything passes.
    - `STATEMENTS=<his address> forge test --match-path test/StatementAdapter.fork.t.sol -vv`: the whole burn day
      on a copy of mainnet against his real contract, from the Safe's proposal to every member paid.
-   - Note the gas it logs for one burn. With the stand-in it's 6.4M. If his pushes it past about 9M, raise
-     `ASSEMBLE_GAS` in `web/src/worker/keeper.ts` (the page sends the same) to keep 30% headroom.
+   - Note the gas it logs for one burn. It must fit well under 16,777,216, the most any mainnet transaction may
+     carry (EIP-7825): the keeper and the page send 16M (`ASSEMBLE_GAS` in `web/src/worker/keeper.ts`), and the
+     keeper simulates with that gas, so a burn that can't fit is never sent.
 4. **Review it** the way the rest was reviewed ([AUDIT.md](AUDIT.md)) and write the findings up.
 5. **Deploy it:** `STATEMENTS=<his address> forge script script/DeployAdapter.s.sol --rpc-url $MAINNET_RPC --broadcast --verify`.
    It refuses mainnet while `ADAPTER_READY` is false. Put the address in README.md and ADAPTER.md and post it.

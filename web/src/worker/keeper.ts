@@ -26,7 +26,8 @@ const ZERO = '0x0000000000000000000000000000000000000000';
 const BURNABLE = 3; // Batch.Phase
 const AUCTION = 3, SETTLED = 4; // Batch.State
 const PAY_FOR = 3n * 86_400n; // how long after an auction ends a failed payout is retried
-const ASSEMBLE_GAS = 12_000_000n; // as the page sends it: the burn runs through Jack's contract
+/// As the page sends it: just under EIP-7825's per-transaction cap (16,777,216), the most any transaction can carry.
+const ASSEMBLE_GAS = 16_000_000n;
 /// Up to this many a run: at 5 minutes apart, 60 an hour, so every union that locks together still burns in its hour.
 const PER_RUN = 5;
 
@@ -75,7 +76,8 @@ export async function keep(o: { key: string; chainId: number; factory: Address; 
   for (const j of jobs) {
     if (sent >= PER_RUN) break;
     try {
-      const { request } = await c.simulateContract({ address: j.address, abi: j.abi, functionName: j.functionName, args: j.args, account } as never);
+      // Simulated with the gas it will be sent with, so a burn that can't fit is never sent to fail on chain.
+      const { request } = await c.simulateContract({ address: j.address, abi: j.abi, functionName: j.functionName, args: j.args, account, ...(j.gas ? { gas: j.gas } : {}) } as never);
       // Nonces counted here, not re-read from a node that may not have seen the last one yet.
       const hash = await w.writeContract({ ...(request as object), nonce: nonce + sent, ...(j.gas ? { gas: j.gas } : {}) } as never);
       sent++;
