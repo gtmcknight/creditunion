@@ -47,7 +47,7 @@ const INK_NAMES = ['Cyan', 'Magenta', 'Yellow', 'Black'];
 /// "Black", "Cyan + black" for a palette mask.
 export const inkName = (m: number) => INK_NAMES.filter((_, b) => m & (1 << b)).join(' + ').replace(/ \+ (\w)/g, (_, c) => ` + ${c.toLowerCase()}`);
 
-export type Rule = { label: string; value: string; swatch?: number; slots?: number[]; href?: string; picked?: boolean };
+export type Rule = { label: string; value: string; swatch?: number; slots?: number[]; href?: string; picked?: boolean; full?: boolean };
 /// A batch's rules one per row, for the batch page. `slots`: the sheet slots a row governs (all when absent);
 /// `href`: the trait page for the Credits the row admits.
 export function filterRules(f: Summary['filter'], allowlistSize: number, slotOf: (i: number) => number): Rule[] {

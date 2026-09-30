@@ -91,8 +91,7 @@ export const activityItems = (rows: Item[] | null, o: { union?: boolean; member?
       ? rows.map((x) => row(x, { here: o.union, who: !o.member })).join('')
       : '<li class="muted live-empty">Nothing yet.</li>';
 
-/// The Activity fold on a union's page: the page draws <details id="activity"> with #activity-count and
-/// #activity-list inside.
+/// A union's Activity: the page draws #activity-list (and #activity-all, its Show all) inside #activity.
 export async function activityFold(union: Address) {
   const list = document.getElementById('activity-list');
   if (!list) return;
@@ -101,6 +100,18 @@ export async function activityFold(union: Address) {
   const count = document.getElementById('activity-count');
   if (count) count.textContent = rows?.length ? String(rows.length) : '';
   list.innerHTML = activityItems(rows, { union: true });
+  // A short list shows the latest three, and a link to the rest.
+  const all = document.getElementById('activity-all');
+  if (all && list.classList.contains('short')) {
+    const n = rows?.length ?? 0;
+    all.hidden = n <= 3;
+    all.textContent = 'Show all';
+    all.onclick = () => {
+      list.classList.remove('short');
+      all.hidden = true;
+      hydrate(list);
+    };
+  }
   // Its names are looked up once someone opens it, not for every row of a fold nobody opened.
   const fold = list.closest('details');
   if (fold && !fold.open) fold.addEventListener('toggle', () => fold.open && hydrate(list), { once: true });

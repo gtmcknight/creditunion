@@ -7,7 +7,7 @@ import { openModal, toast } from './ui';
 
 const ICON = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.25" d="M8 10.5V2.2M5.1 5.1 8 2.2l2.9 2.9M3.1 8.6v5.8h9.8V8.6"/></svg>';
 
-/// The Share button, for the bar under the sheet.
+/// The Share button, for the bar under the sheet: icon and word, in full ink so it's noticed.
 export const shareButton = () => `<button type="button" class="share-pick">${ICON}<span>Share</span></button>`;
 
 const blobOf = (c: HTMLCanvasElement) => new Promise<Blob>((ok, no) => c.toBlob((b) => (b ? ok(b) : no(new Error('no image'))), 'image/png'));

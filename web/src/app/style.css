@@ -690,7 +690,7 @@ nav a .num {
 }
 .show {
   display: inline-flex;
-  gap: 14px;
+  gap: 10px;
 }
 .show button {
   height: 32px;
@@ -779,7 +779,7 @@ nav a .num {
   transition: color 150ms var(--ease);
 }
 .dirs .dir-word {
-  margin-right: 12px;
+  margin-right: 10px;
 }
 .dirs button:hover,
 .dirs button[aria-checked='true'] {
@@ -795,7 +795,7 @@ nav a .num {
 .dirs .dir-glyph {
   display: grid;
   place-items: center;
-  width: 24px;
+  width: 20px;
 }
 /* Solid glyphs read heavier than words at the same colour: the ones not showing sit back further. */
 .dirs .dir-glyph svg {
@@ -863,7 +863,7 @@ nav a .num {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 6px 16px;
+  gap: 6px 12px;
 }
 .legend span {
   display: inline-flex;
@@ -2479,6 +2479,39 @@ input[type='datetime-local'] {
 }
 .takes .eyebrow {
   margin: 0;
+}
+/* Rules: inline, each its inks and name in ink; hovering one lights its slots on the sheet. */
+.kv .rule {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  text-decoration: none;
+  vertical-align: bottom;
+}
+:is(a, button).rule {
+  cursor: pointer;
+}
+.kv .rule:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+.kv .rule.full {
+  opacity: 0.4;
+}
+.kv .rule .swatches {
+  display: inline-flex;
+  gap: 2px;
+}
+.kv .rule .swatches i {
+  display: block;
+  width: 10px;
+  height: 10px;
 }
 .rule-chips {
   display: flex;
@@ -5933,6 +5966,11 @@ dialog.eligible::backdrop {
 .progress .row.small {
   font-size: 13px;
 }
+/* Creator, members, payout: one rhythm, each line led by the same 20-px faces. */
+.progress .row .who {
+  vertical-align: middle;
+  margin-left: 2px;
+}
 
 /* A card's creator opens their page: underline on hover, like a link. */
 .who.linked {
@@ -8707,7 +8745,7 @@ dialog.how .small { margin-top: 16px; }
 .legend-end {
   display: inline-flex;
   align-items: center;
-  gap: 20px;
+  gap: 12px;
   margin-left: auto;
 }
 .statement > .sheet,
@@ -8723,13 +8761,13 @@ dialog.how .small { margin-top: 16px; }
   padding: 0;
   border: 0;
   background: none;
-  color: var(--muted);
+  color: var(--fg);
   font: inherit;
   cursor: pointer;
   transition: color 150ms var(--ease);
 }
 .share-pick:hover {
-  color: var(--fg);
+  opacity: 0.7;
 }
 /* The modal: the picture at its own shape, the formats under it, then size and ground, then the actions. */
 dialog.share {
@@ -8850,4 +8888,167 @@ dialog.share .share-swatches button {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+/* A union's right column on one scale: the title 32, every section heading 16 medium, everything else 14 in two
+   colours (ink for things and values, muted for what describes them). Addresses stay mono at 13, which reads as 14.
+   Sections: 24 px each side of a line, 12 from a heading to its content and between lines. */
+.batch-side :is(.box > h3, .more > summary > span:first-child) {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.batch-side :is(.progress .row, .progress .num, .box > p, .more summary .small, .more summary .muted, .facts, .facts dt, .facts dd, .facts .small, .live-what, .live-list .small, .live-list .num, .box .small, .box p) {
+  font-size: 14px;
+}
+.batch-side .who {
+  font-size: 14px;
+}
+.batch-side .who-name.mono,
+.batch-side .mono {
+  font-size: 13px;
+}
+.batch-side .progress {
+  gap: 12px;
+  margin-top: -8px; /* 16 under the title, not the column's 24 */
+}
+.batch-side .box {
+  gap: 12px;
+}
+.batch-side .more summary {
+  padding: 16px 0;
+}
+/* Your Credits under the state's line: the section's own 12, not another 16 on top. */
+.batch-side .box > .yours-in {
+  margin-top: 0;
+}
+
+/* Under a union's title: grey labels in one column, values in ink beside them, 12 apart. */
+.kv {
+  display: grid;
+  gap: 12px;
+  margin: -8px 0 0; /* 16 under the title, not the column's 24 */
+  font-size: 14px;
+}
+.kv > div {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+.kv dt {
+  color: var(--muted);
+}
+.kv dd {
+  margin: 0;
+  min-width: 0;
+}
+.kv .members-btn {
+  font-size: 14px;
+}
+/* Rules: each its inks and name, spaced apart; the swatches separate them, no dots. */
+.kv .takes dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.kv .takes {
+  align-items: start;
+}
+/* Four faces beside the member count. */
+.kv .faces .face:nth-child(n + 5) {
+  display: none;
+}
+/* Every line the same 24 px, avatars or not: text and faces centred in it. */
+.kv > div {
+  min-height: 24px;
+}
+.kv :is(dt, dd) {
+  line-height: 24px;
+}
+.kv :is(.who, .members-btn) {
+  height: 24px;
+  vertical-align: top;
+  align-items: center;
+}
+.kv .members-btn {
+  line-height: 24px;
+}
+/* A union's Activity opens on its latest three; Show all lists the rest. */
+.fold-list.short > li:nth-child(n + 4) {
+  display: none;
+}
+.activity-all {
+  margin: 4px 0 16px;
+}
+/* "see it finished", "5 are yours": hovering one shows the sheet that way. */
+.hover-show {
+  color: var(--fg);
+  text-decoration: underline dotted var(--line-strong);
+  text-underline-offset: 3px;
+  cursor: default;
+}
+/* A union's Activity: one line each, who · what they did · the Credit · when. Long names and actions cut short. */
+.batch-side .fold-list .live-row {
+  grid-template-columns: minmax(0, 118px) minmax(0, 1fr) auto auto;
+  gap: 12px;
+  min-height: 44px;
+  padding: 6px 0;
+}
+.batch-side .fold-list :is(.live-what, .live-art) {
+  grid-column: auto;
+  grid-row: auto;
+}
+.batch-side .fold-list .live-what {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.batch-side .fold-list .live-art img {
+  width: 24px;
+  height: 24px;
+}
+.batch-side .fold-list .live-art img:nth-child(n + 2),
+.batch-side .fold-list .live-art .small {
+  display: none;
+}
+.batch-side .fold-list .live-art:empty {
+  display: block;
+  width: 24px;
+}
+/* A union's Activity: always open, a heading like the column's others over its latest lines. */
+.activity-block {
+  display: grid;
+  justify-items: start;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.activity-block > h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.activity-block > .live-list {
+  justify-self: stretch;
+}
+/* "Union" (or "Statement #4") over the title, set like the column's section headings (Full, Activity). */
+.batch-side header .side-label {
+  margin: 0 0 -4px;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+/* Words in a formats row never break. */
+.dirs .dir-word {
+  white-space: nowrap;
+}
+/* Phones: a union's Activity drops the Credit thumbnail so what they did fits the line. */
+@media (max-width: 640px) {
+  .batch-side .fold-list .live-row {
+    grid-template-columns: minmax(0, 110px) minmax(0, 1fr) auto;
+  }
+  .batch-side .fold-list .live-art {
+    display: none;
+  }
 }
