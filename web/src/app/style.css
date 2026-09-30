@@ -8568,41 +8568,6 @@ dialog.how .small { margin-top: 16px; }
 .doc-note { padding: 14px 16px; border-left: 2px solid var(--line-strong); background: color-mix(in srgb, var(--fg) 3%, transparent); }
 .doc-addrs { margin: 12px 0 0; padding: 0 0 0 1.3em; display: grid; gap: 8px; color: var(--muted); line-height: 1.5; }
 
-/* Docs: the life of a union as five boxes. */
-.doc-flow {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 6px;
-  margin: 20px 0 0;
-  padding: 0;
-  list-style: none;
-  counter-reset: flow;
-}
-.doc-flow li {
-  position: relative;
-  display: grid;
-  gap: 4px;
-  padding: 12px;
-  border: 1px solid var(--line-strong);
-  font-size: 13px;
-  line-height: 1.35;
-}
-.doc-flow li b { font-weight: 500; }
-.doc-flow li span { color: var(--muted); }
-.doc-flow li:not(:last-child)::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  right: -6px;
-  width: 6px;
-  height: 1px;
-  background: var(--line-strong);
-}
-@media (max-width: 700px) {
-  .doc-flow { grid-template-columns: 1fr; }
-  .doc-flow li:not(:last-child)::after { top: auto; bottom: -6px; right: auto; left: 20px; width: 1px; height: 6px; }
-}
-
 /* Docs: the payout calculator, Equal and Early bird side by side on the 8×10 sheet. */
 .calc {
   margin: 20px 0 0;

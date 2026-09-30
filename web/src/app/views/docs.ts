@@ -2,7 +2,7 @@ import { config, explorer } from '../chain';
 import { art, esc, pageHead, short } from '../ui';
 import { arrIcon } from './create';
 
-/// /docs: what Credits, Statements and Credit Unions are, then every rule of a union, in plain sections.
+/// /docs: what Credits, Statements and Credit Union are, then every rule of a Union, in plain sections.
 /// /faq redirects here. Numbers come from the contracts (Batch.sol constants); keep them in step.
 
 /// The 80 Credits of the "All Credits" union, in deposit order: real art for the basics cards.
@@ -28,9 +28,9 @@ const cards = (): Card[] => [
   },
   {
     tag: 'Credit Union', official: false, q: 'What is Credit Union?',
-    a: 'This site, not Jack’s. Most people don’t have 80, so strangers pool them here. At 80 they burn, the Statement is auctioned, and everyone gets paid.',
+    a: 'This site, not Jack’s. Most people do not have 80 Credits, so strangers pool them here in Unions. Once a Union has 80, they burn, the Statement is auctioned, and everyone gets paid.',
     art: grid(52),
-    facts: [['Pick', 'A union'], ['Join', 'Buy + deposit in one click'], ['Split', 'Paid when it sells']],
+    facts: [['Pick', 'A Union'], ['Join', 'Buy + deposit in one click'], ['Split', 'Paid when it sells']],
   },
 ];
 
@@ -43,20 +43,11 @@ const basics = () => `<div class="basics">${cards().map((c) => `<article class="
 </article>`).join('')}</div>`;
 
 
-/// Early bird weight of the Credit at deposit position i (0-based), in shares: 1.5 for the first, 0.5 for the last.
+/// Early Bird weight of the Credit at deposit position i (0-based), in shares: 1.5 for the first, 0.5 for the last.
 /// Matches Batch._payMembers: units 237 − 2i out of 12,640.
 const weight = (i: number, early: boolean) => (early ? (237 - 2 * i) / 158 : 1);
 const FEE = 0.02;
 const eth4 = (x: number) => `${x >= 1 ? x.toFixed(3) : x.toPrecision(3)} ETH`.replace(/\.?0+ ETH$/, ' ETH');
-
-/// The union's life as five boxes, with what can happen in each.
-const flow = `<ol class="doc-flow" aria-label="A Credit Union’s life">
-  <li><b>Filling</b><span>Until 80 of 80. Leave anytime.</span></li>
-  <li><b>Countdown</b><span>5 minutes. Anyone leaving stops it.</span></li>
-  <li><b>Locked</b><span>1 hour. Anyone can burn.</span></li>
-  <li><b>Auction</b><span>24 hours from the first bid.</span></li>
-  <li><b>Paid</b><span>Everyone, in one transaction.</span></li>
-</ol>`;
 
 /// The split calculator: a sale price, the split, and your spots in the deposit order, drawn on the 8×10 sheet.
 const calculator = `<div class="calc" id="calc">
@@ -67,7 +58,7 @@ const calculator = `<div class="calc" id="calc">
   </div>
   <div class="calc-sheets">
     <figure><div class="calc-sheet" data-split="equal"></div><figcaption><span>Equal</span><strong id="calc-equal"></strong></figcaption></figure>
-    <figure><div class="calc-sheet" data-split="early"></div><figcaption><span>Early bird</span><strong id="calc-early"></strong></figcaption></figure>
+    <figure><div class="calc-sheet" data-split="early"></div><figcaption><span>Early Bird</span><strong id="calc-early"></strong></figcaption></figure>
   </div>
   <p class="calc-key">One square per Credit, in the order they went in. Stronger color earns more. Yours are outlined.</p>
 </div>`;
@@ -111,79 +102,78 @@ const sections = (): Section[] => [
   {
     id: 'how',
     title: 'How it works',
-    body: `<p>A Credit Union is a contract that holds Credits for a group. When it has 80, it burns them into one Statement, auctions it, and pays everyone who put Credits in.</p>
-    ${flow}
+    body: `<p>A Union is a contract that holds Credits for a group. When it has 80, it burns them into one Statement, auctions it, and pays everyone who put Credits in.</p>
     <ol class="doc-steps">
-      <li><b>Start.</b> Someone opens a union and sets its rules: which Credits it takes, how they’re arranged, and how the sale is split.</li>
+      <li><b>Start.</b> Someone opens a Union and sets its rules: which Credits it takes, how they are arranged, and how the sale is split.</li>
       <li><b>Fill.</b> Members put in Credits they own or buy them through the site. The contract checks every Credit against the rules.</li>
-      <li><b>Lock.</b> At 80 of 80, a 5 minute countdown starts. If anyone leaves, the clock stops. When it runs out, the union locks for an hour.</li>
-      <li><b>Burn.</b> During that hour, anyone can burn the union. If nobody does, it unlocks and members can leave again.</li>
-      <li><b>Auction and split.</b> The Statement is auctioned. When the auction ends, the winner gets the Statement and every member is paid.</li>
+      <li><b>Lock.</b> Once 80 Credits have been deposited, a 5 minute countdown starts. If anyone leaves, the clock stops. When it runs out, the Union locks for an hour.</li>
+      <li><b>Burn.</b> During that hour, anyone can burn the Union. If nobody does, it unlocks. Members can leave, or anyone can restart the countdown for another hour.</li>
+      <li><b>Auction and split.</b> The Statement is auctioned onchain. There is no reserve. The auction runs 24 hours from the first bid, and a bid in the last 15 minutes resets the clock to 15 minutes. When the auction ends, the winner receives the Statement and every member is paid.</li>
     </ol>
     <h3>When burning opens</h3>
-    <p>Jack’s Statement contract goes live on October 1. Our burn contract follows with a 30 minute public notice onchain, and then every full union starts its countdown. Until then, unions fill but never lock, so you can always leave. Unions don’t expire.</p>`,
+    <p>Jack’s Statement contract goes live on October 1. Our burn contract follows with a 30 minute public notice onchain, and then every full Union starts its countdown. Until then, Unions fill but never lock, so members can leave at any time. Picture Unions are the exception: they do not allow withdrawals.</p>
+    <p>A Union has no deadline. It stays open until it fills and burns. If an hour passes without a burn, the Union unlocks and the cycle can repeat as many times as needed.</p>`,
   },
   {
     id: 'types',
-    title: 'Types of unions',
-    body: `<p>Every union takes 80 Credits. The type decides how they’re arranged on the Statement, and that decides how you join.</p>
+    title: 'Types of Unions',
+    body: `<p>Every Union takes 80 Credits. The type decides how they are arranged on the Statement, and that decides how you join.</p>
     <div class="doc-types">${(
       [
-        [0, 'Joined', 'In the order they come in.', 'Your Credits or buy'],
-        [2, 'Number', 'By Credit number, up or down.', 'Your Credits or buy'],
-        [4, 'Painted', 'The creator paints the sheet by a trait, like Colors or Eights. Each spot takes only a Credit that matches.', 'Your Credits or buy'],
+        [0, 'Joined', 'In the order they come in.', 'Buy or deposit'],
+        [2, 'Number', 'By Credit number, ascending or descending.', 'Buy or deposit'],
+        [4, 'Painted', 'The creator paints the sheet using traits, like Colors or Eights. Each spot takes only a Credit that matches.', 'Buy or deposit'],
         [6, 'Picture', 'The creator uploads an image. The site picks the listed Credits that draw it best.', 'Buy here only'],
       ] as [number, string, string, string][]
     )
       .map(([v, name, how, join]) => `<div class="doc-type">${arrIcon(v)}<div><b>${name}</b><p>${how}</p><span class="doc-join${v === 6 ? ' only' : ''}">${join}</span></div></div>`)
       .join('')}</div>
-    <h3>Why Picture unions are buy only</h3>
-    <p>Underneath, a Picture union is a Painted union by Colors, and the contract only checks colors. A spot that asks for cyan and black takes any cyan and black Credit, and spots of the same color fill in the order Credits arrive. A picture needs the exact Credit in every spot.</p>
-    <p>So the site plans the picture from Credits listed for sale and sells them to you in order, so each lands where it belongs. If a planned Credit sells elsewhere first, the site swaps in the next best listing for that spot. Once a Picture union is full, the site doesn’t offer Withdraw, because taking a Credit out would shift the picture.</p>
+    <h3>Why Picture Unions are buy only</h3>
+    <p>The site plans the picture from Credits listed for sale and sells them to you in order, so each lands where it belongs. If a planned Credit sells elsewhere first, the site swaps in the next best listing for that spot. Picture Unions do not allow withdrawals, because taking a Credit out would shift the picture.</p>
     <h3>Limiting who can join</h3>
-    <p>Joined, Number and Painted unions can take any Credit, or only ones that match rules the creator sets: Colors, Eights, Print, Weight, Plates, Bits, rating, payment time, a number range, or a list of up to 200 Credits.</p>`,
+    <p>A Union only accepts Credits that follow the rules its creator sets. For Joined, Number and Painted Unions, those rules can cover Colors, Eights, Print, Weight, Plates, Bits, rating, payment time, a number range, or a list of up to 200 Credits. A Union with no rules accepts every Credit.</p>`,
   },
   {
-    id: 'joining',
-    title: 'Joining and leaving',
-    body: `<h3>With your Credits</h3>
-    <p>Connect your wallet, approve Credit Union once, and pick which Credits to put in. The union’s page only offers Credits it will take.</p>
-    <h3>By buying</h3>
-    <p>Tap the Credits you want on the union’s page. One transaction buys them from OpenSea, CreditStrategy or FWA and puts them in the union in your name. If one sells before your transaction lands, it’s skipped and you get that ETH back. In a Picture union it’s all or nothing: the purchase goes through only if every Credit is still for sale.</p>
-    <h3>Starting a union</h3>
-    <p>Put in at least one of your own Credits. A Picture union starts with a purchase of its first Credit.</p>
+    id: 'deposits',
+    title: 'Deposits',
+    body: `<h3>Using your Credits</h3>
+    <p>Connect your wallet, approve Credit Union once, and pick which Credits to put in. The Union’s page only offers Credits it will take.</p>
+    <h3>Buying</h3>
+    <p>Tap the Credits you want on the Union’s page. One transaction buys them from OpenSea, CreditStrategy or FWA and puts them in the Union in your name. If one sells before your transaction lands, it is skipped and you get that ETH back. In a Picture Union it is all or nothing: the purchase goes through only if every Credit is still for sale.</p>
+    <h3>Starting a Union</h3>
+    <p>Start with at least one Credit. It can be one you already own, or one you buy as you start the Union. A Picture Union starts with a purchase of its first Credit.</p>
     <h3>Leaving</h3>
-    <p>Withdraw your Credits anytime before the union locks.</p>`,
+    <p>Withdraw your Credits anytime before the Union locks. Picture Unions do not allow withdrawals.</p>`,
   },
   {
     id: 'auctions',
     title: 'Auctions',
-    body: `<p>After a union burns, its Statement goes up for auction onchain. There’s no reserve, and the clock doesn’t start until the first bid.</p>
+    body: `<p>After a Union burns, its Statement goes up for auction onchain. There is no reserve. The clock does not start until the first bid.</p>
     <h3>Bidding</h3>
-    <p>The first bid is at least 0.01 ETH. Each bid after that must beat the current one by 5% or 0.01 ETH, whichever is more. Anyone can bid, members included. When you’re outbid, your ETH comes back in the same transaction.</p>
+    <p>The first bid is at least 0.01 ETH. Each bid after that must beat the current one by 5% or 0.01 ETH, whichever is more. Anyone can bid, members included. When you are outbid, your ETH comes back in the same transaction.</p>
     <h3>When it ends</h3>
     <p>The auction ends 24 hours after the first bid. A bid in the last 15 minutes pushes the end to 15 minutes after that bid.</p>
     <p class="doc-note"><b>Example.</b> The first bid is 0.5 ETH at 2:00 pm Monday. The auction will end at 2:00 pm Tuesday, and the next bid must be at least 0.525 ETH. A bid at 1:50 pm Tuesday moves the end to 2:05 pm.</p>
     <h3>Settling</h3>
-    <p>When time runs out, anyone can settle it. The Statement goes to the highest bidder, and the sale is paid out to members in the same transaction.</p>`,
+    <p>When time runs out, anyone can settle the auction. The Statement goes to the highest bidder, and the sale is paid out to members in the same transaction.</p>`,
   },
   {
     id: 'payouts',
     title: 'Payouts',
     body: `<p>2% of the sale goes to Credit Union. The rest is paid per Credit, not per wallet: 10 Credits in means 10 shares.</p>
-    <p>The creator picks the split when opening the union. <b>Equal</b> pays every Credit the same. <b>Early bird</b> pays by the order Credits went in, from 1.5× for the first down to 0.5× for the last.</p>
+    <p>The creator picks the split when opening the Union. <b>Equal</b> pays every Credit the same. <b>Early Bird</b> pays by the order Credits went in, from 1.5× for the first down to 0.5× for the last.</p>
     ${calculator}
     <h3>Your place in line</h3>
-    <p>Early bird counts the order Credits went in, not where they sit on the sheet. If someone ahead of you leaves, everyone behind them moves up one place.</p>
+    <p>Early Bird counts the order Credits went in, not where they sit on the sheet. If someone ahead of you leaves, everyone behind them moves up one place.</p>
     <h3>Seeing your share</h3>
-    <p>A union’s page shows your share once you’re in, and what it’s worth at the current bid during the auction.</p>
+    <p>A Union’s page shows your share once you are in, and what it is worth at the current bid during the auction.</p>
     <h3>Getting paid</h3>
-    <p>Settling sends every member their share automatically. If your wallet can’t receive it, the share waits in the union and you can claim it from the union’s page.</p>`,
+    <p>Settling sends every member their share automatically. If your wallet cannot receive it, the share waits in the Union and you can claim it from the Union’s page.</p>`,
   },
   {
     id: 'fees',
     title: 'Fees',
-    body: `<p>Starting and joining a union is free apart from gas. Credit Union takes 2% of a Statement’s sale, only if it sells, and 2% on Credits you buy through the site.</p>`,
+    body: `<p>Starting and joining a Union is free apart from gas. Credit Union takes 2% of a Statement’s sale, only if it sells, and 2% on Credits you buy through the site.</p>`,
   },
   {
     id: 'safety',
@@ -191,7 +181,7 @@ const sections = (): Section[] => [
     body: `<p>The contracts hold every Credit and every bid. They have no owner, pause or upgrade, and nobody, us included, can move pooled Credits, bids or payouts.</p>
     <p>The code is open source on <a href="https://github.com/gtmcknight/creditunion" target="_blank" rel="noopener">GitHub</a>, with 264 tests, 51 formally proved rules and seven rounds of internal review. There has been no third-party audit.</p>
     <p>If this site goes down, everything still works from Etherscan: leaving, burning, bidding, settling and claiming.</p>
-    <p>Credit Union is independent and not affiliated with Jack Butcher. It’s experimental software; use it at your own risk.</p>`,
+    <p>Credit Union is independent and not affiliated with Jack Butcher. It is experimental software. Use it at your own risk.</p>`,
   },
   {
     id: 'contracts',
@@ -216,9 +206,9 @@ const sections = (): Section[] => [
 export function docs(app: HTMLElement) {
   const list = sections();
   app.innerHTML = `<section class="home docs-page">
-    ${pageHead({ title: 'Docs', lede: 'What Credits and Statements are, and how a Credit Union turns 80 Credits into a Statement and a payout.' })}
+    ${pageHead({ title: 'Docs', lede: 'What Credits and Statements are, and how a Union on Credit Union turns 80 Credits into a Statement and a payout.' })}
     ${basics()}
-    <p class="basics-cta"><a class="btn primary" href="/unions">Browse Credit Unions →</a><a class="btn" href="/create">Start your own</a></p>
+    <p class="basics-cta"><a class="btn primary" href="/unions">Browse Unions →</a><a class="btn" href="/create">Start your own</a></p>
     <div class="docs">
       <nav class="docs-nav">${list.map((x) => `<a href="#${x.id}">${x.title}</a>`).join('')}</nav>
       <div class="docs-body">${list.map((x) => `<section id="${x.id}" class="doc"><h2>${x.title}</h2>${x.body}</section>`).join('')}</div>
