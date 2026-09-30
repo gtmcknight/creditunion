@@ -71,6 +71,9 @@ async function route() {
   lastPath = location.pathname;
   if (!within && !again) {
     app.classList.remove('in');
+    // The page being left goes at once: what fades in next can only be the new page (the backstop below once brought
+    // the old one back while the new one was still loading).
+    app.replaceChildren();
     // It fades in as soon as the view has put something up, not after everything it loads: a view that waits on a
     // slow read (or a wallet) must never sit invisible. A moment later it shows regardless.
     // Not on an animation frame alone: a frame can be withheld (a busy tab, a wallet popup) until the next click or

@@ -8343,3 +8343,6 @@ dialog.how .small { margin-top: 16px; }
 @keyframes mark-rise { from { transform: scaleY(0); } }
 @keyframes mark-open { from { transform: scaleX(0); } }
 @media (prefers-reduced-motion: reduce) { .mark.build rect { animation: none; } }
+/* Cards off screen skip layout and paint until they near the view: a list of dozens of 80-Credit sheets costs only
+   what's showing to draw, to switch tabs on and to leave. The size is remembered once drawn, so scrolling holds still. */
+.grid > .card { content-visibility: auto; contain-intrinsic-size: auto 537px; }
