@@ -120,6 +120,9 @@ const byPlan = <T extends { id: string }>(list: T[], plan: Plan | null | undefin
 let pickAsk: { at: string; id: string } | null = null;
 /// Which Add Credits tab is open, per Credit Union, so a live refresh doesn't flip it back.
 let addTab: { at: string; tab: string } | null = null;
+/// /union/0x…?burn: the union whose page shows Make Statement before burns open (our own first burn on burn day).
+/// Read before the query string is cleared from the address bar, and kept for the visit.
+let burnAsk: string | null = null;
 /// Transactions in flight on this page: live refreshes wait while one is.
 let busy = 0;
 /// The live-refresh timer for the Credit Union on screen (one at a time).
@@ -180,6 +183,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     pickAsk = { at: address.toLowerCase(), id: want };
     addTab = { at: address, tab: 'mine' };
   }
+  if (new URLSearchParams(location.search).has('burn')) burnAsk = address.toLowerCase();
   if (location.search) history.replaceState(history.state, '', location.pathname);
   const s = b.s;
   const burned = s.state === 'Auction' || s.state === 'Settled';
@@ -761,7 +765,7 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
         'The Statement exists. Auction is open.'),
       );
     };
-    if (new URLSearchParams(location.search).has('burn')) show();
+    if (burnAsk === s.address.toLowerCase()) show();
     else fetch('/burns').then((r) => r.json()).then((b: { open?: boolean }) => b.open && show()).catch(() => {});
   }
 
