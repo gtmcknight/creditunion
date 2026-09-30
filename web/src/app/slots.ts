@@ -8,6 +8,7 @@ import { batchAbi, creditArtAbi, creditsAbi } from './abi';
 import { config, pub } from './chain';
 import { layoutSlot, type Summary } from './data';
 import { slotName } from '../shared/layout';
+import { idsKey } from '../shared/ids';
 
 const PRINTS = ['Registered', 'Nudge', 'Slip', 'Skew', 'Drift', 'Loose'];
 const WEIGHTS = ['even', 'lean', 'sparse', 'extreme'];
@@ -77,7 +78,7 @@ export async function placedKeys(batch: Address, ids: readonly bigint[]): Promis
   }
 }
 async function placedKeysOnce(batch: Address, ids: readonly bigint[]): Promise<Map<string, number>> {
-  const r = (await fetch(`/placed/${batch}`)
+  const r = (await fetch(`/placed/${batch}?v=${idsKey(ids)}`)
     .then((x) => (x.ok ? x.json() : null))
     .catch(() => null)) as { ids?: string[]; keys?: number[]; inks?: Record<string, [string, number, number]> } | null;
   if (r?.ids && r.keys) {

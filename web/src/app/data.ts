@@ -59,10 +59,21 @@ export type Rated = {
   tails: number[];
 };
 
+/// A Credit's rating never changes (its seed and payment time are fixed): each is asked for once per visit, so a page
+/// drawn again (a live refresh) asks only for Credits it hasn't seen.
+const rated = new Map<string, Rated>();
+let ratedOf: { n: number; version: string } | null = null;
 export async function ratings(ids: readonly bigint[]): Promise<{ n: number; version: string; ratings: Record<string, Rated> }> {
-  const r = await fetch('/ratings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: ids.map(String) }) });
-  if (!r.ok) throw new Error('Ratings unavailable.');
-  return r.json();
+  const all = [...new Set(ids.map(String))];
+  const want = all.filter((id) => !rated.has(id));
+  if (want.length || !ratedOf) {
+    const r = await fetch('/ratings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: want.length ? want : all }) });
+    if (!r.ok) throw new Error('Ratings unavailable.');
+    const j = (await r.json()) as { n: number; version: string; ratings: Record<string, Rated> };
+    ratedOf = { n: j.n, version: j.version };
+    for (const [id, v] of Object.entries(j.ratings ?? {})) rated.set(id, v);
+  }
+  return { ...ratedOf!, ratings: Object.fromEntries(all.flatMap((id) => (rated.has(id) ? [[id, rated.get(id)!]] : []))) };
 }
 
 export type Summary = {
@@ -132,10 +143,10 @@ function toSummary(address: Address, s: Record<string, unknown>): Summary {
 
 export type Listed = { s: Summary; ids: readonly bigint[]; depositors: readonly Address[] };
 
-/// Every Credit Union, newest first, from the Worker's union index (/unions.json: one cached multicall for
-/// everyone, preloaded by list pages). Most pages read it, so one read serves every page for a few seconds.
-/// Forgotten after any transaction of ours and whenever a page sees a Credit Union change; the next read then
-/// skips the Worker's cache.
+/// Every Credit Union, newest first, from the Worker's union index (/unions.json: read once for the whole site,
+/// preloaded by list pages). Most pages read it, so one read serves every page for a few seconds. Forgotten after
+/// any transaction of ours (the next read then asks the Worker for a read made after it) and whenever a page sees a
+/// Credit Union change.
 const LIST_MS = 10_000;
 let listed: { at: number; p: Promise<Listed[]>; value?: Listed[] } | null = null;
 let fresh = false;
@@ -162,6 +173,16 @@ export const forgetBatches = () => {
   fresh = true;
 };
 onTx(forgetBatches);
+/// Someone else changed a union (a page saw it): the next list read goes to the index again, without `fresh`,
+/// which is for this wallet's own transactions.
+export const staleBatches = () => {
+  listed = null;
+};
+/// When this wallet last sent a transaction: for a while after, a page reads the chain rather than the index, which
+/// can be a block behind what the wallet just did.
+let txAt = 0;
+onTx(() => (txAt = Date.now()));
+export const sinceTx = () => Date.now() - txAt;
 
 type Indexed = { address: Address; summary: Record<string, unknown>; ids: number[]; depositors: Address[] };
 async function readBatches(fresh: boolean): Promise<Listed[]> {
@@ -173,6 +194,21 @@ async function readBatches(fresh: boolean): Promise<Listed[]> {
 
 /// Just the summary: a cheap read for spotting changes.
 export const getSummary = async (a: Address) => toSummary(a, (await pub.readContract({ address: a, abi: batchAbi, functionName: 'summary' })) as Record<string, unknown>);
+
+/// One union from the Worker's index (read once for the whole site, a few seconds old at most), for a page that
+/// watches it: no chain read per viewer. Null when the index doesn't have it (a plan's union still filling, one made
+/// in the last seconds) or can't be read: then read the chain with getBatch.
+/// `at`: when the Worker's read began (unix seconds), to tell an older answer from a newer one.
+export async function indexedOne(a: Address): Promise<(Listed & { at: number }) | null> {
+  try {
+    const r = await fetch(`/unions.json?union=${a.toLowerCase()}`);
+    if (!r.ok) return null;
+    const { at, union: u } = fromJson(await r.text()) as { at: number; union: Indexed | null };
+    return u ? { s: toSummary(u.address, u.summary), ids: u.ids.map(BigInt), depositors: u.depositors, at } : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function getBatch(a: Address) {
   const [s, slots] = await Promise.all([
@@ -198,14 +234,27 @@ export function me(batch: Address, account: Address) {
 }
 
 async function readMine(batch: Address, account: Address) {
-  const [shares, claimable, owed, approved, owned] = await Promise.all([
+  const [shares, claimable, owed, [approved, owned]] = await Promise.all([
     pub.readContract({ address: batch, abi: batchAbi, functionName: 'sharesOf', args: [account] }),
     pub.readContract({ address: batch, abi: batchAbi, functionName: 'claimable', args: [account] }),
     pub.readContract({ address: batch, abi: batchAbi, functionName: 'owed', args: [account] }),
-    isApproved(account),
-    myCredits(account),
+    walletReads(account),
   ]);
   return { shares: Number(shares), claimable, owed, approved, owned };
+}
+
+/// The wallet's own side (its Credits, and whether the factory may move them), the same for every union: read once
+/// for all of them for MINE_MS, and again after any transaction of ours.
+const wallets = new Map<string, { at: number; p: Promise<[boolean, readonly bigint[]]> }>();
+onTx(() => wallets.clear());
+function walletReads(account: Address) {
+  const k = account.toLowerCase();
+  const hit = wallets.get(k);
+  if (hit && Date.now() - hit.at < MINE_MS) return hit.p;
+  const p = Promise.all([isApproved(account), myCredits(account)]) as Promise<[boolean, readonly bigint[]]>;
+  wallets.set(k, { at: Date.now(), p });
+  p.catch(() => wallets.get(k)?.p === p && wallets.delete(k));
+  return p;
 }
 
 export const isApproved = (account: Address) =>

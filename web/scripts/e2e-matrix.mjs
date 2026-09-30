@@ -105,8 +105,9 @@ async function site(m) {
     compatibility_date: '2026-09-01',
     assets: { binding: 'ASSETS', not_found_handling: 'single-page-application', run_worker_first: JSON.parse(readFileSync(join(WEB, 'wrangler.jsonc'), 'utf8').replace(/("(?:[^"\\]|\\.)*")|\/\/[^\n]*/g, (_, str) => str ?? '')).assets.run_worker_first },
     kv_namespaces: [{ binding: 'PLANS', id: 'plans-e2e' }], // Picture unions keep their picture here
-    durable_objects: { bindings: [{ name: 'LOCKS', class_name: 'BuyLocks' }] },
-    migrations: [{ tag: 'v1', new_sqlite_classes: ['BuyLocks'] }],
+    // ChainBook: the union index and Activity read once for the site, as in production (index.ts).
+    durable_objects: { bindings: [{ name: 'LOCKS', class_name: 'BuyLocks' }, { name: 'CHAIN', class_name: 'ChainBook' }] },
+    migrations: [{ tag: 'v1', new_sqlite_classes: ['BuyLocks'] }, { tag: 'v3', new_sqlite_classes: ['ChainBook'] }],
     vars: { CHAIN_ID: '31337', CREDITS: m.credits, FACTORY: m.factory, RATINGS: m.ratings, SWEEPER: '0x0000000000000000000000000000000000000000', OPENSEA_SLUG: 'credits', RPC_URL: RPC, FALLBACK_RPC: RPC },
   };
   const path = join(OUT, 'wrangler.json');
@@ -436,11 +437,11 @@ async function picture(page) {
 /// The preview's Credit in each slot (yours going in, or the one the picture wants there).
 const planned = (page) => page.$$eval('#preview .sheet .cell', (cs) => cs.map((c) => c.dataset.id ?? c.dataset.ghost ?? null));
 /// Each slot's Colors, from the Rules view (then back to the Credits). Its button only shows on a hand-painted
-/// layout, so a picture's is pressed from script.
+/// layout, and the directions sit in a closed menu, so both are pressed from script.
 async function colours(page) {
   await page.$eval('.dirs [data-dir="Rules"]', (b) => b.click());
   const v = await page.$$eval('#preview .rule-cell', (cs) => cs.map((c) => Number(c.dataset.v)));
-  await page.click('.dirs [data-dir="Consolidated"]');
+  await page.$eval('.dirs [data-dir="Consolidated"]', (b) => b.click());
   await page.waitForTimeout(300);
   return v;
 }

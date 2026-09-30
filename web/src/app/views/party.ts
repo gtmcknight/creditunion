@@ -1,7 +1,7 @@
 import { parseAbi, parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi } from '../abi';
 import { canBatch, config, explorer, pub, send, sendBatch, session } from '../chain';
-import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, forgetBatches, getBatch, hasLayout, indexedBatch, layoutSlot, me, placeOnLayout, ratings, type Rated } from '../data';
+import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, indexedBatch, indexedOne, layoutSlot, me, placeOnLayout, ratings, sinceTx, staleBatches, type Rated } from '../data';
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { hydrate, identicon, pct, who } from '../ens';
 import { creditCard, examples, fillGhosts, planGhosts, registerDeposits, registerFilter } from '../ghosts';
@@ -124,7 +124,9 @@ let addTab: { at: string; tab: string } | null = null;
 let busy = 0;
 /// The live-refresh timer for the Credit Union on screen (one at a time).
 let live: ReturnType<typeof setInterval> | null = null;
-const LIVE_MS = 12_000; // about one block
+const LIVE_MS = 8_000; // under a block: the index it reads is kept for everyone, so a poll costs no chain read
+/// How long after this wallet's own transaction the page reads the chain rather than the index.
+const TX_MS = 30_000;
 
 /// What each union's sheet is showing, for the visit: the page re-renders as Credits come in.
 const shown = new Map<string, string>();
@@ -141,18 +143,26 @@ function showSwitch(count: number, mine: number, on: string) {
     .join('')}</div>`;
 }
 
-export async function party(app: HTMLElement, address: Address, rerender: () => void) {
+/// `got`: the union as a live refresh just read it, drawn without reading it again.
+export async function party(app: HTMLElement, address: Address, rerender: () => void, got?: Ctx & { at?: number }) {
   let b: Ctx;
+  let at = got?.at ?? 0;
   const account = session.account;
   // Your side of it (shares, what you're owed, your Credits), read alongside the Credit Union, not after it.
   const mine = account ? me(address, account) : null;
   // From the Credit Union index when a page read it in the last minute (being in it is being ours): the page shows at
-  // once, and is checked against the chain right after. Otherwise only parties our factory made: any contract can
-  // answer summary() with a made-up party. A read that fails (the network, a rate limit) says so, rather than that
-  // the Credit Union doesn't exist.
-  const indexed = indexedBatch(address);
-  if (indexed) b = indexed.b;
-  else {
+  // once, and is checked against the chain right after. Otherwise from the Worker's index of it (a few seconds old,
+  // no chain read), unless this wallet just sent a transaction the index may not have yet. Otherwise only parties our
+  // factory made: any contract can answer summary() with a made-up party. A read that fails (the network, a rate
+  // limit) says so, rather than that the Credit Union doesn't exist.
+  const indexed = got ? null : indexedBatch(address);
+  const one = got || indexed || sinceTx() < TX_MS ? null : await indexedOne(address);
+  if (got) b = got;
+  else if (indexed) b = indexed.b;
+  else if (one) {
+    b = one;
+    at = one.at;
+  } else {
     const [ours, got] = await Promise.all([
       pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'isBatch', args: [address] }).catch(() => null),
       getBatch(address).catch(() => null),
@@ -279,7 +289,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   </section>`;
   hydrate(app);
   document.getElementById('depositors-btn')?.addEventListener('click', () => openDepositors(b, account ?? null));
-  loadBids(s.address, account ?? null);
+  loadBids(s.address, account ?? null, s.highBid);
   void activityFold(s.address);
   // Chrome keeps a focus ring on <summary> after a mouse click; drop it for pointer use only.
   app.querySelectorAll<HTMLElement>('.more summary').forEach((el) => el.addEventListener('pointerup', () => setTimeout(() => el.blur(), 0)));
@@ -394,7 +404,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     });
   });
   bind(b, m, myIds, rerender, keyed);
-  watchLive(app, address, b, rerender, !!indexed);
+  watchLive(app, address, b, rerender, !!indexed, at);
   // Just made on the create page: congratulate once. The flag goes as soon as it's read, so a refresh won't reshow it.
   try {
     if (sessionStorage.getItem('cu-created')?.toLowerCase() === address.toLowerCase()) {
@@ -414,8 +424,10 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
 /// (someone deposited, withdrew, bid, or it locked). Which Credits are in and whose they are count too, so a deposit
 /// and a withdrawal in the same block, which leave the count where it was, still show. Waits while the tab is hidden, a
 /// transaction is in flight or a dialog is open. New Credits drop in with the usual animation. `now`: look once
-/// straight away too (the page was drawn from the index, which can be a few seconds old).
-function watchLive(app: HTMLElement, address: Address, b: Ctx, rerender: () => void, now = false) {
+/// straight away too (the page was drawn from the index, which can be a few seconds old). Reads the Worker's index
+/// of the union (one read for everyone watching), or the chain for a while after this wallet's own transaction;
+/// `at` is how new the page's read is, so an older index answer never takes the page back.
+function watchLive(app: HTMLElement, address: Address, b: Ctx, rerender: () => void, now = false, at = 0) {
   if (live) clearInterval(live);
   const mark = ({ s, ids, depositors }: Ctx) => `${stamp(s.state, s.count, s.highBid)}:${s.lockAt}:${s.state}:${ids.join()}:${depositors.join().toLowerCase()}`;
   const was = mark(b);
@@ -428,13 +440,15 @@ function watchLive(app: HTMLElement, address: Address, b: Ctx, rerender: () => v
     }
     if (document.hidden || busy || document.querySelector('dialog[open]')) return;
     try {
-      const n = await getBatch(address);
+      const one = sinceTx() < TX_MS ? null : await indexedOne(address);
+      if (one && one.at < at) return; // an older read than the page's
+      const n: Ctx & { at?: number } = one ?? (await getBatch(address));
       if (location.pathname !== path || busy) return;
       if (mark(n) !== was) {
         clearInterval(live!);
         live = null;
-        forgetBatches(); // the lists should show it changed too
-        await party(app, address, rerender);
+        staleBatches(); // the lists should show it changed too
+        await party(app, address, rerender, n);
       }
     } catch {}
   };
@@ -810,25 +824,33 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
   );
 
   // Lock countdowns tick in place. When one runs out the phase has moved on: read the party again, a few
-  // seconds late so the chain has a block past the boundary.
+  // seconds late so the chain has a block past the boundary, and spread over a few more so everyone watching doesn't
+  // read it in the same second.
   const clocks = $$('[data-clock]');
   if (clocks.length) {
+    const late = 3 + Math.random() * 5;
     const t = setInterval(() => {
       if (!clocks[0].isConnected) return clearInterval(t);
       for (const el of clocks) el.textContent = clock(Number(el.dataset.clock));
-      if (clocks.some((el) => Date.now() / 1000 >= Number(el.dataset.clock) + 3)) {
+      if (clocks.some((el) => Date.now() / 1000 >= Number(el.dataset.clock) + late)) {
         clearInterval(t);
         rerender();
       }
     }, 1000);
   }
 
-  // Live countdown
+  // The auction's countdown. When it runs out the page draws again, with Settle in place of the bid form: a few
+  // seconds late (a last-second bid adds time, and the live refresh brings it) and spread like the lock clocks.
   const cd = document.querySelector<HTMLElement>('[data-countdown]');
   if (cd) {
+    const end = Number(cd.dataset.countdown), late = 2 + Math.random() * 6;
     const t = setInterval(() => {
       if (!cd.isConnected) return clearInterval(t);
-      cd.textContent = until(Number(cd.dataset.countdown));
+      cd.textContent = until(end);
+      if (Date.now() / 1000 >= end + late && !busy && !document.querySelector('dialog[open]')) {
+        clearInterval(t);
+        rerender();
+      }
     }, 1000);
   }
 
@@ -1160,16 +1182,18 @@ async function bindBuy(
   // that fit, which the picture's may not be). The market read can be minutes old: one no longer for sale leaves the
   // plan, and its slot takes the next best, so nothing waits on a Credit that can't be bought.
   const gone = new Set<number>();
+  // A rate limit throws (listedById strict): the live refresh keeps what it has and tries again next time, rather than
+  // replanning around Credits that are only unread.
   const pictureListings = async (p: Plan) => {
     for (let tries = 0; tries < 5; tries++) {
       const want = byPlan([...p.buy].map((id) => ({ id })), p).slice(0, MAX_SWEEP).map((x) => x.id);
-      const ls = await listedById(want);
+      const ls = await listedById(want, true);
       const sold = want.filter((id) => !ls.some((l) => l.id === id));
       if (!sold.length) return { p, ls };
       sold.forEach((id) => gone.add(Number(id)));
       p = (await replans.get(batch.toLowerCase())?.(gone)) ?? p;
     }
-    return { p, ls: await listedById(byPlan([...p.buy].map((id) => ({ id })), p).slice(0, MAX_SWEEP).map((x) => x.id)) };
+    return { p, ls: await listedById(byPlan([...p.buy].map((id) => ({ id })), p).slice(0, MAX_SWEEP).map((x) => x.id), true) };
   };
   const repicture = async (p: Plan) => {
     const [got, lk] = await Promise.all([pictureListings(p), locks(batch)]);
@@ -1187,7 +1211,7 @@ async function bindBuy(
     clearTimeout(slow);
     if (!grid.isConnected) return;
     if (p) {
-      const [got, lk] = await Promise.all([pictureListings(p), locks(batch)]);
+      const [got, lk] = await Promise.all([pictureListings(p).catch(() => ({ p, ls: [] as Listed[] })), locks(batch)]);
       if (!grid.isConnected) return;
       order = got.p;
       all = got.ls;
@@ -1478,15 +1502,16 @@ function openDepositors(b: Ctx, account: string | null) {
 }
 
 
-/// The auction's bids, newest first: amount, who, when, and the transaction.
-async function loadBids(address: Address, account: string | null) {
+/// The auction's bids, newest first: amount, who, when, and the transaction. Asked for by the high bid the page
+/// shows, so the list always has it (and is kept for good once it does).
+async function loadBids(address: Address, account: string | null, high: bigint) {
   const list = document.getElementById('bid-list');
   const count = document.getElementById('bids-count');
   if (!list || !count) return;
   type Row = { bidder: Address; amount: string; end: number; block: number; tx: string; time: number };
   let rows: Row[] = [];
   try {
-    const r = await fetch(`/bids/${address}`);
+    const r = await fetch(`/bids/${address}?v=${high}`);
     const j = (await r.json()) as { bids?: Row[]; error?: string };
     if (!r.ok || j.error) throw new Error(j.error ?? 'No bids');
     rows = j.bids ?? [];

@@ -296,10 +296,14 @@ document.addEventListener('click', (e) => {
 });
 
 // A slider dragged with the pointer keeps no focus ring; one moved with the keyboard shows it.
-// Reading ahead: a pointer over a link to a Credit Union starts reading your side of it, so it opens with it there.
+// Reading ahead: a pointer resting on a link to a Credit Union starts reading your side of it, so it opens with it
+// there. Resting, not passing: a pointer crossing a grid of cards reads none of them.
+let ahead: ReturnType<typeof setTimeout> | null = null;
 document.addEventListener('pointerover', (e) => {
   const to = (e.target as HTMLElement).closest?.<HTMLAnchorElement>('a[href^="/union/0x"]')?.pathname.slice(7);
-  if (to && /^0x[0-9a-fA-F]{40}$/.test(to) && session.account) void me(to as Address, session.account).catch(() => {});
+  if (ahead) clearTimeout(ahead);
+  ahead = null;
+  if (to && /^0x[0-9a-fA-F]{40}$/.test(to) && session.account) ahead = setTimeout(() => session.account && void me(to as Address, session.account).catch(() => {}), 150);
 });
 document.addEventListener('pointerdown', (e) => (e.target as HTMLElement).closest?.('.sweep-range input')?.setAttribute('data-pointer', ''), true);
 document.addEventListener('keydown', (e) => (e.target as HTMLElement).closest?.('.sweep-range input')?.removeAttribute('data-pointer'), true);
@@ -338,7 +342,10 @@ function siteTicker(page: string) {
     const t = document.getElementById('site-ticker');
     if (t) void activityTicker(t);
   }
-  if (tickerEl) tickerEl.hidden = ['activity', 'live', 'create', 'me', 'member', 'party'].includes(page);
+  if (!tickerEl) return;
+  const was = tickerEl.hidden;
+  tickerEl.hidden = ['activity', 'live', 'create', 'me', 'member', 'party'].includes(page);
+  if (was && !tickerEl.hidden) document.getElementById('site-ticker')?.dispatchEvent(new Event('refresh'));
 }
 
 // The mark builds once on load and again on hover; a hover mid-build lets it finish.

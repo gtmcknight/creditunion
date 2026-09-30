@@ -1,16 +1,19 @@
 /// Credit Union's Worker. It holds no state and signs nothing. Its jobs:
 ///   /config.json   chain id and contract addresses for the app
 ///   /rpc           read-only JSON-RPC proxy to our contracts (and Credits' art) only (keeps the provider key private)
-///   /unions.json   every Credit Union, summary and slots, one cached multicall for all visitors
+///   /unions.json   every Credit Union, summary and slots, read once per block for the whole site (ChainBook);
+///                  ?union= just one, which a union page polls instead of the chain
 ///   /passes        which of a wallet's Credits a Credit Union takes, in one multicall
 ///   /activity.json what wallets have done on the site, newest first (the Activity page)
-///   /art/...       a Credit's art, read from Jack's art contract and cached forever (art never changes)
+///   /art/...       a Credit's art, read from Jack's art contract once and kept for good in KV (art never changes)
 ///   /*.bin         the edition's data files, precompressed at build and cached by the browser until they change
 ///   /opensea/quote cheapest listings that fit a batch (OpenSea as signed Seaport orders, FWA, CreditStrategy)
 ///   /opensea/credit/:id  one Credit's best OpenSea listing price (mainnet's, as a preview, on testnets)
+///   /opensea/credits?ids=  many Credits' best listings at once, from the market book
 ///   /ens/:address  primary ENS name (always from mainnet), cached a day
 /// Every response carries the security headers in `secure()` (headers.ts; the build copies them into _headers for
 /// what the asset layer serves on its own).
+import { DurableObject } from 'cloudflare:workers';
 import { createPublicClient, fallback, hexToBytes, http, type Address, type Hex, parseAbiItem } from 'viem';
 import { mainnet } from 'viem/chains';
 import { normalize } from 'viem/ens';
@@ -29,6 +32,7 @@ import { readActivity, type Activity } from './activity';
 import { keyOf, ruleFor } from '../shared/layout';
 import { ALWAYS, CSP, HSTS } from './headers';
 import { fromJson, toJson } from '../shared/json';
+import { idsKey } from '../shared/ids';
 import { keep, type Kept } from './keeper';
 
 interface RateLimit {
@@ -63,6 +67,8 @@ interface Env {
   /// Buy locks for Picture unions (locks.ts), one object per union.
   LOCKS?: DurableObjectNamespace<import('./locks').BuyLocks>;
   MARKET?: DurableObjectNamespace<import('./market').MarketBook>;
+  /// The chain read once for the whole site: the union index and the Activity feed (ChainBook, below).
+  CHAIN?: DurableObjectNamespace<ChainBook>;
   /// FWA's marketplace on mainnet: a second Buy Credits source. Empty to turn it off.
   FWA_MARKET?: string;
   /// CreditStrategy (nftstrategy.fun) on mainnet: the Credits it holds for sale are a third Buy Credits source.
@@ -97,6 +103,8 @@ const inSupply = (id: number) => Number.isInteger(id) && id >= 1 && id <= SUPPLY
 const OLD_HOSTS = new Set(['creditunion.party', 'eighty.fun', 'www.eighty.fun', 'eighty.rhps.fun']);
 const SITE_HOST = 'creditunion.fun';
 const rpcUrl = (env: Env) => env.RPC_URL || env.FALLBACK_RPC;
+/// The RPCs to try in order: the paid one, then the public one.
+const rpcList = (env: Env) => [...new Set([env.RPC_URL, env.FALLBACK_RPC].filter((u): u is string => !!u))];
 /// The public node behind the paid RPC, for when the paid key is over its limit, refused or down.
 const hasFallback = (env: Env) => !!env.RPC_URL && !!env.FALLBACK_RPC && env.RPC_URL !== env.FALLBACK_RPC;
 const rpcTransport = (env: Env) =>
@@ -107,6 +115,16 @@ const inflight = new Map<string, Promise<Awaited<ReturnType<typeof scan>>>>();
 // promise resolved in another request's context is cancelled when that request ends (the Worker then "hangs").
 const client = (env: Env) => createPublicClient({ transport: rpcTransport(env) });
 const isDev = (url: URL) => url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+
+/// What never changes (a Credit's art, its seed) or changes slowly (an ENS name, with `ttl`), kept once in KV for
+/// every data center: the colo cache is per data center, so without this each of them reads the chain for the same
+/// thing. Misses and failures are nothing, never an error.
+async function keptGet(env: Env, key: string): Promise<string | null> {
+  return env.PLANS ? env.PLANS.get(key, { cacheTtl: 3600 }).catch(() => null) : null;
+}
+async function keptPut(env: Env, key: string, value: string, ttl?: number): Promise<void> {
+  await env.PLANS?.put(key, value, ttl ? { expirationTtl: ttl } : undefined).catch(() => {});
+}
 
 /// Responses whose body is already compressed (serveBin): passed on as they are, not encoded again.
 const precompressed = new WeakSet<Response>();
@@ -233,17 +251,48 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-/// Every Activity row (newest first) with plans' unions left out until they fill: built at most once per 15 seconds
-/// per colo and kept in the colo cache, so /activity.json's slices never rescan.
+/// Every Activity row (newest first) with plans' unions left out until they fill. Read once for the site by the
+/// ChainBook (at most every FEED_MS), kept FEED_MS in the colo cache and in this isolate, so /activity.json's slices
+/// never rescan and never parse the whole feed per request. Without the ChainBook, this data center reads it itself.
+let feedMemo: { got: number; at: number; items: Activity[] } | null = null;
+let feedRead: Promise<Activity[]> | null = null;
 async function activityAll(env: Env, url: URL, ctx: ExecutionContext): Promise<Activity[]> {
-  const cache = caches.default;
-  const key = new Request(`${url.origin}/activity-all`);
-  const hit = await cache.match(key);
-  if (hit) return (await hit.json()) as Activity[];
+  if (feedMemo && Date.now() - feedMemo.got < FEED_MS) return feedMemo.items;
+  if (feedRead) return feedRead;
+  const p = (async () => {
+    const key = new Request(`${url.origin}/activity-all/v2`);
+    const hit = await caches.default.match(key);
+    const at = Number(hit?.headers.get('x-read-at'));
+    if (hit && at) {
+      const items = feedMemo?.at === at ? feedMemo.items : ((await hit.json()) as Activity[]);
+      feedMemo = { got: Date.now(), at, items };
+      return items;
+    }
+    let v: { at: number; body: string };
+    const book = chainBook(env);
+    try {
+      if (!book) throw new Error('no ChainBook');
+      v = await book.activity(BOOK_MS);
+    } catch (e) {
+      if (book) console.warn('[chain] feed read here', safeError(e));
+      v = { at: Date.now(), body: JSON.stringify(await activityItems(env, caches.default, `${url.origin}/activity-state/${env.FACTORY.toLowerCase()}`)) };
+    }
+    ctx.waitUntil(caches.default.put(key, new Response(v.body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${FEED_MS / 1000}`, 'x-read-at': String(v.at) } })));
+    const items = JSON.parse(v.body) as Activity[];
+    feedMemo = { got: Date.now(), at: v.at, items };
+    return items;
+  })();
+  feedRead = p;
+  void p.finally(() => feedRead === p && (feedRead = null)).catch(() => {});
+  return p;
+}
+
+/// The feed read from the chain: the scan state lives in `store` (the colo cache, or the ChainBook's storage).
+async function activityItems(env: Env, store: Cache, stateKey: string): Promise<Activity[]> {
   const c = client(env);
   // Mainnet scans from the factory's deploy block; elsewhere, the last ~2 weeks.
   const from = env.CHAIN_ID === '1' ? ACTIVITY_FROM : (await c.getBlockNumber()) - 100_000n;
-  const items = await readActivity(c as never, cache, `${url.origin}/activity-state/${env.FACTORY.toLowerCase()}`, {
+  const items = await readActivity(c as never, store, stateKey, {
     factory: env.FACTORY,
     sweeper: hasSweeper(env) ? env.SWEEPER : null,
     credits: env.CREDITS,
@@ -258,9 +307,7 @@ async function activityAll(env: Env, url: URL, ctx: ExecutionContext): Promise<A
       if (!s || Number(s.count) < 80) filling.add(a);
     }),
   );
-  const shown = filling.size ? items.filter((x) => !x.union || !filling.has(x.union.toLowerCase())) : items;
-  ctx.waitUntil(cache.put(key, Response.json(shown, { headers: { 'cache-control': 'public, max-age=15' } })));
-  return shown;
+  return filling.size ? items.filter((x) => !x.union || !filling.has(x.union.toLowerCase())) : items;
 }
 
 /// Burn day's hold: until the PLANS key `burns-open` is "1", the keeper doesn't burn and the page hides Make Statement
@@ -280,6 +327,41 @@ const publicConfig = (env: Env) => ({
   fwaMarket: addrOrNull(env.FWA_MARKET),
 });
 
+/// /edition/match answers kept per isolate: the edition never changes within a deploy, and every visitor of /unions
+/// asks for the same cards' examples.
+const matchMemo = new Map<string, Awaited<ReturnType<typeof match>>>();
+/// A /edition/match body as the matcher's Rules (and page); throws on anything out of range.
+function matchRules(b: Record<string, unknown>): { rules: Rules; page: number } {
+  const int = (k: string, min: number, max: number, dflt: number) => {
+    const v = b[k];
+    if (v === undefined || v === null) return dflt;
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < min || v > max) throw 0;
+    return v;
+  };
+  const list = Array.isArray(b.list) ? b.list : [];
+  if (list.length > 200 || list.some((x) => typeof x !== 'number' || !Number.isInteger(x) || x < 1 || x > 1e7)) throw 0;
+  return {
+    rules: {
+      palettes: int('palettes', 0, 0xffff, 0),
+      prints: int('prints', 0, 63, 0),
+      weights: int('weights', 0, 15, 0),
+      eights: int('eights', 0, 0x7fffffff, 0),
+      minuteFrom: int('minuteFrom', -1, 4000, -1),
+      minuteTo: int('minuteTo', -1, 4000, -1),
+      idFrom: int('idFrom', 0, 1e7, 0),
+      idTo: int('idTo', 0, 1e7, 0),
+      minScore: int('minScore', 0, 8000, 0),
+      maxScore: int('maxScore', 0, 8000, 0),
+      list: list as number[],
+      paidFrom: int('paidFrom', 0, 0xffffffff, 0),
+      paidTo: int('paidTo', 0, 0xffffffff, 0),
+      bitsFrom: int('bitsFrom', 0, 256, 0),
+      bitsTo: int('bitsTo', 0, 256, 0),
+    },
+    page: int('page', -1, 2000, -1),
+  };
+}
+
 async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): Promise<Response> {
   if (url.pathname === '/burns') return Response.json({ open: await burnsOpen(env) }, { headers: { 'cache-control': 'public, max-age=15' } });
   if (url.pathname === '/config.json') return Response.json(publicConfig(env), { headers: { 'cache-control': 'public, max-age=60' } });
@@ -287,11 +369,20 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   if (url.pathname === '/rpc') return rpc(req, env, url);
 
   // Every Credit Union with its summary and slots, one cached read for everyone (the lists, profiles, Credit pages).
+  // ?union=0x…: just that one, { at, union } (null when the index doesn't have it), which a union page polls instead
+  // of the chain.
   if (url.pathname === '/unions.json') {
     if (req.method !== 'GET' || !sameSite(req)) return text('forbidden', 403);
     const fresh = url.searchParams.has('fresh'); // after the reader's own transaction: skip the cache
     if (fresh && (await limited(env.RL_MISC, req))) return text('slow down', 429);
-    return unionsJson(env, url, ctx, fresh);
+    try {
+      const v = await unionIndex(env, url, ctx, fresh);
+      const one = url.searchParams.get('union');
+      const body = one ? oneUnion(v, one) : v.body;
+      return new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${INDEX_MS / 1000}` } });
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
   }
 
   // Which of a wallet's Credits a Credit Union would take (Batch.passes), all in one multicall: a holder of
@@ -336,46 +427,36 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   }
 
   // Design-time counts: how many Credits in the edition satisfy a rule set.
+  // { many: [rules…] } (up to 50): each answered in turn, as { many: [answer…] }, for a page that needs several (the
+  // union cards' examples) in one request.
   if (url.pathname === '/edition/match') {
     if (req.method !== 'POST' || !sameSite(req)) return text('forbidden', 403);
-    let page = -1;
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
-    let rules: Rules;
+    let asks: { rules: Rules; page: number; key: string }[];
+    let many = false;
     try {
-      const raw = await readBody(req, 16_000);
+      const raw = await readBody(req, 64_000);
       if (raw === null) return text('too large', 413);
       const b = JSON.parse(raw) as Record<string, unknown>;
-      const int = (k: string, min: number, max: number, dflt: number) => {
-        const v = b[k];
-        if (v === undefined || v === null) return dflt;
-        if (typeof v !== 'number' || !Number.isInteger(v) || v < min || v > max) throw 0;
-        return v;
-      };
-      const list = Array.isArray(b.list) ? b.list : [];
-      if (list.length > 200 || list.some((x) => typeof x !== 'number' || !Number.isInteger(x) || x < 1 || x > 1e7)) throw 0;
-      rules = {
-        palettes: int('palettes', 0, 0xffff, 0),
-        prints: int('prints', 0, 63, 0),
-        weights: int('weights', 0, 15, 0),
-        eights: int('eights', 0, 0x7fffffff, 0),
-        minuteFrom: int('minuteFrom', -1, 4000, -1),
-        minuteTo: int('minuteTo', -1, 4000, -1),
-        idFrom: int('idFrom', 0, 1e7, 0),
-        idTo: int('idTo', 0, 1e7, 0),
-        minScore: int('minScore', 0, 8000, 0),
-        maxScore: int('maxScore', 0, 8000, 0),
-        list: list as number[],
-        paidFrom: int('paidFrom', 0, 0xffffffff, 0),
-        paidTo: int('paidTo', 0, 0xffffffff, 0),
-        bitsFrom: int('bitsFrom', 0, 256, 0),
-        bitsTo: int('bitsTo', 0, 256, 0),
-      };
-      page = int('page', -1, 2000, -1);
+      many = Array.isArray(b.many);
+      const each = many ? (b.many as Record<string, unknown>[]) : [b];
+      if (!each.length || each.length > 50) throw 0;
+      asks = each.map((one) => ({ ...matchRules(one), key: JSON.stringify(one) }));
     } catch {
       return text('bad request', 400);
     }
     try {
-      return Response.json(await match(env.ASSETS, url.origin, rules, page >= 0 ? 120 : 80, page), { headers: { 'cache-control': 'no-store' } });
+      const out = [];
+      for (const a of asks) {
+        let m = matchMemo.get(a.key);
+        if (!m) {
+          m = await match(env.ASSETS, url.origin, a.rules, a.page >= 0 ? 120 : 80, a.page);
+          if (matchMemo.size >= 2000) matchMemo.delete(matchMemo.keys().next().value!);
+          matchMemo.set(a.key, m);
+        }
+        out.push(m);
+      }
+      return Response.json(many ? { many: out } : out[0], { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502 });
     }
@@ -384,8 +465,13 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   // The whole book for the Printer: every Credit for sale (OpenSea, CreditStrategy, FWA), cheapest listing each, as
   // [id, price in wei, source]. Rebuilt every 5 minutes by the cron (reading it cold takes a minute or more), so
   // this is one storage read; buying re-prices each Credit anyway.
+  // Kept 30 s in the colo cache, so a data center pulls the ~2 MB book from the object twice a minute at most, however
+  // many pages ask; only a request that has to pull it counts against the rate limit.
   if (url.pathname === '/market.json') {
     if (!sameSite(req)) return text('forbidden', 403);
+    const key = new Request(`${url.origin}/market.json/v2`);
+    const hit = await caches.default.match(key);
+    if (hit) return hit;
     if (await limited(env.RL_MISC, req, 20)) return text('slow down', 429);
     try {
       if (!env.MARKET) return Response.json({ at: Date.now(), items: [] });
@@ -397,7 +483,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         if (kept) return new Response(kept, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=30' } });
       }
       const body = await b.snapshot();
-      return new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=30' } });
+      const res = new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=30' } });
+      ctx.waitUntil(caches.default.put(key, res.clone()));
+      return res;
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502 });
     }
@@ -456,24 +544,37 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   if (placedPath) {
     if (req.method !== 'GET' || !sameSite(req)) return text('forbidden', 403);
     const batch = placedPath[1] as Address;
+    const edgeFor = (k: string) => new Request(`${url.origin}/placed-cache/v2/${batch.toLowerCase()}/${k}`);
+    // ?v= names the ids the page has (idsKey): when the edge has that answer, no chain read at all.
+    const v = url.searchParams.get('v');
+    if (v && /^[0-9a-z]{1,8}-\d{1,2}$/.test(v)) {
+      const hit = await caches.default.match(edgeFor(v));
+      if (hit) return hit;
+    }
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
     try {
       const c = client(env);
       const [ids] = (await c.readContract({ address: batch, abi: batchAbi, functionName: 'slots' })) as readonly [readonly bigint[], readonly Address[]];
-      const edge = new Request(`${url.origin}/placed-cache/${batch.toLowerCase()}/${ids.join('.')}`);
-      const hit = await caches.default.match(edge);
-      if (hit) return hit;
+      const now = idsKey(ids);
+      // The browser keeps an answer for good only under the URL that names its ids.
+      const asked = v === now;
+      const hit = await caches.default.match(edgeFor(now));
+      if (hit) return asked ? hit : new Response(hit.body, { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
       const keyCalls = ids.map((id) => ({ address: batch, abi: batchAbi, functionName: 'keyOf', args: [id] }) as const);
       const [keys, rated] = await Promise.all([
         hasMulticall(env)
           ? c.multicall({ contracts: keyCalls, allowFailure: false, multicallAddress: MULTICALL3 })
           : Promise.all(keyCalls.map((x) => c.readContract(x))),
-        ids.length ? ratings({ assets: env.ASSETS, origin: url.origin, rpc: rpcUrl(env), credits: env.CREDITS, ids: [...ids] }).catch(() => null) : null,
+        ids.length ? ratings({ assets: env.ASSETS, origin: url.origin, rpcs: rpcList(env), kv: env.PLANS, credits: env.CREDITS, ids: [...ids] }).catch(() => null) : null,
       ]);
       const inks: Record<string, [string, number, number]> = {};
       for (const [id, v] of Object.entries((rated?.ratings ?? {}) as Record<string, { seed?: string; paidAt?: number; score?: number }>)) if (v?.seed) inks[id] = [v.seed, v.paidAt ?? 0, v.score ?? 0];
       const body = JSON.stringify({ ids: ids.map(String), keys: (keys as unknown[]).map(Number), inks });
-      ctx.waitUntil(caches.default.put(edge, new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=86400' } })));
-      return new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+      // Without every ink (a busy RPC), kept only a minute, so the next read fills them in.
+      const whole = ids.every((id) => inks[id.toString()]);
+      const keep = whole ? 'public, max-age=31536000, immutable' : 'public, max-age=60';
+      ctx.waitUntil(caches.default.put(edgeFor(now), new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': keep } })));
+      return new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': asked ? keep : 'no-store' } });
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
     }
@@ -493,21 +594,23 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       const stored = await env.PLANS.get(key);
       // No picture: an empty answer rather than a 404, which browsers log as an error for every plain union on a page.
       if (!stored) return Response.json(null, { headers: { 'cache-control': 'public, max-age=30' } });
-      let body = stored;
+      let body = stored, whole = false;
       try {
         const d = JSON.parse(stored) as { ids?: (number | null)[] };
         const ids = [...new Set((d.ids ?? []).filter((x): x is number => typeof x === 'number' && inSupply(x)))].map(BigInt);
         if (ids.length) {
-          const r = await ratings({ assets: env.ASSETS, origin: url.origin, rpc: rpcUrl(env), credits: env.CREDITS, ids });
+          const r = await ratings({ assets: env.ASSETS, origin: url.origin, rpcs: rpcList(env), kv: env.PLANS, credits: env.CREDITS, ids });
           const inks: Record<string, [string, number, number]> = {};
           for (const [id, v] of Object.entries(r.ratings as Record<string, { seed?: string; paidAt?: number; score?: number }>)) if (v?.seed) inks[id] = [v.seed, v.paidAt ?? 0, v.score ?? 0];
           body = JSON.stringify({ ...d, inks });
+          whole = ids.every((id) => inks[id.toString()]);
         }
       } catch {
         // no ink: the page reads it itself, as before
       }
       const res = new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=300' } });
-      if (body !== stored) ctx.waitUntil(caches.default.put(edge, new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=86400' } })));
+      // Missing any ink (a busy RPC): kept a minute, so a later read fills them in.
+      if (body !== stored) ctx.waitUntil(caches.default.put(edge, new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${whole ? 86400 : 60}` } })));
       return res;
     }
     if (req.method !== 'POST') return text('bad request', 400);
@@ -661,7 +764,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       return text('bad request', 400);
     }
     try {
-      const r = await ratings({ assets: env.ASSETS, origin: url.origin, rpc: rpcUrl(env), credits: env.CREDITS, ids });
+      const r = await ratings({ assets: env.ASSETS, origin: url.origin, rpcs: rpcList(env), kv: env.PLANS, credits: env.CREDITS, ids });
       return Response.json(r, { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502 });
@@ -709,7 +812,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     if (ids && ids.some((x) => !/^\d{1,7}$/.test(x))) return text('bad request', 400);
     if (!(await isBatch(env, url, batch as Address))) return text('not a batch', 404);
     try {
-      let listings = await fitting(env, url, ctx, batch as Address);
+      let listings = await fitting(env, url, ctx, batch as Address, true);
       if (ids) {
         const want = new Set(ids);
         listings = listings.filter((l) => want.has(l.id));
@@ -828,6 +931,46 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
     }
+  }
+
+  // Many Credits' cheapest listings at once, from the market book: { items: { id: offer | null } }, as
+  // /opensea/credit/:id answers each (null: not for sale). An id the book can't price (an OpenSea row without its
+  // order) is left out, for the page to ask /opensea/credit/:id. A stale or missing book is a 503: ask one by one.
+  // Kept 5 s per set of ids: everyone on a Picture union's Buy tab asks for the same ones.
+  if (url.pathname === '/opensea/credits') {
+    if (!sameSite(req)) return text('forbidden', 403);
+    const ids = [...new Set((url.searchParams.get('ids') ?? '').split(',').filter((x) => /^\d{1,6}$/.test(x) && inSupply(Number(x))))].slice(0, 100);
+    if (!ids.length) return text('bad request', 400);
+    if (!hasSweeper(env) || !env.MARKET) return text('no market book here', 503);
+    const cache = caches.default;
+    const key = new Request(`${url.origin}/opensea/credits/${env.CREDITS.toLowerCase()}/${[...ids].sort((a, b) => Number(a) - Number(b)).join('.')}`);
+    const hit = await cache.match(key);
+    if (hit) return hit;
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    const got = await book(env).getMany(ids).catch(() => null);
+    if (!got || Date.now() - got.updated > 2 * 60_000) return text('the market book is behind', 503);
+    const items: Record<string, unknown> = Object.fromEntries(ids.map((id) => [id, null]));
+    for (const e of got.rows) {
+      const [eid, eprice, esource, ea, eb] = e.map(String);
+      if (esource === 'opensea' && !(ea && eb)) {
+        delete items[eid]; // no order to buy it by: the page asks for it alone
+        continue;
+      }
+      const l: Listing = esource === 'opensea' ? { id: eid, price: eprice, source: 'opensea', hash: ea, protocol: eb } : { id: eid, price: eprice, source: esource as Listing['source'], listingId: ea || undefined };
+      items[eid] = {
+        price: l.price,
+        source: l.source,
+        contract: l.source === 'strategy' ? addrOrNull(env.STRATEGY) : l.source === 'fwa' ? addrOrNull(env.FWA_MARKET) : null,
+        listingId: l.listingId ?? null,
+        hash: l.hash ?? null,
+        protocol: l.protocol ?? null,
+        url: listingUrl(env, true, l),
+        preview: false,
+      };
+    }
+    const res = Response.json({ items }, { headers: { 'cache-control': 'public, max-age=5' } });
+    ctx.waitUntil(cache.put(key, res.clone()));
+    return res;
   }
 
   // One Credit's cheapest listing (OpenSea, CreditStrategy or FWA), for its page. Without a Sweeper (testnets) it's
@@ -960,17 +1103,37 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
   }
 
-  // Bid history for a party's auction, from its Bid events. Bids only exist after assembly, so the scan starts
-  // near the assembly time (12 s blocks, with margin) and walks forward in windows public RPCs accept.
+  // Bid history for a party's auction, newest first. ?v= is the high bid the page shows: the answer for it never
+  // changes, so it's kept a day. It comes from the Activity feed (read once for the site); when the feed doesn't have
+  // that bid yet, the ChainBook reads it now (one read for everyone asking). Without the ChainBook, from the chain's
+  // Bid events: the scan starts near the assembly time (12 s blocks, with margin) and walks forward in windows public
+  // RPCs accept.
   const bids = url.pathname.match(/^\/bids\/(0x[0-9a-fA-F]{40})$/);
   if (bids) {
     const cache = caches.default;
-    const key = new Request(url.origin + url.pathname.toLowerCase());
+    const v = url.searchParams.get('v');
+    const named = !!v && /^\d{1,30}$/.test(v);
+    const key = new Request(url.origin + url.pathname.toLowerCase() + (named ? `?v=${v}` : ''));
     const hit = await cache.match(key);
     if (hit) return hit;
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
     const batch = bids[1].toLowerCase() as Address;
     if (!(await isBatch(env, url, batch))) return text('not a batch', 404);
+    const book = chainBook(env);
+    if (book) {
+      try {
+        const of = (items: Activity[]) => items.filter((x) => x.kind === 'bid' && x.union?.toLowerCase() === batch);
+        let rows = of(await activityAll(env, url, ctx));
+        if (named && v !== '0' && rows[0]?.eth !== v) rows = of(JSON.parse((await book.activity(2_000)).body) as Activity[]);
+        const whole = !named || v === '0' || rows[0]?.eth === v;
+        const out = rows.map((x) => ({ bidder: x.who, amount: x.eth ?? '0', end: 0, block: x.block, tx: x.tx, time: x.time }));
+        const res = Response.json({ bids: out }, { headers: { 'cache-control': `public, max-age=${named && whole ? 86400 : 5}` } });
+        ctx.waitUntil(cache.put(key, res.clone()));
+        return res;
+      } catch (e) {
+        console.warn('[bids] from the chain', safeError(e));
+      }
+    }
     try {
       const c = client(env);
       const [assembledAt, head] = await Promise.all([
@@ -1050,6 +1213,15 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const key = new Request(url.origin + url.pathname.toLowerCase());
     const hit = await cache.match(key);
     if (hit) return hit;
+    // Another data center's answer, kept in KV for as long as its own cache keeps it: one lookup per address, not
+    // one per address per data center.
+    const kvKey = `ens:${ens[1].toLowerCase()}`;
+    const kept = await keptGet(env, kvKey);
+    if (kept) {
+      const res = new Response(kept, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=3600' } });
+      ctx.waitUntil(cache.put(key, res.clone()));
+      return res;
+    }
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
     const rpc = env.ENS_RPC || (env.CHAIN_ID === '1' ? rpcUrl(env) : 'https://eth.drpc.org');
     const c = createPublicClient({ chain: mainnet, transport: http(rpc, { timeout: 5_000 }) });
@@ -1063,8 +1235,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
     // The avatar is served by ENS's own metadata service, so this Worker never fetches a URL a name owner chose.
     const avatar = name ? `https://metadata.ens.domains/mainnet/avatar/${encodeURIComponent(name)}` : null;
-    const res = Response.json({ name, avatar }, { headers: { 'cache-control': `public, max-age=${ttl}` } });
-    ctx.waitUntil(cache.put(key, res.clone()));
+    const body = JSON.stringify({ name, avatar });
+    const res = new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttl}` } });
+    ctx.waitUntil(Promise.all([cache.put(key, res.clone()), ttl > 60 ? keptPut(env, kvKey, body, ttl) : null]));
     return res;
   }
 
@@ -1076,17 +1249,27 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const creditsAddr = real ? MAINNET_CREDITS : env.CREDITS;
     // Keyed by contract too: art never changes for a given Credits, but the contract can (testnets).
     const cache = caches.default;
-    const key = new Request(`${url.origin}/art/${creditsAddr.toLowerCase()}/${art[2]}.svg`);
+    const key = new Request(`${url.origin}/art/${creditsAddr.toLowerCase()}/${Number(art[2])}.svg`);
     const hit = await cache.match(key);
     if (hit) return hit;
     if (!inSupply(Number(art[2]))) return new Response('no such credit', { status: 404, headers: { 'cache-control': 'public, max-age=86400' } });
+    // Even opened directly, the SVG can run nothing and reach nothing.
+    const svgHeaders = { 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" };
+    const svgResponse = (svg: string) =>
+      new Response(svg, { headers: { 'content-type': 'image/svg+xml', 'cache-control': 'public, max-age=31536000, immutable', ...svgHeaders } });
+    // The colo cache is per data center; KV keeps each Credit's art once for all of them, so the chain is read once
+    // per Credit, not once per Credit per data center.
+    const kept = await keptGet(env, `art:${creditsAddr.toLowerCase()}:${Number(art[2])}`);
+    if (kept) {
+      const res = svgResponse(kept);
+      ctx.waitUntil(cache.put(key, res.clone()));
+      return res;
+    }
     if (await limited(env.RL_ART, req)) return text('slow down', 429);
     const c = real
       ? createPublicClient({ transport: http(env.ENS_RPC || 'https://eth.drpc.org', { timeout: 8_000 }) })
       : client(env);
     const id = BigInt(art[2]);
-    // Even opened directly, the SVG can run nothing and reach nothing.
-    const svgHeaders = { 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" };
     try {
       // The art contract is read once per isolate (artOf), not per Credit.
       const [seed, ts, artAddr] = await Promise.all([
@@ -1103,13 +1286,14 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         return miss;
       }
       const svg = await c.readContract({ address: artAddr, abi: creditArtAbi, functionName: 'svg', args: [seed, ts] });
-      const res = new Response(svg, {
-        headers: { 'content-type': 'image/svg+xml', 'cache-control': 'public, max-age=31536000, immutable', ...svgHeaders },
-      });
-      ctx.waitUntil(cache.put(key, res.clone()));
+      const res = svgResponse(svg);
+      ctx.waitUntil(Promise.all([cache.put(key, res.clone()), keptPut(env, `art:${creditsAddr.toLowerCase()}:${Number(art[2])}`, svg)]));
       return res;
     } catch {
-      return new Response('art unavailable', { status: 502, headers: svgHeaders });
+      // Remembered here for a few seconds, so a page of these while the RPC is down isn't 3 calls per image.
+      const res = new Response('art unavailable', { status: 502, headers: { ...svgHeaders, 'cache-control': 'no-store' } });
+      ctx.waitUntil(cache.put(key, new Response('art unavailable', { status: 502, headers: { ...svgHeaders, 'cache-control': 'public, max-age=10' } })));
+      return res;
     }
   }
 
@@ -1222,26 +1406,55 @@ async function readParty(env: Env, batch: Address, url?: URL, ctx?: ExecutionCon
   return facts;
 }
 
-/// Every Credit Union, newest first, with its summary (Batch.summary, bigints as { "$n": "…" }) and slots: two
-/// calls per union in one Multicall3 pass, cached a few seconds for everyone. `fresh` (after the reader's own
-/// transaction) reads the chain now and refreshes the cache for everyone else.
-const UNIONS_S = 10;
-async function unionsJson(env: Env, url: URL, ctx: ExecutionContext, fresh: boolean): Promise<Response> {
-  try {
-    return new Response(await unionsBody(env, url, ctx, fresh), { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${UNIONS_S}` } });
-  } catch (e) {
-    return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+/// Every Credit Union, newest first, with its summary (Batch.summary, bigints as { "$n": "…" }) and slots, read by the
+/// ChainBook for the whole site. This isolate keeps it INDEX_MS, then the colo cache, then the ChainBook; `fresh`
+/// (after the reader's own transaction) asks the ChainBook for a read made after this call. Without the ChainBook
+/// (or with it unreachable), this data center reads the chain itself and keeps that 10 s, as before.
+type Index = { at: number; body: string; one?: Map<string, string> };
+let indexMemo: { got: number; v: Index } | null = null;
+let indexRead: Promise<Index> | null = null;
+async function unionIndex(env: Env, url: URL, ctx: ExecutionContext, fresh = false): Promise<Index> {
+  if (!fresh && indexMemo && Date.now() - indexMemo.got < INDEX_MS) return indexMemo.v;
+  if (!fresh && indexRead) return indexRead;
+  const p = (async (): Promise<Index> => {
+    const key = new Request(`${url.origin}/unions.json/v2`);
+    if (!fresh) {
+      const hit = await caches.default.match(key);
+      const at = Number(hit?.headers.get('x-read-at'));
+      if (hit && at) {
+        const v = indexMemo?.v.at === at ? indexMemo.v : { at, body: await hit.text() };
+        indexMemo = { got: Date.now(), v };
+        return v;
+      }
+    }
+    let v: Index, keep = INDEX_MS / 1000;
+    const book = chainBook(env);
+    try {
+      if (!book) throw new Error('no ChainBook');
+      v = await book.unions(fresh ? 0 : BOOK_MS);
+    } catch (e) {
+      if (book) console.warn('[chain] index read here', safeError(e));
+      v = { at: Date.now(), body: await readUnions(env) };
+      keep = 10;
+    }
+    ctx.waitUntil(caches.default.put(key, new Response(v.body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${keep}`, 'x-read-at': String(v.at) } })));
+    if (!indexMemo || indexMemo.v.at <= v.at) indexMemo = { got: Date.now(), v };
+    return v;
+  })();
+  if (!fresh) {
+    indexRead = p;
+    void p.finally(() => indexRead === p && (indexRead = null)).catch(() => {});
   }
+  return p;
 }
-async function unionsBody(env: Env, url: URL, ctx: ExecutionContext, fresh = false): Promise<string> {
-  const key = new Request(`${url.origin}/unions.json/v1`);
-  const hit = fresh ? null : await caches.default.match(key);
-  if (hit) return hit.text();
-  const body = await readUnions(env);
-  ctx.waitUntil(caches.default.put(key, new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${UNIONS_S}` } })));
-  return body;
+/// One union of the index as { at, union }: parsed once per index read, then a lookup.
+function oneUnion(v: Index, addr: string): string {
+  if (!v.one) {
+    const { at, unions } = JSON.parse(v.body) as { at: number; unions: { address: string }[] };
+    v.one = new Map(unions.map((u) => [u.address.toLowerCase(), JSON.stringify({ at, union: u })]));
+  }
+  return v.one.get(addr.toLowerCase()) ?? '{"at":0,"union":null}';
 }
-
 
 /// A printer plan as stored (plus id, union and createdAt).
 type Plan = {
@@ -1330,7 +1543,12 @@ async function keepMarket(env: Env, ctx: ExecutionContext) {
 async function readUnions(env: Env): Promise<string> {
   return toJson({ at: Math.floor(Date.now() / 1000), unions: await unionList(env) });
 }
-async function unionList(env: Env) {
+/// One union as the index has it.
+type Indexed = { address: Address; summary: unknown; ids: number[]; depositors: readonly Address[] };
+/// Every union's summary and slots. `kept`, the last good read by address: a union whose read fails this time keeps
+/// its last good entry (a busy RPC never blanks a card), and with none it waits for the next read. When nothing
+/// could be read at all, this throws rather than answer an empty list.
+async function unionList(env: Env, kept?: Map<string, Indexed>): Promise<Indexed[]> {
   const c = client(env);
   const n = Number(await c.readContract({ address: env.FACTORY as Address, abi: factoryAbi, functionName: 'batchCount' }));
   const pages = await Promise.all(
@@ -1343,18 +1561,178 @@ async function unionList(env: Env) {
     { address: a, abi: batchAbi, functionName: 'summary' } as const,
     { address: a, abi: batchAbi, functionName: 'slots' } as const,
   ]);
+  // batchSize counts calldata bytes (4 a call here): 200 is 25 unions a call. A full union's slots cost ~350k gas to
+  // read, so each call stays far under any RPC's eth_call gas cap however many unions there are.
   const res = hasMulticall(env)
-    ? await c.multicall({ contracts, allowFailure: true, multicallAddress: MULTICALL3, batchSize: 8_192 }) // ~25 unions a call: a full one's slots cost ~350k gas to read
+    ? await c.multicall({ contracts, allowFailure: true, multicallAddress: MULTICALL3, batchSize: 200 })
     : await Promise.all(contracts.map((x) => c.readContract(x).then((result) => ({ status: 'success' as const, result }), () => ({ status: 'failure' as const, result: undefined }))));
   const hidden = await hiddenUnions(env);
-  const unions = addrs.flatMap((address, i) => {
+  let failed = 0;
+  const unions = addrs.flatMap((address, i): Indexed[] => {
     const [s, sl] = [res[2 * i], res[2 * i + 1]];
-    if (s.status !== 'success' || sl.status !== 'success') return [];
+    if (s.status !== 'success' || sl.status !== 'success') {
+      failed++;
+      const k = kept?.get(address.toLowerCase());
+      return k ? [k] : [];
+    }
     const [ids, depositors] = sl.result as readonly [readonly bigint[], readonly Address[]];
     if (ids.length < 80 && hidden.has(address.toLowerCase())) return []; // a plan's union, still filling
     return [{ address, summary: s.result, ids: ids.map(Number), depositors }];
   });
+  if (addrs.length && failed === addrs.length && !kept?.size) throw new Error('Credit Unions could not be read');
   return unions;
+}
+
+// ---------------------------------------------------------------- the chain, read once for the site
+
+/// How long this isolate and the colo cache keep the union index: under a block, so a bid or a deposit shows within
+/// a poll.
+const INDEX_MS = 2_000;
+/// How long they keep the Activity feed: about a block.
+const FEED_MS = 10_000;
+/// How often the ChainBook looks for a new block while pages are asking; it reads the index and the feed again on
+/// each one, so a page's read never waits on the chain.
+const LOOP_MS = 2_000;
+/// The oldest read the ChainBook hands out without reading again (a guard in case its loop falls behind).
+const BOOK_MS = 15_000;
+/// The site's one ChainBook, placed in eastern North America (near the RPC and most visitors) when first made.
+const chainBook = (env: Env) => (env.CHAIN ? env.CHAIN.get(env.CHAIN.idFromName('chain'), { locationHint: 'enam' }) : null);
+
+/// The chain as every page reads it, read by one object for the whole site: the union index (every union's summary
+/// and slots) and the Activity feed. The colo cache is per data center, so without this each of them reads the chain
+/// for the same things; and a union page polls the index rather than the chain, so watching costs no RPC however
+/// many watch. A read older than its caller allows is redone, one at a time (callers waiting share it); a failed read
+/// keeps the last good one.
+export class ChainBook extends DurableObject<Env> {
+  private index: { at: number; body: string } | null = null;
+  private kept = new Map<string, Indexed>();
+  private indexing: Promise<void> | null = null;
+  private feed: { at: number; body: string } | null = null;
+  private feeding: Promise<void> | null = null;
+  private asked = 0; // when a page last asked: the loop runs while that's recent
+  private head = -1n; // the newest block the loop has read the index and the feed at
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS kept (k TEXT PRIMARY KEY, v TEXT)`);
+  }
+
+  /// Keep the loop going while pages ask (it stops five minutes after the last ask, and the next ask starts it).
+  private async wake() {
+    this.asked = Date.now();
+    if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + LOOP_MS);
+  }
+  /// Every LOOP_MS: a new block (or a read going stale) reads the index and the feed again, one read for every page.
+  async alarm() {
+    try {
+      const head = await client(this.env).getBlockNumber();
+      if (head !== this.head || Date.now() - (this.index?.at ?? 0) > 12_000) {
+        this.head = head;
+        this.indexing ??= this.readIndex().finally(() => (this.indexing = null));
+        this.feeding ??= this.readFeed().finally(() => (this.feeding = null));
+        await Promise.allSettled([this.indexing, this.feeding]);
+      }
+    } catch (e) {
+      console.warn('[chain] loop', safeError(e));
+    } finally {
+      if (Date.now() - this.asked < 5 * 60_000) await this.ctx.storage.setAlarm(Date.now() + LOOP_MS);
+    }
+  }
+
+  /// The union index as /unions.json serves it, read at most `maxMs` before this call (0: after it). `at` is when
+  /// that read began.
+  async unions(maxMs: number): Promise<{ at: number; body: string }> {
+    await this.wake();
+    const asked = Date.now();
+    while (!this.index || asked - this.index.at > maxMs) {
+      this.indexing ??= this.readIndex().finally(() => (this.indexing = null));
+      try {
+        await this.indexing;
+      } catch (e) {
+        if (!this.index) throw e;
+        break; // the last good read
+      }
+    }
+    return this.index!;
+  }
+  private async readIndex() {
+    const at = Date.now();
+    const unions = await unionList(this.env, this.kept);
+    this.kept = new Map(unions.map((u) => [u.address.toLowerCase(), u]));
+    this.index = { at, body: toJson({ at: Math.floor(at / 1000), unions }) };
+  }
+
+  /// Every Activity row as a JSON array (newest first, plans' unions left out until they fill), read at most `maxMs`
+  /// before this call.
+  async activity(maxMs: number): Promise<{ at: number; body: string }> {
+    await this.wake();
+    const asked = Date.now();
+    while (!this.feed || asked - this.feed.at > maxMs) {
+      this.feeding ??= this.readFeed().finally(() => (this.feeding = null));
+      try {
+        await this.feeding;
+      } catch (e) {
+        if (!this.feed) throw e;
+        break;
+      }
+    }
+    return this.feed!;
+  }
+  private async readFeed() {
+    const at = Date.now();
+    const items = await activityItems(this.env, this.store(), `activity-state/${this.env.FACTORY.toLowerCase()}`);
+    this.feed = { at, body: JSON.stringify(items) };
+  }
+
+  /// A union's fitting listings (scanFor), scanned at most once per `maxMs` for the whole site, whoever asks. A scan up
+  /// to two minutes old is handed out while the next one runs behind it, so a Buy tab never waits on a scan it can
+  /// do without (buying prices each listing again anyway).
+  private scans = new Map<string, { at: number; p: Promise<Listing[]>; done: boolean }>();
+  private rescans = new Set<string>();
+  async listings(batch: Address, extra: Extra[], maxMs: number): Promise<Listing[]> {
+    setSpareKey(this.env.OPENSEA_API_KEY_2);
+    const k = batch.toLowerCase();
+    const hit = this.scans.get(k);
+    const age = hit ? Date.now() - hit.at : Infinity;
+    if (hit && age <= maxMs) return hit.p;
+    if (hit?.done && age <= 120_000) {
+      if (!this.rescans.has(k)) {
+        this.rescans.add(k);
+        const at = Date.now();
+        void scanFor(this.env, batch, { extra })
+          .then((ls) => this.scans.set(k, { at, p: Promise.resolve(ls), done: true }))
+          .catch((e) => console.warn('[scan]', safeError(e)))
+          .finally(() => this.rescans.delete(k));
+      }
+      return hit.p;
+    }
+    for (const [x, v] of this.scans) if (Date.now() - v.at > 10 * 60_000) this.scans.delete(x);
+    const entry = { at: Date.now(), p: scanFor(this.env, batch, { extra }), done: false };
+    this.scans.set(k, entry);
+    entry.p.then(
+      () => (entry.done = true),
+      () => this.scans.get(k) === entry && this.scans.delete(k),
+    );
+    return entry.p;
+  }
+
+  /// Where the feed's scan state lives (activity.ts keeps it in a Cache): this object's storage, so a restart reads
+  /// on from where it stopped instead of rescanning.
+  private store(): Cache {
+    const sql = this.ctx.storage.sql;
+    const k = (r: RequestInfo | URL) => (typeof r === 'string' ? r : r instanceof URL ? r.href : r.url);
+    return {
+      match: async (r: RequestInfo | URL) => {
+        const row = sql.exec(`SELECT v FROM kept WHERE k = ?`, k(r)).toArray()[0];
+        return row ? new Response(String(row.v)) : undefined;
+      },
+      put: async (r: RequestInfo | URL, res: Response) => {
+        const v = await res.text();
+        // A row holds 2 MB; past that the state stays in memory only (a restart rescans).
+        if (v.length < 1_800_000) sql.exec(`INSERT INTO kept (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v`, k(r), v);
+      },
+    } as unknown as Cache;
+  }
 }
 
 /// A rule as the matcher's Rules, to pick the card's wall.
@@ -1507,17 +1885,38 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
   }
   if (refused) return refused;
   const payload = JSON.stringify(Array.isArray(parsed) ? clean : clean[0]);
-  const post = (to: string) => fetch(to, { method: 'POST', headers: { 'content-type': 'application/json' }, body: payload }).catch(() => null);
-  // The paid key over its limit, refused or down: the public node answers instead, so pages and pre-send
-  // simulations keep working.
-  let upstream = await post(rpcUrl(env));
-  if ((!upstream || [401, 403, 429].includes(upstream.status) || upstream.status >= 500) && hasFallback(env)) upstream = await post(env.FALLBACK_RPC);
+  const post = async (to: string) => {
+    try {
+      const r = await fetch(to, { method: 'POST', headers: { 'content-type': 'application/json' }, body: payload, signal: AbortSignal.timeout(6_000) });
+      return { status: r.status, body: await r.text() };
+    } catch {
+      return null; // down, or slower than a page should wait
+    }
+  };
+  // Refused, down, slow, or over its limit, which a batch can also say inside a 200 (each call answering 429).
+  const failed = (u: Awaited<ReturnType<typeof post>>) => !u || [401, 403, 429].includes(u.status) || u.status >= 500 || /"code"\s*:\s*(429|-32005)\b/.test(u.body);
+  // The paid key failing: the public node answers instead, so pages and pre-send simulations keep working, and for
+  // a few seconds this isolate asks the public node first rather than piling onto a key that's over its limit.
+  let upstream: Awaited<ReturnType<typeof post>>;
+  if (!hasFallback(env)) upstream = await post(rpcUrl(env));
+  else if (Date.now() < rpcCooling) {
+    upstream = await post(env.FALLBACK_RPC);
+    if (failed(upstream)) upstream = await post(rpcUrl(env));
+  } else {
+    upstream = await post(rpcUrl(env));
+    if (failed(upstream)) {
+      rpcCooling = Date.now() + 5_000;
+      upstream = await post(env.FALLBACK_RPC);
+    }
+  }
   if (!upstream) return text('upstream unavailable', 502);
   return new Response(upstream.body, {
     status: upstream.status,
     headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
   });
 }
+/// Until when this isolate sends /rpc to the public node first (the paid key just failed).
+let rpcCooling = 0;
 
 /// Listings that fit a party and would land in it, cheapest first. The scan (list pages, trait and liveness
 /// checks) is the expensive part and the same for everyone, so it is cached briefly and shared while in flight.
@@ -1804,47 +2203,68 @@ async function previewFitting(env: Env, url: URL, ctx: ExecutionContext, batch: 
   return listings;
 }
 
-async function fitting(env: Env, url: URL, ctx: ExecutionContext, batch: Address) {
+/// Listings that fit a union, cheapest first. The scan (OpenSea's pages, FWA and the strategy, liveness checks) is the
+/// costly part and the same for everyone: the ChainBook runs it once per union for the whole site (SCAN_MS), and the
+/// colo keeps it 10 s. `fresh` (a quote about to be bought): the union's canTake is asked now rather than taken from
+/// the last few seconds.
+async function fitting(env: Env, url: URL, ctx: ExecutionContext, batch: Address, fresh = false) {
   const cache = caches.default;
   const scanKey = new Request(`${url.origin}/opensea/scan/${batch}`);
   let listings = await cache.match(scanKey).then((r) => r?.json<Awaited<ReturnType<typeof scan>>>());
   if (!listings && inflight.has(batch)) listings = await inflight.get(batch)!;
   if (!listings) {
-    const c = client(env);
-    const p = extras(env, url, ctx).then((more) => scan({
-      key: env.OPENSEA_API_KEY,
-      slug: env.OPENSEA_SLUG,
-      credits: env.CREDITS,
-      ...more,
-      max: 40,
-      take: (ids) => c.readContract({ address: batch, abi: batchAbi, functionName: 'canTake', args: [ids] }),
-      live: (id, seller, operator) =>
-        Promise.all([
-          c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'ownerOf', args: [id] }),
-          c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'isApprovedForAll', args: [seller, operator] }),
-        ]).then(([o, ok]) => o.toLowerCase() === seller.toLowerCase() && ok),
-      hasCode: (a) => c.getCode({ address: a }).then((code) => !!code && code !== '0x'),
-    }));
+    const book = chainBook(env);
+    const p = extras(env, url, ctx).then(async (more) => {
+      if (book && !more.fakeOpenSea) {
+        try {
+          return await book.listings(batch, more.extra, SCAN_MS);
+        } catch (e) {
+          console.warn('[scan] read here', safeError(e));
+        }
+      }
+      return scanFor(env, batch, more);
+    });
     // waitUntil keeps this request's context (and so the scan's I/O) alive even if the client goes away.
     inflight.set(batch, p);
     ctx.waitUntil(p.finally(() => inflight.delete(batch)).catch(() => {}));
     listings = await p;
-    ctx.waitUntil(cache.put(scanKey, Response.json(listings, { headers: { 'cache-control': 'public, max-age=30' } })));
+    ctx.waitUntil(cache.put(scanKey, Response.json(listings, { headers: { 'cache-control': 'public, max-age=10' } })));
   }
   // Slots: on a layout party two listings of one palette can fight over one slot, so the party replays its
-  // deposit rule over the whole bundle, in price order, and only the ones that would land are kept.
+  // deposit rule over the whole bundle, in price order, and only the ones that would land are kept. Kept 5 s per set
+  // of listings for everyone watching the Buy tab; a quote asks now.
   if (listings.length) {
-    try {
-      const ok = (await client(env).readContract({
-        address: batch,
-        abi: batchAbi,
-        functionName: 'canTake',
-        args: [listings.map((l) => BigInt(l.id))],
-      })) as readonly boolean[];
-      listings = listings.filter((_, i) => ok[i]);
-    } catch {}
+    const takeKey = new Request(`${url.origin}/opensea/take/${batch}/${idsKey(listings.map((l) => l.id))}`);
+    let ok = fresh ? null : await cache.match(takeKey).then((r) => (r ? r.json<boolean[]>() : null));
+    if (!ok) {
+      try {
+        ok = [...((await client(env).readContract({ address: batch, abi: batchAbi, functionName: 'canTake', args: [listings.map((l) => BigInt(l.id))] })) as readonly boolean[])];
+        ctx.waitUntil(cache.put(takeKey, Response.json(ok, { headers: { 'cache-control': 'public, max-age=5' } })));
+      } catch {}
+    }
+    if (ok) listings = listings.filter((_, i) => ok[i]);
   }
   return listings;
+}
+/// How long the ChainBook keeps a union's scan.
+const SCAN_MS = 20_000;
+/// The scan itself (opensea.ts), with this union's canTake and the chain's liveness checks.
+function scanFor(env: Env, batch: Address, more: { extra: Extra[]; fakeOpenSea?: { id: string; price: string }[] }) {
+  const c = client(env);
+  return scan({
+    key: env.OPENSEA_API_KEY,
+    slug: env.OPENSEA_SLUG,
+    credits: env.CREDITS,
+    ...more,
+    max: 40,
+    take: (ids) => c.readContract({ address: batch, abi: batchAbi, functionName: 'canTake', args: [ids] }),
+    live: (id, seller, operator) =>
+      Promise.all([
+        c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'ownerOf', args: [id] }),
+        c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'isApprovedForAll', args: [seller, operator] }),
+      ]).then(([o, ok]) => o.toLowerCase() === seller.toLowerCase() && ok),
+    hasCode: (a) => c.getCode({ address: a }).then((code) => !!code && code !== '0x'),
+  });
 }
 
 /// A Credits contract's art contract, as Credits itself names it (`art()`): the app asks it for a Credit's traits

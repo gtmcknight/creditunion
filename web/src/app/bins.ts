@@ -2,6 +2,8 @@
 /// can let the browser keep it until the file changes. Read once per visit, whichever page asks first.
 declare const __BINS__: Record<string, string>;
 const HASH: Record<string, string> = typeof __BINS__ === 'undefined' ? {} : __BINS__; // a build without the plugin: unversioned
+/// All the edition files' hashes as one: what's worked out from them and kept in the browser is kept under it.
+export const binsVersion = Object.values(HASH).join('.');
 
 /// A file as-is, not kept here. `as` names the file whose hash versions it (wall/<k>.bin: wall.bin's).
 export const fetchBin = (path: string, as = path) =>

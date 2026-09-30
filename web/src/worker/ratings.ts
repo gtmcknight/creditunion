@@ -27,18 +27,31 @@ async function loadEdition(assets: Fetcher, origin: string): Promise<Edition> {
 
 export type Rated = Rating & { id: string; seed: string; paidAt: number };
 
-/// One JSON-RPC batch per 100 calls: plain fetch, no shared scheduler (see index.ts on why).
-async function seeds(rpc: string, credits: Address, ids: bigint[]): Promise<Map<string, [string, number]>> {
+/// One JSON-RPC batch per 100 calls: plain fetch, no shared scheduler (see index.ts on why). Each batch tries the RPCs
+/// in order: a rate-limited, failing or slow one hands the batch to the next.
+async function seeds(rpcs: string[], credits: Address, ids: bigint[]): Promise<{ out: Map<string, [string, number]>; failed: Set<string> }> {
   const out = new Map<string, [string, number]>();
+  const failed = new Set<string>();
   for (let i = 0; i < ids.length; i += 50) {
     const chunk = ids.slice(i, i + 50);
     const calls = chunk.flatMap((id, k) => [
       { jsonrpc: '2.0', id: k * 2, method: 'eth_call', params: [{ to: credits, data: encodeFunctionData({ abi: creditsAbi, functionName: 'seedOf', args: [id] }) }, 'latest'] },
       { jsonrpc: '2.0', id: k * 2 + 1, method: 'eth_call', params: [{ to: credits, data: encodeFunctionData({ abi: creditsAbi, functionName: 'timestampOf', args: [id] }) }, 'latest'] },
     ]);
-    const res = await fetch(rpc, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(calls) });
-    const results = (await res.json()) as { id: number; result?: `0x${string}` }[];
-    const byId = new Map(results.map((r) => [r.id, r.result]));
+    let byId: Map<number, `0x${string}` | undefined> | null = null;
+    for (const rpc of rpcs) {
+      try {
+        const res = await fetch(rpc, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(calls), signal: AbortSignal.timeout(8_000) });
+        const results = (await res.json()) as { id: number; result?: `0x${string}`; error?: unknown }[];
+        if (!res.ok || !Array.isArray(results) || results.some((r) => r.error)) continue;
+        byId = new Map(results.map((r) => [r.id, r.result]));
+        break;
+      } catch {}
+    }
+    if (!byId) {
+      for (const id of chunk) failed.add(id.toString());
+      continue;
+    }
     chunk.forEach((id, k) => {
       const s = byId.get(k * 2);
       const t = byId.get(k * 2 + 1);
@@ -48,15 +61,17 @@ async function seeds(rpc: string, credits: Address, ids: bigint[]): Promise<Map<
       out.set(id.toString(), [seed, Number(decodeFunctionResult({ abi: creditsAbi, functionName: 'timestampOf', data: t }))]);
     });
   }
-  return out;
+  return { out, failed };
 }
 
 export async function ratings(o: {
   assets: Fetcher;
   origin: string;
-  rpc: string;
+  rpcs: string[];
   credits: Address;
   ids: bigint[];
+  /// Where seeds are kept once for every data center (the colo cache is per data center).
+  kv?: KVNamespace;
 }): Promise<{ n: number; version: string; ratings: Record<string, Rated> }> {
   const ed = await loadEdition(o.assets, o.origin);
   const cache = caches.default;
@@ -73,16 +88,32 @@ export async function ratings(o: {
       }
     }),
   );
-  if (missing.length) {
-    const fresh = await seeds(o.rpc, o.credits, missing);
-    for (const [id, v] of fresh) {
-      known.set(id, v);
-      await cache.put(key(BigInt(id)), Response.json(v, { headers: { 'cache-control': 'public, max-age=31536000, immutable' } }));
+  const keep = (id: string, v: [string, number]) => cache.put(key(BigInt(id)), Response.json(v, { headers: { 'cache-control': 'public, max-age=31536000, immutable' } }));
+  // A seed never changes: this data center's first read of one looks in KV before the chain.
+  const kvKey = (id: bigint | string) => `seed:${o.credits.toLowerCase()}:${id}`;
+  let unread = missing;
+  if (unread.length && o.kv) {
+    const kept = new Map<string, [string, number] | null>();
+    for (let i = 0; i < unread.length; i += 100) {
+      const got = await o.kv.get<[string, number]>(unread.slice(i, i + 100).map(kvKey), { type: 'json', cacheTtl: 3600 }).catch(() => null);
+      for (const [k, v] of got ?? []) kept.set(k, v);
     }
+    const fromKv = unread.filter((id) => kept.get(kvKey(id)));
+    for (const id of fromKv) known.set(id.toString(), kept.get(kvKey(id))!);
+    await Promise.all(fromKv.map((id) => keep(id.toString(), known.get(id.toString())!)));
+    unread = unread.filter((id) => !kept.get(kvKey(id)));
+  }
+  if (unread.length) {
+    const { out: fresh, failed } = await seeds(o.rpcs, o.credits, unread);
+    await Promise.all(
+      [...fresh].map(async ([id, v]) => {
+        known.set(id, v);
+        await Promise.all([keep(id, v), o.kv?.put(kvKey(id), JSON.stringify(v)).catch(() => {})]);
+      }),
+    );
     // Ids that do not exist (yet) are remembered briefly too, so a list of bogus ids is not a free RPC amplifier.
-    for (const id of missing) {
-      if (!fresh.has(id.toString())) await cache.put(key(id), Response.json(null, { headers: { 'cache-control': 'public, max-age=60' } }));
-    }
+    // Ids the RPCs couldn't read at all are left out for now, not remembered as missing.
+    await Promise.all(unread.filter((id) => !fresh.has(id.toString()) && !failed.has(id.toString())).map((id) => cache.put(key(id), Response.json(null, { headers: { 'cache-control': 'public, max-age=60' } }))));
   }
   const out: Record<string, Rated> = {};
   for (const [id, [seed, paidAt]] of known) out[id] = { id, seed, paidAt, ...rate(seed, paidAt, ed) };

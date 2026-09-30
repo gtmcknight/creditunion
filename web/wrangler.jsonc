@@ -31,9 +31,9 @@
     { "pattern": "eighty.rhps.fun", "custom_domain": true }
   ],
   // Printer plans and the listings book (/printer): `wrangler kv namespace create PLANS`, then put its id here.
-  // Buy locks for Picture unions (src/worker/locks.ts).
-  "durable_objects": { "bindings": [{ "name": "LOCKS", "class_name": "BuyLocks" }, { "name": "MARKET", "class_name": "MarketBook" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BuyLocks"] }, { "tag": "v2", "new_sqlite_classes": ["MarketBook"] }],
+  // Buy locks for Picture unions (src/worker/locks.ts); the market book (market.ts); the chain read once for the site (ChainBook, index.ts).
+  "durable_objects": { "bindings": [{ "name": "LOCKS", "class_name": "BuyLocks" }, { "name": "MARKET", "class_name": "MarketBook" }, { "name": "CHAIN", "class_name": "ChainBook" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BuyLocks"] }, { "tag": "v2", "new_sqlite_classes": ["MarketBook"] }, { "tag": "v3", "new_sqlite_classes": ["ChainBook"] }],
   "kv_namespaces": [{ "binding": "PLANS", "id": "87dc2ecb2eca465b84947eb80d2a402f" }],
   "observability": { "enabled": true },
   // Every minute: the market book (market.ts); every 5th, the keeper (keeper.ts), once `wrangler secret put KEEPER_KEY`.

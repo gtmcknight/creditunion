@@ -283,9 +283,11 @@ export async function activityTicker(el: HTMLElement) {
     setTimeout(() => line.classList.add('in'), 60); // a withheld frame mustn't hide it
   };
   await load(false);
+  // Shown again after a page that hides it: catch up at once rather than at the next tick.
+  el.addEventListener('refresh', () => void load(true));
   const timer = setInterval(() => {
     if (!el.isConnected) return clearInterval(timer);
-    if (document.visibilityState !== 'visible') return;
+    if (document.visibilityState !== 'visible' || el.closest('[hidden]')) return; // nobody sees it: don't read it
     void load(true);
     const when = line.querySelector('.tick-when');
     if (when && time) when.textContent = ago(time);

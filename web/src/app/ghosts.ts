@@ -4,6 +4,7 @@ import { hydrate, who } from './ens';
 import { earlyShare, hasLayout, layoutSlot, sharePct as pct, type Summary } from './data';
 import { describeFilter, inkName, maskInks } from './traits';
 import { art, esc, same } from './ui';
+import { binsVersion } from './bins';
 import { ruleFor, slotName } from '../shared/layout';
 
 /// Empty slots show a faded real Credit from the edition, so every sheet reads as a Statement in progress.
@@ -31,6 +32,68 @@ export const registerFilter = (address: string, f: Filter) => filters.set(addres
 
 type Match = { count: number; sample: number[] };
 const cache = new Map<string, Promise<Match>>();
+
+/// Answers kept in this browser: the edition never changes, so a card's examples are asked for once, not once per
+/// visit. Versioned by the edition files' hashes (a new edition file, a new set).
+const KEPT = `cu-match:${binsVersion}`;
+let kept: Record<string, Match> | null = null;
+function keptMatches(): Record<string, Match> {
+  if (!kept) {
+    try {
+      const v = JSON.parse(localStorage.getItem(KEPT) ?? '{}') as Record<string, Match>;
+      kept = v && typeof v === 'object' ? v : {};
+    } catch {
+      kept = {};
+    }
+  }
+  return kept;
+}
+let saving: ReturnType<typeof setTimeout> | null = null;
+function keepMatch(body: string, m: Match) {
+  const k = keptMatches();
+  k[body] = m;
+  const keys = Object.keys(k);
+  if (keys.length > 400) for (const x of keys.slice(0, keys.length - 400)) delete k[x]; // the oldest go first
+  saving ??= setTimeout(() => {
+    saving = null;
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const x = localStorage.key(i);
+        if (x?.startsWith('cu-match:') && x !== KEPT) localStorage.removeItem(x); // an older edition's
+      }
+      localStorage.setItem(KEPT, JSON.stringify(k));
+    } catch {}
+  }, 1000);
+}
+
+/// Asks made in the same moment (a page of cards) go to the Worker together, 50 to a request.
+let queue: { body: string; done: (m: Match | null) => void }[] = [];
+let flushing: ReturnType<typeof setTimeout> | null = null;
+function ask(body: string): Promise<Match | null> {
+  return new Promise((done) => {
+    queue.push({ body, done });
+    flushing ??= setTimeout(flush, 0);
+  });
+}
+async function flush() {
+  const q = queue;
+  queue = [];
+  flushing = null;
+  for (let i = 0; i < q.length; i += 50) {
+    const part = q.slice(i, i + 50);
+    try {
+      const r = await fetch('/edition/match', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ many: part.map((x) => JSON.parse(x.body)) }) });
+      const d = r.ok ? ((await r.json()) as { many?: Partial<Match>[] }) : null;
+      part.forEach((x, k) => {
+        const m = d?.many?.[k];
+        x.done(m ? { count: m.count ?? 0, sample: m.sample ?? [] } : null);
+      });
+    } catch {
+      part.forEach((x) => x.done(null));
+    }
+  }
+}
+
 /// How many edition Credits pass `f` (narrowed to `palettes`), and up to 80 of them spread across the edition.
 function match(f: Filter, palettes: number, extra: { eights?: number; prints?: number; weights?: number } = {}) {
   const body = JSON.stringify({
@@ -45,13 +108,14 @@ function match(f: Filter, palettes: number, extra: { eights?: number; prints?: n
   });
   let p = cache.get(body);
   if (!p) {
-    p = fetch('/edition/match', { method: 'POST', headers: { 'content-type': 'application/json' }, body })
-      .then((r) => r.json() as Promise<Partial<Match>>)
-      .then((d) => ({ count: d.count ?? 0, sample: d.sample ?? [] }))
-      .catch(() => {
-        cache.delete(body);
-        return { count: 0, sample: [] };
-      });
+    const had = keptMatches()[body];
+    p = had
+      ? Promise.resolve(had)
+      : ask(body).then((m) => {
+          if (m) keepMatch(body, m);
+          else cache.delete(body); // unanswered: asked again next time
+          return m ?? { count: 0, sample: [] };
+        });
     cache.set(body, p);
   }
   return p;

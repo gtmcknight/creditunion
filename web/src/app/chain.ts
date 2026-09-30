@@ -29,7 +29,8 @@ export let chain: Chain;
 export let pub: ReturnType<typeof makePublic>;
 
 const makePublic = (c: Chain) =>
-  createPublicClient({ chain: c, transport: http('/rpc', { batch: { wait: 16, batchSize: 40 } }) });
+  // One retry, a second later: a busy moment passes, and a rate limit isn't hit four times in a row.
+  createPublicClient({ chain: c, transport: http('/rpc', { batch: { wait: 16, batchSize: 40 }, retryCount: 1, retryDelay: 1_000 }) });
 
 export async function loadConfig() {
   // Written into the page by the Worker (#config); pages the asset layer serves on its own ask for it.

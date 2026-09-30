@@ -470,19 +470,46 @@ export function checkQuote(q: Quote) {
   if (sum !== BigInt(q.total)) throw new Error('Bad quote.');
 }
 
-/// The live listing for each of these Credits (skipping ones not for sale), ready to buy.
-export async function listedById(ids: string[]): Promise<Listed[]> {
-  const got = await Promise.all(
-    ids.map((x) =>
+type Offer = { price: string | null; source?: Listed['source']; hash?: string | null; protocol?: string | null; listingId?: string | null; preview?: boolean };
+const offerOf = (id: string, l: Offer | null): Listed | null =>
+  l?.price && !l.preview ? { id, price: l.price, source: l.source!, hash: l.hash ?? undefined, protocol: l.protocol ?? undefined, listingId: l.listingId ?? undefined } : null;
+
+/// The live listing for each of these Credits (skipping ones not for sale), ready to buy, in the order asked. One
+/// request per 100, answered from the market book; a Credit it can't price, or all of them where there's no book, are
+/// asked for one by one. `strict`: a rate limit throws, since not knowing isn't "not for sale" (a picture would
+/// replan around it); otherwise a Credit that couldn't be read is left out, as one not for sale.
+export async function listedById(ids: string[], strict = false): Promise<Listed[]> {
+  const found = new Map<string, Listed>();
+  const alone: string[] = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const r = await fetch(`/opensea/credits?ids=${chunk.join(',')}`).catch(() => null);
+    if (r?.status === 429 && strict) throw new Error('Too many requests right now. Try again in a minute.');
+    const j = r?.ok ? ((await r.json().catch(() => null)) as { items?: Record<string, Offer | null> } | null) : null;
+    if (!j?.items) {
+      alone.push(...chunk);
+      continue;
+    }
+    for (const id of chunk) {
+      if (!(id in j.items)) alone.push(id);
+      else {
+        const l = offerOf(id, j.items[id]);
+        if (l) found.set(id, l);
+      }
+    }
+  }
+  const one = await Promise.all(
+    alone.map((x) =>
       fetch(`/opensea/credit/${x}`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((l: { price: string | null; source?: Listed['source']; hash?: string | null; protocol?: string | null; listingId?: string | null; preview?: boolean } | null) =>
-          l?.price && !l.preview ? ({ id: x, price: l.price, source: l.source!, hash: l.hash ?? undefined, protocol: l.protocol ?? undefined, listingId: l.listingId ?? undefined } as Listed) : null,
-        )
-        .catch(() => null),
+        .then((r) => {
+          if (r.status === 429 && strict) throw new Error('Too many requests right now. Try again in a minute.');
+          return r.ok ? (r.json() as Promise<Offer>) : null;
+        })
+        .then((l) => offerOf(x, l), (e: Error) => (e.message.startsWith('Too many') ? Promise.reject(e) : null)),
     ),
   );
-  return got.filter((l): l is Listed => !!l);
+  one.forEach((l) => l && found.set(l.id, l));
+  return ids.flatMap((id) => found.get(id) ?? []);
 }
 
 /// Sweep these listings into the connected wallet (Sweeper.buy): a fresh price for exactly them, checked

@@ -165,6 +165,18 @@ export class MarketBook extends DurableObject<Env> {
     return { row, updated: Number(this.meta('updated') ?? 0) };
   }
 
+  /// Many Credits' rows at once (expired ones count as gone), and how fresh the book is.
+  async getMany(ids: string[]): Promise<{ rows: Row[]; updated: number }> {
+    const now = Math.floor(Date.now() / 1000);
+    const rows: Row[] = [];
+    for (let i = 0; i < ids.length; i += 50) {
+      const chunk = ids.slice(i, i + 50); // a query binds at most 100 values
+      for (const r of this.sql.exec(`SELECT * FROM listings WHERE id IN (${chunk.map(() => '?').join(',')})`, ...chunk).toArray())
+        if (!(Number(r.until) > 0 && Number(r.until) <= now)) rows.push([r.id, r.price, r.source, r.a, r.b, r.seller, Number(r.until)].map((x, k) => (k === 6 ? x : String(x))) as Row);
+    }
+    return { rows, updated: Number(this.meta('updated') ?? 0) };
+  }
+
   /// The whole book as /market.json serves it: { at, items: [id, price, source, a, b][] }, unexpired, built once per
   /// change.
   async snapshot(): Promise<string> {
