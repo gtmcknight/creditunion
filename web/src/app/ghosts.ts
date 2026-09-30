@@ -68,6 +68,14 @@ export async function fillGhosts(root: ParentNode = document) {
   await Promise.all([...root.querySelectorAll<HTMLElement>('.sheet[data-batch]')].map(fillSheet));
 }
 
+/// What fits each of a picture's open slots, for their hover cards, read after its Credits are drawn.
+async function fitsFor(el: HTMLElement, f: Summary['filter'], cells: HTMLElement[], open: number[]) {
+  const want = cells.map((_, i) => layoutSlot(f, i));
+  const keys = [...new Set(open.map((i) => want[i]))];
+  const fits = new Map(await Promise.all(keys.map(async (k) => [k, k ? await match(f, ruleFor(f.layoutTrait ?? 0, k).palettes ?? f.palettes, ruleFor(f.layoutTrait ?? 0, k)) : await match(f, f.palettes)] as const)));
+  for (const i of open) if (cells[i].isConnected) slotOf.set(cells[i], { i, want: want[i], f, fit: fits.get(want[i])! });
+}
+
 async function fillSheet(el: HTMLElement) {
   const f = filters.get(el.dataset.batch!.toLowerCase());
   if (!f) return;
@@ -77,6 +85,22 @@ async function fillSheet(el: HTMLElement) {
   // With a picture, every slot not yet filled takes its recommended Credit, placeholders included.
   const empties = cells.map((c, i) => [c, i] as const).filter(([c]) => (plan ? !c.dataset.id : c.classList.contains('empty')));
   if (!empties.length) return;
+  // An Eights rule is what these Credits are about: keep their marks (the bottom row) on the placeholders too.
+  el.classList.toggle('eights-rule', !!f.eights || (hasLayout(f) && f.layoutTrait === 1));
+  // A picture's planned Credits go in at once, without waiting on what fits (that only feeds the hover cards):
+  // the picture draws from them.
+  if (plan && empties.every(([, i]) => plan[i] != null)) {
+    empties.forEach(([c, i]) => {
+      if (c.dataset.ghost === String(plan[i])) return;
+      c.className = 'cell ghost planned';
+      c.dataset.ghost = String(plan[i]);
+      c.removeAttribute('title');
+      c.innerHTML = `<img src="${editionArt(plan[i]!)}" alt="" loading="lazy" decoding="async">`;
+    });
+    el.dispatchEvent(new Event('ghosts', { bubbles: true }));
+    void fitsFor(el, f, cells, empties.map(([, i]) => i));
+    return;
+  }
   // An Eights rule is what these Credits are about: keep their marks (the bottom row) on the placeholders too.
   el.classList.toggle('eights-rule', !!f.eights || (hasLayout(f) && f.layoutTrait === 1));
   // Each empty slot shows an example that fits it: a painted slot one of its own value, an open slot a mix

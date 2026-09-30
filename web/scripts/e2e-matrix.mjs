@@ -427,7 +427,7 @@ async function picture(page) {
   await page.click('label.arr-tile:has(input[value="6"])');
   await page.setInputFiles('#pic-file', join(WEB, 'public', 'examples', 'jack.jpg')); // no examples: upload one
   await page.waitForFunction(
-    () => !document.getElementById('pic-status')?.textContent && [...document.querySelectorAll('#preview .sheet .cell')].filter((c) => c.dataset.id || c.dataset.ghost).length === 80,
+    () => !!document.getElementById('preview')?.dataset.designed && !document.getElementById('pic-status')?.textContent && [...document.querySelectorAll('#preview .sheet .cell')].filter((c) => c.dataset.id || c.dataset.ghost).length === 80,
     null,
     { timeout: 120_000 },
   );

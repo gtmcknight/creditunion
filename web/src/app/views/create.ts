@@ -1407,6 +1407,7 @@ export async function create(app: HTMLElement) {
       // the picture's own picks.
       if (picPlan) {
         picPlan = null;
+        delete preview.dataset.designed;
         picks.clear();
         pickedByHand = false;
       }
@@ -1501,6 +1502,7 @@ export async function create(app: HTMLElement) {
     brushB = 0;
     drawBrushes();
     syncLayout();
+    preview.dataset.designed = String(seq); // the picture is designed (tests wait on this)
   }
   app.querySelectorAll<HTMLInputElement>('input[name=view]').forEach((r) => r.addEventListener('change', () => setView(r.value as 'rules' | 'credits')));
   // On a wide screen Rules sits in the directions row: picking it shows the rules, any direction the Credits.

@@ -9,7 +9,7 @@ import { gapOf, Guide, planOf, unpackPicture, type Plan, type Stored } from '../
 import { Room, books, depositedKeys, keysOf, noRoomReason, type Books } from '../slots';
 import { MAX_SWEEP, buying, checkQuote, listedById, connectToBuy, live as keepLive, minEth, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepRow, type Listed, type Quote, type Sale, type Source } from '../forsale';
 import { creditCell, creditSkel } from './trait';
-import { directionCanvas, directions, mountDirections, pickedDirection, showDirection } from '../directions';
+import { directionCanvas, directions, mountDirections, pickedDirection, primeInks, showDirection, warmInks } from '../directions';
 import { activityFold } from './live';
 import { $$, art, clock, errText, esc, eth, openModal, same, setRange, sheet, short, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
@@ -77,6 +77,8 @@ let picks = new Set<string>();
 const plansOf = new Map<string, Promise<Plan | null>>();
 /// Unions known (from their saved picture) to be Picture unions.
 const isPictureUnion = new Set<string>();
+/// Unions whose live plan has placed its Credits: the saved picture's quick draw must not overwrite them.
+const livePlanned = new Set<string>();
 /// The same plan again without some listings (sold since the market was read), per union.
 const replans = new Map<string, (gone: ReadonlySet<number>) => Promise<Plan | null>>();
 /// The picture against every Credit that could draw it, per union and viewer (reading them is the slow part).
@@ -101,6 +103,7 @@ async function planPicture(b: Ctx, slots: number[], placed: (bigint | null)[] | 
   if (!guide) return null;
   const rec = guide.fill(slots, placed ? placed.map((x) => (x === null ? null : Number(x))) : slots.map(() => null), gone);
   planGhosts(b.s.address, rec.map((c) => c?.id ?? null));
+  livePlanned.add(b.s.address.toLowerCase());
   return planOf(rec, slots, placed);
 }
 /// A Picture union's buy locks (worker/locks.ts): Colors someone is buying right now can't be bought by anyone else
@@ -279,6 +282,26 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   // Chrome keeps a focus ring on <summary> after a mouse click; drop it for pointer use only.
   app.querySelectorAll<HTMLElement>('.more summary').forEach((el) => el.addEventListener('pointerup', () => setTimeout(() => el.blur(), 0)));
   fillGhosts(app);
+  // A Picture union once it's full (until the burn): still a picture, drawn in Consolidated, and still no
+  // withdrawing through the site, since a Credit taken out would shift it.
+  if ((s.state === 'Full' || s.state === 'Expired') && slots && !Number(s.filter.layoutTrait ?? 0)) {
+    const host = app.querySelector<HTMLElement>('.batch-art');
+    void fetch(`/pictures/${s.address}`).then((r) => {
+      if (!r.ok || !host?.isConnected) return;
+      isPictureUnion.add(s.address.toLowerCase());
+      app.querySelectorAll('.layout-name').forEach((e) => (e.textContent = 'Picture'));
+      const takes = app.querySelector('.takes');
+      if (takes) takes.innerHTML = '<h3>Picture</h3><p class="muted">A special Credit Union made from a picture.</p>';
+      if (!pickedDirection(s.address)) showDirection(host.querySelector<HTMLElement>('.dirs'), 'Consolidated');
+      if (config.sweeper) {
+        app.querySelector('#withdraw')?.setAttribute('hidden', '');
+        app.querySelector('#w-clear')?.setAttribute('hidden', '');
+        app.querySelectorAll<HTMLElement>('.batch-side p').forEach((p) => {
+          if (p.textContent?.includes('You can still leave anytime')) p.textContent = p.textContent.replace(' You can still leave anytime.', ' No withdrawals here: taking a Credit out would shift the picture.');
+        });
+      }
+    }, () => {});
+  }
   // A Picture union: its open slots show the Credits that draw it best, and Buy and Deposit lead with them.
   if (s.state === 'Open' && slots && !Number(s.filter.layoutTrait ?? 0)) {
     const host = app.querySelector<HTMLElement>('.batch-art');
@@ -287,9 +310,20 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     const who = config.sweeper ? undefined : (account ?? undefined), held = config.sweeper ? [] : (m?.owned ?? []);
     // Known to be a picture as soon as its saved picture answers (the plan itself takes seconds): say so, and on
     // mainnet drop Deposit at once, so nobody sees a Painted union's Deposit tab in the meantime.
-    void fetch(`/pictures/${s.address}`).then((r) => {
+    void fetch(`/pictures/${s.address}`).then(async (r) => {
       if (!r.ok || !host?.isConnected) return;
       isPictureUnion.add(s.address.toLowerCase());
+      warmInks(b.ids); // the Credits already in: read while the picture's own answer is parsed
+      // Draw the picture now from the Credits saved with it (their ink comes along); the live plan, seconds later,
+      // swaps in a replacement wherever a saved one has sold.
+      const saved = (await r.json().catch(() => null)) as { ids?: (number | null)[]; inks?: Record<string, [string, number, number]> } | null;
+      if (saved?.ids && !livePlanned.has(s.address.toLowerCase())) {
+        primeInks(saved.inks);
+        planGhosts(s.address, saved.ids);
+        await fillGhosts(app);
+        if (!host.isConnected) return;
+        if (!pickedDirection(s.address)) showDirection(host.querySelector<HTMLElement>('.dirs'), 'Consolidated');
+      }
       app.querySelectorAll('.layout-name').forEach((e) => (e.textContent = 'Picture'));
       // Who can join: a picture union takes exactly the Credits that draw it, so the Colors chips say nothing useful.
       const takes = app.querySelector('.takes');

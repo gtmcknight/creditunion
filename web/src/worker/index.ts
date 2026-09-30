@@ -431,8 +431,29 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const batch = picPath[1].toLowerCase() as Address;
     const key = `picture:${batch}`;
     if (req.method === 'GET') {
+      // With the ink of its planned Credits (seed, paid at, score), so a page draws the picture from this one
+      // answer. A picture never changes once saved, so the whole answer is kept at the edge.
+      const edge = new Request(`${url.origin}/pictures-inked/${batch}`);
+      const hit = await caches.default.match(edge);
+      if (hit) return hit;
       const stored = await env.PLANS.get(key);
-      return stored ? new Response(stored, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=300' } }) : new Response('no picture', { status: 404, headers: { 'cache-control': 'public, max-age=30' } });
+      if (!stored) return new Response('no picture', { status: 404, headers: { 'cache-control': 'public, max-age=30' } });
+      let body = stored;
+      try {
+        const d = JSON.parse(stored) as { ids?: (number | null)[] };
+        const ids = [...new Set((d.ids ?? []).filter((x): x is number => typeof x === 'number' && inSupply(x)))].map(BigInt);
+        if (ids.length) {
+          const r = await ratings({ assets: env.ASSETS, origin: url.origin, rpc: rpcUrl(env), credits: env.CREDITS, ids });
+          const inks: Record<string, [string, number, number]> = {};
+          for (const [id, v] of Object.entries(r.ratings as Record<string, { seed?: string; paidAt?: number; score?: number }>)) if (v?.seed) inks[id] = [v.seed, v.paidAt ?? 0, v.score ?? 0];
+          body = JSON.stringify({ ...d, inks });
+        }
+      } catch {
+        // no ink: the page reads it itself, as before
+      }
+      const res = new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=300' } });
+      if (body !== stored) ctx.waitUntil(caches.default.put(edge, new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=86400' } })));
+      return res;
     }
     if (req.method !== 'POST') return text('bad request', 400);
     if (!sameSite(req)) return text('forbidden', 403);

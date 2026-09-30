@@ -9,7 +9,7 @@ import { clock, eth, esc, openModal, pageHead, same, sheet, until } from '../ui'
 import { TRAIT_KINDS, parseTrait, type TraitValue } from '../../shared/trait';
 import { creditsOf, takes } from './trait';
 import { ago, lastJoined } from './live';
-import { drawStill } from '../directions';
+import { drawStill, primeInks, warmInks } from '../directions';
 
 /// Last deposit per union, from the activity feed (filled in after the first draw).
 let lastIn = new Map<string, number>();
@@ -98,9 +98,11 @@ export async function pictureCards(list: Listed[]) {
   const found = await Promise.all(
     todo.map(async (b) => {
       const d = await fetch(`/pictures/${b.s.address}`)
-        .then((r) => (r.ok ? (r.json() as Promise<{ ids?: (number | null)[] }>) : null))
+        .then((r) => (r.ok ? (r.json() as Promise<{ ids?: (number | null)[]; inks?: Record<string, [string, number, number]> }>) : null))
         .catch(() => null);
       if (!d) return false;
+      primeInks(d.inks);
+      warmInks(b.ids); // what's in already (the planned Credits' ink came with the picture)
       pictures.add(b.s.address);
       if (d.ids) planGhosts(b.s.address, d.ids);
       return true;
@@ -250,7 +252,9 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         el.querySelector('#show-empty')?.addEventListener('click', () => ((showEmpty = true), draw()));
         hydrate(el);
         // A picture union's card shows its picture in Consolidated, as Now: what's in at full ink, the rest faded.
-        void fillGhosts(el).then(() => el.querySelectorAll<HTMLElement>('.card-art.picture').forEach((h) => void drawStill(h, 'Consolidated')));
+        // Each picture card draws as soon as its own planned Credits are in, not after every card's examples.
+        el.querySelectorAll<HTMLElement>('.card-art.picture').forEach((h) => void fillGhosts(h).then(() => drawStill(h, 'Consolidated')));
+        void fillGhosts(el);
         return;
       }
       const staged = STAGES.map(([k]) => [k, list.filter((b) => stageOf(b) === k)] as const);

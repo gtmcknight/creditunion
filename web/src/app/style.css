@@ -8314,3 +8314,4 @@ dialog.how .small { margin-top: 16px; }
 .picture-rules { margin: 0 0 16px; padding: 12px 14px; border: 1px solid var(--line-strong); display: grid; gap: 6px; font-size: 14px; line-height: 1.5; }
 .picture-rules p { margin: 0; }
 .subtabs[hidden] { display: none !important; }
+#withdraw[hidden] { display: none !important; }

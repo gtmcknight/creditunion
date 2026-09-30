@@ -112,7 +112,41 @@ function slotsOf(g: HTMLElement) {
   return { ids, ghosts };
 }
 
+/// A Credit's seed never changes, so what's been read is kept in this browser too: a repeat visit draws at once.
+type Seed = [string, number, number]; // seed, paid at, score
+const SEEDS = 'cu-seeds-v1', KEEP = 4000; // keys are 'c' + id, so they keep insertion order (oldest drop first)
+let kept: Record<string, Seed> = {};
+try {
+  kept = JSON.parse(localStorage.getItem(SEEDS) ?? '{}');
+} catch {}
+let saving = 0;
+function keep(id: string, v: Seed) {
+  kept['c' + id] = v;
+  clearTimeout(saving);
+  saving = window.setTimeout(() => {
+    try {
+      const all = Object.entries(kept);
+      if (all.length > KEEP) kept = Object.fromEntries(all.slice(-KEEP));
+      localStorage.setItem(SEEDS, JSON.stringify(kept));
+    } catch {}
+  }, 500);
+}
+/// Start reading these Credits' ink now, so a later draw finds it ready.
+export const warmInks = (ids: readonly (bigint | string)[]) => void load(ids.map(String));
+
+/// Seeds handed over with a page's data (a picture's planned Credits): drawn without asking for them.
+export function primeInks(seeds: Record<string, Seed> | undefined) {
+  for (const [id, v] of Object.entries(seeds ?? {})) {
+    if (!inks.has(id)) inks.set(id, Promise.resolve(inkOf(v[0], v[1], v[2])));
+    if (!kept['c' + id]) keep(id, v);
+  }
+}
+
 function load(slots: readonly (string | null)[]): Promise<(Ink | null)[]> {
+  for (const s of slots) {
+    const k = s && !inks.has(s) ? kept['c' + s] : undefined;
+    if (k) inks.set(s!, Promise.resolve(inkOf(k[0], k[1], k[2])));
+  }
   const need = [...new Set(slots.filter((s): s is string => !!s && !inks.has(s)))];
   if (need.length) {
     const read = ratings(need.map(BigInt)).then(
@@ -122,7 +156,13 @@ function load(slots: readonly (string | null)[]): Promise<(Ink | null)[]> {
         return {} as Awaited<ReturnType<typeof ratings>>['ratings'];
       },
     );
-    for (const id of need) inks.set(id, read.then((r) => (r[id]?.seed ? inkOf(r[id].seed, r[id].paidAt, r[id].score) : null)));
+    for (const id of need)
+      inks.set(id, read.then((r) => {
+        const v = r[id];
+        if (!v?.seed) return null;
+        keep(id, [v.seed, v.paidAt, v.score]);
+        return inkOf(v.seed, v.paidAt, v.score);
+      }));
   }
   return Promise.all(slots.map((s) => (s ? (inks.get(s) ?? null) : null)));
 }
