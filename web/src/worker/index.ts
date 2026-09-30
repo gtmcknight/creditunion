@@ -823,6 +823,30 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const hit = await cache.match(key);
     if (hit) return hit;
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    // From the market book first (every listing, rebuilt every 5 minutes): no OpenSea call for a Credit it has.
+    // Buying still asks OpenSea for a fresh signed order, so one that sold since just drops out then.
+    if (live && env.PLANS) {
+      const book = await marketBook(env);
+      const e = book?.get(String(id));
+      if (e && (e[2] !== 'opensea' || (e[3] && e[4]))) {
+        const l: Listing = e[2] === 'opensea' ? { id: e[0], price: e[1], source: 'opensea', hash: e[3], protocol: e[4] } : { id: e[0], price: e[1], source: e[2] as Listing['source'], listingId: e[3] || undefined };
+        const res = Response.json(
+          {
+            price: l.price,
+            source: l.source,
+            contract: l.source === 'strategy' ? addrOrNull(env.STRATEGY) : l.source === 'fwa' ? addrOrNull(env.FWA_MARKET) : null,
+            listingId: l.listingId ?? null,
+            hash: l.hash ?? null,
+            protocol: l.protocol ?? null,
+            url: listingUrl(env, live, l),
+            preview: false,
+          },
+          { headers: { 'cache-control': 'public, max-age=60' } },
+        );
+        ctx.waitUntil(cache.put(key, res.clone()));
+        return res;
+      }
+    }
     try {
       const main = mainClient(env);
       const strategy = addrOrNull(env.STRATEGY);
@@ -860,7 +884,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
               preview: !live,
             }
           : { price: null, preview: !live },
-        { headers: { 'cache-control': 'public, max-age=20' } },
+        { headers: { 'cache-control': 'public, max-age=60' } },
       );
       ctx.waitUntil(cache.put(key, res.clone()));
       return res;
@@ -1225,19 +1249,34 @@ async function hiddenUnions(env: Env): Promise<Set<string>> {
 }
 
 /// Every Credit for sale, cheapest listing each: FWA and CreditStrategy, then OpenSea's pages to the end.
+/// The market book (/market.json's items) by id, read from storage at most once a minute per isolate.
+let bookMemo: { at: number; map: Map<string, string[]> | null } | null = null;
+async function marketBook(env: Env): Promise<Map<string, string[]> | null> {
+  if (bookMemo && Date.now() - bookMemo.at < 60_000) return bookMemo.map;
+  const raw = await env.PLANS!.get('market', { cacheTtl: 60 }).catch(() => null);
+  let map: Map<string, string[]> | null = null;
+  try {
+    const d = raw ? (JSON.parse(raw) as { items?: string[][] }) : null;
+    if (d?.items) map = new Map(d.items.map((x) => [x[0], x] as const));
+  } catch {}
+  bookMemo = { at: Date.now(), map };
+  return map;
+}
+
 async function readMarket(env: Env, url: URL, ctx: ExecutionContext): Promise<string> {
   const credits = hasSweeper(env) ? env.CREDITS : MAINNET_CREDITS;
-  const best = new Map<string, [string, string, string]>();
-  const add = (id: string, price: string, source: string) => {
+  // [id, price, source, then how to buy it: an OpenSea order's hash and protocol, or FWA's listing id]
+  const best = new Map<string, string[]>();
+  const add = (id: string, price: string, source: string, ...how: string[]) => {
     const had = best.get(id);
-    if (!had || BigInt(price) < BigInt(had[1])) best.set(id, [id, price, source]);
+    if (!had || BigInt(price) < BigInt(had[1])) best.set(id, [id, price, source, ...how]);
   };
-  for (const e of (await extras(env, url, ctx)).extra) add(e.id, e.price, e.source);
+  for (const e of (await extras(env, url, ctx)).extra) add(e.id, e.price, e.source, ...(e.listingId ? [e.listingId] : []));
   if (env.OPENSEA_API_KEY) {
     let next = '';
     for (let page = 0; page < 200; page++) {
       const pg = await bestPageCached(env, url, ctx, credits, next);
-      for (const l of pg.items) add(l.id, l.price, 'opensea');
+      for (const l of pg.items) add(l.id, l.price, 'opensea', l.hash ?? '', l.protocol ?? '');
       if (!pg.next) break;
       next = pg.next;
     }

@@ -179,6 +179,8 @@ export async function create(app: HTMLElement) {
     return;
   }
 
+  // Something on screen at once while the wallet and the factory are read (usually well under a second).
+  app.innerHTML = `<header class="create-head"><h1>Start a Credit Union</h1><p class="create-lede">Set the rules, add your Credits, invite everyone. At 80 they burn into a Statement and everyone in splits the sale.</p></header><p class="muted">Reading your wallet…</p>`;
   const [held, approved, min, protocolBps, creatorBps, table, minutes] = await Promise.all([
     myCredits(session.account),
     isApproved(session.account),
