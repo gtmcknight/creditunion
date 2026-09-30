@@ -86,6 +86,7 @@ export function toast(msg: string, kind: 'ok' | 'err' | 'info' = 'info', ms = 50
   else el.textContent = msg;
   $('#toasts').append(el);
   requestAnimationFrame(() => el.classList.add('in'));
+  setTimeout(() => el.classList.add('in'), 60); // a withheld frame mustn't hide it
   setTimeout(() => {
     el.classList.remove('in');
     setTimeout(() => el.remove(), 250);

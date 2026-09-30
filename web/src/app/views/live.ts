@@ -280,6 +280,7 @@ export async function activityTicker(el: HTMLElement) {
     line.innerHTML = `<span class="tick-who">${who(x.who, 'sm', true)}</span><span class="tick-what">${what(x)}</span><span class="muted tick-when">${x.time ? ago(x.time) : ''}</span>`;
     hydrate(line);
     requestAnimationFrame(() => line.classList.add('in'));
+    setTimeout(() => line.classList.add('in'), 60); // a withheld frame mustn't hide it
   };
   await load(false);
   const timer = setInterval(() => {

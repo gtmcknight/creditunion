@@ -72,7 +72,14 @@ async function route() {
     app.classList.remove('in');
     // It fades in as soon as the view has put something up, not after everything it loads: a view that waits on a
     // slow read (or a wallet) must never sit invisible. A moment later it shows regardless.
-    const show = () => run === seq && requestAnimationFrame(() => app.classList.add('in'));
+    // Not on an animation frame alone: a frame can be withheld (a busy tab, a wallet popup) until the next click or
+    // scroll, and the page would sit invisible. A short timer shows it regardless (after the style has flushed, so
+    // it still fades).
+    const show = () => {
+      if (run !== seq) return;
+      requestAnimationFrame(() => app.classList.add('in'));
+      setTimeout(() => app.classList.add('in'), 60);
+    };
     const seen = new MutationObserver(() => (seen.disconnect(), show()));
     seen.observe(app, { childList: true });
     setTimeout(() => (seen.disconnect(), show()), 400);
@@ -100,6 +107,7 @@ async function route() {
   }
   if (run !== seq) return;
   requestAnimationFrame(() => app.classList.add('in'));
+  setTimeout(() => run === seq && app.classList.add('in'), 60);
   // The tab says where you are: the page's heading (or, in the Credits explorer, its crumb: "Palette Y"), then the
   // site. Home is the site alone. It follows the heading when that changes (an address becoming its ENS name).
   const text = (e: Element | null) => (e?.textContent ?? '').replace(/\s+/g, ' ').trim();
