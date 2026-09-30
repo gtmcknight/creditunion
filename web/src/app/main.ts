@@ -18,7 +18,7 @@ import { timePage } from './views/time';
 import { bitsPage, ratingPage } from './views/scale';
 import { esc, errText, openModal, toast, utc } from './ui';
 import { factoryAbi } from './abi';
-import { me } from './data';
+import { indexedBatch, me } from './data';
 
 const app = document.getElementById('app')!;
 let seq = 0;
@@ -303,7 +303,12 @@ document.addEventListener('pointerover', (e) => {
   const to = (e.target as HTMLElement).closest?.<HTMLAnchorElement>('a[href^="/union/0x"]')?.pathname.slice(7);
   if (ahead) clearTimeout(ahead);
   ahead = null;
-  if (to && /^0x[0-9a-fA-F]{40}$/.test(to) && session.account) ahead = setTimeout(() => session.account && void me(to as Address, session.account).catch(() => {}), 150);
+  if (!to || !/^0x[0-9a-fA-F]{40}$/.test(to)) return;
+  ahead = setTimeout(() => {
+    if (session.account) void me(to as Address, session.account).catch(() => {});
+    // An open union's Buy tab: the Worker starts its scan of the market now, so the listings are waiting on arrival.
+    if (indexedBatch(to as Address)?.b.s.state === 'Open') void fetch(`/opensea/listings?batch=${to}`).catch(() => {});
+  }, 150);
 });
 document.addEventListener('pointerdown', (e) => (e.target as HTMLElement).closest?.('.sweep-range input')?.setAttribute('data-pointer', ''), true);
 document.addEventListener('keydown', (e) => (e.target as HTMLElement).closest?.('.sweep-range input')?.removeAttribute('data-pointer'), true);

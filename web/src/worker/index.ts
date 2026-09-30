@@ -1778,32 +1778,51 @@ export class ChainBook extends DurableObject<Env> {
   }
 
   /// A union's fitting listings (scanFor), scanned at most once per `maxMs` for the whole site, whoever asks. A scan up
-  /// to two minutes old is handed out while the next one runs behind it, so a Buy tab never waits on a scan it can
-  /// do without (buying prices each listing again anyway).
+  /// to STALE_MS old is handed out while the next one runs behind it, so a Buy tab never waits on a scan it can do
+  /// without (buying prices each listing again anyway). Finished scans are also saved in this object's storage, so a
+  /// restart hands out the last one rather than making the next viewer wait on a fresh scan.
   private scans = new Map<string, { at: number; p: Promise<Listing[]>; done: boolean }>();
   private rescans = new Set<string>();
   async listings(batch: Address, extra: Extra[], maxMs: number, deep?: string[] | null): Promise<Listing[]> {
     setSpareKey(this.env.OPENSEA_API_KEY_2);
     const k = batch.toLowerCase();
-    const hit = this.scans.get(k);
+    let hit = this.scans.get(k);
+    if (!hit) {
+      const row = this.ctx.storage.sql.exec(`SELECT v FROM kept WHERE k = ?`, `scan:${k}`).toArray()[0];
+      if (row) {
+        try {
+          const { at, ls } = JSON.parse(String(row.v)) as { at: number; ls: Listing[] };
+          hit = { at, p: Promise.resolve(ls), done: true };
+          this.scans.set(k, hit);
+        } catch {}
+      }
+    }
     const age = hit ? Date.now() - hit.at : Infinity;
     if (hit && age <= maxMs) return hit.p;
-    if (hit?.done && age <= 120_000) {
+    const keep = (at: number, ls: Listing[]) => {
+      this.scans.set(k, { at, p: Promise.resolve(ls), done: true });
+      this.ctx.storage.sql.exec(`INSERT INTO kept (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v`, `scan:${k}`, JSON.stringify({ at, ls }));
+    };
+    if (hit?.done && age <= STALE_MS) {
       if (!this.rescans.has(k)) {
         this.rescans.add(k);
         const at = Date.now();
         void scanFor(this.env, batch, { extra }, deep)
-          .then((ls) => this.scans.set(k, { at, p: Promise.resolve(ls), done: true }))
+          .then((ls) => keep(at, ls))
           .catch((e) => console.warn('[scan]', safeError(e)))
           .finally(() => this.rescans.delete(k));
       }
       return hit.p;
     }
-    for (const [x, v] of this.scans) if (Date.now() - v.at > 10 * 60_000) this.scans.delete(x);
-    const entry = { at: Date.now(), p: scanFor(this.env, batch, { extra }, deep), done: false };
+    for (const [x, v] of this.scans) if (Date.now() - v.at > STALE_MS) this.scans.delete(x);
+    const at = Date.now();
+    const entry = { at, p: scanFor(this.env, batch, { extra }, deep), done: false };
     this.scans.set(k, entry);
     entry.p.then(
-      () => (entry.done = true),
+      (ls) => {
+        entry.done = true;
+        if (this.scans.get(k) === entry) keep(at, ls);
+      },
       () => this.scans.get(k) === entry && this.scans.delete(k),
     );
     return entry.p;
@@ -2349,6 +2368,9 @@ async function fitting(env: Env, url: URL, ctx: ExecutionContext, batch: Address
 }
 /// How long the ChainBook keeps a union's scan.
 const SCAN_MS = 20_000;
+/// How old a scan can be and still be handed out (while a new one runs): the Buy tab shows it at once, and a buy
+/// prices every listing again before it sends.
+const STALE_MS = 30 * 60_000;
 /// The scan itself (opensea.ts), with this union's canTake and the chain's liveness checks; `deep`, a narrow union's
 /// Credits for sale (deepCandidates), is read through once OpenSea's cheapest pages come up short.
 function scanFor(env: Env, batch: Address, more: { extra: Extra[]; fakeOpenSea?: { id: string; price: string }[] }, deep?: readonly string[] | null) {
