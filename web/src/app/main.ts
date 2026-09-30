@@ -51,6 +51,7 @@ export function go(path: string) {
 /// The Credits explorer: its landing, the trait indexes and pages, the range pages.
 const EXPLORER = new Set(['credits', 'palette', 'eights', 'print', 'weight', 'time', 'rating', 'bits']);
 
+let lastPath = '';
 let lastPage = '';
 async function route() {
   const run = ++seq;
@@ -63,8 +64,19 @@ async function route() {
   );
   // Moving within the Credits explorer (trait to trait) swaps the page in place; elsewhere it fades in.
   const within = EXPLORER.has(page) && EXPLORER.has(lastPage);
+  // The same page drawn again (a wallet waking up and reconnecting, say) stays on screen: only a new page fades.
+  const again = location.pathname === lastPath;
   lastPage = page;
-  if (!within) app.classList.remove('in');
+  lastPath = location.pathname;
+  if (!within && !again) {
+    app.classList.remove('in');
+    // It fades in as soon as the view has put something up, not after everything it loads: a view that waits on a
+    // slow read (or a wallet) must never sit invisible. A moment later it shows regardless.
+    const show = () => run === seq && requestAnimationFrame(() => app.classList.add('in'));
+    const seen = new MutationObserver(() => (seen.disconnect(), show()));
+    seen.observe(app, { childList: true });
+    setTimeout(() => (seen.disconnect(), show()), 400);
+  }
   try {
     if (page === '') home(app);
     else if (page === 'faq') faq(app);
