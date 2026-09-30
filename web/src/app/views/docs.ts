@@ -122,7 +122,7 @@ const sections = (): Section[] => [
       [
         [0, 'Joined', 'In the order they come in.', 'Buy or deposit'],
         [2, 'Number', 'By Credit number, ascending or descending.', 'Buy or deposit'],
-        [4, 'Painted', 'The creator paints the sheet using traits, like Colors or Eights. Each spot takes only a Credit that matches.', 'Buy or deposit'],
+        [4, 'Painted', 'The creator paints the sheet using traits, like Colors or Eights. Each spot only takes a Credit that matches.', 'Buy or deposit'],
         [6, 'Picture', 'The creator uploads an image. The site picks the listed Credits that draw it best.', 'Buy here only'],
       ] as [number, string, string, string][]
     )
