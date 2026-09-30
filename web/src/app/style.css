@@ -8325,30 +8325,8 @@ dialog.how .small { margin-top: 16px; }
 .card-art .fit-corner.on { color: #0a0a0a; font-weight: 500; }
 @media (max-width: 600px) { .card-art .fit-corner { top: 8px; right: 8px; font-size: 11px; } }
 .card-art .tag.state.corner { position: absolute; top: 8px; left: 8px; right: auto; }
-.pay-glyph { display: inline-flex; color: var(--muted); }
-.pay-glyph svg { fill: currentColor; }
-.pay-glyph { position: relative; padding: 4px 0; }
-.pay-glyph[data-tip]::after {
-  content: attr(data-tip);
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  translate: 0 -2px;
-  padding: 5px 8px;
-  background: var(--fg);
-  color: var(--bg);
-  font-size: 12px;
-  line-height: 1;
-  white-space: nowrap;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 120ms var(--ease), translate 120ms var(--ease);
-  z-index: 5;
-}
-.pay-glyph[data-tip]:not(:hover)::after { display: none; } /* off-screen space counts even when invisible */
-.pay-glyph[data-tip]:hover::after { opacity: 1; translate: 0 0; }
 .meta-line { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: visible !important; }
-/* The line's words cut with an ellipsis on a narrow card; the payout icon's tooltip beside them still shows. */
+/* The line's words cut with an ellipsis on a narrow card. */
 .meta-line-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meta-text { overflow: visible; min-width: 0; }
 .grid > .card, .card-meta { min-width: 0; }
@@ -9130,3 +9108,11 @@ dialog.share .share-swatches button {
 .join-head { align-items: center; justify-content: flex-start; }
 .join-head h3 { margin: 0; }
 .join-head #pick-count { margin-left: auto; }
+.meta-yours { color: var(--fg); font-weight: 500; }
+/* Card lines 2 and 3: one left edge, one font, one height; the creator name gives way first. */
+.card-meta .meta-line { height: 18px; line-height: 18px; font-size: 13px; color: var(--muted); }
+.meta-byline { display: flex; align-items: center; gap: 0; }
+.meta-byline .who { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--muted); font-size: inherit; }
+.meta-byline .who img { display: none; }
+.meta-byline .who-name { font-family: var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta-byline .meta-where { flex: none; white-space: nowrap; }

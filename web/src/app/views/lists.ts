@@ -8,11 +8,9 @@ import type { Address } from 'viem';
 import { clock, eth, esc, openModal, pageHead, same, sheet, startsAt, statementArt, until } from '../ui';
 import { TRAIT_KINDS, parseTrait, type TraitValue } from '../../shared/trait';
 import { creditsOf, takes } from './trait';
-import { ago, lastJoined } from './live';
 import { drawStill, primeInks, showStill, warmInks } from '../directions';
 
 /// Last deposit per union, from the activity feed (filled in after the first draw).
-let lastIn = new Map<string, number>();
 
 function status(s: Summary) {
   switch (s.state) {
@@ -175,8 +173,9 @@ export function mineIn(b: Listed, by = session.account) {
 }
 
 /// The payout at a glance, beside the creator: five level bars for Equal, five stepping down for Early bird.
-const payGlyph = (early: boolean) =>
-  `<span class="pay-glyph" data-tip="${early ? 'Early bird · first in 1.5×, last 0.5×' : 'Equal · every Credit gets 1/80'}" aria-label="${early ? 'Early bird payout' : 'Equal payout'}"><svg viewBox="0 0 19 12" width="16" height="10" preserveAspectRatio="none" aria-hidden="true">${[0, 1, 2, 3, 4].map((i) => { const h = early ? 12 - i * 2 : 8; return `<rect x="${i * 4}" y="${12 - h}" width="3" height="${h}"/>`; }).join('')}</svg></span>`;
+/// The payout rule as a word, its meaning on hover.
+const payWord = (early: boolean) =>
+  `<span class="pay-word" title="${early ? 'First in get 1.5×, last in 0.5×' : 'Every Credit gets 1/80'}">${early ? 'Early bird' : 'Equal split'}</span>`;
 
 /// A picture card can draw once its Credits are placed and, while open, its plan is known; until then it shows its
 /// last drawing (or its grid).
@@ -212,33 +211,30 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yo
   const canJoin = fit?.length ? Math.min(fit.length, room) : 0;
   const burned = s.state === 'Auction' || s.state === 'Settled';
   const live = s.state === 'Auction' && !(s.highBid && Date.now() / 1000 >= s.auctionEnd);
-  const cta = s.state === 'Open' ? 'Join' : live ? 'Bid' : '';
-  const fits = fit?.length ?? 0;
-  const fitText =
-    s.state !== 'Open' ? '' : mine.size ? (fits && whose === 'yours' ? `${mine.size} in · ${fits} more fit` : `${mine.size} of ${whose} in`) : !session.account && !fit ? '' : fits ? `${fits} of ${whose} fit` : '';
-  // Open: your fit in the art's top-right corner, across from the count. Otherwise the state tag sits there.
-  // Top right: your fit while it's open; once it's past Open, how many of yours are in.
-  // Top right: a JOINED tag with your count once you're in (any state); before that, your fit while it's open.
-  const state = mine.size && whose === 'yours'
-    ? `<span class="tag joined-tag"><span>You joined</span><span class="jn num">${mine.size}</span></span>`
-    : s.state === 'Open' && fitText ? `<span class="fit-corner${fits || mine.size ? ' on' : ''}">${fitText}</span>` : '';
-  // Past Open, the state tag takes the count's corner: FULL says 80/80 already.
-  const corner = s.state === 'Open' ? `<span class="count num">${s.count}/80</span>` : `<span class="tag state corner ${s.state.toLowerCase()}">${s.state}</span>`;
+  // The art carries no text. Under it, three lines: the name; who started it and how many are in; where it stands and
+  // what of yours is in or fits.
+  const cta = s.state === 'Open' && !mine.size ? 'Join' : live ? 'Bid' : '';
   const members = membersOf({ depositors });
-  const last = lastIn.get(s.address.toLowerCase());
-  const momentum = `${members} ${members === 1 ? 'member' : 'members'}${last ? ` · <span class="lj-word">last joined </span>${ago(last)}` : ''}`;
+  const people = `${members} ${members === 1 ? 'member' : 'members'}`;
+  const where =
+    s.state === 'Open' ? `${s.count}/80 Credits`
+    : s.state === 'Full' ? '80/80 Full'
+    : esc(status(s));
+  const more = s.state === 'Open' && whose === 'yours' ? canJoin : 0;
+  const theirs = whose === 'yours' ? 'yours' : whose;
+  const yoursText = mine.size ? `${mine.size} of ${theirs} in${more ? ` · ${more} more fit` : ''}` : more ? `${more} of ${theirs} fit` : '';
   registerFilter(s.address, s.filter);
   registerDeposits(ids, depositors, s.split === 1);
   return `<a class="card${canJoin ? ' can-join' : ''}" href="/union/${s.address}">
-    <div class="card-art${picture ? ' picture dir-host' : ''}${burned ? ' statement-host' : ''}"${picture ? ` data-portrait="${s.address.toLowerCase()}:${ids.length}:${ids.length ? ids[ids.length - 1] : ''}"${pictureReady({ s, ids, depositors }) ? ' data-ready="1"' : ''}` : ''}>${sheet(ids, { size: 'sm', mine, placed: placements.get(placeKey({ s, ids })), batch: s.state === 'Open' ? s.address : undefined, painted: true })}${burned ? statementArt(s.statementId) : ''}${corner}${state}</div>
+    <div class="card-art${picture ? ' picture dir-host' : ''}${burned ? ' statement-host' : ''}"${picture ? ` data-portrait="${s.address.toLowerCase()}:${ids.length}:${ids.length ? ids[ids.length - 1] : ''}"${pictureReady({ s, ids, depositors }) ? ' data-ready="1"' : ''}` : ''}>${sheet(ids, { size: 'sm', mine, placed: placements.get(placeKey({ s, ids })), batch: s.state === 'Open' ? s.address : undefined, painted: true })}${burned ? statementArt(s.statementId) : ''}</div>
     <div class="card-meta">
       <div class="meta-text">
         <strong>${esc(s.name || 'Untitled')}</strong>
-        <span class="meta-by">${who(s.creator, 'sm', 'nested')}</span>
-        <span class="meta-line num">${payGlyph(s.split === 1)}<span class="meta-line-text">${s.state === 'Open' ? momentum : s.state === 'Full' ? `${members} ${members === 1 ? 'member' : 'members'} · ${esc(s.phase === 'Waiting' ? (notice ? `burning starts ${startsAt(notice.at)}` : 'waiting for Jack') : fullStatus(s))}` : esc(status(s))}</span></span>
+        <span class="meta-line num"><span class="meta-line-text meta-byline">${who(s.creator, 'sm', 'nested')}<span class="meta-where">&nbsp;·&nbsp;${people}&nbsp;·&nbsp;${payWord(s.split === 1)}</span></span></span>
+        <span class="meta-line num"><span class="meta-line-text">${where}${yoursText ? ` · <span class="meta-yours">${yoursText}</span>` : ''}</span></span>
         ${rating === undefined ? '' : `<span class="meta-line num">Rating ${rating.toLocaleString()}</span>`}
       </div>
-      ${cta && !(s.state === 'Open' && mine.size) ? `<span class="btn sm primary cta">${cta}</span>` : ''}
+      ${cta ? `<span class="btn sm primary cta">${cta}</span>` : ''}
     </div>
   </a>`;
 }
@@ -455,17 +451,11 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       list.splice(0, list.length, ...nextList);
       parties.splice(0, parties.length, ...nextParties);
       await Promise.all([placeCards(list), pictureCards(list)]);
-      if (tab === 'parties') lastIn = await lastJoined();
       if (document.getElementById('batches') === el) draw();
     }, 20_000);
     Promise.all([placeCards(list), pictureCards(list)]).then((got) => {
       if (got.some(Boolean) && document.getElementById('batches') === el) draw();
     });
-    if (tab === 'parties')
-      lastJoined().then((m) => {
-        lastIn = m;
-        if (m.size && document.getElementById('batches') === el) draw();
-      });
     if (session.account && tab === 'parties') {
       fitByBatch(parties).then((m) => {
         fit = m;
