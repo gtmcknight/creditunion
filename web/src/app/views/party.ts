@@ -9,6 +9,7 @@ import { gapOf, Guide, planOf, unpackPicture, type Plan, type Stored } from '../
 import { Room, books, keysOf, noRoomReason, placedKeys, type Books } from '../slots';
 import { MAX_SWEEP, buying, checkQuote, listedById, connectToBuy, live as keepLive, minEth, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepRow, type Listed, type Quote, type Sale, type Source } from '../forsale';
 import { creditCell, creditSkel } from './trait';
+import { shareButton } from '../share';
 import { directionCanvas, directions, mountDirections, pickedDirection, primeInks, showDirection, warmInks } from '../directions';
 import { activityFold } from './live';
 import { $$, art, clock, errText, esc, eth, openModal, same, setRange, sheet, short, toast, until } from '../ui';
@@ -239,17 +240,17 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   const picked = shown.get(s.address.toLowerCase()) ?? 'now';
   const show = (picked === 'finished' && s.count < 80) || (picked === 'yours' && myIds.size) ? picked : 'now';
   const artHtml = burned
-    ? `<figure class="statement">${sheet(b.ids, { closed: true })}<figcaption class="legend muted small"><span>Statement #${s.statementId}</span></figcaption></figure>`
+    ? `<figure class="statement">${sheet(b.ids, { closed: true })}${directionCanvas}<figcaption class="legend muted small">${directions(s.address, false, true)}<div class="legend-end"><span>Statement #${s.statementId}</span>${shareButton()}</div></figcaption></figure>`
     : `${sheet(b.ids, { mine: myIds, fresh: placed ? undefined : seen < s.count ? seen : undefined, closing: s.state === 'Full', placed, batch: s.state === 'Open' ? s.address : undefined })}${unplaced ? '' : directionCanvas}
-       <div class="legend muted small">${unplaced ? '<span>Couldn’t read which slot each Credit fills. Refresh to try again.</span>' : `${showSwitch(s.count, myIds.size, show)}${directions(s.address)}`}</div>`;
+       <div class="legend muted small">${unplaced ? '<span>Couldn’t read which slot each Credit fills. Refresh to try again.</span>' : `<div class="legend-end">${showSwitch(s.count, myIds.size, show)}${shareButton()}</div>${directions(s.address, false, true)}`}</div>`;
 
   app.innerHTML = `
   
   <section class="batch">
-    <div class="batch-art dir-host" data-show="${show}">${artHtml}</div>
+    <div class="batch-art dir-host" data-show="${show}" data-name="${esc(s.name || 'Untitled')}">${artHtml}</div>
     <div class="batch-side">
       <header>
-        <div class="row"><span class="tag ${s.state.toLowerCase()}">${s.state}</span><button type="button" class="link small" id="share">Share</button></div>
+        <div class="row"><span class="tag ${s.state.toLowerCase()}">${s.state}</span></div>
         <h1>${esc(s.name || 'Untitled')}</h1>
         <div class="byline">${who(s.creator, 'lg', true)}${s.creatorFeeBps ? `<span class="fee">${pct(s.creatorFeeBps)} creator fee</span>` : ''}</div>
       </header>
@@ -385,16 +386,6 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     if (!c) return;
     if ((e as MouseEvent).metaKey || (e as MouseEvent).ctrlKey) window.open(`/credit/${c.dataset.id}`, '_blank');
     else navigate(`/credit/${c.dataset.id}`);
-  });
-  document.getElementById('share')?.addEventListener('click', async () => {
-    const url = shareUrl(s);
-    try {
-      if (navigator.share && matchMedia('(pointer: coarse)').matches) await navigator.share({ title: s.name || 'A Credit Union on creditunion.fun', url });
-      else {
-        await navigator.clipboard.writeText(url);
-        toast('Link copied', 'ok', 2500);
-      }
-    } catch {}
   });
   const art = app.querySelector<HTMLElement>('.batch-art');
   app.querySelectorAll<HTMLElement>('.rule-chip[data-slots]').forEach((row) => {

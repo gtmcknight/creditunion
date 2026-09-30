@@ -792,74 +792,44 @@ nav a .num {
   outline: 1px solid var(--fg);
   outline-offset: 2px;
 }
-/* One menu for the format: its glyph, name and a chevron, in grey like the words beside it, opening upward to a
-   list of all eight by glyph and name. */
-.dirs .dir-pick-wrap {
-  position: relative;
+.dirs .dir-glyph {
+  display: grid;
+  place-items: center;
+  width: 24px;
 }
-.dirs .dir-pick {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
+/* Solid glyphs read heavier than words at the same colour: the ones not showing sit back further. */
+.dirs .dir-glyph svg {
+  opacity: 0.4;
+  transition: opacity 150ms var(--ease);
 }
-.dirs .dir-pick:is(:hover, [aria-expanded='true']) {
-  color: var(--fg);
-}
-.dirs .dir-pick .dir-chevron {
-  margin-left: -2px;
-}
-.dirs .dir-pick .dir-chevron {
-  opacity: 0.5;
-  transition: opacity 150ms var(--ease), rotate 150ms var(--ease);
-}
-.dirs .dir-pick:hover .dir-chevron,
-.dirs .dir-pick[aria-expanded='true'] .dir-chevron {
+.dirs .dir-glyph:is(:hover, :focus-visible, [aria-checked='true']) svg {
   opacity: 1;
 }
-.dirs .dir-pick[aria-expanded='true'] .dir-chevron {
-  rotate: 180deg;
+/* The line under a glyph is the glyph's width, as the line under a word is the word's. */
+.dirs .dir-glyph[aria-checked='true'] {
+  background: linear-gradient(currentColor, currentColor) center bottom / 16px 1px no-repeat;
 }
-.dirs .dir-menu {
+/* Each glyph's name, above it on hover. */
+.dirs .dir-glyph[data-tip]::after {
+  content: attr(data-tip);
   position: absolute;
-  bottom: calc(100% + 6px); /* opens upward, over the sheet it names */
-  left: 0;
-  z-index: 3;
-  display: grid;
-  min-width: 176px;
-  padding: 4px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r);
-  background: var(--bg);
-  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.14);
-}
-.dirs .dir-menu[hidden] {
-  display: none;
-}
-.dirs .dir-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 10px;
-  border-radius: calc(var(--r) - 2px);
-  color: var(--muted);
-  text-align: left;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  translate: -50% 2px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: #0a0a0a;
+  color: #fff;
+  font: 500 11px/1 var(--sans);
   white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms var(--ease), translate 120ms var(--ease);
+  z-index: 2;
 }
-.dirs .dir-item:is(:hover, :focus-visible) {
-  background: var(--line);
-  outline: none;
-}
-.dirs .dir-item[aria-checked='true'] {
-  color: var(--fg);
-}
-.dirs .dir-item[aria-checked='true']::after {
-  content: '';
-  width: 5px;
-  height: 5px;
-  margin-left: auto;
-  border-radius: 50%;
-  background: currentColor;
+.dirs .dir-glyph[data-tip]:is(:hover, :focus-visible)::after {
+  opacity: 1;
+  translate: -50% 0;
 }
 
 /* ---------------------------------------------------------------- batch page */
@@ -8320,14 +8290,14 @@ dialog.how .small { margin-top: 16px; }
 .card-art .joined-tag > span { display: inline-flex; align-items: center; height: 100%; padding: 0 8px; }
 .card-art .joined-tag .jn { box-shadow: inset 1.5px 0 0 #0a0a0a; }
 .show-empty { display: block; margin: 24px auto 0; }
-/* Create's preview bar, one line on a wide screen: the format menu in the bottom-left corner as on a union page,
+/* Create's preview bar, one line on a wide screen: the direction glyphs in the bottom-left corner as on a union page,
    then Painted (on the Painted layout) after it, so Painted appearing never moves it. */
 @media (min-width: 821px) {
   .design-preview { gap: 8px; }
   .preview-foot { flex-wrap: nowrap; align-items: center; }
   .preview-foot > div:has(> .dirs), .preview-foot .dirs { display: contents; }
   .preview-foot .dir-word { order: 1; }
-  .preview-foot .dir-pick-wrap { order: 0; }
+  .preview-foot .dir-glyph { order: 0; }
 }
 /* A card's words: the name beside the Join/Bid button, the creator and the members line under both at full width. */
 .card-meta { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: start; }
@@ -8768,3 +8738,151 @@ dialog.how .small { margin-top: 16px; }
   .calc-sheets { grid-template-columns: repeat(2, auto); }
 }
 .calc-sheets figcaption strong.empty { color: var(--muted); }
+/* The right end of the bar under a union's sheet: Now · Finished, then Share. */
+.legend-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 20px;
+  margin-left: auto;
+}
+.statement > .sheet,
+.statement > .dir-canvas {
+  grid-area: 1 / 1;
+}
+/* Share: a grey word like the words beside it, opening the share modal. */
+.share-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  transition: color 150ms var(--ease);
+}
+.share-pick:hover {
+  color: var(--fg);
+}
+/* The modal: the picture at its own shape, the formats under it, then size and ground, then the actions. */
+dialog.share {
+  width: min(640px, calc(100vw - 2 * var(--gutter)));
+}
+dialog.share form {
+  gap: 14px;
+}
+dialog.share h3 {
+  margin: 0;
+}
+.share-preview {
+  display: block;
+  width: 100%;
+  box-shadow: 0 0 0 1px var(--line);
+}
+/* One row under the picture: All formats and the eight glyphs, larger here, on the left; size and ground, small,
+   on the right. */
+.share-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+dialog.share .dir-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--muted);
+}
+dialog.share .dir-row .dir-word {
+  margin-right: 10px;
+}
+dialog.share .dir-row .dir-glyph {
+  width: 28px;
+}
+dialog.share .dir-row .dir-glyph svg {
+  width: 20px;
+  height: 20px;
+}
+.share-opts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+dialog.share .share-seg button {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+dialog.share .share-swatches {
+  gap: 6px;
+}
+dialog.share .share-swatches button {
+  width: 18px;
+  height: 18px;
+}
+.share-seg {
+  display: inline-flex;
+  padding: 2px;
+  background: var(--surface);
+}
+.share-seg button {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+.share-seg button[aria-checked='true'] {
+  background: var(--raised);
+  box-shadow: var(--raised-shadow);
+  color: var(--fg);
+}
+.share-swatches {
+  display: inline-flex;
+  gap: 8px;
+}
+.share-swatches button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: 0 0 0 1px var(--line-strong);
+  cursor: pointer;
+}
+.share-swatches button {
+  position: relative;
+}
+.share-swatches button[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  translate: -50% 2px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: #0a0a0a;
+  color: #fff;
+  font: 500 11px/1 var(--sans);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms var(--ease), translate 120ms var(--ease);
+}
+.share-swatches button[data-tip]:hover::after {
+  opacity: 1;
+  translate: -50% 0;
+}
+.share-swatches button[aria-checked='true'] {
+  box-shadow: 0 0 0 1px var(--line-strong), 0 0 0 3px var(--bg), 0 0 0 4px var(--fg);
+}
+.share-go {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}

@@ -3,19 +3,21 @@
 /// Previews until Jack's Statement contract is out.
 import { compose, DIRECTIONS, inkOf, paint as paintMarks, PAGE, type Direction, type Ink } from '../shared/statement';
 import { ratings } from './data';
+import { drawPicture, type Pick } from './pictures';
 
 /// The create page adds its Rules view to the same row.
-type Shown = Direction | 'Rules';
-const drawnView = (d: Shown): d is Exclude<Direction, 'Issued'> => d !== 'Issued' && d !== 'Rules';
+/// A union's page adds All eight (the eight side by side) in front of them.
+type Shown = Pick | 'Rules';
+const drawnView = (d: Shown): d is Exclude<Pick, 'Issued'> => d !== 'Issued' && d !== 'Rules';
 
 /// What each switch is showing, for the visit: pages re-render as Credits come in.
 const showing = new Map<string, Shown>();
 /// The direction to go back to when the create page leaves its Rules view.
-const before = new Map<string, Direction>();
+const before = new Map<string, Pick>();
 /// Each Credit's ink, read once.
 const inks = new Map<string, Promise<Ink | null>>();
 /// What each canvas last drew, so a resize can redraw it.
-const drawn = new WeakMap<HTMLCanvasElement, { d: Direction; list: (Ink | null)[]; ghosts: ReadonlySet<number> }>();
+const drawn = new WeakMap<HTMLCanvasElement, { d: Pick; list: (Ink | null)[]; ghosts: ReadonlySet<number> }>();
 const sized = new ResizeObserver((entries) => {
   for (const { target } of entries) {
     const last = drawn.get(target as HTMLCanvasElement);
@@ -26,49 +28,44 @@ const sized = new ResizeObserver((entries) => {
 /// The canvas the three drawn directions share; it sits over the sheet, inside the same `.dir-host`.
 export const directionCanvas = '<canvas class="dir-canvas" hidden aria-hidden="true"></canvas>';
 
-/// A 16-pixel glyph for each direction: what its sheet looks like, in one colour.
+/// A 16-pixel glyph for each direction, what its sheet looks like. Every glyph fills the same page-shaped box with about the same ink, lines at 1.25 (Share matches).
 const GLYPH: Record<Direction, string> = {
-  Issued: '<path fill="currentColor" d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z"/>',
-  Consolidated: '<path fill="currentColor" d="M2 2h12v12H2zM5 5v2h2V5zm4 2v2h2V7zM5 10v2h2v-2z" fill-rule="evenodd"/>',
-  Accrued: '<path fill="none" stroke="currentColor" stroke-width="1.5" d="M4 3.5c2-1 3 .5 5 0s4.5 0 4.5 2.5-2 2.5-1.5 4.5-1 3-3.5 2.5-2.5 1-4.5 0S2 10 3 8 2 4.5 4 3.5z"/>',
-  Allocated: '<path fill="none" stroke="currentColor" stroke-width="1.5" d="M2.75 2.75h10.5v10.5H2.75zM7 2.75 6 7.5l-3.25 1M6 7.5l3.5 2 1 3.75M9.5 9.5l3.75-2.5M9.5 2.75 11 7"/>',
-  Balanced: '<path fill="currentColor" d="M2 2h5v12H2zM8 2h6v6H8zM8 9h3v5H8zM12 9h2v5h-2z"/>',
-  Amortized: '<path fill="none" stroke="currentColor" stroke-width="1.5" d="M2.75 2.75h10.5v10.5H2.75zM5.75 5.75h4.5v4.5h-4.5z"/>',
-  Reconciled: '<path fill="currentColor" d="M2 2h12v2H2zM2 5.5h8v2H2zM2 9h10v2H2zM2 12.5h6v2H2z"/>',
-  Voided: '<path fill="none" stroke="currentColor" stroke-width="1.25" d="M2.6 2.6h3.8v3.8H2.6zM9.6 2.6h3.8v3.8H9.6zM2.6 9.6h3.8v3.8H2.6zM9.6 9.6h3.8v3.8H9.6z"/>',
+  Issued: '<path fill="currentColor" d="M2.5 3h2.5v2.5h-2.5zM2.5 7.25h2.5v2.5h-2.5zM2.5 11.5h2.5v2.5h-2.5zM6.75 3h2.5v2.5h-2.5zM6.75 7.25h2.5v2.5h-2.5zM6.75 11.5h2.5v2.5h-2.5zM11 3h2.5v2.5h-2.5zM11 7.25h2.5v2.5h-2.5zM11 11.5h2.5v2.5h-2.5z"/>', // Credits spaced on the page
+  Consolidated: '<path fill="currentColor" d="M2 1h2v2h-2zM6 1h2v2h-2zM8 1h2v2h-2zM12 1h2v2h-2zM4 3h2v2h-2zM8 3h2v2h-2zM10 3h2v2h-2zM2 5h2v2h-2zM6 5h2v2h-2zM10 5h2v2h-2zM12 5h2v2h-2zM2 7h2v2h-2zM4 7h2v2h-2zM8 7h2v2h-2zM12 7h2v2h-2zM4 9h2v2h-2zM6 9h2v2h-2zM10 9h2v2h-2zM2 11h2v2h-2zM6 11h2v2h-2zM8 11h2v2h-2zM12 11h2v2h-2zM4 13h2v2h-2zM8 13h2v2h-2zM10 13h2v2h-2z"/>', // cells butted into one mosaic
+  Accrued: '<path fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" d="M5 1.9c1.6-.5 2.6.4 4 .1 1.9-.4 3.7.3 3.7 2.6 0 1.7-1.2 2.3-.8 3.9.4 1.6.9 2.6-.1 4.2-.9 1.5-2.8 1.3-4 1.8-1.5.6-3.3.2-4-1.4-.6-1.4.4-2.4.1-3.9C3.6 7.6 2.7 6.6 3 4.9c.3-1.6 1-2.6 2-3zM6.2 5.4c1-.5 2.6-.2 2.6 1 0 1.1-1.5 1-2.2 1.8-.6.6-1.6.3-1.5-.8.1-.9.5-1.6 1.1-2z"/>', // a contour, a loop inside it
+  Allocated: '<path fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" d="M2.6 1.6h10.8v12.8H2.6zM2.6 6.5 6 5.5l1.5-3.9M6 5.5l1.7 3.4 5.7-1.6M7.7 8.9 5.5 14.4M7.7 8.9l3 5.5"/>', // cells of a power diagram
+  Balanced: '<path fill="none" stroke="currentColor" stroke-width="1.25" d="M2.6 1.6h10.8v12.8H2.6zM8.6 1.6v7.4M8.6 5.5h4.8M2.6 9h10.8M6.6 9v5.4M10.1 9v5.4M10.1 11.7h3.3"/>', // blocks cut largest first
+  Amortized: '<path fill="none" stroke="currentColor" stroke-width="1.25" d="M2.6 1.6h10.8v12.8H2.6zM5.1 4.1h5.8v3h-2v4.8H5.1z"/>', // stepped edges between depths
+  Reconciled: '<path fill="currentColor" d="M2 1.5h12V3H2zM2 4.5h8V6H2zM2 7.5h10.5V9H2zM2 10.5h6V12H2zM2 13.5h9V15H2z"/>', // one row per Credit, ragged right
+  Voided: '<path fill="none" stroke="currentColor" stroke-width="1.25" d="M2.6 2.6h4.5v4h-4.5zM2.6 9.4h4.5v4h-4.5zM8.9 2.6h4.5v4h-4.5zM8.9 9.4h4.5v4h-4.5z"/>', // Issued, outlined
 };
 
-const CHEVRON = '<svg class="dir-chevron" viewBox="0 0 10 16" width="10" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" d="m1.5 9.25 3.5-3.5 3.5 3.5"/></svg>';
 const glyph = (paths: string) => `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">${paths}</svg>`;
 
-/// The switch: one menu showing the direction on (glyph and name), listing all eight by glyph and name. `rules` adds the
-/// create page's Painted view (the hand-painted design; 'Rules' inside) in front, hidden until a design is painted.
-export function directions(key: string, rules = false) {
+/// The buttons of a row, the eight with All in front if `all`; `attr` names the attribute each carries its direction in.
+function row(radio: (d: Pick) => string, attr: string, all: boolean) {
+  // All is a word, not a glyph: a way to look at the eight, not a ninth format.
+  return [...(all ? ['All' as const] : []), ...DIRECTIONS]
+    .map((d) =>
+      d === 'All'
+        ? `<button ${radio(d)} ${attr}="All" class="dir-word" aria-label="Preview all 8 formats">All formats</button>`
+        : `<button ${radio(d)} ${attr}="${d}" class="dir-glyph" aria-label="${d}" data-tip="${d}">${glyph(GLYPH[d])}</button>`,
+    )
+    .join('');
+}
+/// The same row for somewhere else (the share modal): `data-pick`, not wired to any sheet.
+export const pickRow = (on: Pick) =>
+  `<div class="dirs dir-row" role="radiogroup" aria-label="Format">${row((d) => `type="button" role="radio" aria-checked="${d === on}"`, 'data-pick', true)}</div>`;
+
+/// The switch: one row of glyphs, each named in its tooltip. `all` puts All eight in front of the eight (a union's
+/// page); `rules` puts the create page's Painted view (the hand-painted design; 'Rules' inside) in front, hidden until
+/// a design is painted.
+export function directions(key: string, rules = false, all = false) {
   const k = key.toLowerCase(), on = showing.get(k) ?? 'Issued';
-  const radio = (d: Shown) => `type="button" role="radio" data-dir="${d}" aria-checked="${d === on}" tabindex="${d === on ? 0 : -1}"`;
+  const radio = (d: Shown) => `type="button" role="radio" aria-checked="${d === on}" tabindex="${d === on ? 0 : -1}"`;
   return `<div class="dirs" role="radiogroup" aria-label="Statement direction" data-key="${k}">${
-    rules ? `<button ${radio('Rules')} class="dir-word" hidden>Painted</button>` : ''
-  }<div class="dir-pick-wrap"><button type="button" class="dir-pick" aria-haspopup="true" aria-expanded="false">${glyph(
-    on === 'Rules' ? '' : GLYPH[on],
-  )}<span>${on === 'Rules' ? 'Direction' : on}</span>${CHEVRON}</button><div class="dir-menu" hidden>${DIRECTIONS.map(
-    (d) => `<button ${radio(d)} class="dir-item">${glyph(GLYPH[d])}<span>${d}</span></button>`,
-  ).join('')}</div></div></div>`;
-}
-
-/// The menu's button shows the direction showing, glyph and name ('Direction' while the create page shows its Painted view).
-function markPick(g: HTMLElement, d: Shown) {
-  const pick = g.querySelector('.dir-pick');
-  if (!pick) return;
-  pick.querySelector('svg')!.innerHTML = d === 'Rules' ? '' : GLYPH[d];
-  pick.querySelector('span')!.textContent = d === 'Rules' ? 'Direction' : d;
-}
-
-function closeMenus(except?: Element | null) {
-  document.querySelectorAll<HTMLElement>('.dirs .dir-menu:not([hidden])').forEach((m) => {
-    if (m === except) return;
-    m.hidden = true;
-    m.previousElementSibling?.setAttribute('aria-expanded', 'false');
-  });
+    rules ? `<button ${radio('Rules')} data-dir="Rules" class="dir-word" hidden>Painted</button>` : ''
+  }${row(radio, 'data-dir', all)}</div>`;
 }
 
 /// A still Statement over a sheet with no switch (a picture union's card): its Credits as Now shows them,
@@ -178,7 +175,9 @@ export function showDirection(g: HTMLElement | null, d: Direction) {
 /// The sheet's 80 slots in burn order: each Credit in it, or the example Credit shown faded in an empty slot. The
 /// host's `data-show` changes what's faded: `finished` draws the examples at full ink, `yours` fades everyone else's.
 function slotsOf(g: HTMLElement) {
-  const host = g.closest<HTMLElement>('.dir-host');
+  return hostSlots(g.closest<HTMLElement>('.dir-host'));
+}
+function hostSlots(host: HTMLElement | null) {
   const cells = [...(host?.querySelector('.sheet')?.children ?? [])] as HTMLElement[];
   const ids = cells.map((c) => c.dataset.id ?? c.dataset.ghost ?? null);
   // A host marked solid-ghosts draws its examples at full ink (the create page's picture preview).
@@ -186,6 +185,14 @@ function slotsOf(g: HTMLElement) {
   const faded = (c: HTMLElement) => (show === 'yours' ? !c.classList.contains('mine') : show === 'now' && !!c.dataset.ghost);
   const ghosts = new Set(cells.flatMap((c, i) => (faded(c) ? [i] : [])));
   return { ids, ghosts };
+}
+
+/// A sheet's Credits read for drawing elsewhere (the share images): each slot's ink, the faded slots, and the
+/// direction its switch shows (Issued when it has none).
+export async function sheetInks(host: HTMLElement): Promise<{ list: (Ink | null)[]; ghosts: ReadonlySet<number>; direction: Pick }> {
+  const { ids, ghosts } = hostSlots(host);
+  const d = showing.get(host.querySelector<HTMLElement>('.dirs')?.dataset.key ?? '');
+  return { list: await load(ids), ghosts, direction: d && d !== 'Rules' ? d : 'Issued' };
 }
 
 /// A Credit's seed never changes, so what's been read is kept in this browser too: a repeat visit draws at once.
@@ -251,9 +258,8 @@ async function show(g: HTMLElement, d: Shown, focus = false, quiet = false) {
     const on = b.dataset.dir === d;
     b.setAttribute('aria-checked', String(on));
     b.tabIndex = on ? 0 : -1;
-    if (on && focus) (b.closest('.dir-menu[hidden]') ? g.querySelector<HTMLElement>('.dir-pick') : b)?.focus();
+    if (on && focus) b.focus();
   });
-  markPick(g, d);
   if (!quiet) g.dispatchEvent(new CustomEvent('direction', { bubbles: true, detail: d }));
   const host = g.closest<HTMLElement>('.dir-host');
   const canvas = host?.querySelector<HTMLCanvasElement>('.dir-canvas');
@@ -284,45 +290,21 @@ const retries = new WeakMap<HTMLCanvasElement, number>();
 const turns = new WeakMap<HTMLCanvasElement, number>();
 
 /// Crisp cells, snapped to device pixels, as Jack's mock draws them.
-function paint(canvas: HTMLCanvasElement, d: Direction, list: (Ink | null)[], ghosts: ReadonlySet<number>) {
+function paint(canvas: HTMLCanvasElement, d: Pick, list: (Ink | null)[], ghosts: ReadonlySet<number>) {
   drawn.set(canvas, { d, list, ghosts });
   const w = canvas.clientWidth;
   if (!w) return;
   const W = Math.round(w * Math.min(3, devicePixelRatio || 1)), H = Math.round((W * PAGE.h) / PAGE.w);
   if (canvas.width !== W) canvas.width = W;
   if (canvas.height !== H) canvas.height = H;
-  paintMarks(canvas.getContext('2d')!, W, compose(d, list, ghosts));
+  const name = canvas.closest<HTMLElement>('.dir-host')?.dataset.name ?? '';
+  if (d === 'All') drawPicture(canvas.getContext('2d')!, W, H, 'All', list, ghosts, 'black', name);
+  else paintMarks(canvas.getContext('2d')!, W, compose(d, list, ghosts));
 }
 
 document.addEventListener('click', (e) => {
-  const t = e.target as HTMLElement;
-  const pick = t.closest<HTMLButtonElement>('.dirs .dir-pick');
-  if (pick) {
-    const menu = pick.nextElementSibling as HTMLElement;
-    closeMenus(menu);
-    menu.hidden = !menu.hidden;
-    pick.setAttribute('aria-expanded', String(!menu.hidden));
-    if (!menu.hidden) (menu.querySelector<HTMLElement>('[aria-checked="true"]') ?? menu.querySelector<HTMLElement>('button'))?.focus({ preventScroll: true });
-    return;
-  }
-  const b = t.closest<HTMLButtonElement>('.dirs [data-dir]');
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.dirs [data-dir]');
   if (b) void show(b.closest<HTMLElement>('.dirs')!, b.dataset.dir as Shown);
-  closeMenus();
-});
-// In an open menu: ↑ ↓ move through the names, Escape closes it.
-document.addEventListener('keydown', (e) => {
-  const open = document.querySelector<HTMLElement>('.dirs .dir-menu:not([hidden])');
-  if (!open) return;
-  if (e.key === 'Escape') {
-    closeMenus();
-    (open.previousElementSibling as HTMLElement | null)?.focus();
-    return;
-  }
-  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-  const items = [...open.querySelectorAll<HTMLElement>('button')];
-  const at = items.indexOf(document.activeElement as HTMLElement);
-  e.preventDefault();
-  items[(at + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
 });
 // Read the ink on the way to a click.
 document.addEventListener('pointerover', (e) => {
