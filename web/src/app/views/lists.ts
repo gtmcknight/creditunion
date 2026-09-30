@@ -231,8 +231,18 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     // taking Credits; Invited, open ones your Credits fit that you haven't joined; Yours, ones you're in or
     // started; Full, full ones until their auction starts.
     type View = 'all' | 'invited' | 'yours' | 'filled';
-    let view: View | null = null;
-    let stage: Stage | null = null;
+    // The tab lives in the address (?tab=full), so Back from a union returns to it. 'full' for the Full tab (View 'filled').
+    const tabParam = new URLSearchParams(location.search).get('tab');
+    const VIEWS: View[] = ['all', 'invited', 'yours', 'filled'];
+    const fromParam = tabParam === 'full' ? 'filled' : tabParam;
+    let view: View | null = VIEWS.includes(fromParam as View) ? (fromParam as View) : null;
+    let stage: Stage | null = STAGES.some(([k]) => k === tabParam) ? (tabParam as Stage) : null;
+    const remember = (t: string | null) => {
+      const u = new URL(location.href);
+      if (t) u.searchParams.set('tab', t);
+      else u.searchParams.delete('tab');
+      history.replaceState(history.state, '', u.pathname + u.search + u.hash);
+    };
     let fit = new Map<Address, bigint[]>();
     let showEmpty = false; // All tabs its empty (0/80) unions behind a button: they're mostly abandoned
     const grid = (items: Listed[]) => `<div class="grid">${items.map((b) => card(b, fit.get(b.s.address))).join('')}</div>`;
@@ -313,12 +323,14 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     app.querySelectorAll<HTMLElement>('[data-stage]').forEach((b) =>
       b.addEventListener('click', () => {
         stage = b.dataset.stage as Stage;
+        remember(stage);
         draw();
       }),
     );
     app.querySelectorAll<HTMLElement>('[data-view]').forEach((b) =>
       b.addEventListener('click', () => {
         view = b.dataset.view as View;
+        remember(view === 'all' ? null : view === 'filled' ? 'full' : view);
         draw();
       }),
     );

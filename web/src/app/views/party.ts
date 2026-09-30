@@ -145,7 +145,6 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   let b: Ctx;
   const account = session.account;
   // Your side of it (shares, what you're owed, your Credits), read alongside the Credit Union, not after it.
-  performance.mark('cu:party start');
   const mine = account ? me(address, account) : null;
   // From the Credit Union index when a page read it in the last minute (being in it is being ours): the page shows at
   // once, and is checked against the chain right after. Otherwise only parties our factory made: any contract can
@@ -180,7 +179,6 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   // own reads rather than after them.
   const keysRead = slots && !burned ? placedKeys(s.address, b.ids).catch(() => null) : null;
   const m: Mine = mine ? await mine : null;
-  performance.mark('cu:wallet read');
   const myIds = new Set(b.ids.filter((_, i) => same(b.depositors[i], account)).map(String));
   const rules = filterRules(s.filter, s.allowlistSize, (i) => layoutSlot(s.filter, i));
   const depositors = new Set(b.depositors.map((d) => d.toLowerCase())).size;
@@ -209,7 +207,6 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   // The keys place the Credits in, and tell the picker what room is left. Null when unread (the picker then
   // falls back to the rules alone).
   const keyed: Map<string, number> | null = keysRead ? await keysRead : null;
-  performance.mark('cu:slots read');
   if (slots && keyed) {
     try {
       placed = b.ids.length ? placeOnLayout(slots, b.ids, (id) => keyed.get(id.toString()) ?? 0) : undefined;
@@ -280,8 +277,6 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       </div>
     </div>
   </section>`;
-
-  performance.mark('cu:drawn');
   hydrate(app);
   document.getElementById('depositors-btn')?.addEventListener('click', () => openDepositors(b, account ?? null));
   loadBids(s.address, account ?? null);
