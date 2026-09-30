@@ -126,6 +126,8 @@ let addTab: { at: string; tab: string } | null = null;
 let burnAsk: string | null = null;
 /// Transactions in flight on this page: live refreshes wait while one is.
 let busy = 0;
+/// Drawings of a union page started, so a late redraw knows when a newer one has replaced it.
+let draws = 0;
 /// The live-refresh timer for the Credit Union on screen (one at a time).
 let live: ReturnType<typeof setInterval> | null = null;
 const LIVE_MS = 8_000; // under a block: the index it reads is kept for everyone, so a poll costs no chain read
@@ -179,7 +181,17 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   // The value of the painted trait each Credit in was booked under (Batch.keyOf), read alongside the wallet's
   // own reads rather than after them.
   const keysRead = slots && !burned ? placedKeys(s.address, b.ids).catch(() => null) : null;
-  const m: Mine = mine ? await mine : null;
+  // Your side, if it's back within a moment. Otherwise the page draws without it (as for a visitor) and draws again,
+  // in place, when it lands: a slow wallet read never holds the whole page blank.
+  const drawing = ++draws;
+  const LATE = Symbol();
+  const quick = mine ? await Promise.race([mine.catch(() => null), new Promise<typeof LATE>((r) => setTimeout(() => r(LATE), 150))]) : null;
+  const m: Mine = quick === LATE ? null : quick;
+  if (quick === LATE)
+    void mine!.then((got) => {
+      if (drawing === draws && app.isConnected && location.pathname.toLowerCase().endsWith(address.toLowerCase()) && same(session.account, account))
+        void party(app, address, rerender, { ...b, at }, got);
+    }, () => {});
   const myIds = new Set(b.ids.filter((_, i) => same(b.depositors[i], account)).map(String));
   // A color layout's rows already name every mix that fits, so its Palette row would only repeat them.
   const rules = filterRules(s.filter, s.allowlistSize, (i) => layoutSlot(s.filter, i)).filter((r, _, all) => !(r.label === 'Palette' && all.some((x) => x.swatch)));
@@ -260,7 +272,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         <div><dt>Payout</dt><dd>${s.split === 1 ? `Early bird <span class="muted">· 1st ${sharePct(earlyShare(0))} → 80th ${sharePct(earlyShare(79))}</span>` : `Equal <span class="muted">· ${sharePct(1 / 80)} per Credit</span>`}</dd></div>
         <div class="takes"><dt>Rules</dt><dd>${rules.length ? rules.map(rule).join('') : 'Any Credit'}</dd></div>
       </dl>
-      <div id="panel">${panel(b, m, myIds)}</div>
+      <div id="panel">${panel(b, m, myIds, quick === LATE)}</div>
       <div class="folds">
       ${s.state === 'Settled' ? `<details class="more" id="unclaimed" hidden>
         <summary><span>Unclaimed</span><span class="muted small num" id="unclaimed-total"></span></summary>
@@ -560,7 +572,7 @@ async function rankFaces(root: ParentNode) {
   if (!box) return;
   const you = box.querySelector<HTMLElement>('.face[data-you]');
   const all = [...box.querySelectorAll<HTMLElement>('.face:not([data-you])')];
-  const has = await Promise.all(all.map((f) => ens(f.dataset.ens as Address).then((r) => !!r.avatar && /^https:\/\//.test(r.avatar), () => false)));
+  const has = await Promise.all(all.map((f) => ens(f.dataset.ens as Address).then((r) => !!r.avatar && /^(https:\/\/|\/avatar\/)/.test(r.avatar), () => false)));
   if (!box.isConnected) return;
   const order = [...all.filter((_, i) => has[i]), ...all.filter((_, i) => !has[i])];
   if (you) order.splice(Math.min(3, order.length), 0, you);
@@ -571,9 +583,11 @@ const plural = (n: number) => `${n} Credit${n === 1 ? '' : 's'}`;
 /// The withdraw button: all of yours when none are picked ("Withdraw your Credit" when it's one), else the picked.
 const withdrawLabel = (picked: number, all: number) => (picked ? `Withdraw ${plural(picked)}` : all === 1 ? 'Withdraw your Credit' : `Withdraw all ${plural(all)}`);
 
-function panel(b: Ctx, m: Mine, myIds: Set<string>) {
+/// `pending`: a wallet is connected but its side isn't read yet: say so rather than offer to connect it.
+function panel(b: Ctx, m: Mine, myIds: Set<string>, pending = false) {
   const s = b.s;
-  const connect = `<button class="btn primary block" data-connect>Connect wallet</button>`;
+  const connect = pending ? `<p class="small muted">Checking your wallet…</p>` : `<button class="btn primary block" data-connect>Connect wallet</button>`;
+  if (pending && s.state === 'Open') return `<div class="box add"><div class="box-head"><h3>Join</h3></div>${connect}</div>`;
   // Your Credits in this party as tiles: pick some to withdraw just those, or leave none picked to take all.
   const withdraw = (primary = false) =>
     myIds.size

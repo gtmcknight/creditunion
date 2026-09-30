@@ -1295,6 +1295,37 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     return Response.json(out, { headers: { 'cache-control': `public, max-age=${ttl}` } });
   }
 
+  // /avatar/<ens name>: the name's avatar at 96 px (ENS serves the original, often megabytes, for a 20 px face).
+  // Resized once by wsrv.nl and kept at the edge a week; no avatar is a 404 kept a day.
+  const av = url.pathname.match(/^\/avatar\/([^/]{1,300})$/);
+  if (av) {
+    let name: string;
+    try {
+      name = decodeURIComponent(av[1]).toLowerCase();
+    } catch {
+      return text('bad name', 400);
+    }
+    if (!/^[^\s/?#]{1,255}$/.test(name)) return text('bad name', 400);
+    const cache = caches.default;
+    const key = new Request(`${url.origin}/avatar/v1/${encodeURIComponent(name)}`);
+    const hit = await cache.match(key);
+    if (hit) return hit;
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    const src = `https://metadata.ens.domains/mainnet/avatar/${encodeURIComponent(name)}`;
+    const r = await fetch(`https://wsrv.nl/?url=${encodeURIComponent(src)}&w=96&h=96&fit=cover&output=webp`, { signal: AbortSignal.timeout(10_000) }).catch(() => null);
+    const type = r?.headers.get('content-type') ?? '';
+    if (r?.ok && type.startsWith('image/')) {
+      const res = new Response(r.body, { headers: { 'content-type': type, 'cache-control': 'public, max-age=604800' } });
+      ctx.waitUntil(cache.put(key, res.clone()));
+      return res;
+    }
+    // No avatar (a 404 from ENS) is kept; a slow or failing resizer is not, so the next viewer tries again.
+    const none = r?.status === 404;
+    const miss = new Response('no avatar', { status: 404, headers: { 'cache-control': none ? 'public, max-age=86400' : 'no-store' } });
+    if (none) ctx.waitUntil(cache.put(key, miss.clone()));
+    return miss;
+  }
+
   // /art/<id>.svg and /art/<contract>/<id>.svg: the configured Credits. /art/mainnet/<id>.svg: the real
   // edition, for previews of Credits you don't hold, on any network.
   const art = url.pathname.match(/^\/art\/(?:(mainnet)\/|0x[0-9a-fA-F]{40}\/)?(\d{1,7})\.svg$/);

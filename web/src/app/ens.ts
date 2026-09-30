@@ -33,7 +33,11 @@ async function ask() {
     const got = (await fetch(`/ens?a=${part.join(',')}`)
       .then((r) => (r.ok ? r.json() : {}))
       .catch(() => ({}))) as Record<string, Ens>;
-    for (const k of part) all.get(k)!(got[k] ?? none);
+    for (const k of part) {
+      const e = got[k] ?? none;
+      // ENS's own avatar URL serves the original image, often megabytes: ours is the same picture at face size.
+      all.get(k)!(e.name && e.avatar?.startsWith('https://metadata.ens.domains/') ? { ...e, avatar: `/avatar/${encodeURIComponent(e.name)}` } : e);
+    }
   }
 }
 
@@ -71,7 +75,7 @@ export function hydrate(root: ParentNode = document) {
       n.textContent = r.name;
       n.classList.remove('mono');
     }
-    if (r.avatar && /^https:\/\//.test(r.avatar)) {
+    if (r.avatar && /^(https:\/\/|\/avatar\/)/.test(r.avatar)) {
       const img = new Image();
       img.alt = '';
       img.onload = () => el.querySelector('img')?.replaceWith(img);

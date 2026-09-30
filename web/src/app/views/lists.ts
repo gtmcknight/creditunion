@@ -93,11 +93,16 @@ async function totalCards(list: Listed[]) {
 /// Layout batches before the burn: each Credit in the slot it will burn into, as the union page shows it.
 const placements = new Map<string, (bigint | null)[]>(); // by address:count, so a new deposit re-places
 const placeKey = (b: { s: { address: Address }; ids: readonly bigint[] }) => `${b.s.address.toLowerCase()}:${b.ids.length}`;
+const placing = new Map<string, Promise<Map<string, number> | null>>();
 export async function placeCards(list: Listed[]) {
   const todo = list.filter((b) => b.ids.length && hasLayout(b.s.filter) && (b.s.state === 'Open' || b.s.state === 'Full') && !placements.has(placeKey(b)));
   await Promise.all(
     todo.map(async (b) => {
-      const keys = await placedKeys(b.s.address, b.ids).catch(() => null);
+      // A page drawn twice at once (a wallet reconnecting as it loads) shares the read in flight.
+      const k = placeKey(b);
+      let read = placing.get(k);
+      if (!read) placing.set(k, (read = placedKeys(b.s.address, b.ids).catch(() => null).finally(() => placing.delete(k))));
+      const keys = await read;
       if (!keys) return;
       const slots = Array.from({ length: 80 }, (_, i) => layoutSlot(b.s.filter, i));
       placements.set(placeKey(b), placeOnLayout(slots, b.ids, (id) => keys.get(id.toString()) ?? 0));
@@ -123,13 +128,22 @@ const savePictures = () => {
 };
 /// Addresses whose saved picture has been read this visit (its planned Credits registered).
 const pictureRead = new Set<Address>();
+/// Picture reads in flight, shared by a page drawn twice at once.
+const pictureReading = new Map<Address, Promise<{ ids?: (number | null)[]; inks?: Record<string, [string, number, number]> } | null>>();
 export async function pictureCards(list: Listed[]) {
   const todo = list.filter((b) => (b.s.state === 'Open' || b.s.state === 'Full') && hasLayout(b.s.filter) && !Number(b.s.filter.layoutTrait ?? 0) && !pictureRead.has(b.s.address));
   const found = await Promise.all(
     todo.map(async (b) => {
-      const d = await fetch(`/pictures/${b.s.address}`)
-        .then((r) => (r.ok ? (r.json() as Promise<{ ids?: (number | null)[]; inks?: Record<string, [string, number, number]> }>) : null))
-        .catch(() => null);
+      let read = pictureReading.get(b.s.address);
+      if (!read)
+        pictureReading.set(
+          b.s.address,
+          (read = fetch(`/pictures/${b.s.address}`)
+            .then((r) => (r.ok ? (r.json() as Promise<{ ids?: (number | null)[]; inks?: Record<string, [string, number, number]> }>) : null))
+            .catch(() => null)
+            .finally(() => pictureReading.delete(b.s.address))),
+        );
+      const d = await read;
       pictureRead.add(b.s.address);
       if (!d) {
         if (pictures.delete(b.s.address)) savePictures();
