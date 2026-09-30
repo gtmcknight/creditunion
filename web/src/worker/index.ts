@@ -491,7 +491,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       const hit = await caches.default.match(edge);
       if (hit) return hit;
       const stored = await env.PLANS.get(key);
-      if (!stored) return new Response('no picture', { status: 404, headers: { 'cache-control': 'public, max-age=30' } });
+      // No picture: an empty answer rather than a 404, which browsers log as an error for every plain union on a page.
+      if (!stored) return Response.json(null, { headers: { 'cache-control': 'public, max-age=30' } });
       let body = stored;
       try {
         const d = JSON.parse(stored) as { ids?: (number | null)[] };

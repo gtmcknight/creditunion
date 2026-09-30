@@ -63,6 +63,7 @@ async function route() {
     a.classList.toggle('current', page === 'me'),
   );
   // Moving within the Credits explorer (trait to trait) swaps the page in place; elsewhere it fades in.
+  performance.mark('cu:route ' + location.pathname.slice(0, 20));
   const within = EXPLORER.has(page) && EXPLORER.has(lastPage);
   // The same page drawn again (a wallet waking up and reconnecting, say) stays on screen: only a new page fades.
   const again = location.pathname === lastPath;
@@ -77,8 +78,8 @@ async function route() {
     // it still fades).
     const show = () => {
       if (run !== seq) return;
-      requestAnimationFrame(() => app.classList.add('in'));
-      setTimeout(() => app.classList.add('in'), 60);
+      requestAnimationFrame(() => (app.classList.add('in'), performance.mark('cu:shown (frame)')));
+      setTimeout(() => (app.classList.add('in'), performance.mark('cu:shown (timer)')), 60);
     };
     const seen = new MutationObserver(() => (seen.disconnect(), show()));
     seen.observe(app, { childList: true });
