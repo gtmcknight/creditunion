@@ -60,19 +60,77 @@ export async function drawStill(host: HTMLElement, d: Direction) {
   const ids = cells.map((c) => c.dataset.id ?? c.dataset.ghost ?? null);
   // As Now shows it: the Credits already in at full ink, the planned ones still to come faded.
   const faded = new Set(cells.flatMap((c, i) => (c.dataset.ghost && !c.dataset.id ? [i] : [])));
+  const canvasOf = () => {
+    let c = host.querySelector<HTMLCanvasElement>(':scope > .dir-canvas');
+    if (!c) {
+      c = document.createElement('canvas');
+      c.className = 'dir-canvas still';
+      host.append(c);
+    }
+    return c;
+  };
+  const key = host.dataset.portrait;
   // The sheet's own grid stays up until every Credit's ink is read, then the Statement replaces it whole: no grey
   // frames while it loads.
   const list = await load(ids);
   if (!host.isConnected) return;
-  let canvas = host.querySelector<HTMLCanvasElement>(':scope > .dir-canvas');
-  if (!canvas) {
-    canvas = document.createElement('canvas');
-    canvas.className = 'dir-canvas still';
-    host.append(canvas);
-  }
+  const canvas = canvasOf();
   host.classList.add('dir-on');
   sized.observe(canvas);
   paint(canvas, d, list, faded);
+  if (key) saveSnapshot(key, canvas);
+}
+
+/// A card's last drawing, per union and its Credits, kept small in this browser (a 256 × 320 PNG, a few KB).
+const SNAP = 'cu-portrait:';
+/// A picture card's last drawing, shown at once (before its Credits are placed or their ink read).
+export function showStill(host: HTMLElement) {
+  const key = host.dataset.portrait;
+  if (!key || drawn.get(host.querySelector(':scope > .dir-canvas') as HTMLCanvasElement)) return;
+  void showSnapshot(host, key, () => {
+    let c = host.querySelector<HTMLCanvasElement>(':scope > .dir-canvas');
+    if (!c) {
+      c = document.createElement('canvas');
+      c.className = 'dir-canvas still';
+      host.append(c);
+    }
+    return c;
+  });
+}
+async function showSnapshot(host: HTMLElement, key: string, canvasOf: () => HTMLCanvasElement) {
+  let url: string | null = null;
+  try {
+    url = localStorage.getItem(SNAP + key);
+  } catch {}
+  if (!url) return;
+  const img = new Image();
+  img.src = url;
+  await img.decode().catch(() => null);
+  const canvas = canvasOf();
+  if (!host.isConnected || drawn.get(canvas)) return; // the real drawing got there first
+  const w = canvas.clientWidth || 256, W = Math.round(w * Math.min(3, devicePixelRatio || 1));
+  canvas.width = W;
+  canvas.height = Math.round((W * PAGE.h) / PAGE.w);
+  const g = canvas.getContext('2d')!;
+  g.imageSmoothingEnabled = false;
+  g.drawImage(img, 0, 0, canvas.width, canvas.height);
+  host.classList.add('dir-on');
+}
+function saveSnapshot(key: string, canvas: HTMLCanvasElement) {
+  try {
+    const small = document.createElement('canvas');
+    small.width = 256;
+    small.height = 320;
+    const g = small.getContext('2d')!;
+    g.imageSmoothingEnabled = false;
+    g.drawImage(canvas, 0, 0, 256, 320);
+    const union = key.split(':')[0];
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k?.startsWith(SNAP + union + ':') && k !== SNAP + key) localStorage.removeItem(k); // one per union
+    }
+    localStorage.setItem(SNAP + key, small.toDataURL('image/png'));
+  } catch {}
 }
 
 /// After a render: redraw whatever direction each switch was showing.

@@ -1,3 +1,4 @@
+import { primeInks } from './directions';
 /// What a painted sheet can still take. Mirrors Batch.sol: `_keyOf` (a Credit's value of the painted trait, read
 /// from Jack's art contract exactly as the batch reads it) and `_add` (a Credit lands if a painted slot of its
 /// value is free, else only while an open slot is: `overflow < anySlots`, which it then uses up). `passes()` is
@@ -59,6 +60,20 @@ export function keyFromRead(trait: number, r: Read): number {
 export async function keysOf(trait: number, ids: readonly bigint[]): Promise<Map<string, number>> {
   const r = await Promise.all(ids.map(readOf));
   return new Map(ids.map((id, i) => [id.toString(), keyFromRead(trait, r[i])]));
+}
+
+/// The same from the Worker's /placed answer: one request (kept at the edge) for every Credit's value, which also
+/// brings their ink. Falls back to reading the chain when the answer is behind the ids asked for.
+export async function placedKeys(batch: Address, ids: readonly bigint[]): Promise<Map<string, number>> {
+  const r = (await fetch(`/placed/${batch}`)
+    .then((x) => (x.ok ? x.json() : null))
+    .catch(() => null)) as { ids?: string[]; keys?: number[]; inks?: Record<string, [string, number, number]> } | null;
+  if (r?.ids && r.keys) {
+    primeInks(r.inks);
+    const m = new Map(r.ids.map((id, i) => [id, r.keys![i]] as const));
+    if (ids.every((id) => m.has(id.toString()))) return m;
+  }
+  return depositedKeys(batch, ids);
 }
 
 /// Values the batch recorded for its deposits (Batch.keyOf), keyed by id.

@@ -6,7 +6,7 @@ import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../trai
 import { hydrate, identicon, pct, who } from '../ens';
 import { creditCard, examples, fillGhosts, planGhosts, registerDeposits, registerFilter } from '../ghosts';
 import { gapOf, Guide, planOf, unpackPicture, type Plan, type Stored } from '../picture';
-import { Room, books, depositedKeys, keysOf, noRoomReason, type Books } from '../slots';
+import { Room, books, keysOf, noRoomReason, placedKeys, type Books } from '../slots';
 import { MAX_SWEEP, buying, checkQuote, listedById, connectToBuy, live as keepLive, minEth, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepRow, type Listed, type Quote, type Sale, type Source } from '../forsale';
 import { creditCell, creditSkel } from './trait';
 import { directionCanvas, directions, mountDirections, pickedDirection, primeInks, showDirection, warmInks } from '../directions';
@@ -177,7 +177,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   const slots = hasLayout(s.filter) ? Array.from({ length: 80 }, (_, i) => layoutSlot(s.filter, i)) : null;
   // The value of the painted trait each Credit in was booked under (Batch.keyOf), read alongside the wallet's
   // own reads rather than after them.
-  const keysRead = slots && !burned ? depositedKeys(s.address, b.ids).catch(() => null) : null;
+  const keysRead = slots && !burned ? placedKeys(s.address, b.ids).catch(() => null) : null;
   const m: Mine = mine ? await mine : null;
   const myIds = new Set(b.ids.filter((_, i) => same(b.depositors[i], account)).map(String));
   const rules = filterRules(s.filter, s.allowlistSize, (i) => layoutSlot(s.filter, i));

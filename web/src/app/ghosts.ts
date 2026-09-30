@@ -24,6 +24,7 @@ export function registerDeposits(ids: readonly bigint[], by: readonly Address[],
 /// A Picture union's recommended Credit for each slot (null: none for sale), so its open slots show the picture.
 const plans = new Map<string, readonly (number | null)[]>();
 export const planGhosts = (address: string, ids: readonly (number | null)[]) => plans.set(address.toLowerCase(), ids);
+export const hasPlan = (address: string) => plans.has(address.toLowerCase());
 
 /// Remember a batch's filter so `fillGhosts` can find it from the sheet's `data-batch`.
 export const registerFilter = (address: string, f: Filter) => filters.set(address.toLowerCase(), f);

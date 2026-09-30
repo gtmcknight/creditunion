@@ -425,6 +425,36 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
 
   // A Picture union's picture (64 × 80 RGBA, base64, and the Detail it was matched with): the page it was made on keeps it here, so every visitor's union
   // page can recommend the Credit that draws each open slot best. Once per union: the first save stands.
+  // /placed/<union>: a layout union's Credits in deposit order, the value it recorded for each (Batch.keyOf: which
+  // painted slots it takes) and each one's ink, so a card or page places and draws them from one answer instead of a
+  // chain read per Credit. A deposited Credit's value never changes; the answer is kept at the edge per set of ids.
+  const placedPath = url.pathname.match(/^\/placed\/(0x[0-9a-fA-F]{40})$/);
+  if (placedPath) {
+    if (req.method !== 'GET' || !sameSite(req)) return text('forbidden', 403);
+    const batch = placedPath[1] as Address;
+    try {
+      const c = client(env);
+      const [ids] = (await c.readContract({ address: batch, abi: batchAbi, functionName: 'slots' })) as readonly [readonly bigint[], readonly Address[]];
+      const edge = new Request(`${url.origin}/placed-cache/${batch.toLowerCase()}/${ids.join('.')}`);
+      const hit = await caches.default.match(edge);
+      if (hit) return hit;
+      const keyCalls = ids.map((id) => ({ address: batch, abi: batchAbi, functionName: 'keyOf', args: [id] }) as const);
+      const [keys, rated] = await Promise.all([
+        hasMulticall(env)
+          ? c.multicall({ contracts: keyCalls, allowFailure: false, multicallAddress: MULTICALL3 })
+          : Promise.all(keyCalls.map((x) => c.readContract(x))),
+        ids.length ? ratings({ assets: env.ASSETS, origin: url.origin, rpc: rpcUrl(env), credits: env.CREDITS, ids: [...ids] }).catch(() => null) : null,
+      ]);
+      const inks: Record<string, [string, number, number]> = {};
+      for (const [id, v] of Object.entries((rated?.ratings ?? {}) as Record<string, { seed?: string; paidAt?: number; score?: number }>)) if (v?.seed) inks[id] = [v.seed, v.paidAt ?? 0, v.score ?? 0];
+      const body = JSON.stringify({ ids: ids.map(String), keys: (keys as unknown[]).map(Number), inks });
+      ctx.waitUntil(caches.default.put(edge, new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=86400' } })));
+      return new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
+  }
+
   const picPath = url.pathname.match(/^\/pictures\/(0x[0-9a-fA-F]{40})$/);
   if (picPath) {
     if (!env.PLANS) return text('pictures are off here', 501);

@@ -1,15 +1,15 @@
 import { session } from '../chain';
 import { listBatches, type Listed, type Summary, hasLayout, layoutSlot, placeOnLayout } from '../data';
-import { depositedKeys } from '../slots';
+import { placedKeys } from '../slots';
 import { hydrate, who } from '../ens';
 import { fitByBatch } from '../fit';
-import { editionArt, examples, fillGhosts, planGhosts, registerDeposits, registerFilter } from '../ghosts';
+import { editionArt, examples, fillGhosts, hasPlan, planGhosts, registerDeposits, registerFilter } from '../ghosts';
 import type { Address } from 'viem';
 import { clock, eth, esc, openModal, pageHead, same, sheet, until } from '../ui';
 import { TRAIT_KINDS, parseTrait, type TraitValue } from '../../shared/trait';
 import { creditsOf, takes } from './trait';
 import { ago, lastJoined } from './live';
-import { drawStill, primeInks, warmInks } from '../directions';
+import { drawStill, primeInks, showStill, warmInks } from '../directions';
 
 /// Last deposit per union, from the activity feed (filled in after the first draw).
 let lastIn = new Map<string, number>();
@@ -81,7 +81,7 @@ export async function placeCards(list: Listed[]) {
   const todo = list.filter((b) => b.ids.length && hasLayout(b.s.filter) && (b.s.state === 'Open' || b.s.state === 'Full') && !placements.has(placeKey(b)));
   await Promise.all(
     todo.map(async (b) => {
-      const keys = await depositedKeys(b.s.address, b.ids).catch(() => null);
+      const keys = await placedKeys(b.s.address, b.ids).catch(() => null);
       if (!keys) return;
       const slots = Array.from({ length: 80 }, (_, i) => layoutSlot(b.s.filter, i));
       placements.set(placeKey(b), placeOnLayout(slots, b.ids, (id) => keys.get(id.toString()) ?? 0));
@@ -92,18 +92,36 @@ export async function placeCards(list: Listed[]) {
 
 /// Picture unions: the Credit picked for each slot when it was made (saved with its picture), drawn in its open
 /// slots so the card shows the picture, and "Picture" where a painted one says "Painted".
-const pictures = new Set<Address>();
+const PICS = 'cu-pictures';
+const pictures = new Set<Address>(((): Address[] => {
+  try {
+    return JSON.parse(localStorage.getItem(PICS) ?? '[]');
+  } catch {
+    return [];
+  }
+})()); // known from an earlier visit too, so their cards show their last drawing straight away
+const savePictures = () => {
+  try {
+    localStorage.setItem(PICS, JSON.stringify([...pictures]));
+  } catch {}
+};
+/// Addresses whose saved picture has been read this visit (its planned Credits registered).
+const pictureRead = new Set<Address>();
 export async function pictureCards(list: Listed[]) {
-  const todo = list.filter((b) => (b.s.state === 'Open' || b.s.state === 'Full') && hasLayout(b.s.filter) && !Number(b.s.filter.layoutTrait ?? 0) && !pictures.has(b.s.address));
+  const todo = list.filter((b) => (b.s.state === 'Open' || b.s.state === 'Full') && hasLayout(b.s.filter) && !Number(b.s.filter.layoutTrait ?? 0) && !pictureRead.has(b.s.address));
   const found = await Promise.all(
     todo.map(async (b) => {
       const d = await fetch(`/pictures/${b.s.address}`)
         .then((r) => (r.ok ? (r.json() as Promise<{ ids?: (number | null)[]; inks?: Record<string, [string, number, number]> }>) : null))
         .catch(() => null);
-      if (!d) return false;
+      pictureRead.add(b.s.address);
+      if (!d) {
+        if (pictures.delete(b.s.address)) savePictures();
+        return false;
+      }
       primeInks(d.inks);
       warmInks(b.ids); // what's in already (the planned Credits' ink came with the picture)
-      pictures.add(b.s.address);
+      if (!pictures.has(b.s.address)) (pictures.add(b.s.address), savePictures());
       if (d.ids) planGhosts(b.s.address, d.ids);
       return true;
     }),
@@ -119,6 +137,10 @@ export function mineIn(b: Listed, by = session.account) {
 /// The payout at a glance, beside the creator: five level bars for Equal, five stepping down for Early bird.
 const payGlyph = (early: boolean) =>
   `<span class="pay-glyph" data-tip="${early ? 'Early bird · first in 1.5×, last 0.5×' : 'Equal · every Credit gets 1/80'}" aria-label="${early ? 'Early bird payout' : 'Equal payout'}"><svg viewBox="0 0 19 12" width="16" height="10" preserveAspectRatio="none" aria-hidden="true">${[0, 1, 2, 3, 4].map((i) => { const h = early ? 12 - i * 2 : 8; return `<rect x="${i * 4}" y="${12 - h}" width="3" height="${h}"/>`; }).join('')}</svg></span>`;
+
+/// A picture card can draw once its Credits are placed and, while open, its plan is known; until then it shows its
+/// last drawing (or its grid).
+const pictureReady = (b: Listed) => (!b.ids.length || placements.has(placeKey(b))) && (b.s.state !== 'Open' || hasPlan(b.s.address));
 
 /// `whose`: who the fit count is about ("yours" for the connected wallet, "theirs" on someone else's page).
 export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yours') {
@@ -145,7 +167,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yo
   registerFilter(s.address, s.filter);
   registerDeposits(ids, depositors, s.split === 1);
   return `<a class="card${canJoin ? ' can-join' : ''}" href="/union/${s.address}">
-    <div class="card-art${picture ? ' picture dir-host' : ''}">${sheet(ids, { size: 'sm', mine, placed: placements.get(placeKey({ s, ids })), batch: s.state === 'Open' ? s.address : undefined })}${corner}${state}</div>
+    <div class="card-art${picture ? ' picture dir-host' : ''}"${picture ? ` data-portrait="${s.address.toLowerCase()}:${ids.length}:${ids.length ? ids[ids.length - 1] : ''}"${pictureReady({ s, ids, depositors }) ? ' data-ready="1"' : ''}` : ''}>${sheet(ids, { size: 'sm', mine, placed: placements.get(placeKey({ s, ids })), batch: s.state === 'Open' ? s.address : undefined })}${corner}${state}</div>
     <div class="card-meta">
       <div class="meta-text">
         <strong>${esc(s.name || 'Untitled')}</strong>
@@ -253,7 +275,10 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         hydrate(el);
         // A picture union's card shows its picture in Consolidated, as Now: what's in at full ink, the rest faded.
         // Each picture card draws as soon as its own planned Credits are in, not after every card's examples.
-        el.querySelectorAll<HTMLElement>('.card-art.picture').forEach((h) => void fillGhosts(h).then(() => drawStill(h, 'Consolidated')));
+        el.querySelectorAll<HTMLElement>('.card-art.picture').forEach((h) => {
+          showStill(h);
+          if (h.dataset.ready) void fillGhosts(h).then(() => drawStill(h, 'Consolidated'));
+        });
         void fillGhosts(el);
         return;
       }
