@@ -143,7 +143,18 @@ async function fitsFor(el: HTMLElement, f: Summary['filter'], cells: HTMLElement
   for (const i of open) if (cells[i].isConnected) slotOf.set(cells[i], { i, want: want[i], f, fit: fits.get(want[i])! });
 }
 
+/// Once a sheet's placeholders are settled (landed, or none to show), it says so, and its canvas stops drawing the
+/// grey stand-ins it shows in their slots meanwhile (sheet-paint.ts).
 async function fillSheet(el: HTMLElement) {
+  try {
+    await fillPlaceholders(el);
+  } finally {
+    el.dataset.ghosted = '1';
+    el.dispatchEvent(new Event('ghosts', { bubbles: true }));
+  }
+}
+
+async function fillPlaceholders(el: HTMLElement) {
   const f = filters.get(el.dataset.batch!.toLowerCase());
   if (!f) return;
   const cells = [...el.children] as HTMLElement[];
@@ -233,7 +244,7 @@ function tip() {
     // List cards are one link into the Credit Union: no per-cell cards there, only on its own page.
     show((e.target as Element).closest?.('.card') ? null : ((e.target as Element).closest?.('.cell.ghost, .cell[data-id]') ?? null));
   });
-  // Over a drawn direction that keeps each Credit in its own place (Consolidated, Amortized, Voided): the card of
+  // Over a drawn direction that keeps each Credit in its own place (Consolidated, Assessed, Amortized, Recorded): the card of
   // the Credit under the pointer, beside its patch.
   document.addEventListener('pointermove', (e) => {
     const canvas = (e.target as Element).closest?.<HTMLCanvasElement>('.dir-canvas:not(.still)');

@@ -16,20 +16,45 @@ function printFor(id: string, seed: [string, number, number] | null) {
   return p ?? Promise.resolve(null);
 }
 
+const TILE = [60, 60, 200, 200]; // where a Credit's art sits in its 320 box: the grey stand-in covers the same
 const EIGHTS_ROW = 290; // placeholders drop the Eights marks' row (y 290–320 of 320), as .cell.ghost img's clip does
 
+const rectsOf = async (ids: (string | null)[]) => {
+  const seeds = await seedsOf(ids);
+  return Promise.all(ids.map((id, i) => (id ? printFor(id, seeds[i]) : null)));
+};
+const turn = new WeakMap<HTMLElement, number>();
+
+/// The sheet's own Credits first, with a grey tile in every open slot; then again once its placeholders' seeds land.
 async function paint(sheet: HTMLElement) {
   const canvas = sheet.previousElementSibling as HTMLCanvasElement | null;
   if (!canvas?.classList.contains('sheet-paint')) return;
+  place(sheet, canvas); // the paper at its full size now, before the Credits' seeds come back
+  const t = (turn.get(sheet) ?? 0) + 1;
+  turn.set(sheet, t);
   const cells = [...sheet.children] as HTMLElement[];
-  const ids = cells.map((c) => c.dataset.id ?? c.dataset.ghost ?? null);
-  const seeds = await seedsOf(ids);
-  const rects = await Promise.all(ids.map((id, i) => (id ? printFor(id, seeds[i]) : null)));
+  const ghosts = cells.map((c) => c.dataset.ghost ?? null);
+  const own = await rectsOf(cells.map((c) => c.dataset.id ?? null));
+  if (turn.get(sheet) !== t) return;
+  draw(sheet, canvas, cells, own);
+  if (!ghosts.some(Boolean)) return;
+  const theirs = await rectsOf(ghosts);
+  if (turn.get(sheet) !== t) return;
+  draw(sheet, canvas, cells, own.map((r, i) => r ?? theirs[i]));
+}
+
+/// The canvas over the sheet exactly, in CSS pixels.
+function place(sheet: HTMLElement, canvas: HTMLCanvasElement) {
+  const w = sheet.offsetWidth, h = sheet.offsetHeight;
+  if (w && h) Object.assign(canvas.style, { left: `${sheet.offsetLeft}px`, top: `${sheet.offsetTop}px`, width: `${w}px`, height: `${h}px` });
+}
+
+function draw(sheet: HTMLElement, canvas: HTMLCanvasElement, cells: HTMLElement[], rects: (Rect[] | null)[]) {
   if (!sheet.isConnected) return;
   // The canvas covers the sheet exactly, at device pixels.
   const w = sheet.offsetWidth, h = sheet.offsetHeight;
   if (!w || !h) return;
-  Object.assign(canvas.style, { left: `${sheet.offsetLeft}px`, top: `${sheet.offsetTop}px`, width: `${w}px`, height: `${h}px` });
+  place(sheet, canvas);
   const dpr = Math.min(3, devicePixelRatio || 1);
   const W = Math.round(w * dpr), H = Math.round(h * dpr);
   if (canvas.width !== W) canvas.width = W;
@@ -43,8 +68,19 @@ async function paint(sheet: HTMLElement) {
   const picture = !!sheet.closest('.card-art.picture');
   const ghostAlpha = picture ? 0.6 : dark ? 0.4 : 0.28;
   const keepEights = sheet.classList.contains('eights-rule');
+  // An open union's empty slots, until their placeholders are drawn: a grey tile each, so the sheet reads full.
+  const open = !!sheet.dataset.batch, settled = !!sheet.dataset.ghosted;
   cells.forEach((cell, i) => {
     const r = rects[i];
+    if (!r && open && (cell.classList.contains('ghost') || (!settled && cell.classList.contains('empty')))) {
+      const x0 = Math.round(cell.offsetLeft * dpr), y0 = Math.round(cell.offsetTop * dpr);
+      const s = Math.round((cell.offsetLeft + cell.offsetWidth) * dpr) - x0;
+      const k = s / 320;
+      g.globalAlpha = 1;
+      g.fillStyle = dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)';
+      g.fillRect(x0 + Math.round(TILE[0] * k), y0 + Math.round(TILE[1] * k), Math.round(TILE[2] * k), Math.round(TILE[3] * k));
+      return;
+    }
     if (!r) return;
     const ghost = cell.classList.contains('ghost');
     // Snapped to device pixels so neighbouring cells don't blur into each other.

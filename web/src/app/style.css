@@ -9122,7 +9122,7 @@ dialog.share .share-swatches button {
 }
 
 /* A card's sheet painted on one canvas behind its cells (sheet-paint.ts): the cells stay for what reads them. */
-.sheet-paint { position: absolute; background: #fff; pointer-events: none; }
+.sheet-paint { position: absolute; width: 0; height: 0; background: #fff; pointer-events: none; } /* no size until its first paint sets one: unsized, a canvas is 300×150, a half-height white box */
 .sheet.painted { position: relative; background: transparent !important; } /* the canvas behind is the paper */
 
 /* A union's Join box: the heading and its tabs on one line. */

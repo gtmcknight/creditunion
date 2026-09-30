@@ -273,7 +273,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       action: tab === 'parties' ? '<a class="btn primary" href="/create">Start a Credit Union</a>' : '<button type="button" class="btn" id="how-auctions">How it works</button>',
       label: 'Show',
     })}
-    <div id="batches"><p class="muted">Loading from chain…</p></div>
+    <div id="batches"></div>
   </section>`;
   document.getElementById('how-auctions')?.addEventListener('click', howAuctions);
 
