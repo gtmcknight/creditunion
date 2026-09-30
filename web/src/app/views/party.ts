@@ -293,6 +293,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   </section>`;
   hydrate(app);
   document.getElementById('depositors-btn')?.addEventListener('click', () => openDepositors(b, account ?? null));
+  app.querySelector('.rule-chip[data-picked]')?.addEventListener('click', () => void openPicked(b));
   loadBids(s.address, account ?? null, s.highBid);
   void activityFold(s.address);
   // Chrome keeps a focus ring on <summary> after a mouse click; drop it for pointer use only.
@@ -529,8 +530,8 @@ const fact = (k: string, v: string) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
 /// A rule row; hovering it lights the slots it governs on the sheet (every slot unless it's a layout row).
 /// A row with a trait page is a link to it.
 const rule = (r: Rule) => {
-  const tag = r.href ? 'a' : 'span';
-  return `<${tag} class="rule-chip"${r.href ? ` href="${esc(r.href)}"` : ''} data-slots="${r.slots ? r.slots.join(',') : 'all'}">${r.swatch ? `<span class="swatches">${maskInks(r.swatch).map((c) => `<i style="background:${c}"></i>`).join('')}</span>` : ''}${esc(r.label)} <span class="num">${esc(r.value)}</span></${tag}>`;
+  const tag = r.href ? 'a' : r.picked ? 'button' : 'span';
+  return `<${tag} class="rule-chip"${r.href ? ` href="${esc(r.href)}"` : ''}${r.picked ? ' type="button" data-picked' : ''} data-slots="${r.slots ? r.slots.join(',') : 'all'}">${r.swatch ? `<span class="swatches">${maskInks(r.swatch).map((c) => `<i style="background:${c}"></i>`).join('')}</span>` : ''}${esc(r.label)} <span class="num">${esc(r.value)}</span></${tag}>`;
 };
 const link = (a: string) => {
   const u = explorer('address', a);
@@ -1505,6 +1506,38 @@ function openDepositors(b: Ctx, account: string | null) {
   openModal(d);
 }
 
+/// The union's own list of Credits (picked when it was made): only these can join. Which are in, and which are for
+/// sale now with their price, cheapest first.
+async function openPicked(b: Ctx) {
+  const d = document.createElement('dialog');
+  d.className = 'people picked-list';
+  d.innerHTML = `<form method="dialog">
+    <header class="row"><h3>Picked Credits <span class="muted num">${b.s.allowlistSize}</span></h3></header>
+    <p class="muted small picked-note">Only these can join.</p>
+    <div class="trait-grid">${creditSkel.repeat(Math.min(b.s.allowlistSize, 20))}</div>
+  </form>`;
+  document.body.append(d);
+  d.addEventListener('close', () => d.remove());
+  openModal(d);
+  const grid = d.querySelector<HTMLElement>('.trait-grid')!, note = d.querySelector<HTMLElement>('.picked-note')!;
+  const r = (await fetch(`/allowlist/${b.s.address}`)
+    .then((x) => (x.ok ? x.json() : null))
+    .catch(() => null)) as { ids?: number[] } | null;
+  if (!d.isConnected) return;
+  if (!r?.ids?.length) {
+    note.textContent = 'Couldn’t read the list right now. Try again in a minute.';
+    grid.innerHTML = '';
+    return;
+  }
+  const inside = new Set(b.ids.map(String));
+  const out = r.ids.filter((id) => !inside.has(String(id)));
+  const sale = new Map((await listedById(out.map(String)).catch(() => [] as Listed[])).map((l) => [l.id, l]));
+  if (!d.isConnected) return;
+  const price = (id: number) => sale.get(String(id))?.price;
+  const order = [...out.filter((id) => price(id)).sort((x, y) => (BigInt(price(x)!) < BigInt(price(y)!) ? -1 : 1)), ...out.filter((id) => !price(id)), ...r.ids.filter((id) => inside.has(String(id)))];
+  grid.innerHTML = order.map((id) => creditCell(id, sale.has(String(id)) ? priceTag(sale.get(String(id))!) : inside.has(String(id)) ? '<span class="muted">In</span>' : '')).join('');
+  note.textContent = `Only these can join. ${inside.size} in · ${sale.size} for sale.`;
+}
 
 /// The auction's bids, newest first: amount, who, when, and the transaction. Asked for by the high bid the page
 /// shows, so the list always has it (and is kept for good once it does).

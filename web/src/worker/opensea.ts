@@ -24,7 +24,8 @@ export type Source = 'opensea' | 'fwa' | 'strategy';
 export type Listing = { id: string; price: string; source: Source; hash?: string; protocol?: string; listingId?: string; seller?: string; until?: number };
 /// A listing off OpenSea handed to the scan, just read on-chain: FWA (with its listing id) or CreditStrategy.
 export type Extra = { id: string; price: string; source: 'fwa' | 'strategy'; listingId?: string };
-type Cand = {
+/// A listing as the scan weighs it.
+export type Cand = {
   id: string;
   price: bigint;
   source: Source;
@@ -143,6 +144,9 @@ export async function scan(o: {
   extra?: Extra[];
   /// Dev only: stand-in OpenSea listings instead of the API (they skip the on-chain liveness checks).
   fakeOpenSea?: { id: string; price: string }[];
+  /// Past OpenSea's cheapest pages: listings further up the price list that could fit (a union with its own list of
+  /// Credits, or a rare trait), each with its order read. Asked once, only when the pages left the scan short.
+  deep?: (seen: ReadonlySet<string>, need: number) => Promise<Cand[]>;
 }): Promise<Listing[]> {
   const picked: Listing[] = [];
   const seen = new Set<string>();
@@ -185,6 +189,21 @@ export async function scan(o: {
     extraBudget -= join.length;
     extras = osDone ? [] : extras.filter((e) => e.price > top);
     fresh = [...join, ...fresh].filter((c) => !seen.has(c.id) && !!seen.add(c.id)).sort(byPrice);
+    await consider(fresh);
+  }
+  if (picked.length < o.max && o.deep && !o.fakeOpenSea) {
+    const more = await o.deep(seen, o.max - picked.length).catch((e: Error) => {
+      console.warn('[scan] past the cheapest pages:', e.message?.slice(0, 120));
+      return [] as Cand[];
+    });
+    const fresh = more.filter((c) => c.source === 'opensea' && !!c.operator && !seen.has(c.id) && !!seen.add(c.id)).sort(byPrice);
+    if (fresh.length) await consider(fresh);
+  }
+  picked.sort((a, b) => (BigInt(a.price) < BigInt(b.price) ? -1 : BigInt(a.price) > BigInt(b.price) ? 1 : 0));
+  return picked;
+
+  /// One page's candidates, cheapest first: which the batch takes, which are live, then picked in price order.
+  async function consider(fresh: Cand[]) {
     // Ask the batch in small chunks, with what's already picked booked first, so a painted sheet's slots fill in
     // price order and the scan keeps going past Credits it has no room for. Chunks keep each call's gas modest.
     // Enough that fit (with room for OpenSea ones failing liveness) ends the page early.
@@ -218,8 +237,20 @@ export async function scan(o: {
       );
     }
   }
-  picked.sort((a, b) => (BigInt(a.price) < BigInt(b.price) ? -1 : BigInt(a.price) > BigInt(b.price) ? 1 : 0));
-  return picked;
+}
+
+/// One Credit's cheapest listing as the scan weighs it (its terms, the conduit it moves through, who it pays), or
+/// null when it has none it could fill.
+export async function bestOrder(key: string, slug: string, credits: Address, id: string): Promise<Cand | null> {
+  let r: Json;
+  try {
+    r = await os(key, `/listings/collection/${slug}/nfts/${id}/best`);
+  } catch (e) {
+    if ((e as { status?: number }).status === 404) return null;
+    throw e;
+  }
+  const u = usable(r, credits);
+  return u && u.id === id && u.operator ? { ...u, source: 'opensea' } : null;
 }
 
 /// Signed fill data for the `n` cheapest listings OpenSea will still fill (includes the zone signature its

@@ -14,12 +14,12 @@
 /// Every response carries the security headers in `secure()` (headers.ts; the build copies them into _headers for
 /// what the asset layer serves on its own).
 import { DurableObject } from 'cloudflare:workers';
-import { createPublicClient, fallback, hexToBytes, http, type Address, type Hex, parseAbiItem } from 'viem';
+import { createPublicClient, decodeFunctionData, fallback, hexToBytes, http, type Address, type Hex, parseAbiItem } from 'viem';
 import { mainnet } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { normalize } from 'viem/ens';
 import { batchAbi, creditsAbi, creditArtAbi, factoryAbi } from '../app/abi';
-import { setSpareKey, best, bestPage, events, quote, scan, type Extra, type Listing } from './opensea';
+import { setSpareKey, best, bestOrder, bestPage, events, quote, scan, type Cand, type Extra, type Listing } from './opensea';
 import type { Row } from './market';
 import { cacheStore, confirmListing, marketListings, type FwaListing } from './fwa';
 import { confirmStrategy, strategyAbi, strategyListings } from './strategy';
@@ -548,6 +548,23 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   // /placed/<union>: a layout union's Credits in deposit order, the value it recorded for each (Batch.keyOf: which
   // painted slots it takes) and each one's ink, so a card or page places and draws them from one answer instead of a
   // chain read per Credit. A deposited Credit's value never changes; the answer is kept at the edge per set of ids.
+  // A union's own list of Credits, ascending: { ids }. It never changes, so it's kept for good.
+  const allowPath = url.pathname.match(/^\/allowlist\/(0x[0-9a-fA-F]{40})$/);
+  if (allowPath) {
+    if (req.method !== 'GET' || !sameSite(req)) return text('forbidden', 403);
+    const batch = allowPath[1].toLowerCase() as Address;
+    const key = new Request(`${url.origin}/allowlist/${batch}`);
+    const hit = await caches.default.match(key);
+    if (hit) return hit;
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    if (!(await isBatch(env, url, batch))) return text('not a batch', 404);
+    const ids = await allowlistOf(env, batch);
+    if (!ids) return Response.json({ error: 'The list can’t be read right now.' }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    const res = Response.json({ ids }, { headers: { 'cache-control': 'public, max-age=31536000, immutable' } });
+    ctx.waitUntil(caches.default.put(key, res.clone()));
+    return res;
+  }
+
   const placedPath = url.pathname.match(/^\/placed\/(0x[0-9a-fA-F]{40})$/);
   if (placedPath) {
     if (req.method !== 'GET' || !sameSite(req)) return text('forbidden', 403);
@@ -1697,7 +1714,7 @@ export class ChainBook extends DurableObject<Env> {
   /// do without (buying prices each listing again anyway).
   private scans = new Map<string, { at: number; p: Promise<Listing[]>; done: boolean }>();
   private rescans = new Set<string>();
-  async listings(batch: Address, extra: Extra[], maxMs: number): Promise<Listing[]> {
+  async listings(batch: Address, extra: Extra[], maxMs: number, deep?: string[] | null): Promise<Listing[]> {
     setSpareKey(this.env.OPENSEA_API_KEY_2);
     const k = batch.toLowerCase();
     const hit = this.scans.get(k);
@@ -1707,7 +1724,7 @@ export class ChainBook extends DurableObject<Env> {
       if (!this.rescans.has(k)) {
         this.rescans.add(k);
         const at = Date.now();
-        void scanFor(this.env, batch, { extra })
+        void scanFor(this.env, batch, { extra }, deep)
           .then((ls) => this.scans.set(k, { at, p: Promise.resolve(ls), done: true }))
           .catch((e) => console.warn('[scan]', safeError(e)))
           .finally(() => this.rescans.delete(k));
@@ -1715,7 +1732,7 @@ export class ChainBook extends DurableObject<Env> {
       return hit.p;
     }
     for (const [x, v] of this.scans) if (Date.now() - v.at > 10 * 60_000) this.scans.delete(x);
-    const entry = { at: Date.now(), p: scanFor(this.env, batch, { extra }), done: false };
+    const entry = { at: Date.now(), p: scanFor(this.env, batch, { extra }, deep), done: false };
     this.scans.set(k, entry);
     entry.p.then(
       () => (entry.done = true),
@@ -2205,7 +2222,7 @@ async function previewFitting(env: Env, url: URL, ctx: ExecutionContext, batch: 
         main.readContract({ address: MAINNET_CREDITS, abi: creditsAbi, functionName: 'ownerOf', args: [id] }),
         main.readContract({ address: MAINNET_CREDITS, abi: creditsAbi, functionName: 'isApprovedForAll', args: [seller, operator] }),
       ]).then(([o, a]) => o.toLowerCase() === seller.toLowerCase() && a),
-    hasCode: (a) => main.getCode({ address: a }).then((code) => !!code && code !== '0x'),
+    hasCode: (a) => main.getCode({ address: a }).then((code) => !!code && code !== '0x' && !/^0xef0100[0-9a-f]{40}$/i.test(code)), // an EIP-7702 wallet is a person's
   });
   ctx.waitUntil(cache.put(key, Response.json(listings, { headers: { 'cache-control': 'public, max-age=60' } })));
   return listings;
@@ -2222,15 +2239,15 @@ async function fitting(env: Env, url: URL, ctx: ExecutionContext, batch: Address
   if (!listings && inflight.has(batch)) listings = await inflight.get(batch)!;
   if (!listings) {
     const book = chainBook(env);
-    const p = extras(env, url, ctx).then(async (more) => {
+    const p = Promise.all([extras(env, url, ctx), deepCandidates(env, url, ctx, batch).catch(() => null)]).then(async ([more, deep]) => {
       if (book && !more.fakeOpenSea) {
         try {
-          return await book.listings(batch, more.extra, SCAN_MS);
+          return await book.listings(batch, more.extra, SCAN_MS, deep);
         } catch (e) {
           console.warn('[scan] read here', safeError(e));
         }
       }
-      return scanFor(env, batch, more);
+      return scanFor(env, batch, more, deep);
     });
     // waitUntil keeps this request's context (and so the scan's I/O) alive even if the client goes away.
     inflight.set(batch, p);
@@ -2256,14 +2273,16 @@ async function fitting(env: Env, url: URL, ctx: ExecutionContext, batch: Address
 }
 /// How long the ChainBook keeps a union's scan.
 const SCAN_MS = 20_000;
-/// The scan itself (opensea.ts), with this union's canTake and the chain's liveness checks.
-function scanFor(env: Env, batch: Address, more: { extra: Extra[]; fakeOpenSea?: { id: string; price: string }[] }) {
+/// The scan itself (opensea.ts), with this union's canTake and the chain's liveness checks; `deep`, a narrow union's
+/// Credits for sale (deepCandidates), is read through once OpenSea's cheapest pages come up short.
+function scanFor(env: Env, batch: Address, more: { extra: Extra[]; fakeOpenSea?: { id: string; price: string }[] }, deep?: readonly string[] | null) {
   const c = client(env);
   return scan({
     key: env.OPENSEA_API_KEY,
     slug: env.OPENSEA_SLUG,
     credits: env.CREDITS,
     ...more,
+    deep: deep?.length && env.OPENSEA_API_KEY ? (seen, need) => deepOrders(env, deep, seen, need) : undefined,
     max: 40,
     take: (ids) => c.readContract({ address: batch, abi: batchAbi, functionName: 'canTake', args: [ids] }),
     live: (id, seller, operator) =>
@@ -2271,8 +2290,129 @@ function scanFor(env: Env, batch: Address, more: { extra: Extra[]; fakeOpenSea?:
         c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'ownerOf', args: [id] }),
         c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'isApprovedForAll', args: [seller, operator] }),
       ]).then(([o, ok]) => o.toLowerCase() === seller.toLowerCase() && ok),
-    hasCode: (a) => c.getCode({ address: a }).then((code) => !!code && code !== '0x'),
+    // A wallet delegated under EIP-7702 (its code is just 0xef0100 and the delegate's address) is a person's account,
+    // and takes ETH like one: only real contracts are kept out.
+    hasCode: (a) => c.getCode({ address: a }).then((code) => !!code && code !== '0x' && !/^0xef0100[0-9a-f]{40}$/i.test(code)),
   });
+}
+
+/// Most Credits the deep pass hands the scan, cheapest first.
+const DEEP_MAX = 60;
+/// A union that fewer Credits than this fit is narrow: OpenSea's cheapest pages can hold none of its listings.
+const NARROW = 12_000;
+/// The orders of these Credits (the Worker's pick, deepCandidates) not yet weighed by the scan, cheapest first, read
+/// from OpenSea four at a time.
+async function deepOrders(env: Env, ids: readonly string[], seen: ReadonlySet<string>, need: number): Promise<Cand[]> {
+  const want = ids.filter((id) => !seen.has(id)).slice(0, need + 10);
+  const out: Cand[] = [];
+  for (let i = 0; i < want.length; i += 4) for (const c of await Promise.all(want.slice(i, i + 4).map((id) => orderOf(env, id)))) if (c) out.push(c);
+  return out;
+}
+/// Which Credits a union takes, by its rules and its own list, kept per isolate (a union's rules never change); null
+/// for a union so many Credits fit that OpenSea's cheapest pages always have some.
+const narrowUnions = new Map<string, Promise<{ fits: (id: number) => boolean; list: number[] | null } | null>>();
+/// For a narrow union (its own list of Credits, a rare trait), the Credits for sale that fit it, cheapest first, from
+/// the market book: the scan reads their orders once OpenSea's cheapest pages run out (deepOrders). Null otherwise.
+async function deepCandidates(env: Env, url: URL, ctx: ExecutionContext, batch: Address): Promise<string[] | null> {
+  if (!hasSweeper(env) || !env.MARKET || !env.OPENSEA_API_KEY) return null;
+  const k = batch.toLowerCase();
+  let rule = narrowUnions.get(k);
+  if (!rule) {
+    rule = (async () => {
+      const s = (await client(env).readContract({ address: batch, abi: batchAbi, functionName: 'summary' })) as unknown as { filter: Filter; allowlistSize: bigint };
+      const fits = await predicate(env.ASSETS, url.origin, rulesOf(s.filter));
+      if (Number(s.allowlistSize) > 0) {
+        const list = await allowlistOf(env, batch);
+        if (!list) throw new Error('the union’s list can’t be read now');
+        const on = new Set(list);
+        return { fits: (id: number) => on.has(id) && fits(id), list };
+      }
+      let n = 0;
+      for (let id = 1; id <= SUPPLY && n < NARROW; id++) if (fits(id)) n++;
+      return n < NARROW ? { fits, list: null } : null;
+    })();
+    narrowUnions.set(k, rule);
+    rule.catch(() => narrowUnions.get(k) === rule && narrowUnions.delete(k));
+  }
+  const r = await rule;
+  if (!r) return null;
+  const rows = r.list ? ((await book(env).getMany(r.list.map(String))).rows as unknown as Row[]) : await marketRows(env, url, ctx);
+  return rows
+    .filter((x) => x[2] === 'opensea' && r.fits(Number(x[0])))
+    .sort((a, b) => (BigInt(a[1]) < BigInt(b[1]) ? -1 : BigInt(a[1]) > BigInt(b[1]) ? 1 : 0))
+    .slice(0, DEEP_MAX)
+    .map((x) => String(x[0]));
+}
+/// The market book's rows (id, price, source, …) as /market.json has them: the colo's copy, parsed once per isolate
+/// for 30 s.
+let bookMemo: { at: number; rows: Promise<Row[]> } | null = null;
+function marketRows(env: Env, url: URL, ctx: ExecutionContext): Promise<Row[]> {
+  if (bookMemo && Date.now() - bookMemo.at < 30_000) return bookMemo.rows;
+  const rows = (async () => {
+    const key = new Request(`${url.origin}/market.json/v2`);
+    const hit = await caches.default.match(key);
+    const body = hit ? await hit.text() : await book(env).snapshot();
+    if (!hit) ctx.waitUntil(caches.default.put(key, new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=30' } })));
+    return (JSON.parse(body) as { items: string[][] }).items.map((x) => [x[0], x[1], x[2], x[3], x[4], '', 0] as Row);
+  })();
+  bookMemo = { at: Date.now(), rows };
+  rows.catch(() => bookMemo?.rows === rows && (bookMemo = null));
+  return rows;
+}
+/// Orders the deep pass read, a minute each (in the ChainBook, where scans run, that's for the whole site).
+const orders = new Map<string, { at: number; p: Promise<Cand | null> }>();
+function orderOf(env: Env, id: string): Promise<Cand | null> {
+  const hit = orders.get(id);
+  if (hit && Date.now() - hit.at < 60_000) return hit.p;
+  if (orders.size > 2000) for (const [k, v] of orders) if (Date.now() - v.at >= 60_000) orders.delete(k);
+  // A failed read (a rate limit) is nothing this time, not remembered as "no listing".
+  const entry: { at: number; p: Promise<Cand | null> } = { at: Date.now(), p: Promise.resolve(null) };
+  entry.p = bestOrder(env.OPENSEA_API_KEY!, env.OPENSEA_SLUG, env.CREDITS, id).catch(() => {
+    if (orders.get(id) === entry) orders.delete(id);
+    return null;
+  });
+  orders.set(id, entry);
+  return entry.p;
+}
+
+const BATCH_CREATED = parseAbiItem('event BatchCreated(address indexed batch, address indexed creator, string name, uint256 index)');
+/// A union's own list of Credits (Batch's allowlist, set once when it was made), ascending: from the transaction that
+/// made it (the factory's create call), or failing that asked of the union for every Credit. Kept in KV for good.
+/// Null when it can't be read now; [] for a union without one.
+async function allowlistOf(env: Env, batch: Address): Promise<number[] | null> {
+  const k = `allowlist:${batch.toLowerCase()}`;
+  const kept = await keptGet(env, k);
+  if (kept) return JSON.parse(kept) as number[];
+  const c = client(env);
+  const size = Number(await c.readContract({ address: batch, abi: batchAbi, functionName: 'allowlistSize' }).catch(() => -1n));
+  if (size < 0) return null;
+  if (!size) return [];
+  let ids: number[] | null = null;
+  try {
+    const [log] = await c.getLogs({ address: env.FACTORY, event: BATCH_CREATED, args: { batch }, fromBlock: env.CHAIN_ID === '1' ? ACTIVITY_FROM : 0n });
+    const tx = log ? await c.getTransaction({ hash: log.transactionHash! }) : null;
+    if (tx && tx.to?.toLowerCase() === env.FACTORY.toLowerCase()) {
+      const call = decodeFunctionData({ abi: factoryAbi, data: tx.input });
+      if (call.functionName === 'create') {
+        const list = [...new Set((call.args[2] as readonly bigint[]).map(Number))].sort((a, b) => a - b);
+        if (list.length === size) ids = list;
+      }
+    }
+  } catch {}
+  // Made some other way (through a smart wallet, say): the union answers for every Credit, 2,000 to a call.
+  if (!ids && hasMulticall(env)) {
+    try {
+      const found: number[] = [];
+      for (let from = 1; from <= SUPPLY; from += 2000) {
+        const part = Array.from({ length: Math.min(2000, SUPPLY - from + 1) }, (_, i) => from + i);
+        const res = await c.multicall({ contracts: part.map((id) => ({ address: batch, abi: batchAbi, functionName: 'allowed', args: [BigInt(id)] }) as const), allowFailure: false, multicallAddress: MULTICALL3, batchSize: 1_000_000 });
+        part.forEach((id, i) => res[i] && found.push(id));
+      }
+      if (found.length === size) ids = found;
+    } catch {}
+  }
+  if (ids) await keptPut(env, k, JSON.stringify(ids));
+  return ids;
 }
 
 /// A Credits contract's art contract, as Credits itself names it (`art()`): the app asks it for a Credit's traits

@@ -47,7 +47,7 @@ const INK_NAMES = ['Cyan', 'Magenta', 'Yellow', 'Black'];
 /// "Black", "Cyan + black" for a palette mask.
 export const inkName = (m: number) => INK_NAMES.filter((_, b) => m & (1 << b)).join(' + ').replace(/ \+ (\w)/g, (_, c) => ` + ${c.toLowerCase()}`);
 
-export type Rule = { label: string; value: string; swatch?: number; slots?: number[]; href?: string };
+export type Rule = { label: string; value: string; swatch?: number; slots?: number[]; href?: string; picked?: boolean };
 /// A batch's rules one per row, for the batch page. `slots`: the sheet slots a row governs (all when absent);
 /// `href`: the trait page for the Credits the row admits.
 export function filterRules(f: Summary['filter'], allowlistSize: number, slotOf: (i: number) => number): Rule[] {
@@ -76,12 +76,13 @@ export function filterRules(f: Summary['filter'], allowlistSize: number, slotOf:
     });
   if (f.bitsFrom || f.bitsTo)
     rows.push({ label: 'Bits', value: f.bitsFrom && f.bitsTo ? `${f.bitsFrom}–${f.bitsTo}` : f.bitsFrom ? `${f.bitsFrom}+` : `up to ${f.bitsTo}`, href: bitsPath(f.bitsFrom, f.bitsTo) });
-  if (f.idFrom || f.idTo) rows.push({ label: 'Credit #', value: f.idFrom && f.idTo ? `${f.idFrom}–${f.idTo}` : f.idFrom ? `${f.idFrom}+` : `up to ${f.idTo}` });
-  if (allowlistSize) rows.push({ label: 'Listed', value: `${allowlistSize} Credits` });
+  if (f.idFrom || f.idTo) rows.push({ label: 'Token', value: f.idFrom && f.idTo ? `#${f.idFrom}–${f.idTo}` : f.idFrom ? `#${f.idFrom}+` : `up to #${f.idTo}` });
+  // As /create names it: + Token takes one range or a list of numbers. A list opens itself on the union page.
+  if (allowlistSize) rows.push({ label: 'Token', value: `${allowlistSize} picked`, picked: true });
   return rows;
 }
 
-/// "Palette C, K · Print Registered · Paid Sep 21, 3:05–3:06 PM · #1000–2000 · 80 listed", or "" for an open batch.
+/// "Palette C, K · Print Registered · Paid Sep 21, 3:05–3:06 PM · #1000–2000 · 80 picked", or "" for an open batch.
 /// Ink colours for a palette mask, C=1 M=2 Y=4 K=8.
 export const INK = ['#00b5e2', '#e4007c', '#ffd100', '#111111'] as const; // Jack's inks (CreditDrawing.sol)
 export const maskInks = (m: number) => INK.filter((_, b) => m & (1 << b));
@@ -96,6 +97,6 @@ export function describeFilter(f: Summary['filter'], allowlistSize = 0) {
   if (f.paidFrom || f.paidTo) parts.push(window(f.paidFrom, f.paidTo));
   if (f.minScore || f.maxScore) parts.push(f.minScore && f.maxScore ? `Rating ${f.minScore / 10}–${f.maxScore / 10}` : f.minScore ? `Rating ≥ ${f.minScore / 10}` : `Rating ≤ ${f.maxScore / 10}`);
   if (f.idFrom || f.idTo) parts.push(f.idFrom && f.idTo ? `#${f.idFrom}–${f.idTo}` : f.idFrom ? `#${f.idFrom}+` : `up to #${f.idTo}`);
-  if (allowlistSize) parts.push(`${allowlistSize} listed`);
+  if (allowlistSize) parts.push(`${allowlistSize} picked`);
   return parts.join(' · ');
 }

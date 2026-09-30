@@ -2533,6 +2533,14 @@ input[type='datetime-local'] {
 .rule-chip:hover {
   box-shadow: inset 0 0 0 1px var(--fg);
 }
+button.rule-chip {
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
 a.rule-chip {
   color: inherit;
   text-decoration: none;
@@ -3700,6 +3708,9 @@ dialog.people {
   max-height: min(80vh, 720px);
   overflow: auto;
 }
+/* A union's picked Credits: five to a row in the dialog, three on phones. */
+dialog.picked-list .trait-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 0; }
+@media (max-width: 720px) { dialog.picked-list .trait-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 dialog.people header h3 {
   margin: 0 0 8px;
   font-size: 18px;

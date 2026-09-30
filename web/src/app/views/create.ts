@@ -552,7 +552,7 @@ export async function create(app: HTMLElement) {
     if (rules.minScore || rules.maxScore) parts.push(`Rating ${scoreLabel()}`);
     if (rules.bitsFrom || rules.bitsTo) parts.push(`Bits ${bitsLabel()}`);
     if (rules.idFrom || rules.idTo) parts.push(rules.idFrom && rules.idTo ? `#${rules.idFrom}–${rules.idTo}` : rules.idFrom ? `#${rules.idFrom}+` : `up to #${rules.idTo}`);
-    if (rules.list.length) parts.push(`${rules.list.length} listed`);
+    if (rules.list.length) parts.push(`${rules.list.length} picked`);
     return parts.length ? parts.join(' · ') : 'Any Credit';
   };
 
@@ -1340,7 +1340,7 @@ export async function create(app: HTMLElement) {
         } else if (/^\d+$/.test(x)) out.add(Number(x));
       }
       rules.list = [...out];
-      hint.textContent = out.size > 200 ? 'Over 200: use one range, or list fewer' : `${out.size} listed`;
+      hint.textContent = out.size > 200 ? 'Over 200: use one range, or list fewer' : `${out.size} picked`;
     } else hint.textContent = 'Any';
     refresh();
   };
