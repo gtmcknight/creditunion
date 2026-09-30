@@ -25,6 +25,9 @@ const sized = new ResizeObserver((entries) => {
   }
 });
 
+/// What a canvas is showing now (a union's drawn direction), for hover cards over it.
+export const canvasShowing = (c: HTMLCanvasElement) => drawn.get(c)?.d;
+
 /// The canvas the three drawn directions share; it sits over the sheet, inside the same `.dir-host`.
 export const directionCanvas = '<canvas class="dir-canvas" hidden aria-hidden="true"></canvas>';
 
@@ -248,6 +251,47 @@ function load(slots: readonly (string | null)[]): Promise<(Ink | null)[]> {
       }));
   }
   return Promise.all(slots.map((s) => (s ? (inks.get(s) ?? null) : null)));
+}
+
+/// Each Credit's seed and payment second (what its art is drawn from), from this browser's keep or a ratings read.
+/// Asked for in the same moment (every card on a page), they go out together, 200 to a request.
+const seedReads = new Map<string, Promise<Seed | null>>();
+let seedAsk: Map<string, (v: Seed | null) => void> | null = null;
+async function askSeeds() {
+  const all = seedAsk!;
+  seedAsk = null;
+  const ids = [...all.keys()];
+  for (let i = 0; i < ids.length; i += 200) {
+    const part = ids.slice(i, i + 200);
+    const r = await ratings(part.map(BigInt)).then((x) => x.ratings, () => null);
+    for (const id of part) {
+      const v = r?.[id];
+      if (!v?.seed) {
+        seedReads.delete(id); // asked again next time
+        all.get(id)!(null);
+        continue;
+      }
+      const seed: Seed = [v.seed, v.paidAt, v.score];
+      keep(id, seed);
+      all.get(id)!(seed);
+    }
+  }
+}
+export function seedsOf(ids: readonly (string | null)[]): Promise<(Seed | null)[]> {
+  for (const id of ids) {
+    if (!id || kept['c' + id] || seedReads.has(id)) continue;
+    seedReads.set(
+      id,
+      new Promise((done) => {
+        if (!seedAsk) {
+          seedAsk = new Map();
+          setTimeout(askSeeds, 30);
+        }
+        seedAsk.set(id, done);
+      }),
+    );
+  }
+  return Promise.all(ids.map((s) => (!s ? null : kept['c' + s] ? kept['c' + s] : (seedReads.get(s) ?? null))));
 }
 
 /// `quiet` changes are the page's own; the rest tell it with a `direction` event.

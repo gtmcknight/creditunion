@@ -2661,9 +2661,10 @@ a.rule-chip:hover {
 [data-pane][hidden] {
   display: none;
 }
-/* Two rows of the Buy tab's Credits, and the top of a third so it reads as scrolling. */
+/* The Buy tab's Credits: a row and a half until JS fits it (fitRows), growing to the last picked row. */
 .listings {
   max-height: 270px;
+  transition: max-height 200ms var(--ease);
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 3px;
@@ -9070,3 +9071,12 @@ dialog.share .share-swatches button {
     display: none;
   }
 }
+
+/* A card's sheet painted on one canvas behind its cells (sheet-paint.ts): the cells stay for what reads them. */
+.sheet-paint { position: absolute; background: #fff; pointer-events: none; }
+.sheet.painted { position: relative; background: transparent !important; } /* the canvas behind is the paper */
+
+/* A union's Join box: the heading and its tabs on one line. */
+.join-head { align-items: center; justify-content: flex-start; }
+.join-head h3 { margin: 0; }
+.join-head #pick-count { margin-left: auto; }

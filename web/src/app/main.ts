@@ -1,6 +1,7 @@
 import type { Address } from 'viem';
 import { chain, config, connect, disconnect, explorer, loadConfig, onSession, restore, session, wallets } from './chain';
 import { party } from './views/party';
+import './sheet-paint';
 import { create } from './views/create';
 import { lists } from './views/lists';
 import { home } from './views/home';

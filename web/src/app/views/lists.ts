@@ -230,7 +230,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yo
   registerFilter(s.address, s.filter);
   registerDeposits(ids, depositors, s.split === 1);
   return `<a class="card${canJoin ? ' can-join' : ''}" href="/union/${s.address}">
-    <div class="card-art${picture ? ' picture dir-host' : ''}${burned ? ' statement-host' : ''}"${picture ? ` data-portrait="${s.address.toLowerCase()}:${ids.length}:${ids.length ? ids[ids.length - 1] : ''}"${pictureReady({ s, ids, depositors }) ? ' data-ready="1"' : ''}` : ''}>${sheet(ids, { size: 'sm', mine, placed: placements.get(placeKey({ s, ids })), batch: s.state === 'Open' ? s.address : undefined })}${burned ? statementArt(s.statementId) : ''}${corner}${state}</div>
+    <div class="card-art${picture ? ' picture dir-host' : ''}${burned ? ' statement-host' : ''}"${picture ? ` data-portrait="${s.address.toLowerCase()}:${ids.length}:${ids.length ? ids[ids.length - 1] : ''}"${pictureReady({ s, ids, depositors }) ? ' data-ready="1"' : ''}` : ''}>${sheet(ids, { size: 'sm', mine, placed: placements.get(placeKey({ s, ids })), batch: s.state === 'Open' ? s.address : undefined, painted: true })}${burned ? statementArt(s.statementId) : ''}${corner}${state}</div>
     <div class="card-meta">
       <div class="meta-text">
         <strong>${esc(s.name || 'Untitled')}</strong>

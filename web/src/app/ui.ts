@@ -74,21 +74,24 @@ export function sheet(
     batch?: string;
     /// With `placed`: the Credit to show faded in each empty slot, by slot.
     slotGhosts?: ({ id: bigint; src: string } | null)[];
+    /// Drawn on one canvas behind the cells (sheet-paint.ts) rather than as 80 images: for pages with many sheets.
+    painted?: boolean;
   } = {},
 ) {
+  const pic = (src: string) => (opts.painted ? '' : `<img src="${src}" alt="" loading="lazy" decoding="async">`);
   const cells = Array.from({ length: 80 }, (_, i) => {
     const id = opts.placed ? (opts.placed[i] ?? undefined) : ids[i];
     if (id === undefined) {
       const g = opts.placed ? opts.slotGhosts?.[i] : opts.ghosts?.[i - ids.length];
-      if (g?.src) return `<i class="cell ghost"${g.id ? ` data-ghost="${g.id}"` : ''}><img src="${g.src}" alt="" loading="lazy" decoding="async"></i>`;
+      if (g?.src) return `<i class="cell ghost"${g.id ? ` data-ghost="${g.id}"` : ''}>${pic(g.src)}</i>`;
       return `<i class="cell empty"></i>`;
     }
     const mine = opts.mine?.has(id.toString()) ? ' mine' : '';
     const fresh = opts.fresh !== undefined && i >= opts.fresh ? ` new" style="--k:${i - opts.fresh}` : '';
-    return `<i class="cell${mine}${fresh}" data-id="${id}"><img src="${art(id)}" alt="" loading="lazy" decoding="async"></i>`;
+    return `<i class="cell${mine}${fresh}" data-id="${id}">${pic(art(id))}</i>`;
   });
-  const cls = ['sheet', opts.size ?? 'lg', opts.closed && 'closed', opts.closing && 'closing'].filter(Boolean).join(' ');
-  return `<div class="${cls}"${opts.batch ? ` data-batch="${opts.batch}"` : ''}>${cells.join('')}</div>`;
+  const cls = ['sheet', opts.size ?? 'lg', opts.closed && 'closed', opts.closing && 'closing', opts.painted && 'painted'].filter(Boolean).join(' ');
+  return `${opts.painted ? '<canvas class="sheet-paint" aria-hidden="true"></canvas>' : ''}<div class="${cls}"${opts.batch ? ` data-batch="${opts.batch}"` : ''}>${cells.join('')}</div>`;
 }
 
 export function toast(msg: string, kind: 'ok' | 'err' | 'info' = 'info', ms = 5000, html = false) {

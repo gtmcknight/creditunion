@@ -120,6 +120,27 @@ function eightsOf(ink: Ink, mix: string[], at: (x: number, y: number, w: number,
   for (let i = 0; i < n; i++) at((16 - n + i) * 20, 300, 20, 20, mix[1 << (4 - n + i)]);
 }
 
+/// Where slot `c` sits on the page, in paper units ([x, y, w, h]), in the directions that keep each Credit in its own
+/// place (Issued and Voided on Jack's 8 × 10 layout; Consolidated and Amortized in the butted box). Null in the rest,
+/// which move ink between Credits.
+export function slotBox(d: Direction, c: number): [number, number, number, number] | null {
+  if (d === 'Issued' || d === 'Voided') {
+    const { x0, y0, k } = issuedAt(c);
+    return [x0, y0, 320 * k, 320 * k];
+  }
+  if (d === 'Consolidated' || d === 'Amortized') return [BOX.x + (c % 8) * 8 * CELL, BOX.y + Math.floor(c / 8) * 8 * CELL, 8 * CELL, 8 * CELL];
+  return null;
+}
+/// The slot under a point on the page (paper units), or -1.
+export function slotAt(d: Direction, x: number, y: number): number {
+  for (let c = 0; c < 80; c++) {
+    const b = slotBox(d, c);
+    if (!b) return -1;
+    if (x >= b[0] && x < b[0] + b[2] && y >= b[1] && y < b[1] + b[3]) return c;
+  }
+  return -1;
+}
+
 /// The Credits as issued: each one's art, eight marks included, on Jack's 8 × 10 layout. Unlike the Credit's own
 /// art, a misprint isn't re-centred on its paper: its frame stays put and the slipped plates hang off it.
 function issued(inks: readonly (Ink | null)[], ghosts: ReadonlySet<number>, faint: string): Rect[] {

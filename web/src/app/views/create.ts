@@ -10,7 +10,7 @@ import { $$, art, errText, esc, fromTimeText, openModal, sameZoneDay, sheet, toa
 import { LAYOUT_TRAITS, keyOf, ruleFor, slotMark, slotName, type LayoutTrait } from '../../shared/layout';
 import { bitsPath, ratingPath, setPath, timePath } from '../../shared/trait';
 import { editionArt } from '../ghosts';
-import { listedById, listedPager, live, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepToWallet, type Listed as Listing, type Sale } from '../forsale';
+import { listedById, listedPager, live, priceTag, relist, sweepControls, sweepToWallet, type Listed as Listing, type Sale } from '../forsale';
 import { creditCell } from './trait';
 import { directionCanvas, directions, mountDirections, rulesView, showDirection } from '../directions';
 import { Room, booksOf, noRoomReason } from '../slots';
@@ -428,11 +428,7 @@ export async function create(app: HTMLElement) {
     await pager.fill(8, 3);
     if (buyFor !== key || !el.isConnected) return;
     const ls = pager.sale.ls.slice(0, 8);
-    // The marketplaces' marks lead the Buy row: tap one to hide its listings for this visit.
-    const marks = document.createElement('span');
-    marks.className = 'src-toggles';
-    sourceMarks(marks, pager.seen);
-    el.hidden = !ls.length && !marks.childElementCount;
+    el.hidden = !ls.length;
     if (el.hidden) return;
     const tile = (l: Listing) => creditCell(Number(l.id), priceTag(l));
     el.innerHTML = `<div class="jb"><div class="jb-sweep" id="cb-act"></div>
@@ -441,7 +437,6 @@ export async function create(app: HTMLElement) {
     const act = el.querySelector<HTMLElement>('#cb-act')!;
     const sale = { ...pager.sale, ls, all: [...ls] };
     const mine = sweepControls(act, sale, grid, { button: false, onPick: () => refresh() });
-    act.prepend(marks);
     buyer = mine;
     // Live: the cheapest eight again every 20 s, and any you picked stay while they're listed.
     const tick = async () => {
@@ -451,14 +446,8 @@ export async function create(app: HTMLElement) {
       if (buyFor !== key || !grid.isConnected || (!fresh.items.length && !fresh.done)) return;
       const picked = new Set(mine.chosen().map((l) => l.id));
       relist(grid, sale, fresh.sale.ls.filter((l, i) => i < 8 || picked.has(l.id)), tile, mine);
-      sourceMarks(marks, fresh.seen);
     };
     live(grid, tick);
-    // A marketplace hidden: its tiles leave at once, then the eight fill up again; shown: its Credits slide in.
-    onSources(grid, () => {
-      relist(grid, sale, sale.ls.filter(sourceShown), tile, mine);
-      void tick();
-    });
   }
   /// A picture: its first Credits for sale, in the order they go in (only these can start it), when none of yours are.
   async function drawPictureBuy(el: HTMLElement) {

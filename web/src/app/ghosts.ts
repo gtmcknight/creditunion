@@ -6,6 +6,8 @@ import { describeFilter, inkName, maskInks } from './traits';
 import { art, esc, same } from './ui';
 import { binsVersion } from './bins';
 import { ruleFor, slotName } from '../shared/layout';
+import { PAGE, slotAt, slotBox, type Direction } from '../shared/statement';
+import { canvasShowing } from './directions';
 
 /// Empty slots show a faded real Credit from the edition, so every sheet reads as a Statement in progress.
 /// Hovering a slot opens a card: an empty one says what it takes and how many Credits in the edition could fill
@@ -160,7 +162,7 @@ async function fillSheet(el: HTMLElement) {
       c.className = 'cell ghost planned';
       c.dataset.ghost = String(plan[i]);
       c.removeAttribute('title');
-      c.innerHTML = `<img src="${editionArt(plan[i]!)}" alt="" loading="lazy" decoding="async">`;
+      c.innerHTML = el.classList.contains('painted') ? '' : `<img src="${editionArt(plan[i]!)}" alt="" loading="lazy" decoding="async">`;
     });
     el.dispatchEvent(new Event('ghosts', { bubbles: true }));
     void fitsFor(el, f, cells, empties.map(([, i]) => i));
@@ -192,7 +194,7 @@ async function fillSheet(el: HTMLElement) {
     c.className = plan?.[i] ? 'cell ghost planned' : 'cell ghost';
     c.dataset.ghost = String(id);
     c.removeAttribute('title');
-    c.innerHTML = `<img src="${editionArt(id)}" alt="" loading="lazy" decoding="async">`;
+    c.innerHTML = el.classList.contains('painted') ? '' : `<img src="${editionArt(id)}" alt="" loading="lazy" decoding="async">`;
     slotOf.set(c, { i, want: want[i], f, fit: fits.get(want[i])! });
   });
   el.dispatchEvent(new Event('ghosts', { bubbles: true }));
@@ -208,25 +210,43 @@ function tip() {
   tipEl.setAttribute('role', 'tooltip');
   document.body.append(tipEl);
   let shown: Element | null = null;
-  document.addEventListener('pointerover', (e) => {
-    // List cards are one link into the Credit Union: no per-cell cards there, only on its own page.
-    const cell = (e.target as Element).closest?.('.card') ? null : (e.target as Element).closest?.('.cell.ghost, .cell[data-id]');
+  const hide = () => {
+    if (shown) tipEl!.classList.remove('in');
+    shown = null;
+  };
+  // `at`: where the Credit shows (its cell, or its patch of a drawn direction).
+  const show = (cell: Element | null, at?: DOMRect) => {
     const s = cell && slotOf.get(cell);
     const d = cell && !s ? deposits.get((cell as HTMLElement).dataset.id ?? '') : undefined;
-    if (!cell || (!s && !d)) {
-      if (shown) tipEl!.classList.remove('in');
-      shown = null;
-      return;
-    }
+    if (!cell || (!s && !d)) return hide();
     if (cell === shown) return;
     shown = cell;
     tipEl!.innerHTML = s ? card(s) : creditCard((cell as HTMLElement).dataset.id!, { rating: (cell as HTMLElement).dataset.rating, pos: d!.pos, early: d!.early, by: d!.by });
     tipEl!.classList.add('compact');
     hydrate(tipEl!);
     // A union sheet's cell zooms 1.2× on hover (style.css): place the card beside where it will end up.
-    place(grown(cell as HTMLElement, cell.closest('.batch-art') && (cell as HTMLElement).dataset.id ? 1.2 : 1));
+    place(at ?? grown(cell as HTMLElement, cell.closest('.batch-art') && (cell as HTMLElement).dataset.id ? 1.2 : 1));
     tipEl!.classList.add('in');
+  };
+  document.addEventListener('pointerover', (e) => {
+    if ((e.target as Element).closest?.('.dir-canvas')) return; // pointermove below
+    // List cards are one link into the Credit Union: no per-cell cards there, only on its own page.
+    show((e.target as Element).closest?.('.card') ? null : ((e.target as Element).closest?.('.cell.ghost, .cell[data-id]') ?? null));
   });
+  // Over a drawn direction that keeps each Credit in its own place (Consolidated, Amortized, Voided): the card of
+  // the Credit under the pointer, beside its patch.
+  document.addEventListener('pointermove', (e) => {
+    const canvas = (e.target as Element).closest?.<HTMLCanvasElement>('.dir-canvas:not(.still)');
+    if (!canvas) return;
+    const d = canvasShowing(canvas);
+    const r = canvas.getBoundingClientRect();
+    const c = d && d !== 'All' && r.width ? slotAt(d, ((e.clientX - r.left) / r.width) * PAGE.w, ((e.clientY - r.top) / r.height) * PAGE.h) : -1;
+    const cell = c >= 0 ? canvas.closest('.dir-host')?.querySelector('.sheet')?.children[c] : null;
+    if (!cell) return hide();
+    const b = slotBox(d as Direction, c)!, k = r.width / PAGE.w;
+    show(cell, new DOMRect(r.left + b[0] * k, r.top + b[1] * k, b[2] * k, b[3] * k));
+  });
+  document.addEventListener('pointerleave', hide);
   addEventListener('scroll', () => {
     tipEl!.classList.remove('in');
     shown = null;

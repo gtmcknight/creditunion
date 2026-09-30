@@ -21,7 +21,7 @@ export const MIXES: number[] = Array.from({ length: 16 }, (_, mask) => {
   return (r << 16) | (g << 8) | b;
 });
 
-const sha256 = async (bytes: Uint8Array) => new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+const sha256 = async (bytes: Uint8Array) => new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as BufferSource));
 const MISPRINT = new TextEncoder().encode('/misprint');
 
 /// Per-plate slips in cells. Registered prints (h[0] >= 32) don't move.

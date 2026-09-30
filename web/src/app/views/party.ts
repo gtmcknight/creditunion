@@ -7,7 +7,7 @@ import { ens, hydrate, identicon, pct, who } from '../ens';
 import { creditCard, examples, fillGhosts, planGhosts, registerDeposits, registerFilter } from '../ghosts';
 import { gapOf, Guide, planOf, unpackPicture, type Plan, type Stored } from '../picture';
 import { Room, books, keysOf, noRoomReason, placedKeys, type Books } from '../slots';
-import { MAX_SWEEP, buying, checkQuote, listedById, connectToBuy, live as keepLive, minEth, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepRow, type Listed, type Quote, type Sale, type Source } from '../forsale';
+import { MAX_SWEEP, buying, checkQuote, listedById, connectToBuy, live as keepLive, minEth, priceTag, relist, sweepControls, sweepRow, type Listed, type Quote, type Sale, type Source } from '../forsale';
 import { creditCell, creditSkel } from './trait';
 import { shareButton } from '../share';
 import { directionCanvas, directions, mountDirections, pickedDirection, primeInks, showDirection, warmInks } from '../directions';
@@ -615,12 +615,11 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>, pending = false) {
     const remembered = addTab?.at === s.address && (addTab.tab !== 'withdraw' || myIds.size) ? addTab.tab : null;
     const start = remembered ?? (!m || !m.owned.length ? 'buy' : 'mine');
     return `<div class="box add">
-      <div class="box-head"><h3>Join<span class="src-toggles" id="buy-sources"${start === 'buy' ? '' : ' hidden'}></span></h3><span class="muted small num" id="pick-count"></span></div>
-      <div class="subtabs" role="tablist">
+      <div class="box-head join-head"><h3>Join</h3><div class="subtabs" role="tablist">
         <button type="button" role="tab" data-add="mine" aria-selected="${start === 'mine'}">Deposit <span class="num" id="n-mine"></span></button>
         <button type="button" role="tab" data-add="buy" aria-selected="${start === 'buy'}">Buy</button>
         ${myIds.size ? `<button type="button" role="tab" data-add="withdraw" aria-selected="${start === 'withdraw'}">Withdraw <span class="num">${myIds.size}</span></button>` : ''}
-      </div>
+      </div><span class="muted small num" id="pick-count"></span></div>
       <div data-pane="mine"${start === 'mine' ? '' : ' hidden'}>
         ${
           m
@@ -903,7 +902,6 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
       t.addEventListener('click', () => {
         document.querySelectorAll('[data-add]').forEach((x) => x.setAttribute('aria-selected', String(x === t)));
         document.querySelectorAll<HTMLElement>('[data-pane]').forEach((p) => (p.hidden = p.dataset.pane !== t.dataset.add));
-        document.getElementById('buy-sources')?.toggleAttribute('hidden', t.dataset.add !== 'buy');
         addTab = { at: s.address, tab: t.dataset.add! };
         if (t.dataset.add === 'buy') buy();
       }),
@@ -1137,6 +1135,22 @@ const quotedPrices = (q: Quote) =>
     ...(q.strategy ?? []).map((f) => [f.id, BigInt(f.price)] as const),
   ]);
 
+/// The Buy grid shows a row and a half: enough to see more wait below. Picking further down (the slider takes the
+/// cheapest in order) opens it to the last picked row and half the next.
+function fitRows(grid: HTMLElement) {
+  const cells = [...grid.children] as HTMLElement[];
+  if (!cells.length) return;
+  const top = grid.getBoundingClientRect().top - grid.scrollTop;
+  const rows = [...new Set(cells.map((c) => Math.round(c.getBoundingClientRect().top - top)))].sort((x, y) => x - y);
+  if (rows.length < 2) return void (grid.style.maxHeight = '');
+  const picked = cells.reduce((at, c, i) => (c.classList.contains('sel') ? i : at), -1);
+  const upTo = picked < 0 ? 0 : rows.indexOf(Math.round(cells[picked].getBoundingClientRect().top - top));
+  const next = rows[upTo + 1];
+  // Half the next row's art (not its caption): enough to read as more below.
+  const art = cells[0].querySelector<HTMLElement>('.cc-art')?.offsetHeight ?? cells[0].offsetHeight;
+  grid.style.maxHeight = next === undefined ? 'none' : `${Math.round(next + art / 2)}px`;
+}
+
 /// The Buy tab, as on /credits: the cheapest Credits that fit, as many as one buy takes. Drag for the cheapest that
 /// many, or tap Credits to pick them, up to what's left to fill. One click gets a signed price for exactly those and
 /// opens the wallet. Where buy-in is off (testnets), it previews edition Credits, disabled.
@@ -1186,8 +1200,6 @@ async function bindBuy(
   }
   // Every listing that fits, and what shows: the cheapest that many from the marketplaces shown, and any picked.
   let all = listings;
-  const marks = document.getElementById('buy-sources');
-  if (marks) sourceMarks(marks, [...sources, ...all.map((l) => l.source)]);
   const plan = plansOf.get(batch.toLowerCase());
   let order: Plan | null = null;
   let held = new Set<number>(); // Colors someone else is buying right now: they sit out until that buy lands
@@ -1235,7 +1247,7 @@ async function bindBuy(
   const pictureLine = (n: number) =>
     (n ? 'The Credits that draw the picture’s next slots, in the order they go in. ' : 'Nothing for sale draws the picture’s next slots right now. ') +
     (held.size ? `Someone is buying ${[...held].map((m) => slotName(0, m)).join(', ')} right now; those are back in a moment. ` : '');
-  const showing = (picked: Set<string>) => byPlan(order ? all.filter((l) => order!.buy.has(l.id) && !held.has(order!.colour.get(l.id)!)) : all, order).filter(sourceShown).filter((l, i) => i < MAX_SWEEP || picked.has(l.id));
+  const showing = (picked: Set<string>) => byPlan(order ? all.filter((l) => order!.buy.has(l.id) && !held.has(order!.colour.get(l.id)!)) : all, order).filter((l, i) => i < MAX_SWEEP || picked.has(l.id));
   const shown = showing(new Set());
   const sale: Sale = { ls: [...shown], preview: mainnetOnly, byId: new Map(shown.map((l) => [l.id, l])), all: shown, mine: new Set() };
   // Credits whose price went up at the last click: their new price shows in red until the next.
@@ -1243,6 +1255,7 @@ async function bindBuy(
   const tile = (l: Listed) => creditCell(Number(l.id), priceTag(l, rose.has(l.id)));
   const tiles = () => {
     grid.innerHTML = sale.ls.map(tile).join('');
+    fitRows(grid);
   };
   tiles();
   // Testnet: the banner already says it's a preview.
@@ -1250,6 +1263,7 @@ async function bindBuy(
   line.hidden = !line.textContent;
   let chosen: () => Listed[] = () => [];
   const label = () => {
+    fitRows(grid);
     if (!go) return;
     const n = chosen().length;
     go.disabled = mainnetOnly || !n || !connected;
@@ -1275,12 +1289,9 @@ async function bindBuy(
   );
   const reshow = () => {
     relist(grid, sale, showing(new Set(ctl.chosen().map((l) => l.id))), tile, ctl);
-    if (marks) sourceMarks(marks, [...sources, ...all.map((l) => l.source)]);
     line.textContent = order ? pictureLine(sale.ls.length) : sale.ls.length || mainnetOnly ? '' : 'No listings fit right now. ';
     line.hidden = !line.textContent;
   };
-  // A marketplace hidden or shown: its listings leave or slide in.
-  onSources(grid, reshow);
   if (!go || !connected || mainnetOnly) return;
 
   // One click: a fresh signed price for exactly these (OpenSea's is good for ~90 s), then the wallet. Listings
