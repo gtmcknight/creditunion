@@ -1,4 +1,4 @@
-import { session } from '../chain';
+import { config, session } from '../chain';
 import { listBatches, type Listed, type Summary, hasLayout, layoutSlot, placeOnLayout } from '../data';
 import { placedKeys } from '../slots';
 import { hydrate, who } from '../ens';
@@ -165,8 +165,10 @@ function morph(el: HTMLElement, html: string): Set<Element> {
 export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yours') {
   const mine = mineIn({ s, ids, depositors });
   const room = 80 - s.count;
-  const canJoin = fit?.length ? Math.min(fit.length, room) : 0;
   const picture = pictures.has(s.address);
+  // A Picture union takes only Credits bought for it (where the site can buy), so yours never "fit" one.
+  if (picture && config.sweeper) fit = [];
+  const canJoin = fit?.length ? Math.min(fit.length, room) : 0;
   const live = s.state === 'Auction' && !(s.highBid && Date.now() / 1000 >= s.auctionEnd);
   const cta = s.state === 'Open' ? 'Join' : live ? 'Bid' : '';
   const fits = fit?.length ?? 0;
