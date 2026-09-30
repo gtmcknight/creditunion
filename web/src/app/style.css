@@ -762,8 +762,10 @@ nav a .num {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin-left: auto;
-  margin-right: -4px; /* the last glyph's own padding */
+}
+/* Under a union's sheet the format sits in the bottom-left corner; Now · Finished moves to the right. */
+.legend > .dirs {
+  order: -1;
 }
 .dirs button {
   position: relative;
@@ -779,19 +781,6 @@ nav a .num {
 .dirs .dir-word {
   margin-right: 12px;
 }
-.dirs .dir-glyph {
-  display: grid;
-  place-items: center;
-  width: 24px;
-}
-/* Solid glyphs read heavier than words at the same colour: the ones not showing sit back further. */
-.dirs .dir-glyph svg {
-  opacity: 0.4;
-  transition: opacity 150ms var(--ease);
-}
-.dirs .dir-glyph:is(:hover, :focus-visible, [aria-checked='true']) svg {
-  opacity: 1;
-}
 .dirs button:hover,
 .dirs button[aria-checked='true'] {
   color: var(--fg);
@@ -799,48 +788,78 @@ nav a .num {
 .dirs .dir-word[aria-checked='true'] {
   box-shadow: inset 0 -1px 0 currentColor;
 }
-/* The line under a glyph is the glyph's width, as the line under a word is the word's. */
-.dirs .dir-glyph[aria-checked='true'] {
-  background: linear-gradient(currentColor, currentColor) center bottom / 16px 1px no-repeat;
-}
 .dirs button:focus-visible {
   outline: 1px solid var(--fg);
   outline-offset: 2px;
 }
-.dirs .dir-glyph::after {
-  content: attr(data-tip);
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 50%;
-  translate: -50% -2px;
-  padding: 4px 8px;
-  border-radius: var(--r);
-  background: var(--fg);
-  color: var(--bg);
-  font-size: 12px;
-  line-height: 1;
-  white-space: nowrap;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 120ms var(--ease), translate 120ms var(--ease);
-  z-index: 2;
+/* One menu for the format: its glyph, name and a chevron, in grey like the words beside it, opening upward to a
+   list of all eight by glyph and name. */
+.dirs .dir-pick-wrap {
+  position: relative;
 }
-.dirs .dir-glyph:last-child::after {
-  left: auto;
-  right: 0;
-  translate: 0 -2px;
+.dirs .dir-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
 }
-.dirs .dir-glyph:is(:hover, :focus-visible)::after {
+.dirs .dir-pick:is(:hover, [aria-expanded='true']) {
+  color: var(--fg);
+}
+.dirs .dir-pick .dir-chevron {
+  margin-left: -2px;
+}
+.dirs .dir-pick .dir-chevron {
+  opacity: 0.5;
+  transition: opacity 150ms var(--ease), rotate 150ms var(--ease);
+}
+.dirs .dir-pick:hover .dir-chevron,
+.dirs .dir-pick[aria-expanded='true'] .dir-chevron {
   opacity: 1;
-  translate: -50% 0;
 }
-.dirs .dir-glyph:last-child:is(:hover, :focus-visible)::after {
-  translate: 0 0;
+.dirs .dir-pick[aria-expanded='true'] .dir-chevron {
+  rotate: 180deg;
 }
-@media (hover: none) {
-  .dirs .dir-glyph::after {
-    display: none;
-  }
+.dirs .dir-menu {
+  position: absolute;
+  bottom: calc(100% + 6px); /* opens upward, over the sheet it names */
+  left: 0;
+  z-index: 3;
+  display: grid;
+  min-width: 176px;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  background: var(--bg);
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.14);
+}
+.dirs .dir-menu[hidden] {
+  display: none;
+}
+.dirs .dir-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 10px;
+  border-radius: calc(var(--r) - 2px);
+  color: var(--muted);
+  text-align: left;
+  white-space: nowrap;
+}
+.dirs .dir-item:is(:hover, :focus-visible) {
+  background: var(--line);
+  outline: none;
+}
+.dirs .dir-item[aria-checked='true'] {
+  color: var(--fg);
+}
+.dirs .dir-item[aria-checked='true']::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 /* ---------------------------------------------------------------- batch page */
@@ -867,7 +886,7 @@ nav a .num {
 .batch-art {
   /* Not sticky: the sheet is nearly viewport-tall, so sticky only made it jump when the side column changed height. */
   display: grid;
-  gap: 12px;
+  gap: 4px; /* the bar under the sheet: its 32px buttons already carry the space */
 }
 .legend {
   display: flex;
@@ -8290,15 +8309,14 @@ dialog.how .small { margin-top: 16px; }
 .card-art .joined-tag > span { display: inline-flex; align-items: center; height: 100%; padding: 0 8px; }
 .card-art .joined-tag .jn { box-shadow: inset 1.5px 0 0 #0a0a0a; }
 .show-empty { display: block; margin: 24px auto 0; }
-/* Create's preview bar, one line on a wide screen: Painted at the left (on the Painted layout),
-   the direction glyphs at the right edge as on a union page, so Painted appearing never moves them. */
+/* Create's preview bar, one line on a wide screen: the format menu in the bottom-left corner as on a union page,
+   then Painted (on the Painted layout) after it, so Painted appearing never moves it. */
 @media (min-width: 821px) {
   .design-preview { gap: 8px; }
   .preview-foot { flex-wrap: nowrap; align-items: center; }
   .preview-foot > div:has(> .dirs), .preview-foot .dirs { display: contents; }
   .preview-foot .dir-word { order: 1; }
-  .preview-foot .dir-glyph { order: 3; }
-  .preview-foot .dirs .dir-word + .dir-glyph { margin-left: auto; }
+  .preview-foot .dir-pick-wrap { order: 0; }
 }
 /* A card's words: the name beside the Join/Bid button, the creator and the members line under both at full width. */
 .card-meta { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: start; }

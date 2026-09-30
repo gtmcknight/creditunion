@@ -38,19 +38,37 @@ const GLYPH: Record<Direction, string> = {
   Voided: '<path fill="none" stroke="currentColor" stroke-width="1.25" d="M2.6 2.6h3.8v3.8H2.6zM9.6 2.6h3.8v3.8H9.6zM2.6 9.6h3.8v3.8H2.6zM9.6 9.6h3.8v3.8H9.6z"/>',
 };
 
-/// The directions as one row of glyphs, each named in its tooltip. `rules` adds the create page's Painted view (the
-/// hand-painted design; 'Rules' inside) in front, hidden until a design is painted.
+const CHEVRON = '<svg class="dir-chevron" viewBox="0 0 10 16" width="10" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" d="m1.5 9.25 3.5-3.5 3.5 3.5"/></svg>';
+const glyph = (paths: string) => `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">${paths}</svg>`;
+
+/// The switch: one menu showing the direction on (glyph and name), listing all eight by glyph and name. `rules` adds the
+/// create page's Painted view (the hand-painted design; 'Rules' inside) in front, hidden until a design is painted.
 export function directions(key: string, rules = false) {
   const k = key.toLowerCase(), on = showing.get(k) ?? 'Issued';
-  const all: Shown[] = rules ? ['Rules', ...DIRECTIONS] : [...DIRECTIONS];
-  return `<div class="dirs" role="radiogroup" aria-label="Statement direction" data-key="${k}">${all
-    .map((d) => {
-      const attrs = `type="button" role="radio" data-dir="${d}" aria-checked="${d === on}" tabindex="${d === on ? 0 : -1}"`;
-      return d === 'Rules'
-        ? `<button ${attrs} class="dir-word" hidden>Painted</button>`
-        : `<button ${attrs} class="dir-glyph" aria-label="${d}" data-tip="${d}"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">${GLYPH[d]}</svg></button>`;
-    })
-    .join('')}</div>`;
+  const radio = (d: Shown) => `type="button" role="radio" data-dir="${d}" aria-checked="${d === on}" tabindex="${d === on ? 0 : -1}"`;
+  return `<div class="dirs" role="radiogroup" aria-label="Statement direction" data-key="${k}">${
+    rules ? `<button ${radio('Rules')} class="dir-word" hidden>Painted</button>` : ''
+  }<div class="dir-pick-wrap"><button type="button" class="dir-pick" aria-haspopup="true" aria-expanded="false">${glyph(
+    on === 'Rules' ? '' : GLYPH[on],
+  )}<span>${on === 'Rules' ? 'Direction' : on}</span>${CHEVRON}</button><div class="dir-menu" hidden>${DIRECTIONS.map(
+    (d) => `<button ${radio(d)} class="dir-item">${glyph(GLYPH[d])}<span>${d}</span></button>`,
+  ).join('')}</div></div></div>`;
+}
+
+/// The menu's button shows the direction showing, glyph and name ('Direction' while the create page shows its Painted view).
+function markPick(g: HTMLElement, d: Shown) {
+  const pick = g.querySelector('.dir-pick');
+  if (!pick) return;
+  pick.querySelector('svg')!.innerHTML = d === 'Rules' ? '' : GLYPH[d];
+  pick.querySelector('span')!.textContent = d === 'Rules' ? 'Direction' : d;
+}
+
+function closeMenus(except?: Element | null) {
+  document.querySelectorAll<HTMLElement>('.dirs .dir-menu:not([hidden])').forEach((m) => {
+    if (m === except) return;
+    m.hidden = true;
+    m.previousElementSibling?.setAttribute('aria-expanded', 'false');
+  });
 }
 
 /// A still Statement over a sheet with no switch (a picture union's card): its Credits as Now shows them,
@@ -233,8 +251,9 @@ async function show(g: HTMLElement, d: Shown, focus = false, quiet = false) {
     const on = b.dataset.dir === d;
     b.setAttribute('aria-checked', String(on));
     b.tabIndex = on ? 0 : -1;
-    if (on && focus) b.focus();
+    if (on && focus) (b.closest('.dir-menu[hidden]') ? g.querySelector<HTMLElement>('.dir-pick') : b)?.focus();
   });
+  markPick(g, d);
   if (!quiet) g.dispatchEvent(new CustomEvent('direction', { bubbles: true, detail: d }));
   const host = g.closest<HTMLElement>('.dir-host');
   const canvas = host?.querySelector<HTMLCanvasElement>('.dir-canvas');
@@ -276,8 +295,34 @@ function paint(canvas: HTMLCanvasElement, d: Direction, list: (Ink | null)[], gh
 }
 
 document.addEventListener('click', (e) => {
-  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.dirs [data-dir]');
+  const t = e.target as HTMLElement;
+  const pick = t.closest<HTMLButtonElement>('.dirs .dir-pick');
+  if (pick) {
+    const menu = pick.nextElementSibling as HTMLElement;
+    closeMenus(menu);
+    menu.hidden = !menu.hidden;
+    pick.setAttribute('aria-expanded', String(!menu.hidden));
+    if (!menu.hidden) (menu.querySelector<HTMLElement>('[aria-checked="true"]') ?? menu.querySelector<HTMLElement>('button'))?.focus({ preventScroll: true });
+    return;
+  }
+  const b = t.closest<HTMLButtonElement>('.dirs [data-dir]');
   if (b) void show(b.closest<HTMLElement>('.dirs')!, b.dataset.dir as Shown);
+  closeMenus();
+});
+// In an open menu: ↑ ↓ move through the names, Escape closes it.
+document.addEventListener('keydown', (e) => {
+  const open = document.querySelector<HTMLElement>('.dirs .dir-menu:not([hidden])');
+  if (!open) return;
+  if (e.key === 'Escape') {
+    closeMenus();
+    (open.previousElementSibling as HTMLElement | null)?.focus();
+    return;
+  }
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  const items = [...open.querySelectorAll<HTMLElement>('button')];
+  const at = items.indexOf(document.activeElement as HTMLElement);
+  e.preventDefault();
+  items[(at + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
 });
 // Read the ink on the way to a click.
 document.addEventListener('pointerover', (e) => {
