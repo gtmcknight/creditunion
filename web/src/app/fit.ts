@@ -7,22 +7,27 @@ import { onTx, pub, session } from './chain';
 import { eligible, hasLayout, myCredits, ratings, type Listed, type Rated, type Summary } from './data';
 import { paletteBit, TRAITS } from './traits';
 
-let cache: { account: string; owned: bigint[]; traits: Map<string, Rated> } | null = null;
+let cache: { account: string; p: Promise<{ owned: bigint[]; traits: Map<string, Rated> }> } | null = null;
 
-/// A wallet's Credits (the connected one by default) with their traits. Cached per account for the session.
-export async function myTraits(account = session.account): Promise<{ owned: bigint[]; traits: Map<string, Rated> }> {
-  if (!account) return { owned: [], traits: new Map() };
-  if (cache && cache.account === account) return cache;
-  const owned = [...(await myCredits(account))];
-  const traits = new Map<string, Rated>();
-  for (let i = 0; i < owned.length; i += 200) {
-    try {
-      const r = await ratings(owned.slice(i, i + 200));
-      for (const [id, v] of Object.entries(r.ratings)) traits.set(id, v);
-    } catch {}
-  }
-  cache = { account, owned, traits };
-  return cache;
+/// A wallet's Credits (the connected one by default) with their traits. Cached per account for the session; a page
+/// that asks twice while the first read is out shares it.
+export function myTraits(account = session.account): Promise<{ owned: bigint[]; traits: Map<string, Rated> }> {
+  if (!account) return Promise.resolve({ owned: [], traits: new Map() });
+  if (cache && cache.account === account) return cache.p;
+  const p = (async () => {
+    const owned = [...(await myCredits(account))];
+    const traits = new Map<string, Rated>();
+    for (let i = 0; i < owned.length; i += 200) {
+      try {
+        const r = await ratings(owned.slice(i, i + 200));
+        for (const [id, v] of Object.entries(r.ratings)) traits.set(id, v);
+      } catch {}
+    }
+    return { owned, traits };
+  })();
+  const entry = (cache = { account, p });
+  p.catch(() => cache === entry && (cache = null)); // a failed read is retried next time, not remembered
+  return p;
 }
 
 export function invalidateFit() {
@@ -71,18 +76,22 @@ export async function fitByBatch(list: Listed[], account = session.account): Pro
 export async function fitIds(list: Listed[], owned: bigint[], traits: Map<string, Rated>): Promise<Map<Address, bigint[]>> {
   const out = new Map<Address, bigint[]>();
   if (!owned.length) return out;
-  for (const { s } of list) {
-    if (s.state !== 'Open') continue;
-    let fit = owned.filter((id) => fitsRules(s, id, traits.get(id.toString())));
-    if (fit.length && s.allowlistSize) fit = await eligible(s.address, fit).catch(() => []);
-    // Layout batches have slots per palette; the batch says which of these would actually land, as a bundle.
-    if (fit.length && hasLayout(s.filter)) {
-      try {
-        const ok = (await pub.readContract({ address: s.address, abi: batchAbi, functionName: 'canTake', args: [fit] })) as readonly boolean[];
-        fit = fit.filter((_, i) => ok[i]);
-      } catch {}
-    }
-    if (fit.length) out.set(s.address, fit);
-  }
+  // Every union at once, so their chain reads go out as one batched request rather than one round trip each.
+  const fits = await Promise.all(
+    list.map(async ({ s }) => {
+      if (s.state !== 'Open') return [];
+      let fit = owned.filter((id) => fitsRules(s, id, traits.get(id.toString())));
+      if (fit.length && s.allowlistSize) fit = await eligible(s.address, fit).catch(() => []);
+      // Layout batches have slots per palette; the batch says which of these would actually land, as a bundle.
+      if (fit.length && hasLayout(s.filter)) {
+        try {
+          const ok = (await pub.readContract({ address: s.address, abi: batchAbi, functionName: 'canTake', args: [fit] })) as readonly boolean[];
+          fit = fit.filter((_, i) => ok[i]);
+        } catch {}
+      }
+      return fit;
+    }),
+  );
+  list.forEach(({ s }, i) => fits[i].length && out.set(s.address, fits[i]));
   return out;
 }
