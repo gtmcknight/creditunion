@@ -103,6 +103,8 @@ export function errText(e: unknown): string {
   }
   const m = err.shortMessage ?? err.message ?? String(e);
   if (/rejected|denied/i.test(m)) return 'Cancelled in wallet.';
+  const os = /OpenSea (\d{3})/.exec(m);
+  if (os) return +os[1] === 429 ? 'OpenSea is busy right now. Try again in a minute.' : +os[1] >= 500 ? 'OpenSea isn’t answering right now. Try again in a minute.' : 'OpenSea couldn’t fill this right now. Refresh and try again.';
   // The node's word for a sender who can't cover value plus gas.
   if (/OutOfFunds|insufficient funds|Transaction creation failed/i.test(`${m} ${err.message ?? ''}`)) return 'Not enough ETH in your wallet to cover this and gas.';
   // A revert with no reason usually means the wallet ran it somewhere else (wrong network, stale page).

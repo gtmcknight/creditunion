@@ -297,6 +297,11 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
           ? grid(shown)
           : `<p class="muted">${pick === 'upcoming' ? 'No Credit Union is full right now.' : pick === 'live' ? 'Nothing at auction right now.' : 'Nothing sold yet.'}</p>`;
       hydrate(el);
+      // Picture unions waiting to burn show their picture here too, as on /unions.
+      el.querySelectorAll<HTMLElement>('.card-art.picture').forEach((h) => {
+        showStill(h);
+        if (h.dataset.ready) void fillGhosts(h).then(() => drawStill(h, 'Consolidated'));
+      });
       fillGhosts(el);
       // Empty Auctions: a greyed Statement of real edition Credits stands in for the first one.
       const ph = document.getElementById('auction-placeholder');

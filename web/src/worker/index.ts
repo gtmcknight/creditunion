@@ -15,7 +15,7 @@ import { createPublicClient, fallback, hexToBytes, http, type Address, type Hex,
 import { mainnet } from 'viem/chains';
 import { normalize } from 'viem/ens';
 import { batchAbi, creditsAbi, creditArtAbi, factoryAbi } from '../app/abi';
-import { best, bestPage, quote, scan, type Extra, type Listing } from './opensea';
+import { setSpareKey, best, bestPage, quote, scan, type Extra, type Listing } from './opensea';
 import { cacheStore, confirmListing, marketListings, type FwaListing } from './fwa';
 import { confirmStrategy, strategyAbi, strategyListings } from './strategy';
 import { ratings } from './ratings';
@@ -43,6 +43,7 @@ interface Env {
   RATINGS?: Address;
   OPENSEA_SLUG: string;
   OPENSEA_API_KEY?: string;
+  OPENSEA_API_KEY_2?: string; // tried when the first is rate limited
   RPC_URL?: string;
   FALLBACK_RPC: string;
   ACTIVITY_MIRROR?: string; // local dev only: serve /activity.json from this URL
@@ -191,6 +192,7 @@ export { BuyLocks } from './locks';
 
 export default {
   async fetch(req, env, ctx): Promise<Response> {
+    setSpareKey(env.OPENSEA_API_KEY_2);
     const url = new URL(req.url);
     // The old domains send pages to the new one (same path), so shared links keep working.
     if (OLD_HOSTS.has(url.hostname))

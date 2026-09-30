@@ -43,12 +43,30 @@ export type Quote = {
   expires: number | null; // unix seconds when the earliest zone signature expires, null if unsigned
 };
 
+/// A second OpenSea key (secret OPENSEA_API_KEY_2), tried when the first is rate limited.
+let spare: string | undefined;
+export const setSpareKey = (k: string | undefined) => void (spare = k || undefined);
+
+/// What a person sees when OpenSea says no (the raw status and body only go to the logs).
+function osError(status: number) {
+  if (status === 429) return 'OpenSea is busy right now. Try again in a minute.';
+  if (status >= 500) return 'OpenSea isn’t answering right now. Try again in a minute.';
+  if (status === 404) return 'That listing is no longer on OpenSea.';
+  return 'OpenSea couldn’t fill this right now. Refresh and try again.';
+}
+
 async function os(key: string, path: string, init?: RequestInit): Promise<Json> {
-  const res = await fetch(API + path, {
-    ...init,
-    headers: { accept: 'application/json', 'content-type': 'application/json', 'x-api-key': key, ...init?.headers },
-  });
-  if (!res.ok) throw new Error(`OpenSea ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const go = (k: string) =>
+    fetch(API + path, {
+      ...init,
+      headers: { accept: 'application/json', 'content-type': 'application/json', 'x-api-key': k, ...init?.headers },
+    });
+  let res = await go(key);
+  if (res.status === 429 && spare && spare !== key) res = await go(spare);
+  if (!res.ok) {
+    console.warn(`[opensea] ${res.status} ${path.split('?')[0]}: ${(await res.text()).slice(0, 200)}`);
+    throw new Error(osError(res.status));
+  }
   return res.json();
 }
 
