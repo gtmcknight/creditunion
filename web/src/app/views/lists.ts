@@ -496,7 +496,7 @@ function howAuctions() {
     </ul>
     <h4>The split</h4>
     <p class="muted">2% fee, then the rest goes to the 80 Credits that made it: 1/80 each, or 1.5× for the first in down to 0.5× for the last on Early bird. Every member is paid when the auction settles.</p>
-    <p class="small muted">Hits 80/80 after launch? It gets 5 minutes to leave from that moment, then burns. <a href="/faq">More questions</a></p>`;
+    <p class="small muted">Hits 80/80 after launch? It gets 5 minutes to leave from that moment, then burns. <a href="/docs#how">How it works</a></p>`;
   document.body.append(d);
   d.addEventListener('close', () => d.remove());
   openModal(d);

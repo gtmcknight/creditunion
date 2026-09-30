@@ -32,7 +32,7 @@ export function cardFor(path: string): Card | null {
   if (first === 'b' || first === 'party' || first === 'union') return CARDS.party;
   if (first === 'unions') return CARDS.parties;
   if (first === 'member') return CARDS.member;
-  if (first === 'faq') return CARDS.about;
+  if (first === 'docs') return CARDS.about;
   if (first === 'new') return CARDS.create;
   return CARDS[first] ?? null;
 }

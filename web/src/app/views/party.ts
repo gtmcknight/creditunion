@@ -353,7 +353,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         document.querySelector<HTMLElement>('[data-pane="withdraw"]')?.setAttribute('hidden', '');
         document.querySelector<HTMLElement>('[data-add="buy"]')?.parentElement?.setAttribute('hidden', ''); // Buy alone needs no tabs
         const note = document.querySelector('.pane-note');
-        if (note) note.innerHTML = '<span id="buy-line"></span>Credit Union is unofficial and experimental, so use it at your own risk. <a href="/faq">Questions?</a>';
+        if (note) note.innerHTML = '<span id="buy-line"></span>Credit Union is unofficial and experimental, so use it at your own risk. <a href="/docs">How it works</a>';
         document.querySelector('[data-pane="buy"]')?.insertAdjacentHTML('afterbegin', '<div class="picture-rules"><p><strong>Buy only.</strong> Each open slot has one Credit for sale picked to draw that part of the picture. You buy those, in order. Credits you already own can’t go in.</p><p><strong>No withdrawals here.</strong> Taking a Credit out would shift the picture.</p></div>');
       }
       if (config.sweeper) {
@@ -596,7 +596,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>) {
       </div>
       <div data-pane="buy"${start === 'buy' ? '' : ' hidden'}>${buyPane(!!m)}</div>
       ${myIds.size ? `<div data-pane="withdraw"${start === 'withdraw' ? '' : ' hidden'}>${withdraw()}</div>` : ''}
-      <p class="muted small pane-note"><span id="buy-line">Finding the cheapest listings that fit… </span>Leave anytime until it locks. Credit Union is unofficial and experimental, so use it at your own risk. <a href="/faq">Questions?</a></p>
+      <p class="muted small pane-note"><span id="buy-line">Finding the cheapest listings that fit… </span>Leave anytime until it locks. Credit Union is unofficial and experimental, so use it at your own risk. <a href="/docs">How it works</a></p>
     </div>`;
   }
 

@@ -9,7 +9,7 @@ import { hydrate, who } from './ens';
 import { mint } from './views/mint';
 import { previews } from './views/previews';
 import { activityTicker, live, tickerHtml } from './views/live';
-import { faq } from './views/faq';
+import { docs } from './views/docs';
 import { profile } from './views/profile';
 import { printer } from './views/printer';
 import { credit } from './views/credit';
@@ -23,10 +23,10 @@ import { me } from './data';
 const app = document.getElementById('app')!;
 let seq = 0;
 
-/// Real paths: / (how it works and live activity), /faq, /unions, /auctions, /credits, /create, /union/0x…, /credit/123, /mint, /me,
+/// Real paths: / (how it works and live activity), /docs, /unions, /auctions, /credits, /create, /union/0x…, /credit/123, /mint, /me,
 /// trait pages /palette/CMYK, /eights/3, /print/slip, /weight/sparse, and /time?from=&to=, /rating, /bits. Pages keep their old
 /// internal names (party, parties). Old #/ links and old paths (/party, /parties, /new, /b, /docs, /how) still land.
-const LEGACY: Record<string, string> = { union: 'party', unions: 'parties', new: 'create', b: 'party', docs: '', how: '', about: '' };
+const LEGACY: Record<string, string> = { union: 'party', unions: 'parties', new: 'create', b: 'party', faq: 'docs', how: '', about: '' };
 function pagePath(): string[] {
   const parts = location.pathname.replace(/^\/+|\/+$/g, '').split('/');
   parts[0] = LEGACY[parts[0]] ?? parts[0];
@@ -89,7 +89,7 @@ async function route() {
   }
   try {
     if (page === '') home(app);
-    else if (page === 'faq') faq(app);
+    else if (page === 'docs') docs(app);
     else if (page === 'mint') await mint(app, route);
     else if (page === 'og') await previews(app);
     else if (page === 'activity' || page === 'live') await live(app);

@@ -33,8 +33,8 @@ const NUMBER_DIRS: [number, string, string][] = [
 ];
 /// Picture is Painted on-chain: the tile only changes how the paint is made.
 const PICTURE = 6;
-/// A 4×5 thumbnail per layout: shade steps show the order the sheet fills in.
-const arrIcon = (v: number) => {
+/// A 4×5 thumbnail per layout: shade steps show the order the sheet fills in. Also on /docs.
+export const arrIcon = (v: number) => {
   const cells = Array.from({ length: 20 }, (_, i) => {
     const k = v === 2 ? i : v === 5 ? 19 - i : v === 0 ? [3, 11, 7, 15, 0, 18, 9, 5, 13, 1, 16, 6, 10, 2, 19, 8, 14, 4, 17, 12][i] : -1;
     if (v === PICTURE) return `<rect x="${(i % 4) * 7}" y="${((i / 4) | 0) * 7}" width="6" height="6" fill="${PICTURE_ICON[i]}"/>`;

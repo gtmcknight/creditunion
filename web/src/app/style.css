@@ -8357,3 +8357,414 @@ dialog.how .small { margin-top: 16px; }
 /* Cards off screen skip layout and paint until they near the view: a list of dozens of 80-Credit sheets costs only
    what's showing to draw, to switch tabs on and to leave. The size is remembered once drawn, so scrolling holds still. */
 .grid > .card { content-visibility: auto; contain-intrinsic-size: auto 537px; }
+
+/* FAQ basics: Credits, Statements, Credit Union in three cards above the questions. Jack's two say Official, ours says Unofficial. */
+.basics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.basic {
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+}
+.basic-tag {
+  align-self: flex-start;
+  padding: 4px 7px 3px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  background: var(--fg);
+  color: var(--bg);
+}
+.basic.ours .basic-tag {
+  background: none;
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--fg);
+}
+.basic h2 {
+  margin: 16px 0 6px;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+.basic p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+  min-height: 6em;
+}
+.basic-art {
+  display: grid;
+  place-items: center;
+  height: 240px;
+  margin: 20px 0;
+}
+.basic-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 19px);
+  gap: 2px;
+  padding: 12px;
+  background: #fff;
+}
+.basic-grid i {
+  display: block;
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: #e6e6e3;
+}
+.basic-grid i:has(img) {
+  background: #fff;
+}
+/* The art is a 320 frame around a 160 print: crop to the print plus a little paper. */
+.basic-grid img {
+  display: block;
+  width: 166.7%;
+  margin: -33.3%;
+}
+.basic-four {
+  display: grid;
+  grid-template-columns: repeat(2, 104px);
+  gap: 4px;
+}
+.basic-four img {
+  width: 104px;
+  height: 104px;
+  display: block;
+}
+.basic dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: auto 0 0;
+}
+.basic dl div {
+  border-top: 1px solid var(--line-strong);
+  padding-top: 8px;
+}
+.basic dt {
+  font-size: 17px;
+  letter-spacing: -0.01em;
+}
+.basic dd {
+  margin: 4px 0 0;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  line-height: 1.35;
+}
+.basics-cta {
+  display: flex;
+  gap: 8px;
+  margin: 20px 0 56px;
+}
+@media (max-width: 900px) {
+  .basics { grid-template-columns: 1fr; }
+  .basic p { min-height: 0; }
+}
+
+/* /docs: a sticky list of sections on the left, plain sections on the right. */
+.docs {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 48px;
+  align-items: start;
+}
+.docs-nav {
+  position: sticky;
+  top: 24px;
+  display: grid;
+  gap: 2px;
+}
+.docs-nav a {
+  padding: 5px 0;
+  font-size: 14px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.docs-nav a:hover {
+  color: var(--fg);
+}
+.docs-body {
+  max-width: 720px;
+}
+.doc {
+  padding: 0 0 40px;
+  margin: 0 0 40px;
+  border-bottom: 1px solid var(--line);
+  scroll-margin-top: 24px;
+}
+.doc:last-child {
+  border-bottom: 0;
+}
+.doc h2 {
+  margin: 0 0 16px;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+.doc p {
+  margin: 16px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+.doc b {
+  color: var(--fg);
+  font-weight: 500;
+}
+.doc-steps,
+.doc-list {
+  margin: 0;
+  padding: 0 0 0 1.3em;
+  display: grid;
+  gap: 10px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+.doc-facts,
+.doc-addrs {
+  margin: 0;
+  display: grid;
+}
+.doc-facts div,
+.doc-addrs div {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 16px;
+  padding: 11px 0;
+  border-top: 1px solid var(--line);
+}
+.doc-facts div:last-child,
+.doc-addrs div:last-child {
+  border-bottom: 1px solid var(--line);
+}
+.doc-facts dt,
+.doc-addrs dt {
+  font-weight: 500;
+}
+.doc-facts dd,
+.doc-addrs dd {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.doc-table {
+  width: 100%;
+  margin: 16px 0 0;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.doc-table th,
+.doc-table td {
+  padding: 10px 12px 10px 0;
+  text-align: left;
+  border-top: 1px solid var(--line);
+}
+.doc-table th {
+  font-weight: 500;
+}
+.doc-table td {
+  color: var(--muted);
+}
+.doc-table tr:last-child td {
+  border-bottom: 1px solid var(--line);
+}
+@media (max-width: 900px) {
+  .docs { grid-template-columns: 1fr; gap: 24px; }
+  .docs-nav { position: static; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+  .doc-facts div, .doc-addrs div { grid-template-columns: 1fr; gap: 2px; }
+}
+.docs-page .doc { display: block; }
+.docs-page .doc h2 { margin: 0 0 14px; line-height: 1.2; }
+.docs-page .doc h2 + p { margin-top: 0; }
+.docs-page .docs-nav a { display: block; height: auto; padding: 4px 0; }
+.docs-page .basics-cta { margin-bottom: 40px; }
+.docs-page .doc > dl:last-child div:last-child,
+.docs-page .doc > table:last-child tr:last-child td { border-bottom: 0; }
+.doc-types td:first-child { white-space: nowrap; }
+.doc-types td:last-child { white-space: nowrap; }
+@media (max-width: 600px) { .doc-types td:last-child { white-space: normal; } }
+/* Below the sticky 64px header, for the sidebar and for jumps to a section. */
+.docs-page .docs-nav { top: 88px; }
+.docs-page .doc { scroll-margin-top: 88px; }
+.docs-page .doc h3 { margin: 28px 0 0; font-size: 16px; font-weight: 500; }
+.docs-page .doc h3 + p { margin-top: 8px; }
+.docs-page .doc-steps { margin-top: 16px; }
+.doc-note { padding: 14px 16px; border-left: 2px solid var(--line-strong); background: color-mix(in srgb, var(--fg) 3%, transparent); }
+.doc-addrs { margin: 12px 0 0; padding: 0 0 0 1.3em; display: grid; gap: 8px; color: var(--muted); line-height: 1.5; }
+
+/* Docs: the life of a union as five boxes. */
+.doc-flow {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: flow;
+}
+.doc-flow li {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  font-size: 13px;
+  line-height: 1.35;
+}
+.doc-flow li b { font-weight: 500; }
+.doc-flow li span { color: var(--muted); }
+.doc-flow li:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: -6px;
+  width: 6px;
+  height: 1px;
+  background: var(--line-strong);
+}
+@media (max-width: 700px) {
+  .doc-flow { grid-template-columns: 1fr; }
+  .doc-flow li:not(:last-child)::after { top: auto; bottom: -6px; right: auto; left: 20px; width: 1px; height: 6px; }
+}
+
+/* Docs: the payout calculator, Equal and Early bird side by side on the 8×10 sheet. */
+.calc {
+  margin: 20px 0 0;
+  padding: 16px;
+  border: 1px solid var(--line-strong);
+}
+.calc-inputs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.calc-inputs label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.calc-field {
+  display: flex;
+  align-items: center;
+  height: 34px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+}
+.calc-field input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--fg);
+  background: none;
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0;
+  font-variant-numeric: tabular-nums;
+  outline-offset: -1px;
+}
+.calc-field em {
+  padding: 0 10px;
+  font-style: normal;
+  font-size: 12px;
+  color: var(--muted);
+}
+.calc-field em:first-child { padding-right: 0; }
+.calc-sheets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 16px 0 0;
+}
+.calc-sheets figure {
+  margin: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+}
+.calc-sheet {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(8, 11px);
+  gap: 2px;
+}
+.calc-sheet i {
+  aspect-ratio: 1;
+  background: color-mix(in srgb, #00b5e2 calc(var(--w) * 100%), var(--line));
+}
+.calc-sheet i.mine { outline: 1.5px solid var(--fg); outline-offset: 0; }
+.calc-sheets figcaption { display: grid; gap: 2px; }
+.calc-sheets figcaption span { font-size: 12px; color: var(--muted); }
+.calc-sheets figcaption strong { font-size: 20px; font-weight: 500; letter-spacing: -0.01em; color: var(--fg); font-variant-numeric: tabular-nums; }
+.docs-page .calc-key { margin: 14px 0 0; font-size: 12px; }
+@media (max-width: 600px) {
+  .calc-inputs { grid-template-columns: 1fr; }
+  .calc-sheets { grid-template-columns: 1fr; }
+}
+
+/* Docs: the four union types, each with its /create icon. */
+.doc-types {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 20px 0 0;
+}
+.doc-type {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  padding: 16px;
+  border: 1px solid var(--line-strong);
+}
+.doc-type svg {
+  width: 56px;
+  height: auto;
+  padding: 7px;
+  background: #fff;
+  display: block;
+}
+.docs-page .doc-type p {
+  margin: 4px 0 10px;
+  font-size: 14px;
+}
+.doc-join {
+  display: inline-block;
+  padding: 3px 7px 2px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--muted);
+}
+.doc-join.only {
+  background: var(--fg);
+  color: var(--bg);
+  box-shadow: none;
+}
+@media (max-width: 700px) {
+  .doc-types { grid-template-columns: 1fr; }
+}
+/* Compact: the calculator is as wide as its inputs, each result under its sheet. */
+.calc { width: fit-content; max-width: 100%; }
+.calc-inputs { grid-template-columns: repeat(3, 120px); }
+.calc-sheets { grid-template-columns: repeat(2, auto); justify-content: start; gap: 40px; }
+.calc-sheets figure { flex-direction: column; align-items: flex-start; gap: 10px; }
+.docs-page .calc-key { max-width: 380px; }
+@media (max-width: 600px) {
+  .calc { width: auto; }
+  .calc-inputs { grid-template-columns: 1fr; }
+  .calc-sheets { grid-template-columns: repeat(2, auto); }
+}
+.calc-sheets figcaption strong.empty { color: var(--muted); }
