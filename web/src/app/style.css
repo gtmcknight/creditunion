@@ -718,6 +718,23 @@ nav a .num {
   display: grid;
   gap: 12px;
 }
+/* A burned union's Statement over the sheet it came from (ui.ts statementArt): hidden until it has loaded. */
+.statement-host {
+  position: relative;
+}
+.statement-host > .statement-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: #fff;
+  opacity: 0;
+  transition: opacity 200ms var(--ease);
+}
+.statement-host.drawn > .statement-art {
+  opacity: 1;
+  z-index: 1; /* over a picture union's preview canvas; the card's tags come after it and stay on top */
+}
 
 /* Statement directions: Issued is the sheet; the other three draw on a canvas in its place. */
 .batch-art > .sheet,
@@ -8749,6 +8766,7 @@ dialog.how .small { margin-top: 16px; }
   margin-left: auto;
 }
 .statement > .sheet,
+.statement > .statement-host,
 .statement > .dir-canvas {
   grid-area: 1 / 1;
 }

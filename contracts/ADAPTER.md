@@ -81,9 +81,9 @@ and in the README before mainnet deploy. On Sepolia the setter is the deployer.
 8. **Statement auctions** run as they do today: 24 hours from the first bid, and the sale is split among the
    Credit Union.
 
-The site's keeper (`web/src/worker/keeper.ts`, every 5 minutes) presses Make Statement for every Credit Union in its
-locked hour, and activates the adapter once the notice has run, so Credit Unions don't wait on a stranger. The site
-shows the notice as a bar above every page, with when burning starts. **Guess:** only 1,526 Statements can ever
+The site's keeper (`web/src/worker/keeper.ts`, every 5 minutes) activates the adapter once the notice has run and
+settles ended auctions. It never burns: every Statement is made by someone pressing Make Statement. The site shows
+the notice as a bar above every page, with when burning starts, in the viewer's own time. **Guess:** only 1,526 Statements can ever
 exist, so there may be a race once burning opens.
 
 ## How we'll test it before proposing

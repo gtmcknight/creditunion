@@ -1,5 +1,5 @@
 import type { Address } from 'viem';
-import { chain, config, connect, disconnect, explorer, loadConfig, onSession, pub, restore, session, wallets } from './chain';
+import { chain, config, connect, disconnect, explorer, loadConfig, onSession, restore, session, wallets } from './chain';
 import { party } from './views/party';
 import { create } from './views/create';
 import { lists } from './views/lists';
@@ -16,9 +16,8 @@ import { credit } from './views/credit';
 import { traitPage } from './views/trait';
 import { timePage } from './views/time';
 import { bitsPage, ratingPage } from './views/scale';
-import { esc, errText, openModal, toast, utc } from './ui';
-import { factoryAbi } from './abi';
-import { indexedBatch, me } from './data';
+import { esc, errText, openModal, startsAt, toast } from './ui';
+import { indexedBatch, me, readNotice } from './data';
 
 const app = document.getElementById('app')!;
 let seq = 0;
@@ -139,19 +138,14 @@ function drawTestnet() {
 }
 
 /// Burn day: from the moment the burn adapter is proposed until it's on, a bar above the header with when burning
-/// turns on (the 30-minute notice in contracts/ADAPTER.md), so members who don't trust it know to leave in time.
+/// turns on (the 30-minute notice in contracts/ADAPTER.md), in the viewer's own time, so members who don't trust it
+/// know to leave in time.
 async function drawNotice() {
-  const zero = '0x0000000000000000000000000000000000000000';
-  const read = (functionName: 'assembler' | 'pendingAssembler' | 'pendingUntil') => pub.readContract({ address: config.factory, abi: factoryAbi, functionName });
-  const got = await Promise.all([read('assembler'), read('pendingAssembler'), read('pendingUntil')]).catch(() => null);
-  if (!got) return;
-  const [active, next, until] = got as [Address, Address, bigint];
-  if (active !== zero || next === zero) return;
-  const at = Number(until) * 1000;
-  const when = at > Date.now() ? `${utc({ month: 'short', day: 'numeric' }).format(new Date(at))} at ${utc({ hour: '2-digit', minute: '2-digit' }).format(new Date(at))} UTC` : 'any minute now';
-  const link = explorer('address', next);
+  const n = await readNotice();
+  if (!n) return;
+  const link = explorer('address', n.adapter);
   const el = document.getElementById('notice')!;
-  el.innerHTML = `<span><strong>Burning starts ${when}.</strong> Full Credit Unions then count down 5 minutes and lock for an hour. You can withdraw until they lock.</span>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">The burn contract ↗</a>` : ''}`;
+  el.innerHTML = `<span><strong>Burning starts ${startsAt(n.at)}.</strong> Full Credit Unions lock 5 minutes later. Withdraw before then.</span>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">The burn contract ↗</a>` : ''}`;
   el.hidden = false;
 }
 

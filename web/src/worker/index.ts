@@ -250,7 +250,6 @@ export default {
         maxGwei: Number(env.KEEPER_MAX_GWEI) || 20,
         transport: rpcTransport(env),
         unions: () => unionList(env) as Promise<Kept[]>,
-        burnsOpen: () => burnsOpen(env),
       }).catch((e) => console.error('[keeper] run failed', safeError(e))),
     );
   },
@@ -315,8 +314,8 @@ async function activityItems(env: Env, store: Cache, stateKey: string): Promise<
   return filling.size ? items.filter((x) => !x.union || !filling.has(x.union.toLowerCase())) : items;
 }
 
-/// Burn day's hold: until the PLANS key `burns-open` is "1", the keeper doesn't burn and the page hides Make Statement
-/// (anyone can still call assemble() directly). Flip it once the first Statement checks out, no deploy needed:
+/// Burn day's hold: until the PLANS key `burns-open` is "1", the page hides Make Statement (anyone can still call
+/// assemble() directly; the keeper never burns). Flip it once the first Statement checks out, no deploy needed:
 ///   pnpm wrangler kv key put --binding PLANS burns-open 1 --remote
 async function burnsOpen(env: Env) {
   return (await env.PLANS?.get('burns-open', { cacheTtl: 30 })) === '1';
@@ -1380,6 +1379,32 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       ctx.waitUntil(cache.put(key, new Response('art unavailable', { status: 502, headers: { ...svgHeaders, 'cache-control': 'public, max-age=10' } })));
       return res;
     }
+  }
+
+  // /statement/<id>.svg: a Statement as Jack's contract draws it, for burned unions' pages and cards. Read from the
+  // Statements the factory's burn contract mints into (statementSVG, else the image in tokenURI). The drawing only
+  // changes when its owner overprints it, so each data center keeps it 10 minutes.
+  const stmt = url.pathname.match(/^\/statement\/(\d{1,7})\.svg$/);
+  if (stmt) {
+    const cache = caches.default;
+    const key = new Request(`${url.origin}/statement/${Number(stmt[1])}.svg`);
+    const hit = await cache.match(key);
+    if (hit) return hit;
+    const svgHeaders = { 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox" };
+    const miss = (why: string, age: number) => new Response(why, { status: 404, headers: { ...svgHeaders, 'cache-control': `public, max-age=${age}` } });
+    if (await limited(env.RL_ART, req)) return text('slow down', 429);
+    const statements = await statementsOf(env);
+    if (!statements) return miss('no Statements yet', 60);
+    const c = client(env);
+    const id = BigInt(stmt[1]);
+    const svg = await c
+      .readContract({ address: statements, abi: statementsAbi, functionName: 'statementSVG', args: [id] })
+      .catch(() => c.readContract({ address: statements, abi: statementsAbi, functionName: 'tokenURI', args: [id] }).then(imageOf))
+      .catch(() => null);
+    if (!svg || !svg.includes('<svg')) return miss('no such Statement', 60);
+    const res = new Response(svg, { headers: { 'content-type': 'image/svg+xml', 'cache-control': 'public, max-age=600', ...svgHeaders } });
+    ctx.waitUntil(cache.put(key, res.clone()));
+    return res;
   }
 
   // Link cards drawn per party (and made-up ones for /og).
@@ -2554,6 +2579,45 @@ async function ensOf(env: Env, url: URL, ctx: ExecutionContext, addr: Address, g
 /// (describe) the way a batch does, and /art draws with it. Read once per isolate per Credits contract (the
 /// configured one, and mainnet's for previews); only a well-formed nonzero address is ever returned.
 const artAddrs = new Map<string, Promise<string | null>>();
+/// Jack's Statements, as far as the Worker reads it: the drawing of one Statement.
+const statementsAbi = [
+  { type: 'function', name: 'statementSVG', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'string' }] },
+  { type: 'function', name: 'tokenURI', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'string' }] },
+] as const;
+/// The Statements contract burned unions mint into: the factory's burn contract's statement(). Read once a minute per
+/// isolate; null until a burn contract is active.
+let statementsKept: { at: number; addr: Promise<Address | null> } | null = null;
+function statementsOf(env: Env): Promise<Address | null> {
+  if (statementsKept && Date.now() - statementsKept.at < 60_000) return statementsKept.addr;
+  const c = client(env);
+  const addr = c
+    .readContract({ address: env.FACTORY as Address, abi: factoryAbi, functionName: 'assembler' })
+    .then((a) => (/^0x0{40}$/i.test(a as string) ? null : c.readContract({ address: a as Address, abi: [{ type: 'function', name: 'statement', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] }] as const, functionName: 'statement' })))
+    .then((a) => (a && /^0x[0-9a-fA-F]{40}$/.test(a) && !/^0x0{40}$/i.test(a) ? (a as Address) : null))
+    .catch(() => null);
+  statementsKept = { at: Date.now(), addr };
+  return addr;
+}
+/// The SVG in a tokenURI's image: the JSON and the image each a data URI, as base64 or as text.
+function imageOf(uri: string): string | null {
+  const data = (u: string) => {
+    const m = u.match(/^data:[^,]*?(;base64)?,([\s\S]*)$/);
+    if (!m) return null;
+    if (m[1]) return new TextDecoder().decode(Uint8Array.from(atob(m[2]), (ch) => ch.charCodeAt(0)));
+    try {
+      return decodeURIComponent(m[2]);
+    } catch {
+      return m[2];
+    }
+  };
+  try {
+    const image = (JSON.parse(data(uri) ?? '') as { image?: unknown }).image;
+    return typeof image === 'string' ? data(image) : null;
+  } catch {
+    return null;
+  }
+}
+
 function artOf(env: Env, credits: Address = env.CREDITS, c: ReturnType<typeof client> = client(env)): Promise<string | null> {
   const key = credits.toLowerCase();
   let at = artAddrs.get(key);

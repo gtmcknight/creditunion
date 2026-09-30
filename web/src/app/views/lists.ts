@@ -1,11 +1,11 @@
 import { config, session } from '../chain';
-import { listBatches, scores, type Listed, type Summary, hasLayout, layoutSlot, placeOnLayout } from '../data';
+import { listBatches, notice, readNotice, scores, type Listed, type Summary, hasLayout, layoutSlot, placeOnLayout } from '../data';
 import { placedKeys } from '../slots';
 import { hydrate, who } from '../ens';
 import { fitByBatch } from '../fit';
 import { editionArt, examples, fillGhosts, hasPlan, planGhosts, registerDeposits, registerFilter } from '../ghosts';
 import type { Address } from 'viem';
-import { clock, eth, esc, openModal, pageHead, same, sheet, until } from '../ui';
+import { clock, eth, esc, openModal, pageHead, same, sheet, startsAt, statementArt, until } from '../ui';
 import { TRAIT_KINDS, parseTrait, type TraitValue } from '../../shared/trait';
 import { creditsOf, takes } from './trait';
 import { ago, lastJoined } from './live';
@@ -32,7 +32,7 @@ function status(s: Summary) {
 /// A full party by where it stands in the lock cycle, read against the clock so a stale list still reads right.
 export function fullStatus(s: Summary) {
   const now = Date.now() / 1000;
-  if (s.phase === 'Waiting') return 'Waiting for Jack to launch Statements';
+  if (s.phase === 'Waiting') return notice ? `Burning starts ${startsAt(notice.at)}` : 'Waiting for Jack to launch Statements';
   if (s.phase === 'Countdown' && now < s.lockAt) return `Locks in ${clock(s.lockAt)}`;
   if ((s.phase === 'Countdown' || s.phase === 'Burnable') && now < s.deadline) return 'Ready to burn';
   return 'Unlocked';
@@ -210,6 +210,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yo
   // A Picture union takes only Credits bought for it (where the site can buy), so yours never "fit" one.
   if (picture && config.sweeper) fit = [];
   const canJoin = fit?.length ? Math.min(fit.length, room) : 0;
+  const burned = s.state === 'Auction' || s.state === 'Settled';
   const live = s.state === 'Auction' && !(s.highBid && Date.now() / 1000 >= s.auctionEnd);
   const cta = s.state === 'Open' ? 'Join' : live ? 'Bid' : '';
   const fits = fit?.length ?? 0;
@@ -229,12 +230,12 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yo
   registerFilter(s.address, s.filter);
   registerDeposits(ids, depositors, s.split === 1);
   return `<a class="card${canJoin ? ' can-join' : ''}" href="/union/${s.address}">
-    <div class="card-art${picture ? ' picture dir-host' : ''}"${picture ? ` data-portrait="${s.address.toLowerCase()}:${ids.length}:${ids.length ? ids[ids.length - 1] : ''}"${pictureReady({ s, ids, depositors }) ? ' data-ready="1"' : ''}` : ''}>${sheet(ids, { size: 'sm', mine, placed: placements.get(placeKey({ s, ids })), batch: s.state === 'Open' ? s.address : undefined })}${corner}${state}</div>
+    <div class="card-art${picture ? ' picture dir-host' : ''}${burned ? ' statement-host' : ''}"${picture ? ` data-portrait="${s.address.toLowerCase()}:${ids.length}:${ids.length ? ids[ids.length - 1] : ''}"${pictureReady({ s, ids, depositors }) ? ' data-ready="1"' : ''}` : ''}>${sheet(ids, { size: 'sm', mine, placed: placements.get(placeKey({ s, ids })), batch: s.state === 'Open' ? s.address : undefined })}${burned ? statementArt(s.statementId) : ''}${corner}${state}</div>
     <div class="card-meta">
       <div class="meta-text">
         <strong>${esc(s.name || 'Untitled')}</strong>
         <span class="meta-by">${who(s.creator, 'sm', 'nested')}</span>
-        <span class="meta-line num">${payGlyph(s.split === 1)}<span class="meta-line-text">${s.state === 'Open' ? momentum : s.state === 'Full' ? `${members} ${members === 1 ? 'member' : 'members'} · ${esc(s.phase === 'Waiting' ? 'waiting for Jack' : fullStatus(s))}` : esc(status(s))}</span></span>
+        <span class="meta-line num">${payGlyph(s.split === 1)}<span class="meta-line-text">${s.state === 'Open' ? momentum : s.state === 'Full' ? `${members} ${members === 1 ? 'member' : 'members'} · ${esc(s.phase === 'Waiting' ? (notice ? `burning starts ${startsAt(notice.at)}` : 'waiting for Jack') : fullStatus(s))}` : esc(status(s))}</span></span>
         ${rating === undefined ? '' : `<span class="meta-line num">Rating ${rating.toLocaleString()}</span>`}
       </div>
       ${cta && !(s.state === 'Open' && mine.size) ? `<span class="btn sm primary cta">${cta}</span>` : ''}
@@ -277,7 +278,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
   document.getElementById('how-auctions')?.addEventListener('click', howAuctions);
 
   try {
-    const all = await listBatches();
+    const [all] = await Promise.all([listBatches(), readNotice()]);
     const el = document.getElementById('batches');
     if (!el) return; // navigated away
     const parties = all.filter((b) => PARTY_STATES.has(b.s.state));
@@ -416,12 +417,13 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     draw();
     // Live: read the list again every 20 seconds while the page is showing, and redraw only when a union changed
     // (a deposit, a withdrawal, a new one, a state change).
-    const sig = (xs: Listed[]) => xs.map((b) => `${b.s.address}:${b.ids.length}:${b.s.state}:${b.s.phase}:${b.s.highBid}`).join('|');
+    // Burn day's notice is part of it: cards of full unions say when burning starts.
+    const sig = (xs: Listed[]) => `${notice?.at ?? ''}|` + xs.map((b) => `${b.s.address}:${b.ids.length}:${b.s.state}:${b.s.phase}:${b.s.highBid}`).join('|');
     let seen = sig(all);
     const poll = setInterval(async () => {
       if (document.getElementById('batches') !== el) return clearInterval(poll);
       if (document.visibilityState !== 'visible') return;
-      const next = await listBatches().catch(() => null);
+      const [next] = await Promise.all([listBatches().catch(() => null), readNotice()]);
       // A layout union whose placement failed earlier (a busy RPC) is tried again, then drawn.
       if (next && sig(next) === seen) {
         if (await placeCards(list)) draw();
@@ -529,7 +531,7 @@ const HOW_STEPS: [string, string][] = [
   ['Oct 1: Jack publishes the Statement contract', 'From then on, 80 Credits can burn into one Statement.'],
   ['We build our burn contract', 'It lets Credit Unions use Jack’s contract. We test it first.'],
   ['We launch it: 35 minute warning', 'Full unions (80/80) lock in 35 minutes. Until then, anyone can leave.'],
-  ['Full unions (80/80) lock and burn', 'Withdrawals close. Within minutes, the 80 Credits become one Statement.'],
+  ['Full unions (80/80) lock for an hour', 'Withdrawals close. Anyone can press Make Statement to burn the 80 Credits into one Statement.'],
   ['The auction starts', 'No reserve. The 24 hour clock starts at the first bid.'],
   ['The auction ends', 'The Statement goes to the winner. The ETH goes to every member.'],
 ];
@@ -547,7 +549,7 @@ function howAuctions() {
     </ul>
     <h4>The split</h4>
     <p class="muted">2% fee, then the rest goes to the 80 Credits that made it: 1/80 each, or 1.5× for the first in down to 0.5× for the last on Early bird. Every member is paid when the auction settles.</p>
-    <p class="small muted">Hits 80/80 after launch? It gets 5 minutes to leave from that moment, then burns. <a href="/docs#how">How it works</a></p>`;
+    <p class="small muted">Hits 80/80 after launch? It gets 5 minutes to leave from that moment, then locks. <a href="/docs#how">How it works</a></p>`;
   document.body.append(d);
   d.addEventListener('close', () => d.remove());
   openModal(d);

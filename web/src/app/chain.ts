@@ -2,6 +2,7 @@ import {
   createPublicClient,
   createWalletClient,
   custom,
+  fallback,
   formatEther,
   http,
   type Address,
@@ -28,9 +29,22 @@ export let config: Config;
 export let chain: Chain;
 export let pub: ReturnType<typeof makePublic>;
 
-const makePublic = (c: Chain) =>
+/// Reads go through the Worker (/rpc). With a wallet connected, a read /rpc can't answer (overloaded, down, refused)
+/// goes to the wallet's own connection instead, so a bid, a settle or a claim still simulates, sends and lands when
+/// our side is struggling. A revert is an answer and never falls through.
+const makePublic = (c: Chain, wallet?: EIP1193Provider) => {
   // One retry, a second later: a busy moment passes, and a rate limit isn't hit four times in a row.
-  createPublicClient({ chain: c, transport: http('/rpc', { batch: { wait: 16, batchSize: 40 }, retryCount: 1, retryDelay: 1_000 }) });
+  const rpc = http('/rpc', { batch: { wait: 16, batchSize: 40 }, retryCount: 1, retryDelay: 1_000 });
+  return createPublicClient({ chain: c, transport: wallet ? fallback([rpc, walletReads(wallet, c)], { retryCount: 1, retryDelay: 1_000 }) : rpc });
+};
+/// The wallet's connection, for reads only while it's on our chain: a read never answers from another chain.
+const walletReads = (p: EIP1193Provider, c: Chain) =>
+  custom({
+    async request({ method, params }: { method: string; params?: unknown }) {
+      if (Number(await p.request({ method: 'eth_chainId' })) !== c.id) throw new Error(`Switch your wallet to ${c.name}.`);
+      return p.request({ method, params } as never);
+    },
+  });
 
 export async function loadConfig() {
   // Written into the page by the Worker (#config); pages the asset layer serves on its own ask for it.
@@ -63,6 +77,7 @@ export async function connect(w?: Announced) {
   session.account = account;
   session.rdns = w?.info.rdns;
   session.wallet = createWalletClient({ account, chain, transport: custom(provider) });
+  pub = makePublic(chain, provider);
   try {
     localStorage.setItem('cu-wallet', w?.info.rdns ?? 'injected');
   } catch {}
@@ -76,6 +91,7 @@ export async function connect(w?: Announced) {
 
 export function disconnect() {
   session.account = session.wallet = session.provider = undefined;
+  pub = makePublic(chain);
   try {
     localStorage.removeItem('cu-wallet');
     localStorage.removeItem('eighty-wallet');

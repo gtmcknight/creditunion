@@ -23,8 +23,7 @@ early Wednesday. This is the checklist from his publish to the first Statement. 
    - `STATEMENTS=<his address> forge test --match-path test/StatementAdapter.fork.t.sol -vv`: the whole burn day
      on a copy of mainnet against his real contract, from the Safe's proposal to every member paid.
    - Note the gas it logs for one burn. It must fit well under 16,777,216, the most any mainnet transaction may
-     carry (EIP-7825): the keeper and the page send 16M (`ASSEMBLE_GAS` in `web/src/worker/keeper.ts`), and the
-     keeper simulates with that gas, so a burn that can't fit is never sent.
+     carry (EIP-7825): the page's Make Statement sends 16M (`web/src/app/views/party.ts`).
 4. **Review it** the way the rest was reviewed ([AUDIT.md](AUDIT.md)) and write the findings up.
 5. **Deploy it:** `STATEMENTS=<his address> forge script script/DeployAdapter.s.sol --rpc-url $MAINNET_RPC --broadcast --verify`.
    It refuses mainnet while `ADAPTER_READY` is false. Put the address in README.md and ADAPTER.md and post it.
@@ -36,11 +35,11 @@ early Wednesday. This is the checklist from his publish to the first Statement. 
 
 | ET | UTC | |
 |---|---|---|
-| by 6:00pm | 22:00 | The keeper is on: `KEEPER_KEY` is set (`wrangler secret put KEEPER_KEY`) and the key holds enough ETH for every full union's burn (its address is at `/burns`). `KEEPER_MAX_GWEI` isn't below the day's gas price. **Burns are held:** `pnpm wrangler kv key get --binding PLANS burns-open --remote` is empty (not `1`). While held, the keeper still turns burning on and settles, but burns nothing, and union pages hide Make Statement. |
+| by 6:00pm | 22:00 | The keeper is on: `KEEPER_KEY` is set (`wrangler secret put KEEPER_KEY`) and the key holds enough ETH for every full union's burn (its address is at `/burns`). `KEEPER_MAX_GWEI` isn't below the day's gas price. **Burns are held:** `pnpm wrangler kv key get --binding PLANS burns-open --remote` is empty (not `1`). While held, union pages hide Make Statement. The keeper never burns; it turns burning on and settles. |
 | **7:30pm** | 23:30 | **Execute the Safe's `proposeAssembler`.** Not earlier: the keeper switches it on as soon as the 30-minute notice ends, and a union that locks before Jack's contract opens only fails its burn and loses its hour. The site shows the notice bar; anyone can still leave any union. |
 | 8:00pm | 00:00 | Burning switches on: anyone calls `activateAssembler()`, the keeper within 5 minutes, or press it ourselves at 8:00. Every full union starts its 5-minute countdown. |
 | ~8:05pm | 00:05 | The first union can burn. Open it with `?burn` on the URL (`/union/<address>?burn`), press **Make Statement** ourselves and check: the Statement is on the union page, the 80 are gone, the direction is right, the auction is open. |
-| once it checks out | | **Open burns:** `pnpm wrangler kv key put --binding PLANS burns-open 1 --remote`. Within 5 minutes the keeper burns every other full union, and Make Statement shows on every union page. Then post. Watch `wrangler tail` for `[keeper] can't burn`. |
+| once it checks out | | **Open burns:** `pnpm wrangler kv key put --binding PLANS burns-open 1 --remote`. Make Statement shows on every union page, and each union burns when someone presses it. Then post. A union nobody burns within its hour unlocks; anyone can restart its countdown. |
 | if it doesn't | | Leave burns held. Every other union's hour runs out and it unlocks; members can leave. Nothing is lost but the hour. Fix, then anyone restarts the countdowns. |
 
 ## If something goes wrong

@@ -9,7 +9,7 @@ import { hydrate, who } from '../ens';
 import { fitIds, weightOf } from '../fit';
 import { fillGhosts } from '../ghosts';
 import { maskInks, paletteBit } from '../traits';
-import { art, boughtToast, errText, esc, eth, same, sheet, toast, utc } from '../ui';
+import { art, boughtToast, errText, esc, eth, same, sheet, statementArt, toast, utc } from '../ui';
 import { card } from './lists';
 import { creditsHead } from './trait';
 import { processOf } from '../../shared/credits';
@@ -126,7 +126,7 @@ function homeBar(b: Listed, id: bigint, burned: boolean, depositor: Address | un
     .filter(Boolean)
     .join(dot);
   return `<a class="home-bar" href="/union/${b.s.address}">
-    <span class="home-mini">${sheet(b.ids, { size: 'sm' })}</span>
+    <span class="home-mini${burned ? ' statement-host' : ''}">${sheet(b.ids, { size: 'sm' })}${burned ? statementArt(b.s.statementId) : ''}</span>
     <span class="home-text"><span class="home-top">${top}</span><span class="home-sub">${sub}</span></span>
     <span class="home-go" aria-label="View Credit Union">→</span>
   </a>`;

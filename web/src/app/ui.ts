@@ -41,6 +41,18 @@ export function clock(ts: number) {
 /// Art URL includes the Credits contract, so a new contract (testnets) never shows a browser-cached image.
 export const art = (id: bigint | number) => `/art/${config.credits.toLowerCase()}/${id}.svg`;
 
+/// A burned union's Statement as Jack's contract draws it (the Worker's /statement/<id>.svg), laid over the sheet it
+/// came from: it shows once it has loaded, and the sheet stays if it can't be read. Both are 4:5.
+export const statementArt = (id: bigint) => `<img class="statement-art" src="/statement/${id}.svg" alt="Statement #${id}" decoding="async">`;
+document.addEventListener(
+  'load',
+  (e) => {
+    const t = e.target as Element;
+    if (t instanceof HTMLImageElement && t.classList.contains('statement-art')) t.parentElement?.classList.add('drawn');
+  },
+  true,
+);
+
 /// 8×10 sheet on a hairline grid. Filled cells show the Credit; the rest are empty slots.
 /// `closed`: no gaps, the 80 read as one image (a Statement). `closing`: animates to closed.
 /// `fresh`: cells from this index on drop in, in order.
@@ -142,6 +154,11 @@ export type { Address };
 /// Unix seconds ⇄ a datetime-local input's value ("2026-09-21T09:11"), in local time, to the minute.
 /// Payment times read the same for everyone: UTC, 24-hour, as Jack's site shows them. (Auction clocks stay local.)
 export const utc = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-US', { ...o, timeZone: 'UTC', hourCycle: 'h23' });
+/// Unix seconds as the viewer's own clock time and zone: "3:03 AM EDT". Burn day reads in local time.
+export const localTime = (unix: number) =>
+  new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(new Date(unix * 1000));
+/// When burning turns on, for "Burning starts …": "at 3:03 AM EDT", or "any minute now" once that's passed.
+export const startsAt = (unix: number) => (unix * 1000 > Date.now() ? `at ${localTime(unix)}` : 'any minute now');
 export const sameUtcDay = (a: Date, b: Date) => a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10);
 
 /// Payment windows are shown and typed in UTC (as Jack's site) or the viewer's own time. The choice sticks.

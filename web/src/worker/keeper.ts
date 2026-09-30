@@ -1,15 +1,13 @@
-/// The keeper (a Cron Trigger, every 5 minutes): presses the buttons nobody is paid to press, so burn day doesn't wait
-/// on a stranger (contracts/ADAPTER.md). A burn hour gets about a dozen tries. Each run sends up to five
-/// transactions, most urgent first, each only if it would land:
+/// The keeper (a Cron Trigger, every 5 minutes): presses the buttons nobody is paid to press. It never burns: every
+/// burn is a person pressing Make Statement (contracts/ADAPTER.md). Each run sends up to five transactions, most urgent
+/// first, each only if it would land:
 ///   1. factory.activateAssembler(), once the 30-minute notice has run;
-///   2. assemble() on a Credit Union in its burn hour, once burns are open (the `burns-open` flag, see burnsOpen);
-///   3. settle() on an auction that has ended;
-///   4. claim(member) for a member whose payout failed at settle (anyone may send it for them), for three days.
-/// It never restarts a countdown: with the keeper running, a burn hour only lapses when the burn itself fails, and a
-/// restart would lock the members in again for nothing; that call stays with people, on the page. Every call is
-/// simulated first; nothing is sent while the keeper's last transactions are pending, or while gas is over its cap.
-/// The key (secret KEEPER_KEY) holds no role in any contract: all it can lose is its gas money. Without it, the
-/// keeper does nothing.
+///   2. settle() on an auction that has ended;
+///   3. claim(member) for a member whose payout failed at settle (anyone may send it for them), for three days.
+/// It never restarts a countdown either: a burn hour nobody used unlocks, and restarting it stays with people, on the
+/// page. Every call is simulated first; nothing is sent while the keeper's last transactions are pending, or while
+/// gas is over its cap. The key (secret KEEPER_KEY) holds no role in any contract: all it can lose is its gas money.
+/// Without it, the keeper does nothing.
 import { createPublicClient, createWalletClient, type Address, type Hex, type Transport } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { mainnet, sepolia } from 'viem/chains';
@@ -23,17 +21,14 @@ export type Kept = {
 };
 
 const ZERO = '0x0000000000000000000000000000000000000000';
-const BURNABLE = 3; // Batch.Phase
 const AUCTION = 3, SETTLED = 4; // Batch.State
 const PAY_FOR = 3n * 86_400n; // how long after an auction ends a failed payout is retried
-/// As the page sends it: just under EIP-7825's per-transaction cap (16,777,216), the most any transaction can carry.
-const ASSEMBLE_GAS = 16_000_000n;
-/// Up to this many a run: at 5 minutes apart, 60 an hour, so every union that locks together still burns in its hour.
+/// Up to this many a run, 5 minutes apart.
 const PER_RUN = 5;
 
-type Job = { what: string; address: Address; abi: typeof batchAbi | typeof factoryAbi; functionName: string; args?: readonly unknown[]; gas?: bigint };
+type Job = { what: string; address: Address; abi: typeof batchAbi | typeof factoryAbi; functionName: string; args?: readonly unknown[] };
 
-export async function keep(o: { key: string; chainId: number; factory: Address; maxGwei: number; transport: Transport; unions: () => Promise<Kept[]>; burnsOpen: () => Promise<boolean> }) {
+export async function keep(o: { key: string; chainId: number; factory: Address; maxGwei: number; transport: Transport; unions: () => Promise<Kept[]> }) {
   if (!/^0x[0-9a-fA-F]{64}$/.test(o.key)) return console.error('[keeper] KEEPER_KEY is not a private key');
   const chain = o.chainId === 1 ? mainnet : o.chainId === 11_155_111 ? sepolia : { ...mainnet, id: o.chainId };
   const account = privateKeyToAccount(o.key as Hex);
@@ -55,12 +50,6 @@ export async function keep(o: { key: string; chainId: number; factory: Address; 
   if (active === ZERO && next !== ZERO && now >= BigInt(until)) jobs.push({ what: 'turn burning on', address: o.factory, abi: factoryAbi, functionName: 'activateAssembler' });
 
   const unions = await o.unions();
-  // Burns wait for the flag: we burn the first union by hand and check its Statement before the keeper does the rest.
-  const burnable = unions.filter((u) => u.summary.phase === BURNABLE);
-  const open = burnable.length ? await o.burnsOpen() : false;
-  if (burnable.length && !open) console.warn(`[keeper] ${burnable.length} burnable, holding: burns-open is off`);
-  if (open) for (const u of burnable)
-    jobs.push({ what: `burn ${u.address}`, address: u.address, abi: batchAbi, functionName: 'assemble', gas: ASSEMBLE_GAS });
   for (const u of unions)
     if (u.summary.state === AUCTION && u.summary.highBid > 0n && now >= u.summary.auctionEnd) jobs.push({ what: `settle ${u.address}`, address: u.address, abi: batchAbi, functionName: 'settle' });
   for (const u of unions) {
@@ -76,16 +65,14 @@ export async function keep(o: { key: string; chainId: number; factory: Address; 
   for (const j of jobs) {
     if (sent >= PER_RUN) break;
     try {
-      // Simulated with the gas it will be sent with, so a burn that can't fit is never sent to fail on chain.
-      const { request } = await c.simulateContract({ address: j.address, abi: j.abi, functionName: j.functionName, args: j.args, account, ...(j.gas ? { gas: j.gas } : {}) } as never);
+      const { request } = await c.simulateContract({ address: j.address, abi: j.abi, functionName: j.functionName, args: j.args, account } as never);
       // Nonces counted here, not re-read from a node that may not have seen the last one yet.
-      const hash = await w.writeContract({ ...(request as object), nonce: nonce + sent, ...(j.gas ? { gas: j.gas } : {}) } as never);
+      const hash = await w.writeContract({ ...(request as object), nonce: nonce + sent } as never);
       sent++;
       console.log(`[keeper] ${j.what}: ${hash}`);
     } catch (e) {
-      // A burn that won't go through inside its hour is the one to look at: the window lapses without it.
       const why = String((e as { shortMessage?: string; message?: string }).shortMessage ?? (e as Error).message ?? e).split('\n')[0];
-      (j.functionName === 'assemble' ? console.error : console.warn)(`[keeper] can't ${j.what}: ${why}`);
+      console.warn(`[keeper] can't ${j.what}: ${why}`);
     }
   }
 }

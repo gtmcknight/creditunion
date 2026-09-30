@@ -308,6 +308,24 @@ function passesOf(batch: Address, ids: readonly bigint[]) {
   return p;
 }
 
+/// Burn day's 30-minute notice: while the Safe's proposed burn contract waits, when burning turns on (unix seconds)
+/// and that contract. Null when nothing is pending or burning is already on. Read from the factory, kept a minute;
+/// `notice` holds the last read for renders that can't wait.
+export type Notice = { at: number; adapter: Address } | null;
+export let notice: Notice = null;
+let noticeKept: { t: number; read: Promise<Notice> } | null = null;
+export function readNotice(): Promise<Notice> {
+  if (noticeKept && Date.now() - noticeKept.t < 60_000) return noticeKept.read;
+  const get = (functionName: 'assembler' | 'pendingAssembler' | 'pendingUntil') => pub.readContract({ address: config.factory, abi: factoryAbi, functionName });
+  const zero = '0x0000000000000000000000000000000000000000';
+  const read = Promise.all([get('assembler'), get('pendingAssembler'), get('pendingUntil')]).then(
+    ([active, next, until]) => (notice = active === zero && next !== zero ? { at: Number(until), adapter: next as Address } : null),
+    () => notice,
+  );
+  noticeKept = { t: Date.now(), read };
+  return read;
+}
+
 export async function minOpen() {
   return Number(await pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'minOpen' }));
 }

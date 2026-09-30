@@ -1,7 +1,7 @@
 import { parseAbi, parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi } from '../abi';
 import { canBatch, config, explorer, pub, send, sendBatch, session } from '../chain';
-import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, indexedBatch, indexedOne, layoutSlot, me, placeOnLayout, ratings, sinceTx, staleBatches, type Rated } from '../data';
+import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, indexedBatch, indexedOne, layoutSlot, me, notice, placeOnLayout, readNotice, ratings, sinceTx, staleBatches, type Rated } from '../data';
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { ens, hydrate, identicon, pct, who } from '../ens';
 import { creditCard, examples, fillGhosts, planGhosts, registerDeposits, registerFilter } from '../ghosts';
@@ -12,7 +12,7 @@ import { creditCell, creditSkel } from './trait';
 import { shareButton } from '../share';
 import { directionCanvas, directions, mountDirections, pickedDirection, primeInks, showDirection, warmInks } from '../directions';
 import { activityFold } from './live';
-import { $$, art, clock, errText, esc, eth, openModal, same, setRange, sheet, short, toast, until } from '../ui';
+import { $$, art, clock, errText, esc, eth, openModal, same, setRange, sheet, short, startsAt, statementArt, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
 import { slotName } from '../../shared/layout';
 import { go as navigate } from '../main';
@@ -173,6 +173,8 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     addTab = { at: address, tab: 'mine' };
   }
   if (new URLSearchParams(location.search).has('burn')) burnAsk = address.toLowerCase();
+  // Burn day's notice: a full union waiting on it says when burning starts (read already for the bar, kept a minute).
+  if (b.s.state === 'Full' && b.s.phase === 'Waiting') await readNotice();
   if (location.search) history.replaceState(history.state, '', location.pathname);
   const s = b.s;
   const burned = s.state === 'Auction' || s.state === 'Settled';
@@ -244,7 +246,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   registerDeposits(b.ids, b.depositors, b.s.split === 1);
   // A choice that no longer applies (the union filled, or your Credits left) falls back to Now.
   const artHtml = burned
-    ? `<figure class="statement">${sheet(b.ids, { closed: true })}${directionCanvas}<figcaption class="legend muted small">${directions(s.address, false, true)}<div class="legend-end"><span>Statement #${s.statementId}</span>${shareButton()}</div></figcaption></figure>`
+    ? `<figure class="statement"><div class="statement-host">${sheet(b.ids, { closed: true })}${statementArt(s.statementId)}</div>${directionCanvas}<figcaption class="legend muted small">${directions(s.address, false, true)}<div class="legend-end"><span>Statement #${s.statementId}</span>${shareButton()}</div></figcaption></figure>`
     : `${sheet(b.ids, { mine: myIds, fresh: placed ? undefined : seen < s.count ? seen : undefined, closing: s.state === 'Full', placed, batch: s.state === 'Open' ? s.address : undefined })}${unplaced ? '' : directionCanvas}
        <div class="legend muted small">${unplaced ? '<span>Couldn’t read which slot each Credit fills. Refresh to try again.</span>' : `<div class="legend-end">${shareButton()}</div>${directions(s.address, false, true)}`}</div>`;
 
@@ -311,6 +313,10 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   // Chrome keeps a focus ring on <summary> after a mouse click; drop it for pointer use only.
   app.querySelectorAll<HTMLElement>('.more summary').forEach((el) => el.addEventListener('pointerup', () => setTimeout(() => el.blur(), 0)));
   fillGhosts(app);
+  // What burns is what shows: a layout painted in colors with every slot painted burns in Consolidated unless its
+  // creator picks another format (StatementAdapter.formatOf), so its sheet opens in Consolidated too.
+  if (!burned && slots?.every((v) => v) && !Number(s.filter.layoutTrait ?? 0) && !pickedDirection(s.address))
+    showDirection(app.querySelector<HTMLElement>('.batch-art .dirs'), 'Consolidated');
   // A Picture union once it's full (until the burn): still a picture, drawn in Consolidated, and still no
   // withdrawing through the site, since a Credit taken out would shift it.
   if ((s.state === 'Full' || s.state === 'Expired') && slots && !Number(s.filter.layoutTrait ?? 0)) {
@@ -447,7 +453,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
 /// `at` is how new the page's read is, so an older index answer never takes the page back.
 function watchLive(app: HTMLElement, address: Address, b: Ctx, rerender: () => void, now = false, at = 0, m: Mine = null) {
   if (live) clearInterval(live);
-  const mark = ({ s, ids, depositors }: Ctx) => `${stamp(s.state, s.count, s.highBid)}:${s.lockAt}:${s.state}:${ids.join()}:${depositors.join().toLowerCase()}`;
+  const mark = ({ s, ids, depositors }: Ctx) => `${stamp(s.state, s.count, s.highBid)}:${s.lockAt}:${s.state}:${ids.join()}:${depositors.join().toLowerCase()}:${notice?.at ?? ''}`;
   const was = mark(b);
   const path = location.pathname;
   const look = async () => {
@@ -461,6 +467,7 @@ function watchLive(app: HTMLElement, address: Address, b: Ctx, rerender: () => v
       const one = sinceTx() < TX_MS ? null : await indexedOne(address);
       if (one && one.at < at) return; // an older read than the page's
       const n: Ctx & { at?: number } = one ?? (await getBatch(address));
+      if (n.s.state === 'Full') await readNotice();
       if (location.pathname !== path || busy) return;
       if (mark(n) !== was) {
         clearInterval(live!);
@@ -542,6 +549,12 @@ const rule = (r: Rule) => {
   // A slot colour shows what's left only while the union is open ("12 left"); once it's filled the sheet says it.
   const text = r.slots ? `${esc(r.label)}${/left$/.test(r.value) ? ` <span class="muted">${esc(r.value)}</span>` : ''}` : `${esc(r.label)} ${esc(r.value)}`;
   return `<${tag} class="rule${r.full ? ' full' : ''}"${r.href ? ` href="${esc(r.href)}"` : ''}${r.picked ? ' type="button" data-picked' : ''} data-slots="${r.slots ? r.slots.join(',') : 'all'}">${inks}${text}</${tag}>`;
+};
+/// The same button on the union's own contract, for when this site can't be reached or is slow: Etherscan's Write as
+/// Proxy tab (a union is a clone of the verified Batch).
+const onChain = (a: string, what: string) => {
+  const u = explorer('address', a);
+  return u ? `<p class="small muted"><a href="${u}#writeProxyContract" target="_blank" rel="noopener">Or ${what} on Etherscan ↗</a></p>` : '';
 };
 const link = (a: string) => {
   const u = explorer('address', a);
@@ -629,7 +642,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>, pending = false) {
       case 'Waiting':
         return `<div class="box">
           <h3>Waiting for Statements</h3>
-          <p class="muted">Full. It burns once Jack launches Statements. You can still leave anytime.</p>
+          <p class="muted">${notice ? `Burning starts ${startsAt(notice.at)}. You can leave until it locks, 5 minutes later.` : 'Full. Once Jack launches Statements it locks, and anyone can burn it. You can still leave anytime.'}</p>
           ${myIds.size ? withdraw() : ''}
         </div>`;
       case 'Countdown':
@@ -672,7 +685,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>, pending = false) {
     const mine = m?.shares
       ? m.claimable > 0n
         ? `<div class="stack"><button class="btn primary block" id="claim">Claim ${eth(m.claimable)}</button><p class="small muted center num">${m.shares} of 80</p></div>`
-        : `<p class="small muted num">Claimed · ${m.shares} of 80</p>`
+        : `<p class="small muted num">Paid · ${m.shares} of 80</p>`
       : '';
     return `<div class="box">
       <div class="bid-now"><div><span>Sold</span><strong class="num">${eth(s.highBid)}</strong></div><div><span>${s.split === 1 ? "Avg per Credit" : "Per Credit"}</span><strong class="num">${eth(per)}</strong></div></div>
@@ -695,11 +708,11 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>, pending = false) {
     </div>
     ${
       ended
-        ? `<button class="btn primary block" id="settle">Settle</button>`
+        ? `<button class="btn primary block" id="settle">Settle</button>${onChain(s.address, 'settle')}`
         : m
           ? `<form class="bid-form" id="bid-form"><label class="field"><input id="bid" inputmode="decimal" autocomplete="off" placeholder="${hasMin ? minEth(s.minBid) : '0.1'}" aria-label="Bid in ETH"><span>ETH</span></label><button class="btn primary">Bid</button></form>
-             <p class="small muted">${hasMin ? `Min ${minEth(s.minBid)}. ` : ''}Outbid ETH returns instantly. Credit Union is unofficial and experimental, so use it at your own risk.</p>`
-          : connect
+             <p class="small muted">${hasMin ? `Min ${minEth(s.minBid)}. ` : ''}Outbid ETH returns instantly. Credit Union is unofficial and experimental, so use it at your own risk.</p>${onChain(s.address, 'bid')}`
+          : `${connect}${onChain(s.address, 'bid')}`
     }
     ${m?.shares ? `<p class="small">Your share <strong class="num">${myShare}</strong>${s.highBid ? ` · <span class="num">≈${eth(perUnit * myUnits)}</span> now` : ''}</p>` : ''}
     ${owed}
@@ -787,7 +800,7 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
     const show = () => {
       if (!slot.isConnected) return;
       slot.innerHTML = `${m ? `<button class="btn primary block" id="assemble">Make Statement</button>` : `<button class="btn primary block" data-connect>Connect wallet</button>`}
-        <p class="small muted">Anyone can press it and pays the gas.</p>`;
+        <p class="small muted">Anyone can press it. You pay the gas.</p>`;
       document.getElementById('assemble')?.addEventListener('click', (e) =>
         run(e.currentTarget as HTMLElement, 'Burning…', () =>
           send({ address: s.address, abi: batchAbi, functionName: 'assemble', gas: 16_000_000n }, txNote),
