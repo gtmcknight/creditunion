@@ -180,7 +180,7 @@ const sections = (): Section[] => [
     title: 'Safety',
     body: `<p>The contracts hold every Credit and every bid. They have no owner, pause or upgrade, and nobody, us included, can move pooled Credits, bids or payouts.</p>
     <p>The code is open source on <a href="https://github.com/gtmcknight/creditunion" target="_blank" rel="noopener">GitHub</a>, with 264 tests, 51 formally proved rules and seven rounds of internal review. There has been no third-party audit.</p>
-    <p>If this site goes down, everything still works from Etherscan: leaving, burning, bidding, settling and claiming.</p>
+    <p>If this site goes down, everything still works without it. <a href="https://creditunionfun.eth.limo" target="_blank" rel="noopener">creditunionfun.eth.limo</a> is a copy on IPFS that bids, settles and claims through your own wallet, and Etherscan works too: leaving, burning, bidding, settling and claiming.</p>
     <p>Credit Union is independent and not affiliated with Jack Butcher. It is experimental software. Use it at your own risk.</p>`,
   },
   {

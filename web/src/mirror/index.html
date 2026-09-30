@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Credit Union · Mirror</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 8' shape-rendering='crispEdges'%3E%3Cpath d='M0 7h9v1H0zM0 2h9v1H0zM2 1h5v1H2zM4 0h1v1H4zM7 4h1v3H7z'/%3E%3Cpath fill='%2300b5e2' d='M1 4h1v3H1z'/%3E%3Cpath fill='%23e4007c' d='M3 4h1v3H3z'/%3E%3Cpath fill='%23ffd100' d='M5 4h1v3H5z'/%3E%3C/svg%3E">
+<meta name="description" content="Credit Union's auctions on the contracts, through your own wallet. For when creditunion.fun is down.">
+<style>
+:root {
+  --bg: #eeeeec; --fg: #0a0a0a; --muted: #6b6b6b; --faint: #a3a3a3; --line: rgba(0, 0, 0, 0.09);
+  --surface: #e6e6e3; --raised: #fff; --accent: #0a0a0a; --on-accent: #fff; --err: #c4231c; --ok: #0a7d34;
+  --line-strong: rgba(0, 0, 0, 0.18); --art-line: rgba(0, 0, 0, 0.1);
+  --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0a0a0a; --fg: #f5f5f5; --muted: #8f8f8f; --faint: #5c5c5c; --line: rgba(255, 255, 255, 0.08);
+    --surface: #141414; --raised: #1f1f1f; --accent: #f5f5f5; --on-accent: #0a0a0a; --err: #ff5a4f; --ok: #3ccf6e;
+    --line-strong: rgba(255, 255, 255, 0.16); --art-line: rgba(255, 255, 255, 0.1);
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 32px clamp(16px, 4vw, 40px) 64px; }
+.mono { font-family: var(--mono); font-size: 12px; }
+a { color: inherit; }
+header.top { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+header.top h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; display: flex; align-items: center; gap: 10px; }
+header.top h1 .mark { flex: none; }
+header.top h1 span { color: var(--muted); font-weight: 400; }
+.lede { margin: 8px 0 0; color: var(--muted); max-width: 62ch; }
+.btn { font: 500 13px var(--sans); height: 34px; padding: 0 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--raised); color: var(--fg); cursor: pointer; transition: background 0.15s, border-color 0.15s, transform 0.1s; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); }
+.btn:hover:not(:disabled) { background: var(--surface); border-color: var(--line-strong); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.btn.primary:hover:not(:disabled) { background: var(--accent); opacity: 0.86; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn.acct { display: inline-grid; }
+.btn.acct > * { grid-area: 1 / 1; text-align: center; }
+.btn.acct .off { visibility: hidden; }
+.btn.acct:hover .addr { visibility: hidden; }
+.btn.acct:hover .off { visibility: visible; }
+@media (prefers-reduced-motion: reduce) { .btn { transition: none; } }
+.btn:focus-visible, .row:focus-visible, input:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 24px; margin-top: 28px; align-items: start; }
+@media (max-width: 760px) {
+  main { grid-template-columns: minmax(0, 1fr); }
+  .pick-col { order: -1; }
+  .pick { position: static; }
+  .pick.empty { display: none; }
+}
+.list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+#list { display: grid; gap: 28px; }
+.group h2 { margin: 0 0 6px; font-size: 12px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.group h2 .n { color: var(--faint); }
+.row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 12px 8px 8px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; transition: background 0.12s; }
+.row:hover, .row.on { background: var(--surface); }
+.row .text { flex: 1 1 auto; min-width: 0; display: grid; }
+.row .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .by, .pick .by { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .meta { flex: 0 1 auto; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* A preview: the union's 80 Credits as dots in burn order, then the Statement itself once it's burned. */
+.art { flex: none; display: block; width: 32px; aspect-ratio: 4 / 5; background: var(--raised); box-shadow: 0 0 0 1px var(--art-line); border-radius: 2px; overflow: hidden; }
+.art img, .art svg { display: block; width: 100%; height: 100%; }
+
+#go { display: flex; gap: 8px; margin-top: 4px; }
+#go input, .bid input { flex: 1; min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--fg); font: 13px var(--mono); }
+.pick { position: sticky; top: 16px; background: var(--raised); border-radius: 10px; padding: 20px; box-shadow: 0 0 0 1px var(--line); display: grid; gap: 12px; }
+.pick.empty { color: var(--muted); }
+.pick-top { display: flex; gap: 16px; align-items: flex-start; }
+.pick-top .art { width: 120px; border-radius: 3px; }
+.pick-head { display: grid; gap: 2px; min-width: 0; }
+.pick-head h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.pick-head .by { margin: 0; font-size: 13px; }
+.pick-head .links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; font-size: 12px; }
+.fresh { justify-self: start; display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 0; border: 0; background: none; color: var(--muted); font: 12px var(--sans); font-variant-numeric: tabular-nums; cursor: pointer; }
+.fresh:hover { color: var(--fg); }
+.fresh i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent); }
+.fresh.stale { color: #9a6700; }
+.fresh.stale i { background: #d4a72c; box-shadow: 0 0 0 3px rgba(212, 167, 44, 0.2); }
+.facts { margin: 0; }
+.now { display: grid; gap: 2px; padding: 12px 0 4px; border-top: 1px solid var(--line); }
+.now .k { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 8px; }
+.now .big { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.now .sub { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.chip { font: 500 12px var(--sans); padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--raised); color: var(--fg); cursor: pointer; vertical-align: 1px; margin-right: 4px; }
+.chip:hover { background: var(--surface); }
+.chip.win { border-color: transparent; background: var(--ok); color: #fff; cursor: default; }
+.bids h3 { margin: 4px 0 6px; font-size: 12px; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.bidrow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; font-variant-numeric: tabular-nums; }
+.bidrow span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.facts strong { font-variant-numeric: tabular-nums; }
+.bid { display: flex; gap: 8px; }
+.bid label { flex: 1; display: flex; align-items: center; gap: 8px; }
+.bid label span { color: var(--muted); font-size: 12px; }
+.hint { margin: 0; color: var(--muted); font-size: 12px; }
+.line { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+#status { margin: 0; padding: 10px 12px; border-radius: 6px; background: var(--surface); font-size: 13px; }
+#status.err { color: var(--err); }
+.preview-note { margin: 16px 0 0; padding: 8px 12px; border-radius: 6px; background: #fff3cd; color: #6b5200; font-size: 13px; }
+footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; display: flex; gap: 8px 16px; flex-wrap: wrap; align-items: baseline; font-variant-numeric: tabular-nums; }
+footer .grow { flex: 1; }
+footer a { color: var(--muted); }
+footer a:hover { color: var(--fg); }
+dialog.picker { border: 0; border-radius: 12px; padding: 0; width: min(360px, calc(100vw - 32px)); background: var(--raised); color: var(--fg); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25), 0 0 0 1px var(--line); }
+dialog.picker::backdrop { background: rgba(0, 0, 0, 0.35); }
+dialog.picker header { display: flex; justify-content: space-between; align-items: center; padding: 16px 16px 8px 20px; }
+dialog.picker h3 { margin: 0; font-size: 15px; font-weight: 600; }
+dialog.picker .x { border: 0; background: none; color: var(--muted); font-size: 22px; line-height: 1; width: 32px; height: 32px; border-radius: 6px; cursor: pointer; }
+dialog.picker .x:hover { background: var(--surface); color: var(--fg); }
+.wallets { display: grid; gap: 4px; padding: 4px 12px 16px; }
+.wallets .hint { padding: 0 8px 6px; }
+.wallet { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: 0; border-radius: 8px; background: none; color: var(--fg); font: 500 14px var(--sans); text-decoration: none; text-align: left; cursor: pointer; transition: background 0.12s; }
+.wallet:hover, .wallet:focus-visible { background: var(--surface); outline: none; }
+.wallet img, .wallet .blank { width: 28px; height: 28px; border-radius: 7px; flex: none; }
+.wallet .blank { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.wallet .go { margin-left: auto; color: var(--muted); }
+/* Phones: a row's status goes under its name (after the base row rules, so it wins). */
+@media (max-width: 760px) {
+  .row { display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: 12px; align-items: center; }
+  .row .art { grid-row: 1 / span 2; }
+  .row .meta { grid-column: 2; font-size: 12px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1><svg class="mark" viewBox="0 0 9 8" width="27" height="24" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true"><rect x="0" y="7" width="9" height="1"/><rect x="1" y="4" width="1" height="3" fill="#00b5e2"/><rect x="3" y="4" width="1" height="3" fill="#e4007c"/><rect x="5" y="4" width="1" height="3" fill="#ffd100"/><rect x="7" y="4" width="1" height="3"/><rect x="0" y="2" width="9" height="1"/><rect x="2" y="1" width="5" height="1"/><rect x="4" y="0" width="1" height="1"/></svg>Credit Union <span>· Mirror</span></h1>
+    <div id="acct"></div>
+  </header>
+  <p class="preview-note" id="preview-note" hidden>Preview on a copy of mainnet: made-up auctions, and wallet actions are off.</p>
+  <p class="lede">Bid, settle and claim straight on the Credit Union contracts, through your own wallet. Nothing here goes through <a href="https://creditunion.fun">creditunion.fun</a>, so it works when the site doesn’t.</p>
+  <main>
+    <div class="list">
+      <div id="list"><p class="hint">Reading the chain…</p></div>
+      <form id="go"><input id="addr" placeholder="Or paste a Credit Union address, 0x…" autocomplete="off" spellcheck="false" aria-label="Credit Union address"><button class="btn">Open</button></form>
+    </div>
+    <div class="pick-col">
+      <div class="pick empty" id="pick"></div>
+      <p id="status" hidden></p>
+    </div>
+  </main>
+  <footer><span id="live">Reading the chain…</span><span class="grow"></span><span>Factory <span id="factory"></span></span><a href="https://creditunion.fun">creditunion.fun ↗</a></footer>
+</div>
+<!--palettes-->
+<!--script-->
+</body>
+</html>

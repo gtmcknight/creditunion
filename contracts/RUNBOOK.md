@@ -52,3 +52,15 @@ early Wednesday. This is the checklist from his publish to the first Statement. 
 - **Jack's cap runs out** (1,526 Statements): burns fail the same way and unions keep their Credits.
 - **After 8:00pm the adapter is permanent.** If it turns out wrong, the fix is a new factory, with members
   withdrawing and depositing again. Unions that haven't locked can always be left.
+
+- **creditunion.fun is down or slow during an auction:** nothing depends on it. Pages that load already read and
+  send through the visitor's wallet when `/rpc` fails. Point people to creditunionfun.eth.limo (the mirror, below)
+  or to Etherscan: the union's address, Contract, Write as Proxy, then `bid` (the bid as the value), `settle` or
+  `claim`.
+
+## The mirror
+
+creditunionfun.eth.limo: one static page that bids, settles, claims, refunds and burns through the visitor's own
+wallet, with nothing from creditunion.fun. `mirror/README.md` has its CID, how to check the file and how to change
+it; `.github/workflows/mirror.yml` publishes the same file to GitHub Pages once Pages is on (Settings → Pages →
+GitHub Actions).

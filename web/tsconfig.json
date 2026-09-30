@@ -17,6 +17,7 @@
   },
   "include": [
     "src/app",
+    "src/mirror",
     "vite.config.ts"
   ]
 }

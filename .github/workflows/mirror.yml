@@ -1,0 +1,29 @@
+# The mirror (mirror/index.html, built from web/src/mirror): Credit Union's auctions through a visitor's own wallet,
+# as one static page. The same file is pinned to IPFS behind creditunionfun.eth; this publishes it to GitHub Pages
+# too, so there are two copies that don't depend on creditunion.fun. Needs Pages on, with GitHub Actions as the source.
+name: Mirror
+on:
+  push:
+    branches: [main]
+    paths: ['mirror/**', '.github/workflows/mirror.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: mirror
+      - id: deployment
+        uses: actions/deploy-pages@v4
