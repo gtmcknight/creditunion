@@ -1384,7 +1384,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
 
   // /statement/<id>.svg: a Statement as Jack's contract draws it, for burned unions' pages and cards. Read from the
   // Statements the factory's burn contract mints into (statementSVG, else the image in tokenURI). The drawing only
-  // changes when its owner overprints it, so each data center keeps it 10 minutes.
+  // changes when its owner switches its format or overprints it, so each data center keeps it 10 minutes.
   const stmt = url.pathname.match(/^\/statement\/(\d{1,7})\.svg$/);
   if (stmt) {
     const cache = caches.default;

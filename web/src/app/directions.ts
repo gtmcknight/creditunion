@@ -1,6 +1,6 @@
-/// The eight Statement directions under a sheet (a union's, or the create page's preview). Issued is the sheet
-/// itself; the other seven are drawn from the Credits' ink (shared/statement.ts), read with their ratings.
-/// Previews until Jack's Statement contract is out.
+/// The eight Statement formats under a sheet (a union's, or the create page's preview), in the order the Statements
+/// contract lists them. Issued is the sheet itself; the other seven are drawn from the Credits' ink
+/// (shared/statement.ts), so a preview is what the contract draws.
 import { compose, DIRECTIONS, inkOf, paint as paintMarks, PAGE, type Direction, type Ink } from '../shared/statement';
 import { ratings } from './data';
 import { drawPicture, type Pick } from './pictures';
@@ -35,12 +35,12 @@ export const directionCanvas = '<canvas class="dir-canvas" hidden aria-hidden="t
 const GLYPH: Record<Direction, string> = {
   Issued: '<path fill="currentColor" d="M2.5 3h2.5v2.5h-2.5zM2.5 7.25h2.5v2.5h-2.5zM2.5 11.5h2.5v2.5h-2.5zM6.75 3h2.5v2.5h-2.5zM6.75 7.25h2.5v2.5h-2.5zM6.75 11.5h2.5v2.5h-2.5zM11 3h2.5v2.5h-2.5zM11 7.25h2.5v2.5h-2.5zM11 11.5h2.5v2.5h-2.5z"/>', // Credits spaced on the page
   Consolidated: '<path fill="currentColor" d="M2 1h2v2h-2zM6 1h2v2h-2zM8 1h2v2h-2zM12 1h2v2h-2zM4 3h2v2h-2zM8 3h2v2h-2zM10 3h2v2h-2zM2 5h2v2h-2zM6 5h2v2h-2zM10 5h2v2h-2zM12 5h2v2h-2zM2 7h2v2h-2zM4 7h2v2h-2zM8 7h2v2h-2zM12 7h2v2h-2zM4 9h2v2h-2zM6 9h2v2h-2zM10 9h2v2h-2zM2 11h2v2h-2zM6 11h2v2h-2zM8 11h2v2h-2zM12 11h2v2h-2zM4 13h2v2h-2zM8 13h2v2h-2zM10 13h2v2h-2z"/>', // cells butted into one mosaic
+  Assessed: '<path fill="currentColor" d="M2.5 2h5.5v5.5H2.5zM8.5 8.5h5v5.5h-5zM9 2.5h1v1h-1zM11 2.5h1v1h-1zM13 2.5h1v1h-1zM9 4.5h1v1h-1zM11 4.5h1v1h-1zM13 4.5h1v1h-1zM9 6.5h1v1h-1zM11 6.5h1v1h-1zM13 6.5h1v1h-1zM3 9h1v1h-1zM5 9h1v1h-1zM7 9h1v1h-1zM3 11h1v1h-1zM5 11h1v1h-1zM7 11h1v1h-1zM3 13h1v1h-1zM5 13h1v1h-1zM7 13h1v1h-1z"/>', // each Credit a block of its mix, dithered to how much it inks
   Accrued: '<path fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" d="M5 1.9c1.6-.5 2.6.4 4 .1 1.9-.4 3.7.3 3.7 2.6 0 1.7-1.2 2.3-.8 3.9.4 1.6.9 2.6-.1 4.2-.9 1.5-2.8 1.3-4 1.8-1.5.6-3.3.2-4-1.4-.6-1.4.4-2.4.1-3.9C3.6 7.6 2.7 6.6 3 4.9c.3-1.6 1-2.6 2-3zM6.2 5.4c1-.5 2.6-.2 2.6 1 0 1.1-1.5 1-2.2 1.8-.6.6-1.6.3-1.5-.8.1-.9.5-1.6 1.1-2z"/>', // a contour, a loop inside it
-  Allocated: '<path fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" d="M2.6 1.6h10.8v12.8H2.6zM2.6 6.5 6 5.5l1.5-3.9M6 5.5l1.7 3.4 5.7-1.6M7.7 8.9 5.5 14.4M7.7 8.9l3 5.5"/>', // cells of a power diagram
-  Balanced: '<path fill="none" stroke="currentColor" stroke-width="1.25" d="M2.6 1.6h10.8v12.8H2.6zM8.6 1.6v7.4M8.6 5.5h4.8M2.6 9h10.8M6.6 9v5.4M10.1 9v5.4M10.1 11.7h3.3"/>', // blocks cut largest first
   Amortized: '<path fill="none" stroke="currentColor" stroke-width="1.25" d="M2.6 1.6h10.8v12.8H2.6zM5.1 4.1h5.8v3h-2v4.8H5.1z"/>', // stepped edges between depths
+  Liquidated: '<path fill="currentColor" d="M2.6 1.8h10.8v1.6H2.6zM2.6 4.4h10.8v2.4H2.6zM2.6 7.8h10.8v1.4H2.6zM2.6 10.2h10.8v4H2.6z"/>', // the page's ink poured into bands
+  Recorded: '<path fill="currentColor" fill-rule="evenodd" d="M3.65 2.2h1.2v3h-1.2zM6.75 2.2h2.5v3H6.75zM7.6 3.05v1.3h0.8v-1.3zM11.15 2.2h1.2v3h-1.2zM3 6.4h2.5v3H3zM3.85 7.25v1.3h0.8v-1.3zM7.4 6.4h1.2v3h-1.2zM10.5 6.4h2.5v3H10.5zM11.35 7.25v1.3h0.8v-1.3zM3.65 10.6h1.2v3h-1.2zM7.4 10.6h1.2v3h-1.2zM10.5 10.6h2.5v3H10.5zM11.35 11.45v1.3h0.8v-1.3z"/>', // every pixel written as a 1 or a 0
   Reconciled: '<path fill="currentColor" d="M2 1.5h12V3H2zM2 4.5h8V6H2zM2 7.5h10.5V9H2zM2 10.5h6V12H2zM2 13.5h9V15H2z"/>', // one row per Credit, ragged right
-  Voided: '<path fill="none" stroke="currentColor" stroke-width="1.25" d="M2.6 2.6h4.5v4h-4.5zM2.6 9.4h4.5v4h-4.5zM8.9 2.6h4.5v4h-4.5zM8.9 9.4h4.5v4h-4.5z"/>', // Issued, outlined
 };
 
 const glyph = (paths: string) => `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">${paths}</svg>`;
@@ -66,7 +66,7 @@ export const pickRow = (on: Pick) =>
 export function directions(key: string, rules = false, all = false) {
   const k = key.toLowerCase(), on = showing.get(k) ?? 'Issued';
   const radio = (d: Shown) => `type="button" role="radio" aria-checked="${d === on}" tabindex="${d === on ? 0 : -1}"`;
-  return `<div class="dirs" role="radiogroup" aria-label="Statement direction" data-key="${k}">${
+  return `<div class="dirs" role="radiogroup" aria-label="Statement format" data-key="${k}">${
     rules ? `<button ${radio('Rules')} data-dir="Rules" class="dir-word" hidden>Painted</button>` : ''
   }${row(radio, 'data-dir', all)}</div>`;
 }
