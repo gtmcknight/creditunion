@@ -252,7 +252,11 @@ export type HomeTab = 'parties' | 'auctions';
 
 /// Two pages over one list: Credit Unions still pooling (All, Invited, Yours, Full), and Statements at or past
 /// auction (by stage).
+/// A page drawn twice at once (a wallet reconnecting as it loads) runs lists() twice over the same buttons; only the
+/// latest run wires them, or a sort would redraw from the first run's state (before the wallet: no Invited, no Yours).
+let listsRun = 0;
 export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
+  const run = ++listsRun;
   const head =
     tab === 'parties'
       ? ['Credit Unions', 'Each Credit Union pools Credits toward 80. Join with ones that fit, and leave anytime before it fills.']
@@ -280,7 +284,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
   try {
     const [all] = await Promise.all([listBatches(), readNotice()]);
     const el = document.getElementById('batches');
-    if (!el) return; // navigated away
+    if (!el || run !== listsRun) return; // navigated away, or drawn again since
     const parties = all.filter((b) => PARTY_STATES.has(b.s.state));
     // Auctions: full ones waiting to burn (Upcoming), at auction (Live), and sold.
     const auctions = all.filter((b) => b.s.state !== 'Open' && b.s.state !== 'Expired');
@@ -310,7 +314,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     let fit = new Map<Address, bigint[]>();
     let showEmpty = false; // All tabs its empty (0/80) unions behind a button: they're mostly abandoned
     const grid = (items: Listed[]) => {
-      const rated = tab === 'parties' && sortKey() === 'rating';
+      const rated = tab === 'parties' && sortFor(view) === 'rating';
       return `<div class="grid">${items.map((b) => card(b, fit.get(b.s.address), 'yours', rated ? totalOf(b) : undefined)).join('')}</div>`;
     };
     let totaling = false;
@@ -319,9 +323,24 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       const live = items.filter((b) => b.s.count > 0), gone = items.length - live.length;
       return (live.length ? grid(live) : '') + (gone ? `<button type="button" class="btn show-empty" id="show-empty">Show ${gone} empty ${gone === 1 ? 'union' : 'unions'}</button>` : '');
     };
+    // Full unions are all 80 of 80: Fullest and Emptiest can't order them, so Full hides those two and uses Newest.
+    const sortFor = (v: View | null) => {
+      const k = sortKey();
+      return v === 'filled' && (k === 'fullest' || k === 'emptiest') ? 'new' : k;
+    };
+    const showSorts = (v: View | null) => {
+      const k = sortFor(v);
+      app.querySelectorAll<HTMLElement>('.sort-menu [data-sort]').forEach((o) => {
+        o.hidden = v === 'filled' && (o.dataset.sort === 'fullest' || o.dataset.sort === 'emptiest');
+        o.setAttribute('aria-selected', String(o.dataset.sort === k));
+      });
+      const label = app.querySelector('.sort-label');
+      if (label) label.textContent = SORTS.find(([x]) => x === k)?.[1] ?? '';
+    };
     const draw = () => {
-      sortList(list, tab === 'parties' ? sortKey() : 'new');
-      if (tab === 'parties' && sortKey() === 'rating' && !totaling && list.some((b) => totalOf(b) === undefined)) {
+      if (tab === 'parties') showSorts(view);
+      sortList(list, tab === 'parties' ? sortFor(view) : 'new');
+      if (tab === 'parties' && sortFor(view) === 'rating' && !totaling && list.some((b) => totalOf(b) === undefined)) {
         totaling = true;
         totalCards(list)
           .then((got) => got && document.getElementById('batches') === el && draw())
@@ -463,7 +482,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       const open = (on: boolean) => {
         menu.hidden = !on;
         btn.setAttribute('aria-expanded', String(on));
-        if (on) (opts.find((o) => o.getAttribute('aria-selected') === 'true') ?? opts[0]).focus();
+        if (on) (opts.find((o) => !o.hidden && o.getAttribute('aria-selected') === 'true') ?? opts.find((o) => !o.hidden)!).focus();
       };
       const choose = (o: HTMLElement) => {
         opts.forEach((x) => x.setAttribute('aria-selected', String(x === o)));
@@ -481,13 +500,14 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         if (o) choose(o);
       });
       menu.addEventListener('keydown', (e) => {
-        const i = opts.indexOf(document.activeElement as HTMLElement);
+        const shown = opts.filter((o) => !o.hidden); // the Full tab hides two
+        const i = shown.indexOf(document.activeElement as HTMLElement);
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
           e.preventDefault();
-          opts[(i + (e.key === 'ArrowDown' ? 1 : opts.length - 1)) % opts.length].focus();
+          shown[(i + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % shown.length].focus();
         } else if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          if (i >= 0) choose(opts[i]);
+          if (i >= 0) choose(shown[i]);
         } else if (e.key === 'Escape' || e.key === 'Tab') {
           open(false);
           if (e.key === 'Escape') btn.focus();

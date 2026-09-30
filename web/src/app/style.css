@@ -6568,6 +6568,7 @@ dialog.eligible::backdrop {
 }
 .sort-menu li:hover, .sort-menu li:focus-visible { background: var(--surface); color: var(--fg); }
 .sort-menu li[aria-selected='true'] { color: var(--fg); }
+.sort-menu li[hidden] { display: none; }
 .sort-menu li[aria-selected='true']::after {
   content: '';
   width: 8px;
