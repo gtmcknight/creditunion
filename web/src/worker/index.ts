@@ -15,7 +15,8 @@ import { createPublicClient, fallback, hexToBytes, http, type Address, type Hex,
 import { mainnet } from 'viem/chains';
 import { normalize } from 'viem/ens';
 import { batchAbi, creditsAbi, creditArtAbi, factoryAbi } from '../app/abi';
-import { setSpareKey, best, bestPage, quote, scan, type Extra, type Listing } from './opensea';
+import { setSpareKey, best, bestPage, events, quote, scan, type Extra, type Listing } from './opensea';
+import type { Row } from './market';
 import { cacheStore, confirmListing, marketListings, type FwaListing } from './fwa';
 import { confirmStrategy, strategyAbi, strategyListings } from './strategy';
 import { ratings } from './ratings';
@@ -61,6 +62,7 @@ interface Env {
   PLANS?: KVNamespace;
   /// Buy locks for Picture unions (locks.ts), one object per union.
   LOCKS?: DurableObjectNamespace<import('./locks').BuyLocks>;
+  MARKET?: DurableObjectNamespace<import('./market').MarketBook>;
   /// FWA's marketplace on mainnet: a second Buy Credits source. Empty to turn it off.
   FWA_MARKET?: string;
   /// CreditStrategy (nftstrategy.fun) on mainnet: the Credits it holds for sale are a third Buy Credits source.
@@ -189,6 +191,7 @@ function sameSite(req: Request) {
   return s === null || s === 'same-origin' || s === 'none';
 }
 export { BuyLocks } from './locks';
+export { MarketBook } from './market';
 
 export default {
   async fetch(req, env, ctx): Promise<Response> {
@@ -211,15 +214,10 @@ export default {
 
   // Every 5 minutes: the keeper (keeper.ts), once KEEPER_KEY is set.
   async scheduled(_event, env, ctx) {
-    // The Printer's book of listings, kept fresh for /market.json.
-    if (env.PLANS) {
-      const plans = env.PLANS;
-      ctx.waitUntil(
-        readMarket(env, new URL('https://creditunion.fun/market.json'), ctx)
-          .then((body) => plans.put('market', body))
-          .catch((e) => console.error('[market] refresh failed', safeError(e))),
-      );
-    }
+    // The market book, kept live each minute (keepMarket).
+    ctx.waitUntil(keepMarket(env, ctx).catch((e) => console.error('[market] update failed', safeError(e))));
+    // The keeper runs every 5 minutes, as before.
+    if (new Date(_event.scheduledTime).getUTCMinutes() % 5 !== 0) return;
     if (!env.KEEPER_KEY) return;
     ctx.waitUntil(
       keep({
@@ -388,13 +386,18 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   // this is one storage read; buying re-prices each Credit anyway.
   if (url.pathname === '/market.json') {
     if (!sameSite(req)) return text('forbidden', 403);
-    const kept = env.PLANS ? await env.PLANS.get('market', { cacheTtl: 60 }) : null;
-    if (kept) return new Response(kept, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=60' } });
     if (await limited(env.RL_MISC, req, 20)) return text('slow down', 429);
     try {
-      const body = await readMarket(env, url, ctx);
-      if (env.PLANS) ctx.waitUntil(env.PLANS.put('market', body));
-      return new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=60' } });
+      if (!env.MARKET) return Response.json({ at: Date.now(), items: [] });
+      const b = book(env);
+      if (!(await b.state()).rows) {
+        // Not filled yet (just deployed): fill it in the background, and serve the last book kept in storage meanwhile.
+        ctx.waitUntil(keepMarket(env, ctx).catch((e) => console.error('[market] fill failed', safeError(e))));
+        const kept = env.PLANS ? await env.PLANS.get('market', { cacheTtl: 60 }) : null;
+        if (kept) return new Response(kept, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=30' } });
+      }
+      const body = await b.snapshot();
+      return new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=30' } });
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502 });
     }
@@ -427,6 +430,25 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
 
   // A Picture union's picture (64 × 80 RGBA, base64, and the Detail it was matched with): the page it was made on keeps it here, so every visitor's union
   // page can recommend the Credit that draws each open slot best. Once per union: the first save stands.
+  // /market/moved: a transaction of ours that moved Credits (a buy or a deposit). Its receipt says which Credits left
+  // whom; the market book drops those listings now instead of at its next read of the chain.
+  if (url.pathname === '/market/moved') {
+    if (req.method !== 'POST' || !sameSite(req)) return text('forbidden', 403);
+    if (await limited(env.RL_MISC, req, 5)) return text('slow down', 429);
+    const tx = String(((await req.json().catch(() => ({}))) as { tx?: unknown }).tx ?? '');
+    if (!/^0x[0-9a-fA-F]{64}$/.test(tx) || !env.MARKET) return text('bad request', 400);
+    try {
+      const r = await client(env).getTransactionReceipt({ hash: tx as `0x${string}` });
+      const moves = r.logs
+        .filter((l) => l.address.toLowerCase() === env.CREDITS.toLowerCase() && l.topics[0] === '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef' && l.topics.length === 4)
+        .map((l) => ({ id: String(BigInt(l.topics[3]!)), from: `0x${l.topics[1]!.slice(26)}`.toLowerCase() }));
+      await book(env).moved(moves);
+      return Response.json({ moved: moves.length });
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502 });
+    }
+  }
+
   // /placed/<union>: a layout union's Credits in deposit order, the value it recorded for each (Batch.keyOf: which
   // painted slots it takes) and each one's ink, so a card or page places and draws them from one answer instead of a
   // chain read per Credit. A deposited Credit's value never changes; the answer is kept at the edge per set of ids.
@@ -825,11 +847,19 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
     // From the market book first (every listing, rebuilt every 5 minutes): no OpenSea call for a Credit it has.
     // Buying still asks OpenSea for a fresh signed order, so one that sold since just drops out then.
-    if (live && env.PLANS) {
-      const book = await marketBook(env);
-      const e = book?.get(String(id));
+    if (live && env.MARKET) {
+      const got = await book(env).get(String(id)).catch(() => null);
+      const fresh = !!got && Date.now() - got.updated < 2 * 60_000; // the loop touches it every ~10 s
+      const e = got?.row;
+      // Not in a fresh book: not for sale anywhere we buy from, no need to ask OpenSea.
+      if (fresh && !e) {
+        const res = Response.json({ price: null, preview: false }, { headers: { 'cache-control': 'public, max-age=10' } });
+        ctx.waitUntil(cache.put(key, res.clone()));
+        return res;
+      }
       if (e && (e[2] !== 'opensea' || (e[3] && e[4]))) {
-        const l: Listing = e[2] === 'opensea' ? { id: e[0], price: e[1], source: 'opensea', hash: e[3], protocol: e[4] } : { id: e[0], price: e[1], source: e[2] as Listing['source'], listingId: e[3] || undefined };
+        const [eid, eprice, esource, ea, eb] = e.map(String);
+        const l: Listing = esource === 'opensea' ? { id: eid, price: eprice, source: 'opensea', hash: ea, protocol: eb } : { id: eid, price: eprice, source: esource as Listing['source'], listingId: ea || undefined };
         const res = Response.json(
           {
             price: l.price,
@@ -841,7 +871,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
             url: listingUrl(env, live, l),
             preview: false,
           },
-          { headers: { 'cache-control': 'public, max-age=60' } },
+          { headers: { 'cache-control': 'public, max-age=10' } },
         );
         ctx.waitUntil(cache.put(key, res.clone()));
         return res;
@@ -1249,40 +1279,52 @@ async function hiddenUnions(env: Env): Promise<Set<string>> {
 }
 
 /// Every Credit for sale, cheapest listing each: FWA and CreditStrategy, then OpenSea's pages to the end.
-/// The market book (/market.json's items) by id, read from storage at most once a minute per isolate.
-let bookMemo: { at: number; map: Map<string, string[]> | null } | null = null;
-async function marketBook(env: Env): Promise<Map<string, string[]> | null> {
-  if (bookMemo && Date.now() - bookMemo.at < 60_000) return bookMemo.map;
-  const raw = await env.PLANS!.get('market', { cacheTtl: 60 }).catch(() => null);
-  let map: Map<string, string[]> | null = null;
-  try {
-    const d = raw ? (JSON.parse(raw) as { items?: string[][] }) : null;
-    if (d?.items) map = new Map(d.items.map((x) => [x[0], x] as const));
-  } catch {}
-  bookMemo = { at: Date.now(), map };
-  return map;
-}
 
-async function readMarket(env: Env, url: URL, ctx: ExecutionContext): Promise<string> {
+/// The whole book read from scratch: FWA and the strategy, then every OpenSea listing page (the hourly rebuild).
+async function readMarketRows(env: Env, url: URL, ctx: ExecutionContext): Promise<Row[]> {
   const credits = hasSweeper(env) ? env.CREDITS : MAINNET_CREDITS;
-  // [id, price, source, then how to buy it: an OpenSea order's hash and protocol, or FWA's listing id]
-  const best = new Map<string, string[]>();
-  const add = (id: string, price: string, source: string, ...how: string[]) => {
-    const had = best.get(id);
-    if (!had || BigInt(price) < BigInt(had[1])) best.set(id, [id, price, source, ...how]);
+  const best = new Map<string, Row>();
+  const add = (r: Row) => {
+    const had = best.get(r[0]);
+    if (!had || BigInt(r[1]) < BigInt(had[1])) best.set(r[0], r);
   };
-  for (const e of (await extras(env, url, ctx)).extra) add(e.id, e.price, e.source, ...(e.listingId ? [e.listingId] : []));
+  for (const e of (await extras(env, url, ctx)).extra) add([e.id, e.price, e.source, e.listingId ?? '', '', '', 0]);
   if (env.OPENSEA_API_KEY) {
     let next = '';
     for (let page = 0; page < 200; page++) {
-      const pg = await bestPageCached(env, url, ctx, credits, next);
-      for (const l of pg.items) add(l.id, l.price, 'opensea', l.hash ?? '', l.protocol ?? '');
+      const pg = await bestPage(env.OPENSEA_API_KEY, env.OPENSEA_SLUG, credits, next);
+      for (const l of pg.items) add([l.id, l.price, 'opensea', l.hash ?? '', l.protocol ?? '', l.seller ?? '', l.until ?? 0]);
       if (!pg.next) break;
       next = pg.next;
     }
   }
-  return JSON.stringify({ at: Date.now(), items: [...best.values()] });
+  return [...best.values()];
 }
+const book = (env: Env) => env.MARKET!.get(env.MARKET!.idFromName('credits'));
+
+/// Each minute: keep the book's 10-second loop going (the feed and the chain, market.ts); every 5 minutes FWA and the
+/// strategy; every hour (or when the book is empty or the loop fell behind) the whole book again.
+async function keepMarket(env: Env, ctx: ExecutionContext) {
+  if (!env.MARKET || !env.OPENSEA_API_KEY) return;
+  const b = book(env);
+  const st = await b.state();
+  const url = new URL('https://creditunion.fun/market.json');
+  const now = Math.floor(Date.now() / 1000);
+  const credits = hasSweeper(env) ? env.CREDITS : MAINNET_CREDITS;
+  if (!st.rows || Date.now() - st.built > 60 * 60_000 || now - st.cursor > 30 * 60) {
+    if (!(await b.claim('rebuild', 10 * 60_000))) return; // one already running
+    try {
+      await b.replaceAll(await readMarketRows(env, url, ctx), now - 60);
+      console.log('[market] rebuilt');
+    } finally {
+      await b.release('rebuild');
+    }
+    return;
+  }
+  await b.kick(); // the book's own 10-second loop reads the feed and the chain (market.ts)
+  if (new Date().getUTCMinutes() % 5 === 0) await b.setExtras((await extras(env, url, ctx)).extra.map((e) => [e.id, e.price, e.source, e.listingId ?? '', '', '', 0] as Row));
+}
+
 
 async function readUnions(env: Env): Promise<string> {
   return toJson({ at: Math.floor(Date.now() / 1000), unions: await unionList(env) });

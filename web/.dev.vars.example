@@ -10,3 +10,6 @@ ENS_RPC=https://eth-mainnet.example/your-key
 
 # Local preview of Activity without an RPC key (never set in production)
 # ACTIVITY_MIRROR=https://creditunion.fun/activity.json
+
+# The market book's 10-second loop spends the OpenSea key: off locally
+MARKET_LOOP=off

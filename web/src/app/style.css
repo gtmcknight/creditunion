@@ -8315,3 +8315,13 @@ dialog.how .small { margin-top: 16px; }
 .picture-rules p { margin: 0; }
 .subtabs[hidden] { display: none !important; }
 #withdraw[hidden] { display: none !important; }
+
+/* The mark builds as it does at the end of the launch film: the base wipes in, the four ink columns rise, the roof opens from the middle. Once on load, again on hover. */
+.mark rect { transform-box: fill-box; }
+.mark.build rect { animation: 200ms var(--d, 0ms) cubic-bezier(0.2, 0, 0, 1) both mark-open; }
+.mark.build .wipe { transform-origin: left; animation-name: mark-wipe; }
+.mark.build .rise { transform-origin: bottom; animation-name: mark-rise; animation-duration: 233ms; }
+@keyframes mark-wipe { from { transform: scaleX(0); } }
+@keyframes mark-rise { from { transform: scaleY(0); } }
+@keyframes mark-open { from { transform: scaleX(0); } }
+@media (prefers-reduced-motion: reduce) { .mark.build rect { animation: none; } }

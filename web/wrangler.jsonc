@@ -6,7 +6,7 @@
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/rpc", "/unions.json", "/passes", "/bids/*", "/activity", "/activity.json", "/live", "/ratings", "/edition/*", "/art/*", "/config.json", "/opensea/*", "/ens/*", "/owner/*", "/", "/parties", "/about", "/about/*", "/docs", "/docs/*", "/how", "/how/*", "/faq", "/auctions", "/create", "/unions", "/union/*", "/party/*", "/b/*", "/mint", "/og", "/og/party/*", "/og/sample/*", "/me", "/member/*", "/credit/*", "/og/credit/*", "/credits", "/palette", "/palette/*", "/eights", "/eights/*", "/print", "/print/*", "/weight", "/weight/*", "/time", "/rating", "/bits", "/*.bin", "/wall/*", "/plans", "/plans/*", "/pictures/*", "/placed/*", "/locks/*", "/printer", "/printer/*", "/market.json", "/burns"]
+    "run_worker_first": ["/rpc", "/unions.json", "/passes", "/bids/*", "/activity", "/activity.json", "/live", "/ratings", "/edition/*", "/art/*", "/config.json", "/opensea/*", "/ens/*", "/owner/*", "/", "/parties", "/about", "/about/*", "/docs", "/docs/*", "/how", "/how/*", "/faq", "/auctions", "/create", "/unions", "/union/*", "/party/*", "/b/*", "/mint", "/og", "/og/party/*", "/og/sample/*", "/me", "/member/*", "/credit/*", "/og/credit/*", "/credits", "/palette", "/palette/*", "/eights", "/eights/*", "/print", "/print/*", "/weight", "/weight/*", "/time", "/rating", "/bits", "/*.bin", "/wall/*", "/plans", "/plans/*", "/pictures/*", "/placed/*", "/market/*", "/locks/*", "/printer", "/printer/*", "/market.json", "/burns"]
   },
   // Public config served at /config.json. Secrets: `wrangler secret put RPC_URL` and `wrangler secret put OPENSEA_API_KEY`.
   "vars": {
@@ -32,12 +32,12 @@
   ],
   // Printer plans and the listings book (/printer): `wrangler kv namespace create PLANS`, then put its id here.
   // Buy locks for Picture unions (src/worker/locks.ts).
-  "durable_objects": { "bindings": [{ "name": "LOCKS", "class_name": "BuyLocks" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BuyLocks"] }],
+  "durable_objects": { "bindings": [{ "name": "LOCKS", "class_name": "BuyLocks" }, { "name": "MARKET", "class_name": "MarketBook" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BuyLocks"] }, { "tag": "v2", "new_sqlite_classes": ["MarketBook"] }],
   "kv_namespaces": [{ "binding": "PLANS", "id": "87dc2ecb2eca465b84947eb80d2a402f" }],
   "observability": { "enabled": true },
-  // The keeper (src/worker/keeper.ts) runs every 5 minutes; it does nothing until `wrangler secret put KEEPER_KEY`.
-  "triggers": { "crons": ["*/5 * * * *"] },
+  // Every minute: the market book (market.ts); every 5th, the keeper (keeper.ts), once `wrangler secret put KEEPER_KEY`.
+  "triggers": { "crons": ["* * * * *"] },
   // Per-IP rate limits (Workers Rate Limiting API). Keys are cf-connecting-ip. RL_RPC counts JSON-RPC calls, not requests.
   "unsafe": {
     "bindings": [

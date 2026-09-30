@@ -110,6 +110,14 @@ export async function ensureChain() {
 
 /// Run after each transaction we send settles (landed, reverted or refused), so cached reads start over.
 const txDone = new Set<() => void>();
+/// A transaction of ours that moved Credits (a buy, a deposit): tell the market book at once, so everyone else's
+/// Buy list drops them within seconds. The Worker reads the receipt itself; this only says which to read.
+const CREDIT_TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+function reportMoves(receipts: readonly { transactionHash: string; logs: readonly { address: string; topics: readonly string[] }[] }[]) {
+  for (const r of receipts)
+    if (r.logs.some((l) => l.address.toLowerCase() === config.credits.toLowerCase() && l.topics[0] === CREDIT_TRANSFER))
+      void fetch('/market/moved', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tx: r.transactionHash }) }).catch(() => {});
+}
 export const onTx = (f: () => void) => txDone.add(f);
 const settled = () => txDone.forEach((f) => f());
 
@@ -144,6 +152,7 @@ export async function send(
     if (replaced === 'cancelled') throw new Error('Cancelled in wallet.');
     if (replaced === 'replaced') throw new Error('Replaced by another transaction in your wallet.');
     if (receipt.status !== 'success') throw new Error('Transaction reverted.');
+    reportMoves([receipt]);
     return receipt;
   } finally {
     settled();
@@ -213,6 +222,7 @@ export async function sendBatch(calls: Call[], onSubmit?: (id: string) => void) 
   try {
     const res = await session.wallet.waitForCallsStatus({ id, timeout: 15 * 60_000 });
     if (res.status !== 'success' || res.receipts?.some((r) => r.status !== 'success')) throw new Error('Transaction reverted.');
+    reportMoves(res.receipts ?? []);
     return res.receipts ?? [];
   } finally {
     settled();

@@ -76,11 +76,11 @@ export const buying = { n: 0 };
 /// How often a live view reads its listings again.
 const LIVE_MS = 20_000;
 
-/// Keeps a view of listings live, the way a marketplace's own page is: `tick` every LIVE_MS while the page is in
+/// Keeps a view of listings live, the way a marketplace's own page is: `tick` every `every` ms (LIVE_MS) while the page is in
 /// front (and at once on coming back to it after longer), one at a time, and none while a buy is in flight or a
 /// slider is held. A pointer moving over `el` (on its way to a tap) puts it off a moment, so nothing moves under it.
 /// Stops for good once `el` has left the page.
-export function live(el: HTMLElement, tick: () => Promise<void>) {
+export function live(el: HTMLElement, tick: () => Promise<void>, every = LIVE_MS) {
   let running = false;
   let last = Date.now();
   let touched = 0;
@@ -108,9 +108,9 @@ export function live(el: HTMLElement, tick: () => Promise<void>) {
       running = false;
     }
   };
-  const timer = setInterval(() => void run(), LIVE_MS);
+  const timer = setInterval(() => void run(), every);
   const back = () => {
-    if (!document.hidden && Date.now() - last >= LIVE_MS) void run();
+    if (!document.hidden && Date.now() - last >= every) void run();
   };
   const stop = () => {
     clearInterval(timer);

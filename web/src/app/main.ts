@@ -317,3 +317,19 @@ function siteTicker(page: string) {
   }
   if (tickerEl) tickerEl.hidden = ['activity', 'live', 'create', 'me', 'member', 'party'].includes(page);
 }
+
+// The mark builds once on load and again on hover; a hover mid-build lets it finish.
+{
+  const mark = document.querySelector<SVGElement>('.logo .mark');
+  let building = false;
+  const build = () => {
+    if (!mark || building) return;
+    building = true;
+    mark.classList.remove('build');
+    void mark.getBoundingClientRect();
+    mark.classList.add('build');
+    setTimeout(() => (building = false), 800);
+  };
+  build();
+  mark?.closest('a')?.addEventListener('pointerenter', build);
+}

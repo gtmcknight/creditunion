@@ -1230,15 +1230,19 @@ async function bindBuy(
   buyMost = false;
   // Live: the listings that fit, read again every 20 s (the worker's scan of them is cached 30 s). The cheapest that
   // many show, and any you picked stay while they're listed.
-  keepLive(grid, async () => {
-    if (order) return repicture(order);
-    const r = await fetch(`/opensea/listings?batch=${batch}`);
-    const d = r.ok ? ((await r.json()) as { listings?: Listed[]; sources?: Source[]; error?: string }) : null;
-    if (!d?.listings || d.error || !grid.isConnected) return;
-    all = d.listings;
-    sources = d.sources ?? sources;
-    reshow();
-  });
+  keepLive(
+    grid,
+    async () => {
+      if (order) return repicture(order);
+      const r = await fetch(`/opensea/listings?batch=${batch}`);
+      const d = r.ok ? ((await r.json()) as { listings?: Listed[]; sources?: Source[]; error?: string }) : null;
+      if (!d?.listings || d.error || !grid.isConnected) return;
+      all = d.listings;
+      sources = d.sources ?? sources;
+      reshow();
+    },
+    order ? 10_000 : undefined, // a picture's Buy list: many buyers at once, each read comes from the market book
+  );
   const reshow = () => {
     relist(grid, sale, showing(new Set(ctl.chosen().map((l) => l.id))), tile, ctl);
     if (marks) sourceMarks(marks, [...sources, ...all.map((l) => l.source)]);

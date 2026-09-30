@@ -21,7 +21,7 @@ type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-ex
 export type Source = 'opensea' | 'fwa' | 'strategy';
 /// A listing that fits: on OpenSea (a Seaport order, by hash), on FWA's marketplace (by listing id) or held by
 /// CreditStrategy (by Credit id).
-export type Listing = { id: string; price: string; source: Source; hash?: string; protocol?: string; listingId?: string };
+export type Listing = { id: string; price: string; source: Source; hash?: string; protocol?: string; listingId?: string; seller?: string; until?: number };
 /// A listing off OpenSea handed to the scan, just read on-chain: FWA (with its listing id) or CreditStrategy.
 export type Extra = { id: string; price: string; source: 'fwa' | 'strategy'; listingId?: string };
 type Cand = {
@@ -92,6 +92,7 @@ function usable(l: Json, credits: Address) {
     hash: String(l.order_hash),
     protocol: String(l.protocol_address),
     seller: String(p.offerer).toLowerCase() as Address,
+    until: Number(p.endTime ?? 0) || 0,
     operator: operator as Address | null,
     recipients: p.consideration.map((c: Json) => String(c.recipient).toLowerCase() as Address),
   };
@@ -119,7 +120,7 @@ export async function bestPage(key: string, slug: string, credits: Address, next
   const items = ((r.listings ?? []) as Json[])
     .map((l) => usable(l, credits))
     .filter((c): c is NonNullable<typeof c> => !!c && !!c.operator)
-    .map((c): Listing => ({ id: c.id, price: c.price.toString(), source: 'opensea', hash: c.hash, protocol: c.protocol }));
+    .map((c): Listing => ({ id: c.id, price: c.price.toString(), source: 'opensea', hash: c.hash, protocol: c.protocol, seller: c.seller, until: c.until }));
   return { items, next: String(r.next ?? '') };
 }
 
@@ -309,4 +310,36 @@ function toAdvanced(r: Json): Json {
     signature: adv?.signature ?? order.signature,
     extraData: adv?.extraData ?? '0x',
   };
+}
+
+/// What happened to the collection since `after` (unix seconds): new listings, and Credits that left an address
+/// (a sale or any transfer). Newest first from OpenSea; read back to `after`, `pages` at most.
+export async function events(key: string, slug: string, credits: Address, after: number, pages = 10) {
+  // In the order they happened (OpenSea sends newest first): a relist after a listing must win over it.
+  const ops: ({ t: number; listed: Listing } | { t: number; gone: { id: string; from: string } })[] = [];
+  let newest = after, next = '';
+  for (let pg = 0; pg < pages; pg++) {
+    const r = await os(key, `/events/collection/${slug}?event_type=listing&event_type=sale&event_type=transfer&after=${after}&limit=50${next ? `&next=${encodeURIComponent(next)}` : ''}`);
+    for (const e of (r.asset_events ?? []) as Json[]) {
+      newest = Math.max(newest, Number(e.event_timestamp) || 0);
+      const nft = e.asset ?? e.nft;
+      if (String(nft?.contract ?? '').toLowerCase() !== credits.toLowerCase()) continue;
+      const id = String(nft.identifier);
+      if (e.event_type === 'order' && e.order_type === 'listing') {
+        // A plain ETH listing of one Credit through Seaport 1.6, open to anyone, not expired: what the Sweeper fills.
+        if (e.is_private_listing || Number(e.quantity) !== 1) continue;
+        if (String(e.payment?.token_address ?? '') !== '0x0000000000000000000000000000000000000000') continue;
+        if (String(e.protocol_address ?? '').toLowerCase() !== SEAPORT) continue;
+        const until = Number(e.expiration_date) || 0;
+        if (until && until <= Date.now() / 1000) continue;
+        ops.push({ t: Number(e.event_timestamp) || 0, listed: { id, price: String(e.payment.quantity), source: 'opensea', hash: String(e.order_hash), protocol: String(e.protocol_address), seller: String(e.maker ?? '').toLowerCase(), until } });
+      } else if (e.event_type === 'sale') ops.push({ t: Number(e.event_timestamp) || 0, gone: { id, from: String(e.seller ?? '').toLowerCase() } });
+      else if (e.event_type === 'transfer') ops.push({ t: Number(e.event_timestamp) || 0, gone: { id, from: String(e.from_address ?? '').toLowerCase() } });
+    }
+    next = String(r.next ?? '');
+    const oldest = Math.min(...((r.asset_events ?? []) as Json[]).map((e) => Number(e.event_timestamp) || Infinity));
+    if (!next || oldest < after) break;
+  }
+  // OpenSea's newest-first order, reversed, then sorted by time (a stable sort): same-second events stay in order.
+  return { ops: ops.reverse().sort((a, b) => a.t - b.t), newest };
 }
