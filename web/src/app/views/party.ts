@@ -256,7 +256,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     <div class="batch-art dir-host" data-show="now" data-name="${esc(s.name || 'Untitled')}">${artHtml}</div>
     <div class="batch-side">
       <header>
-        <h3 class="side-label">${burned ? `Statement #${s.statementId}` : 'Union'}</h3>
+        ${burned ? `<h3 class="side-label">Statement #${s.statementId}</h3>` : ''}
         <h1>${esc(s.name || 'Untitled')}</h1>
       </header>
       <dl class="kv">
@@ -274,6 +274,16 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         <div><dt>Payout</dt><dd>${s.split === 1 ? `Early bird <span class="muted">· 1st ${sharePct(earlyShare(0))} → 80th ${sharePct(earlyShare(79))}</span>` : `Equal <span class="muted">· ${sharePct(1 / 80)} per Credit</span>`}</dd></div>
         <div class="takes"><dt>Rules</dt><dd>${rules.length ? rules.map(rule).join('') : 'Any Credit'}</dd></div>
       </dl>
+      <details class="kv-more">
+        <summary><span class="when-closed">More details</span><span class="when-open">Fewer details</span></summary>
+        <dl class="kv">
+          ${fact('Layout', `<span class="layout-name">${ARRANGEMENTS[s.arrangement] ?? 'Order joined'}</span>`)}
+          ${s.count ? fact('Rating', `<span id="rating" class="muted">…</span>`) : ''}
+          ${s.reserve && (s.state === 'Open' || s.state === 'Full' || (s.state === 'Auction' && s.minBid === s.reserve && !s.highBid)) ? fact('Reserve', eth(s.reserve)) : ''}
+          ${fact('Split', split(s))}
+          ${fact('Contract', link(s.address))}
+        </dl>
+      </details>
       <div id="panel">${panel(b, m, myIds, quick === LATE)}</div>
       <div class="folds">
       ${s.state === 'Settled' ? `<details class="more" id="unclaimed" hidden>
@@ -290,17 +300,6 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         <ol class="live-list fold-list short" id="activity-list"><li class="muted live-empty">Loading…</li></ol>
         <button type="button" class="link small activity-all" id="activity-all" hidden></button>
       </section>
-      <details class="more">
-        <summary><span>Details</span><span class="muted small num" id="rating-sum"></span></summary>
-        <dl class="facts">
-          ${fact('Layout', `<span class="layout-name">${ARRANGEMENTS[s.arrangement] ?? 'Order joined'}</span>`)}
-          ${s.state === 'Auction' || s.state === 'Settled' ? fact('Members', `<button type="button" class="link num" id="depositors-btn">${depositors}</button>`) : ''}
-          ${s.count ? fact('Credit rating', `<span id="rating" class="muted">…</span>`) : ''}
-          ${s.reserve && (s.state === 'Open' || s.state === 'Full' || (s.state === 'Auction' && s.minBid === s.reserve && !s.highBid)) ? fact('Reserve', eth(s.reserve)) : ''}
-          ${fact('Sale split', split(s))}
-          ${fact('Contract', link(s.address))}
-        </dl>
-      </details>
       </div>
     </div>
   </section>`;
@@ -370,7 +369,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         document.querySelector<HTMLElement>('[data-pane="withdraw"]')?.setAttribute('hidden', '');
         document.querySelector<HTMLElement>('[data-add="buy"]')?.parentElement?.setAttribute('hidden', ''); // Buy alone needs no tabs
         const note = document.querySelector('.pane-note');
-        if (note) note.innerHTML = '<span id="buy-line"></span>Credit Union is unofficial and experimental, so use it at your own risk. <a href="/docs">How it works</a>';
+        if (note) note.innerHTML = '<span id="buy-line"></span><span class="buy-how">One transaction buys your picks and deposits them in your name. </span>Unofficial, use at your own risk. <a href="/docs" target="_blank" rel="noopener">How it works</a>';
         document.querySelector('[data-pane="buy"]')?.insertAdjacentHTML('afterbegin', '<div class="picture-rules"><p><strong>Buy only.</strong> Each open slot has one Credit for sale picked to draw that part of the picture. You buy those, in order. Credits you already own can’t go in.</p><p><strong>No withdrawals here.</strong> Taking a Credit out would shift the picture.</p></div>');
       }
       if (config.sweeper) {
@@ -534,7 +533,7 @@ function openCreated(b: Ctx, placed?: (bigint | null)[], joined?: number) {
 /// "1% protocol · 5% creator · 94% to depositors"
 function split(s: Ctx['s']) {
   const rest = 10_000 - s.protocolFeeBps - s.creatorFeeBps;
-  return [`${pct(s.protocolFeeBps)} protocol`, s.creatorFeeBps ? `${pct(s.creatorFeeBps)} creator` : '', `${pct(rest)} members`]
+  return [`${pct(rest)} members`, s.creatorFeeBps ? `${pct(s.creatorFeeBps)} creator` : '', `${pct(s.protocolFeeBps)} protocol`]
     .filter(Boolean)
     .join(' · ');
 }
@@ -631,7 +630,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>, pending = false) {
       </div>
       <div data-pane="buy"${start === 'buy' ? '' : ' hidden'}>${buyPane(!!m)}</div>
       ${myIds.size ? `<div data-pane="withdraw"${start === 'withdraw' ? '' : ' hidden'}>${withdraw()}</div>` : ''}
-      <p class="muted small pane-note"><span id="buy-line">Finding the cheapest listings that fit… </span>Leave anytime until it locks. Credit Union is unofficial and experimental, so use it at your own risk. <a href="/docs">How it works</a></p>
+      <p class="muted small pane-note"><span id="buy-line">Finding the cheapest listings that fit… </span><span class="buy-how">One transaction buys your picks and deposits them in your name. </span>Leave anytime until it locks. Unofficial, use at your own risk. <a href="/docs" target="_blank" rel="noopener">How it works</a></p>
     </div>`;
   }
 
@@ -724,7 +723,6 @@ function buyPane(connected: boolean) {
   return `<div class="buy-row" id="buy-act">${sweepRow('sale', 0, MAX_SWEEP, 0)}</div>
     <div class="trait-grid listings" id="listings">${creditSkel.repeat(MAX_SWEEP)}</div>
     ${connected || !config.sweeper ? `<button class="btn primary block" id="buy-go" disabled>Buy &amp; deposit</button>` : connectToBuy(true)}
-    <p class="muted small buy-source">One transaction buys the Credits you pick (OpenSea, FWA, CreditStrategy) and deposits them here in your name.</p>
 `;
 }
 
@@ -1135,8 +1133,8 @@ const quotedPrices = (q: Quote) =>
     ...(q.strategy ?? []).map((f) => [f.id, BigInt(f.price)] as const),
   ]);
 
-/// The Buy grid shows a row and a half: enough to see more wait below. Picking further down (the slider takes the
-/// cheapest in order) opens it to the last picked row and half the next.
+/// The Buy grid shows one row. Picking further down (the slider takes the cheapest in order) opens it to the last
+/// picked row.
 function fitRows(grid: HTMLElement) {
   const cells = [...grid.children] as HTMLElement[];
   if (!cells.length) return;
@@ -1146,9 +1144,16 @@ function fitRows(grid: HTMLElement) {
   const picked = cells.reduce((at, c, i) => (c.classList.contains('sel') ? i : at), -1);
   const upTo = picked < 0 ? 0 : rows.indexOf(Math.round(cells[picked].getBoundingClientRect().top - top));
   const next = rows[upTo + 1];
-  // Half the next row's art (not its caption): enough to read as more below.
-  const art = cells[0].querySelector<HTMLElement>('.cc-art')?.offsetHeight ?? cells[0].offsetHeight;
-  grid.style.maxHeight = next === undefined ? 'none' : `${Math.round(next + art / 2)}px`;
+  const css = getComputedStyle(grid);
+  const exact = next === undefined ? 0 : cells.find((c) => Math.round(c.getBoundingClientRect().top - top) === next)!.getBoundingClientRect().top - top;
+  const cut = exact - (parseFloat(css.rowGap) || 0) + (parseFloat(css.paddingBottom) || 0); // the row's bottom, plus the grid's own padding
+  const h = next === undefined ? 'none' : `${cut}px`;
+  if (grid.style.maxHeight) return void (grid.style.maxHeight = h);
+  // The first fit (tiles just replaced the skeleton): snap, no shrink from the stylesheet's height.
+  grid.style.transition = 'none';
+  grid.style.maxHeight = h;
+  void grid.offsetHeight;
+  grid.style.transition = '';
 }
 
 /// The Buy tab, as on /credits: the cheapest Credits that fit, as many as one buy takes. Drag for the cheapest that
@@ -1460,10 +1465,8 @@ async function loadRatings(
   if (scores.length) {
     // The Statement's own metadata carries a "Credit rating": the total over its 80. Show that total, so far.
     const total = scores.reduce((a, x) => a + x, 0);
-    const sum = document.getElementById('rating-sum');
-    if (sum) sum.textContent = `Rating ${Math.round(total).toLocaleString()}`;
     el.classList.remove('muted');
-    el.innerHTML = `<span class="num">${Math.round(total).toLocaleString()}</span>${scores.length < 80 ? ` <span class="muted small num">from ${scores.length} of 80</span>` : ''} <a href="${RATING_URL}" target="_blank" rel="noopener" class="muted small" title="The total of Jack Butcher’s rating (v${version}, over all ${n.toLocaleString()} Credits) across this Credit Union’s Credits">v${version} ↗</a>`;
+    el.innerHTML = `<span class="num">${Math.round(total).toLocaleString()}</span>${scores.length < 80 ? ` <span class="muted small num">from ${scores.length} ${scores.length === 1 ? 'Credit' : 'Credits'}</span>` : ''} <span class="muted">·</span> <a href="${RATING_URL}" target="_blank" rel="noopener" class="muted small" title="The total of Jack Butcher’s rating (v${version}, over all ${n.toLocaleString()} Credits) across this Credit Union’s Credits">v${version} ↗</a>`;
   }
   document.querySelectorAll<HTMLElement>('.batch-art .cell[data-id]').forEach((c) => {
     const r = rated[c.dataset.id!];

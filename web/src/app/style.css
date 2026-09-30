@@ -3709,6 +3709,16 @@ a.rule-chip:hover {
 }
 
 /* Buy tab: grey tiles while the listings load. */
+/* One row of them, as the loaded grid shows: rows past the first collapse to nothing. */
+.listings:has(> .skel) {
+  grid-template-rows: auto;
+  grid-auto-rows: 0;
+  row-gap: 0;
+  overflow: hidden;
+}
+.listings > .cc.skel {
+  overflow: hidden;
+}
 .listings .cc.skel .cc-art {
   animation: skel 1.2s ease-in-out infinite alternate;
 }
@@ -4997,7 +5007,7 @@ a.who:hover .who-name {
   line-height: 1.6;
 }
 /* The buy status leads the pane note only while the Buy tab is showing. */
-[data-pane='buy'][hidden] ~ .pane-note #buy-line {
+[data-pane='buy'][hidden] ~ .pane-note :is(#buy-line, .buy-how) {
   display: none;
 }
 /* Slot tooltip lines stay on one line each; the tip grows to fit. */
@@ -8992,6 +9002,45 @@ dialog.share .share-swatches button {
 }
 .kv .members-btn {
   line-height: 24px;
+}
+/* More details: a quiet toggle under Rules that opens the rest in the same lines. */
+.kv-more {
+  margin-top: -12px; /* the column's 24 less 12: a line's gap under Rules, as between the lines */
+}
+.kv-more > summary {
+  display: inline-block;
+  list-style: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 24px;
+  cursor: pointer;
+}
+.kv-more > summary::-webkit-details-marker {
+  display: none;
+}
+.kv-more > summary:focus:not(:focus-visible) {
+  outline: none;
+}
+.kv-more > summary:hover {
+  color: var(--fg);
+}
+.kv-more[open] > summary .when-closed,
+.kv-more:not([open]) > summary .when-open {
+  display: none;
+}
+.kv-more > .kv {
+  margin: 12px 0 0;
+}
+/* One treatment for everything in these lines: values in ink at one weight, asides muted, and anything you can
+   hover or click (creator, members, see it finished, rules) plain until hovered, then underlined. */
+.kv :is(.members-btn, .hover-show, a) {
+  font-weight: inherit;
+  text-decoration: none;
+}
+.kv :is(.members-btn, .hover-show, a):hover {
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
 }
 /* A union's Activity opens on its latest three; Show all lists the rest. */
 .fold-list.short > li:nth-child(n + 4) {
