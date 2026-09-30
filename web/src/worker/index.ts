@@ -16,6 +16,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { createPublicClient, fallback, hexToBytes, http, type Address, type Hex, parseAbiItem } from 'viem';
 import { mainnet } from 'viem/chains';
+import { privateKeyToAccount } from 'viem/accounts';
 import { normalize } from 'viem/ens';
 import { batchAbi, creditsAbi, creditArtAbi, factoryAbi } from '../app/abi';
 import { setSpareKey, best, bestPage, events, quote, scan, type Extra, type Listing } from './opensea';
@@ -317,6 +318,13 @@ async function burnsOpen(env: Env) {
   return (await env.PLANS?.get('burns-open', { cacheTtl: 30 })) === '1';
 }
 
+/// The keeper's address, never its key, at /burns: so its gas money can be checked before burn day.
+let keeperAddr: Address | null | undefined;
+const keeperOf = (env: Env) =>
+  keeperAddr !== undefined
+    ? keeperAddr
+    : (keeperAddr = /^0x[0-9a-fA-F]{64}$/.test(env.KEEPER_KEY ?? '') ? privateKeyToAccount(env.KEEPER_KEY as Hex).address : null);
+
 /// Chain and addresses for the app: at /config.json, and written into every page the Worker serves (#config).
 const publicConfig = (env: Env) => ({
   chainId: Number(env.CHAIN_ID),
@@ -363,7 +371,7 @@ function matchRules(b: Record<string, unknown>): { rules: Rules; page: number } 
 }
 
 async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): Promise<Response> {
-  if (url.pathname === '/burns') return Response.json({ open: await burnsOpen(env) }, { headers: { 'cache-control': 'public, max-age=15' } });
+  if (url.pathname === '/burns') return Response.json({ open: await burnsOpen(env), keeper: keeperOf(env) }, { headers: { 'cache-control': 'public, max-age=15' } });
   if (url.pathname === '/config.json') return Response.json(publicConfig(env), { headers: { 'cache-control': 'public, max-age=60' } });
 
   if (url.pathname === '/rpc') return rpc(req, env, url);

@@ -36,7 +36,7 @@ early Wednesday. This is the checklist from his publish to the first Statement. 
 
 | ET | UTC | |
 |---|---|---|
-| by 6:00pm | 22:00 | The keeper is on: `KEEPER_KEY` is set (`wrangler secret put KEEPER_KEY`) and the key holds enough ETH for every full union's burn. `KEEPER_MAX_GWEI` isn't below the day's gas price. **Burns are held:** `pnpm wrangler kv key get --binding PLANS burns-open --remote` is empty (not `1`). While held, the keeper still turns burning on and settles, but burns nothing, and union pages hide Make Statement. |
+| by 6:00pm | 22:00 | The keeper is on: `KEEPER_KEY` is set (`wrangler secret put KEEPER_KEY`) and the key holds enough ETH for every full union's burn (its address is at `/burns`). `KEEPER_MAX_GWEI` isn't below the day's gas price. **Burns are held:** `pnpm wrangler kv key get --binding PLANS burns-open --remote` is empty (not `1`). While held, the keeper still turns burning on and settles, but burns nothing, and union pages hide Make Statement. |
 | **7:30pm** | 23:30 | **Execute the Safe's `proposeAssembler`.** Not earlier: the keeper switches it on as soon as the 30-minute notice ends, and a union that locks before Jack's contract opens only fails its burn and loses its hour. The site shows the notice bar; anyone can still leave any union. |
 | 8:00pm | 00:00 | Burning switches on: anyone calls `activateAssembler()`, the keeper within 5 minutes, or press it ourselves at 8:00. Every full union starts its 5-minute countdown. |
 | ~8:05pm | 00:05 | The first union can burn. Open it with `?burn` on the URL (`/union/<address>?burn`), press **Make Statement** ourselves and check: the Statement is on the union page, the 80 are gone, the direction is right, the auction is open. |
