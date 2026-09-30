@@ -212,6 +212,9 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       placed = b.ids.length ? placeOnLayout(slots, b.ids, (id) => keyed.get(id.toString()) ?? 0) : undefined;
     } catch {}
   }
+  // Keys unread even after retrying: the sheet can't show where the Credits go, so it says so instead of drawing them
+  // in deposit order.
+  const unplaced = !!slots && !burned && b.ids.length > 0 && !placed;
   // Painted slot chips count the spaces left, not what the sheet was painted with.
   if (placed && s.state === 'Open')
     for (const r of rules) if (r.slots) r.value = String(r.slots.filter((i) => placed![i] == null).length);
@@ -222,8 +225,8 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   const show = (picked === 'finished' && s.count < 80) || (picked === 'yours' && myIds.size) ? picked : 'now';
   const artHtml = burned
     ? `<figure class="statement">${sheet(b.ids, { closed: true })}<figcaption class="legend muted small"><span>Statement #${s.statementId}</span></figcaption></figure>`
-    : `${sheet(b.ids, { mine: myIds, fresh: placed ? undefined : seen < s.count ? seen : undefined, closing: s.state === 'Full', placed, batch: s.state === 'Open' ? s.address : undefined })}${directionCanvas}
-       <div class="legend muted small">${showSwitch(s.count, myIds.size, show)}${directions(s.address)}</div>`;
+    : `${sheet(b.ids, { mine: myIds, fresh: placed ? undefined : seen < s.count ? seen : undefined, closing: s.state === 'Full', placed, batch: s.state === 'Open' ? s.address : undefined })}${unplaced ? '' : directionCanvas}
+       <div class="legend muted small">${unplaced ? '<span>Couldn’t read which slot each Credit fills. Refresh to try again.</span>' : `${showSwitch(s.count, myIds.size, show)}${directions(s.address)}`}</div>`;
 
   app.innerHTML = `
   

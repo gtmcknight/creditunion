@@ -331,7 +331,12 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       if (document.getElementById('batches') !== el) return clearInterval(poll);
       if (document.visibilityState !== 'visible') return;
       const next = await listBatches().catch(() => null);
-      if (!next || sig(next) === seen || document.getElementById('batches') !== el) return;
+      // A layout union whose placement failed earlier (a busy RPC) is tried again, then drawn.
+      if (next && sig(next) === seen) {
+        if (await placeCards(list)) draw();
+        return;
+      }
+      if (!next || document.getElementById('batches') !== el) return;
       seen = sig(next);
       const nextParties = next.filter((b) => PARTY_STATES.has(b.s.state));
       const nextList = want ? nextParties.filter((b) => b.s.state === 'Open' && want.test(b)) : tab === 'parties' ? nextParties : next.filter((b) => b.s.state !== 'Open' && b.s.state !== 'Expired');

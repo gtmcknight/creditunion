@@ -65,6 +65,18 @@ export async function keysOf(trait: number, ids: readonly bigint[]): Promise<Map
 /// The same from the Worker's /placed answer: one request (kept at the edge) for every Credit's value, which also
 /// brings their ink. Falls back to reading the chain when the answer is behind the ids asked for.
 export async function placedKeys(batch: Address, ids: readonly bigint[]): Promise<Map<string, number>> {
+  // A layout union drawn without its keys would put its Credits in deposit order (a scrambled picture): a busy RPC
+  // or a rate limit gets three tries, a second apart, before giving up.
+  for (let tryN = 0; ; tryN++) {
+    try {
+      return await placedKeysOnce(batch, ids);
+    } catch (e) {
+      if (tryN >= 2) throw e;
+      await new Promise((r) => setTimeout(r, 1000 * (tryN + 1)));
+    }
+  }
+}
+async function placedKeysOnce(batch: Address, ids: readonly bigint[]): Promise<Map<string, number>> {
   const r = (await fetch(`/placed/${batch}`)
     .then((x) => (x.ok ? x.json() : null))
     .catch(() => null)) as { ids?: string[]; keys?: number[]; inks?: Record<string, [string, number, number]> } | null;
