@@ -64,8 +64,10 @@ async function os(key: string, path: string, init?: RequestInit): Promise<Json> 
   let res = await go(key);
   if (res.status === 429 && spare && spare !== key) res = await go(spare);
   if (!res.ok) {
-    console.warn(`[opensea] ${res.status} ${path.split('?')[0]}: ${(await res.text()).slice(0, 200)}`);
-    throw new Error(osError(res.status));
+    const body = (await res.text()).slice(0, 200);
+    if (res.status !== 404) console.warn(`[opensea] ${res.status} ${path.split('?')[0]}: ${body}`);
+    // The status rides along (callers tell a missing listing from an outage by it); the message is for people.
+    throw Object.assign(new Error(osError(res.status)), { status: res.status, body });
   }
   return res.json();
 }
@@ -101,7 +103,7 @@ export async function best(key: string, slug: string, credits: Address, id: numb
   try {
     r = await os(key, `/listings/collection/${slug}/nfts/${id}/best`);
   } catch (e) {
-    if (/OpenSea 404/.test((e as Error).message)) return null;
+    if ((e as { status?: number }).status === 404) return null;
     throw e;
   }
   const l = usable(r, credits);
@@ -258,7 +260,7 @@ export async function quote(o: { key: string; sweeper: Address; listings: Listin
           const err = e as Error;
           // "Order not valid" (400) is a dead listing, and a malformed fill is skipped the same way; a rate
           // limit or outage stops the walk, and what was already collected is still a valid quote.
-          if (/OpenSea 400/.test(err.message) || /no order parameters/.test(err.message)) stale = true;
+          if ((e as { status?: number }).status === 400 || /no order parameters/.test(err.message)) stale = true;
           else upstream = err;
           return null;
         }
