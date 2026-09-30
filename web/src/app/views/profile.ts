@@ -5,7 +5,7 @@ import { listBatches, myCredits, type Listed } from '../data';
 import { hydrate, who } from '../ens';
 import { fillGhosts } from '../ghosts';
 import { errText, esc, eth, pageHead, same, toast } from '../ui';
-import { card, mineIn } from './lists';
+import { card, drawPictures, mineIn, pictureCards, placeCards } from './lists';
 import { creditCell } from './trait';
 import { activityItems, activityOf } from './live';
 
@@ -118,6 +118,7 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
     }
     at.innerHTML = `<p class="muted tab-note">${NOTES[tab](own)}</p>${body[tab]()}`;
     hydrate(at);
+    drawPictures(at);
     fillGhosts(at);
   };
   app.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) =>
@@ -127,6 +128,11 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
     }),
   );
   draw();
+  // Layout and picture unions draw as /unions draws them once their placements and saved pictures are read.
+  // Always redraw: a second render of this page finds them already read (nothing new), yet drew before they were.
+  void Promise.all([placeCards([...filling, ...auctions]), pictureCards([...filling, ...auctions])]).then(() => {
+    if (document.getElementById('tab-body') === at) draw();
+  });
   void activityOf({ member: account }).then((rows) => {
     activity = rows;
     if (at.isConnected) draw();

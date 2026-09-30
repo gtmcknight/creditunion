@@ -129,6 +129,16 @@ export async function pictureCards(list: Listed[]) {
   return found.some(Boolean);
 }
 
+/// Picture cards under `root` (only those in `fresh`, when given) show their picture in Consolidated, as Now: what's
+/// in at full ink, the rest faded. Each draws as soon as its own planned Credits are in.
+export function drawPictures(root: ParentNode, fresh?: Set<Element>) {
+  root.querySelectorAll<HTMLElement>('.card-art.picture').forEach((h) => {
+    if (fresh && !fresh.has(h.closest('.card')!)) return;
+    showStill(h);
+    if (h.dataset.ready) void fillGhosts(h).then(() => drawStill(h, 'Consolidated'));
+  });
+}
+
 /// Ids in this batch deposited by `by` (the connected wallet by default).
 export function mineIn(b: Listed, by = session.account) {
   return new Set(b.ids.filter((_, i) => same(b.depositors[i], by)).map(String));
@@ -310,11 +320,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         // A picture union's card shows its picture in Consolidated, as Now: what's in at full ink, the rest faded.
         // Each picture card draws as soon as its own planned Credits are in, not after every card's examples. A card
         // kept from the last drawing already shows it.
-        el.querySelectorAll<HTMLElement>('.card-art.picture').forEach((h) => {
-          if (!fresh.has(h.closest('.card')!)) return;
-          showStill(h);
-          if (h.dataset.ready) void fillGhosts(h).then(() => drawStill(h, 'Consolidated'));
-        });
+        drawPictures(el, fresh);
         void fillGhosts(el);
         return;
       }
