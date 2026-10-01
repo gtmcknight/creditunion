@@ -1385,7 +1385,8 @@ async function bindBuy(
     go.disabled = mainnetOnly || !n || !connected;
     go.textContent = n ? `Buy & deposit ${n}` : 'Buy & deposit';
   };
-  const ctl = sweepControls(host, sale, grid, { button: false, cap: 80 - b.s.count, onPick: label });
+  // A picture's Credits go in in the order shown (each takes the first open slot of its colour): a tap picks up to it.
+  const ctl = sweepControls(host, sale, grid, { button: false, cap: 80 - b.s.count, onPick: label, inOrder: () => !!order });
   chosen = ctl.chosen;
   label();
   // Live: the listings that fit, read again every 20 s (the worker's scan of them is cached 30 s). The cheapest that
