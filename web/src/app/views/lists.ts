@@ -9,6 +9,7 @@ import { clock, eth, esc, openModal, pageHead, same, sheet, startsAt, statementA
 import { TRAIT_KINDS, parseTrait, type TraitValue } from '../../shared/trait';
 import { creditsOf, takes } from './trait';
 import { drawStill, primeInks, showStill, warmInks } from '../directions';
+import { DIRECTIONS, type Direction } from '../../shared/statement';
 
 /// Last deposit per union, from the activity feed (filled in after the first draw).
 
@@ -157,13 +158,14 @@ export async function pictureCards(list: Listed[]) {
   return found.some(Boolean);
 }
 
-/// Picture cards under `root` (only those in `fresh`, when given) show their picture in Consolidated, as Now: what's
-/// in at full ink, the rest faded. Each draws as soon as its own planned Credits are in.
+/// Cards under `root` (only those in `fresh`, when given) that draw a format over their sheet (card's data-draw): a
+/// full union in the format it burns in, a picture still filling in Consolidated, as Now (what's in at full ink, the
+/// rest faded). Each draws as soon as its own Credits are placed.
 export function drawPictures(root: ParentNode, fresh?: Set<Element>) {
-  root.querySelectorAll<HTMLElement>('.card-art.picture').forEach((h) => {
+  root.querySelectorAll<HTMLElement>('.card-art[data-draw]').forEach((h) => {
     if (fresh && !fresh.has(h.closest('.card')!)) return;
     showStill(h);
-    if (h.dataset.ready) void fillGhosts(h).then(() => drawStill(h, 'Consolidated'));
+    if (h.dataset.ready) void fillGhosts(h).then(() => drawStill(h, h.dataset.draw as Direction));
   });
 }
 
@@ -202,7 +204,7 @@ function morph(el: HTMLElement, html: string): Set<Element> {
 }
 
 /// `rating`: the union's total rating, shown as a fourth line (while sorting by it).
-export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yours', rating?: number) {
+export function card({ s, ids, depositors, format }: Listed, fit?: bigint[], whose = 'yours', rating?: number) {
   const mine = mineIn({ s, ids, depositors });
   const room = 80 - s.count;
   const picture = pictures.has(s.address);
@@ -211,6 +213,12 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yo
   const canJoin = fit?.length ? Math.min(fit.length, room) : 0;
   const burned = s.state === 'Auction' || s.state === 'Settled';
   const live = s.state === 'Auction' && !(s.highBid && Date.now() / 1000 >= s.auctionEnd);
+  // What the art draws over its sheet: a full union the format it burns in (its creator's pick, else Consolidated for a
+  // picture and Issued, the sheet itself, for the rest); a picture still filling Consolidated. A burned one shows its
+  // Statement instead.
+  const burnsIn: Direction = (s.state === 'Full' && format != null && DIRECTIONS[format]) || (picture ? 'Consolidated' : 'Issued');
+  const draw = !burned && burnsIn !== 'Issued' ? burnsIn : null;
+  const ready = picture ? pictureReady({ s, ids, depositors }) : ids.length === 80;
   // The art carries no text. Under it, three lines: the name; who started it and how many are in; where it stands and
   // what of yours is in or fits.
   const cta = s.state === 'Open' && !mine.size ? 'Join' : live ? 'Bid' : '';
@@ -226,7 +234,7 @@ export function card({ s, ids, depositors }: Listed, fit?: bigint[], whose = 'yo
   registerFilter(s.address, s.filter);
   registerDeposits(ids, depositors, s.split === 1);
   return `<a class="card${canJoin ? ' can-join' : ''}" href="/union/${s.address}">
-    <div class="card-art${picture ? ' picture dir-host' : ''}${burned ? ' statement-host' : ''}"${picture ? ` data-portrait="${s.address.toLowerCase()}:${ids.length}:${ids.length ? ids[ids.length - 1] : ''}"${pictureReady({ s, ids, depositors }) ? ' data-ready="1"' : ''}` : ''}>${sheet(ids, { size: 'sm', mine, placed: placements.get(placeKey({ s, ids })), batch: s.state === 'Open' ? s.address : undefined, painted: true })}${burned ? statementArt(s.statementId) : ''}</div>
+    <div class="card-art${picture ? ' picture' : ''}${draw ? ' dir-host' : ''}${burned ? ' statement-host' : ''}"${draw ? ` data-draw="${draw}" data-portrait="${s.address.toLowerCase()}:${ids.length}:${ids.length ? ids[ids.length - 1] : ''}:${draw}"${ready ? ' data-ready="1"' : ''}` : ''}>${sheet(ids, { size: 'sm', mine, placed: placements.get(placeKey({ s, ids })), batch: s.state === 'Open' ? s.address : undefined, painted: true })}${burned ? statementArt(s.statementId) : ''}</div>
     <div class="card-meta">
       <div class="meta-text">
         <strong>${esc(s.name || 'Untitled')}</strong>
@@ -380,9 +388,9 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         );
         el.querySelector('#show-empty')?.addEventListener('click', () => ((showEmpty = true), draw()));
         hydrate(el);
-        // A picture union's card shows its picture in Consolidated, as Now: what's in at full ink, the rest faded.
-        // Each picture card draws as soon as its own planned Credits are in, not after every card's examples. A card
-        // kept from the last drawing already shows it.
+        // A full union's card shows the format it burns in, a picture still filling Consolidated, as Now: what's in at
+        // full ink, the rest faded. Each card draws as soon as its own Credits are in, not after every card's examples.
+        // A card kept from the last drawing already shows it.
         drawPictures(el, fresh);
         void fillGhosts(el);
         return;
@@ -405,12 +413,8 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
             : `<p class="muted">${pick === 'upcoming' ? 'No Credit Union is full right now.' : pick === 'live' ? 'Nothing at auction right now.' : 'Nothing sold yet.'}</p>`,
       );
       hydrate(el);
-      // Picture unions waiting to burn show their picture here too, as on /unions (a kept card already does).
-      el.querySelectorAll<HTMLElement>('.card-art.picture').forEach((h) => {
-        if (!fresh.has(h.closest('.card')!)) return;
-        showStill(h);
-        if (h.dataset.ready) void fillGhosts(h).then(() => drawStill(h, 'Consolidated'));
-      });
+      // Unions waiting to burn show the format they burn in here too, as on /unions (a kept card already does).
+      drawPictures(el, fresh);
       fillGhosts(el);
       // Empty Auctions: a greyed Statement of real edition Credits stands in for the first one.
       const ph = document.getElementById('auction-placeholder');

@@ -1,7 +1,7 @@
 import { parseAbi, parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi, unionFormatsAbi } from '../abi';
 import { canBatch, config, explorer, pub, send, sendBatch, session } from '../chain';
-import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, indexedBatch, indexedOne, keepPick, layoutSlot, me, notice, pickOf, placeOnLayout, readNotice, ratings, sinceTx, staleBatches, type Rated } from '../data';
+import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, indexedBatch, indexedOne, keepPick, layoutSlot, me, notice, pickOf, placeOnLayout, readNotice, ratings, sinceTx, staleBatches, type Rated, burnsAt } from '../data';
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { ens, hydrate, identicon, pct, who } from '../ens';
 import { creditCard, examples, fillGhosts, planGhosts, registerDeposits, registerFilter } from '../ghosts';
@@ -12,10 +12,10 @@ import { creditCell, creditSkel } from './trait';
 import { shareButton } from '../share';
 import { directionCanvas, directions, mountDirections, pickedDirection, primeInks, sheetInks, showDirection, viewerPicked, warmInks } from '../directions';
 import { activityFold, ago } from './live';
-import { $$, art, clock, errText, esc, eth, openModal, same, setRange, sheet, short, startsAt, statementArt, toast, until } from '../ui';
+import { $$, art, clock, errText, dayAndTime, esc, eth, openModal, same, setRange, sheet, short, startsAt, statementArt, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
 import { slotName } from '../../shared/layout';
-import { compose, DIRECTIONS, paint as paintMarks, PAGE, type Direction } from '../../shared/statement';
+import { compose, DIRECTIONS, paint as paintMarks, PAGE, SHOWN, type Direction } from '../../shared/statement';
 import { go as navigate } from '../main';
 
 const CHUNK = 40; // Credits per transaction; keeps each one well under the block gas limit
@@ -572,14 +572,14 @@ const formatBox = `<div class="box format-box" hidden>
 </div>`;
 
 /// The window: this union in all eight formats. Click one, then Set format. Resolves with the pick once it's set.
-async function chooseFormat(host: HTMLElement, union: Address, burnsIn: Direction, at: Address): Promise<Direction | null> {
+async function chooseFormat(host: HTMLElement, union: Address, burnsIn: Direction, at: Address, until: string): Promise<Direction | null> {
   const { list, ghosts } = await sheetInks(host);
   const d = document.createElement('dialog');
   d.className = 'formats-pick';
   d.innerHTML = `<form method="dialog">
     <h3>Pick the format it burns in</h3>
-    <div class="fp-grid">${DIRECTIONS.map((f) => `<button type="button" class="fp-tile" data-format="${f}" aria-pressed="${f === burnsIn}"><canvas aria-hidden="true"></canvas><span>${f}${f === burnsIn ? ' <em>now</em>' : ''}</span></button>`).join('')}</div>
-    <p class="small muted">You can change it until the countdown starts. After the sale, the winner can switch formats anytime.</p>
+    <div class="fp-grid">${SHOWN.map((f) => `<button type="button" class="fp-tile" data-format="${f}" aria-pressed="${f === burnsIn}"><canvas aria-hidden="true"></canvas><span>${f}${f === burnsIn ? ' <em>now</em>' : ''}</span></button>`).join('')}</div>
+    <p class="small muted">You can change it ${until}. After the sale, the winner can switch formats anytime.</p>
     <button type="button" class="btn primary block" id="fp-set" disabled>Set format</button>
   </form>`;
   document.body.append(d);
@@ -626,7 +626,10 @@ const opensIn = (union: string, fallback: Direction) => picked.get(union.toLower
 /// "Burns in …" under the sheet: its creator's pick (UnionFormats), else Consolidated for a picture and Issued for the
 /// rest, as the burn contract decides. The sheet opens in a pick. While every member can still leave, the creator
 /// gets one button to make the format they're looking at the one it burns in.
+/// When the creator's button shows: full, before its countdown, or after a burn hour lapses unused.
+const PICK_PHASES: PhaseName[] = ['Waiting', 'Expired'];
 async function burnFormat(app: HTMLElement, s: Ctx['s'], picture: boolean) {
+  if (s.state !== 'Full') return; // the format and its button are for full unions only
   const k = s.address.toLowerCase(), read = await pickOf(s.address);
   if (!app.querySelector('.burns-in')?.isConnected) return;
   // A pick made on this page since the read began wins over the read.
@@ -646,13 +649,17 @@ async function burnFormat(app: HTMLElement, s: Ctx['s'], picture: boolean) {
   const at = config.formats, you = session.account;
   const box = app.querySelector<HTMLElement>('.format-box'), open = app.querySelector<HTMLButtonElement>('#format-open');
   // Two draws of the page can both get here after their reads; only one wires the button.
-  if (!at || !you || !same(you, s.creator) || !['Open', 'Waiting', 'Expired'].includes(livePhase(s)) || !box || !open || open.dataset.wired) return;
+  if (!at || !you || !same(you, s.creator) || !PICK_PHASES.includes(livePhase(s)) || !box || !open || open.dataset.wired) return;
   open.dataset.wired = '1';
   box.hidden = false;
   open.addEventListener('click', async () => {
     const host = app.querySelector<HTMLElement>('.batch-art');
     if (!host) return;
-    const d = await chooseFormat(host, s.address, burnsIn, at);
+    // Until when, in the viewer's own time: burning switching on starts a full union's countdown, as does someone
+    // restarting it after an unused burn hour.
+    const on = burnsAt(await readNotice());
+    const until = livePhase(s) === 'Expired' ? 'until someone restarts the countdown' : on * 1000 > Date.now() ? `until ${dayAndTime(on)}` : 'until burning starts, any minute now';
+    const d = await chooseFormat(host, s.address, burnsIn, at, until);
     if (!d) return;
     burnsIn = d;
     picked.set(k, d);

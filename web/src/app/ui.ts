@@ -169,6 +169,11 @@ export const utc = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('e
 export const localTime = (unix: number) =>
   new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(new Date(unix * 1000));
 /// When burning turns on, for "Burning starts …": "at 3:03 AM EDT", or "any minute now" once that's passed.
+/// A moment in the viewer's own time, as the notice bar and the format window say it: "Oct 1 at 7:00 PM CDT".
+export const dayAndTime = (unix: number) => {
+  const d = new Date(unix * 1000);
+  return `${new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(d)} at ${new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(d)}`;
+};
 export const startsAt = (unix: number) => (unix * 1000 > Date.now() ? `at ${localTime(unix)}` : 'any minute now');
 export const sameUtcDay = (a: Date, b: Date) => a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10);
 

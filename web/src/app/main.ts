@@ -17,8 +17,8 @@ import { credit } from './views/credit';
 import { traitPage } from './views/trait';
 import { timePage } from './views/time';
 import { bitsPage, ratingPage } from './views/scale';
-import { esc, errText, openModal, toast } from './ui';
-import { burningOn, indexedBatch, me, readNotice } from './data';
+import { dayAndTime, esc, errText, openModal, toast } from './ui';
+import { BURNING_FROM, burningOn, burnsAt, indexedBatch, me, readNotice } from './data';
 
 const app = document.getElementById('app')!;
 let seq = 0;
@@ -141,11 +141,6 @@ function drawTestnet() {
   el.innerHTML = `<span><strong>Testnet</strong> · ${esc(chain.name)}</span><a href="/mint">Mint test Credits →</a>`;
 }
 
-/// The earliest burning can open: the Statement contract goes live at 8:00 PM ET on Oct 1. Ours follows after checks and its
-/// 30-minute notice (contracts/RUNBOOK.md), so "starting" this time holds either way.
-const BURNING_FROM = Date.UTC(2026, 9, 2, 0, 0) / 1000; // Oct 1, 8:00 PM EDT
-const day = (unix: number) => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(unix * 1000));
-const time = (unix: number) => new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(new Date(unix * 1000));
 
 /// Burn day, one bar above the header for everyone, in their own time: when full Unions become Statements and go up
 /// for auction. Until the burn contract is proposed that's the earliest it can be; then the time from its 30-minute
@@ -154,8 +149,8 @@ async function drawNotice() {
   const n = await readNotice();
   const el = document.getElementById('notice')!;
   if (!n && (burningOn || Date.now() / 1000 > BURNING_FROM + 6 * 3600)) return;
-  const at = n ? n.at : BURNING_FROM, ahead = at * 1000 > Date.now();
-  const lead = ahead ? `Starting ${day(at)} at ${time(at)}, full Unions become Statements and go up for auction.` : n ? 'Any minute now, full Unions become Statements and go up for auction.' : 'Full Unions become Statements and go up for auction soon.';
+  const at = burnsAt(n), ahead = at * 1000 > Date.now();
+  const lead = ahead ? `Starting ${dayAndTime(at)}, full Unions become Statements and go up for auction.` : n ? 'Any minute now, full Unions become Statements and go up for auction.' : 'Full Unions become Statements and go up for auction soon.';
   el.innerHTML = `<span><strong>${lead}</strong> <a href="/docs#burning">How it works</a></span>`;
   el.hidden = false;
 }

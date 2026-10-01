@@ -12,6 +12,9 @@ import { accrued, amortized, assessed, binary, liquidated, paintModel, PALETTE }
 
 export const DIRECTIONS = ['Issued', 'Consolidated', 'Assessed', 'Reconciled', 'Accrued', 'Amortized', 'Liquidated', 'Recorded'] as const;
 export type Direction = (typeof DIRECTIONS)[number];
+/// The order the eight are shown side by side: dense and light formats alternate, row by row, so no two heavy ones
+/// touch. A pick is still saved as its index in DIRECTIONS, the Statement contract's own numbering.
+export const SHOWN: readonly Direction[] = ['Issued', 'Liquidated', 'Accrued', 'Consolidated', 'Assessed', 'Amortized', 'Reconciled', 'Recorded'];
 
 export const PAGE = { w: 10_000, h: 12_500 } as const;
 const CELL = PAGE.w / 76; // one cell of Credit art in the box: 64 cells with 6 of margin each side

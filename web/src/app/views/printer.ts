@@ -7,7 +7,7 @@ import { creatorFeeBps, factoryRatings, forgetBatches, getBatch, isApproved, myC
 import { hydrate, who } from '../ens';
 import { listedById, sweepToWallet } from '../forsale';
 import { errText, esc, pageHead, same, toast } from '../ui';
-import { compose, DIRECTIONS, inkOf, paint as paintMarks, PAGE, type Ink } from '../../shared/statement';
+import { compose, DIRECTIONS, inkOf, paint as paintMarks, PAGE, SHOWN, type Ink } from '../../shared/statement';
 import { print, replace, type Pick, type Printed } from '../printer-match';
 import { creditCell } from './trait';
 import { candidates, framer, loadBase, pixelsOf } from '../picture';
@@ -44,7 +44,7 @@ function paint(c: HTMLCanvasElement, d: (typeof DIRECTIONS)[number], inks: (Ink 
   c.height = H;
   paintMarks(c.getContext('2d')!, W, compose(d, inks, ghosts));
 }
-const sheets = (key: string) => `<div class="printer-sheets" id="${key}">${DIRECTIONS.map((d) => `<figure><canvas data-dir="${d}" aria-label="${d}"></canvas><figcaption>${d}</figcaption></figure>`).join('')}</div>`;
+const sheets = (key: string) => `<div class="printer-sheets" id="${key}">${SHOWN.map((d) => `<figure><canvas data-dir="${d}" aria-label="${d}"></canvas><figcaption>${d}</figcaption></figure>`).join('')}</div>`;
 /// A registered Credit's ink, straight from the edition files: its print (wall.bin) is exactly its plates, since
 /// nothing slipped, and its eights come from its packed traits. The Printer only ever picks registered Credits;
 /// anything else is read from its seed.

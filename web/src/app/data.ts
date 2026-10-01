@@ -156,7 +156,8 @@ function toSummary(address: Address, s: Record<string, unknown>): Summary {
   };
 }
 
-export type Listed = { s: Summary; ids: readonly bigint[]; depositors: readonly Address[] };
+/// `format`: a full union's format pick (an index into the Statement formats), null for none or not full.
+export type Listed = { s: Summary; ids: readonly bigint[]; depositors: readonly Address[]; format?: number | null };
 
 /// Every Credit Union, newest first, from the Worker's union index (/unions.json: read once for the whole site,
 /// preloaded by list pages). Most pages read it, so one read serves every page for a few seconds. Forgotten after
@@ -199,12 +200,12 @@ let txAt = 0;
 onTx(() => (txAt = Date.now()));
 export const sinceTx = () => Date.now() - txAt;
 
-type Indexed = { address: Address; summary: Record<string, unknown>; ids: number[]; depositors: Address[] };
+type Indexed = { address: Address; summary: Record<string, unknown>; ids: number[]; depositors: Address[]; format?: number | null };
 async function readBatches(fresh: boolean): Promise<Listed[]> {
   const r = await fetch(fresh ? `/unions.json?fresh=${Date.now()}` : '/unions.json');
   if (!r.ok) throw new Error('Credit Unions are unavailable right now.');
   const { unions } = fromJson(await r.text()) as { unions: Indexed[] };
-  return unions.map((u) => ({ s: toSummary(u.address, u.summary), ids: u.ids.map(BigInt), depositors: u.depositors }));
+  return unions.map((u) => ({ s: toSummary(u.address, u.summary), ids: u.ids.map(BigInt), depositors: u.depositors, format: u.format ?? null }));
 }
 
 /// Just the summary: a cheap read for spotting changes.
@@ -219,7 +220,7 @@ export async function indexedOne(a: Address): Promise<(Listed & { at: number }) 
     const r = await fetch(`/unions.json?union=${a.toLowerCase()}`);
     if (!r.ok) return null;
     const { at, union: u } = fromJson(await r.text()) as { at: number; union: Indexed | null };
-    return u ? { s: toSummary(u.address, u.summary), ids: u.ids.map(BigInt), depositors: u.depositors, at } : null;
+    return u ? { s: toSummary(u.address, u.summary), ids: u.ids.map(BigInt), depositors: u.depositors, format: u.format ?? null, at } : null;
   } catch {
     return null;
   }
@@ -327,6 +328,12 @@ export function readNotice(): Promise<Notice> {
   noticeKept = { t: Date.now(), read };
   return read;
 }
+/// The earliest burning can open: the Statement contract goes live at 8:00 PM ET on Oct 1. Ours follows after checks
+/// and its 30-minute notice (contracts/RUNBOOK.md), so "starting" this time holds either way.
+export const BURNING_FROM = Date.UTC(2026, 9, 2, 0, 0) / 1000; // Oct 1, 8:00 PM EDT
+/// When burning switches on, which starts every full union's countdown: the notice's time once the burn contract is
+/// proposed, else the earliest it can be.
+export const burnsAt = (n: Notice = notice) => (n ? n.at : BURNING_FROM);
 
 export async function minOpen() {
   return Number(await pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'minOpen' }));

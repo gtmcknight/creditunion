@@ -18,7 +18,7 @@ import { createPublicClient, decodeFunctionData, fallback, hexToBytes, http, typ
 import { mainnet } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { normalize } from 'viem/ens';
-import { batchAbi, creditsAbi, creditArtAbi, factoryAbi } from '../app/abi';
+import { batchAbi, creditsAbi, creditArtAbi, factoryAbi, unionFormatsAbi } from '../app/abi';
 import { setSpareKey, best, bestOrder, bestPage, events, quote, scan, type Cand, type Extra, type Listing } from './opensea';
 import type { Row } from './market';
 import { cacheStore, confirmListing, marketListings, type FwaListing } from './fwa';
@@ -1667,7 +1667,7 @@ async function readUnions(env: Env): Promise<string> {
   return toJson({ at: Math.floor(Date.now() / 1000), unions: await unionList(env) });
 }
 /// One union as the index has it.
-type Indexed = { address: Address; summary: unknown; ids: number[]; depositors: readonly Address[] };
+type Indexed = { address: Address; summary: unknown; ids: number[]; depositors: readonly Address[]; format?: number | null };
 /// Every union's summary and slots. `kept`, the last good read by address: a union whose read fails this time keeps
 /// its last good entry (a busy RPC never blanks a card), and with none it waits for the next read. When nothing
 /// could be read at all, this throws rather than answer an empty list.
@@ -1703,6 +1703,21 @@ async function unionList(env: Env, kept?: Map<string, Indexed>): Promise<Indexed
     return [{ address, summary: s.result, ids: ids.map(Number), depositors }];
   });
   if (addrs.length && failed === addrs.length && !kept?.size) throw new Error('Credit Unions could not be read');
+  // A full union waiting to burn carries its creator's format pick (UnionFormats; null for none), so its card draws
+  // what it will burn in. A pick that can't be read keeps the last one read.
+  const formats = addrOrNull(env.FORMATS);
+  const full = formats ? unions.filter((u) => (u.summary as { state?: number }).state === 1) : [];
+  if (formats && full.length) {
+    const calls = full.map((u) => ({ address: formats, abi: unionFormatsAbi, functionName: 'pickOf', args: [u.address] }) as const);
+    const picks = hasMulticall(env)
+      ? await c.multicall({ contracts: calls, allowFailure: true, multicallAddress: MULTICALL3, batchSize: 1024 })
+      : await Promise.all(calls.map((x) => c.readContract(x).then((result) => ({ status: 'success' as const, result }), () => ({ status: 'failure' as const, result: undefined }))));
+    full.forEach((u, i) => {
+      const r = picks[i];
+      const pick = r.status === 'success' ? (r.result as readonly [boolean, number]) : null;
+      u.format = pick ? (pick[0] ? Number(pick[1]) : null) : (kept?.get(u.address.toLowerCase())?.format ?? null);
+    });
+  }
   return unions;
 }
 

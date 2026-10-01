@@ -1,7 +1,7 @@
 /// The eight Statement formats under a sheet (a union's, or the create page's preview), in the order the Statements
 /// contract lists them. Issued is the sheet itself; the other seven are drawn from the Credits' ink
 /// (shared/statement.ts), so a preview is what the contract draws.
-import { compose, DIRECTIONS, inkOf, paint as paintMarks, PAGE, type Direction, type Ink } from '../shared/statement';
+import { compose, inkOf, paint as paintMarks, PAGE, SHOWN, type Direction, type Ink } from '../shared/statement';
 import { ratings } from './data';
 import { drawPicture, type Pick } from './pictures';
 
@@ -50,7 +50,7 @@ const glyph = (paths: string) => `<svg viewBox="0 0 16 16" width="16" height="16
 /// The buttons of a row, the eight with All in front if `all`; `attr` names the attribute each carries its direction in.
 function row(radio: (d: Pick) => string, attr: string, all: boolean) {
   // All is a word, not a glyph: a way to look at the eight, not a ninth format.
-  return [...(all ? ['All' as const] : []), ...DIRECTIONS]
+  return [...(all ? ['All' as const] : []), ...SHOWN]
     .map((d) =>
       d === 'All'
         ? `<button ${radio(d)} ${attr}="All" class="dir-word" aria-label="Preview all 8 formats">All formats</button>`

@@ -1,6 +1,6 @@
 /// A Statement as a picture: one direction alone, or all eight in Jack's 4 × 2 (his 2000 × 1340 8-up, scaled), on a
 /// background. The union page's All eight view and its shared images both draw through here.
-import { compose, DIRECTIONS, paint, PAGE, type Direction, type Ink } from '../shared/statement';
+import { compose, paint, PAGE, SHOWN, type Direction, type Ink } from '../shared/statement';
 
 export type Pick = Direction | 'All';
 export type Bg = 'black' | 'white' | 'grey';
@@ -28,6 +28,9 @@ export const sizeFor = (p: Prefs, pick: Pick) => (pick === 'All' ? p.all : p.one
 // Jack's 8-up, in his pixels: 346-wide pages, 68.67 across and 69 down between them, filling 1590 × 934 of 2000 × 1340.
 const PW = 346, GX = (1590 - 4 * PW) / 3, GY = 69, PH = (PW * PAGE.h) / PAGE.w;
 
+/// The eight three across: rows of light, dense, light, then dense, light, dense, so they alternate down the columns
+/// too.
+const SHOWN_3: readonly Direction[] = ['Issued', 'Liquidated', 'Accrued', 'Consolidated', 'Amortized', 'Assessed', 'Recorded', 'Reconciled'];
 /// Draws `pick` into a W × H frame (device pixels). A single page stands 3/4 of the frame tall, at most 3/5 wide.
 /// `label`: the union's name, for the ninth cell of the tall All eight.
 export function drawPicture(g: CanvasRenderingContext2D, W: number, H: number, pick: Pick, list: (Ink | null)[], ghosts: ReadonlySet<number>, bg: Bg, label = '') {
@@ -35,13 +38,14 @@ export function drawPicture(g: CanvasRenderingContext2D, W: number, H: number, p
   g.fillRect(0, 0, W, H);
   const pages: [Direction, number, number, number][] = [];
   if (pick === 'All') {
-    // Jack's four across, two down; in a frame taller than wide (the union page's 4:5 sheet), three across, a grid
-    // about as tall as the frame, with the union's name and rating in the ninth cell.
+    // Four across, two down; in a frame taller than wide (the union page's 4:5 sheet), three across, a grid about as
+    // tall as the frame, with the union's name and rating in the ninth cell. Either way light and dense formats
+    // alternate like a checkerboard.
     const cols = H > W ? 3 : 4, rows = Math.ceil(8 / cols);
     const gw = cols * PW + (cols - 1) * GX, gh = rows * PH + (rows - 1) * GY;
     const k = H > W ? Math.min((0.84 * W) / gw, (0.84 * H) / gh) : Math.min((0.795 * W) / gw, (0.697 * H) / gh);
     const x0 = (W - gw * k) / 2, y0 = (H - gh * k) / 2;
-    DIRECTIONS.forEach((d, i) => pages.push([d, x0 + (i % cols) * (PW + GX) * k, y0 + Math.floor(i / cols) * (PH + GY) * k, PW * k]));
+    (cols === 3 ? SHOWN_3 : SHOWN).forEach((d, i) => pages.push([d, x0 + (i % cols) * (PW + GX) * k, y0 + Math.floor(i / cols) * (PH + GY) * k, PW * k]));
     if (cols === 3) caption(g, x0 + 2 * (PW + GX) * k, y0 + 2 * (PH + GY) * k, PW * k, PH * k, label, list, bg);
   } else {
     const h = Math.min(0.746 * H, 0.6 * W * (PAGE.h / PAGE.w)), w = (h * PAGE.w) / PAGE.h;
