@@ -123,13 +123,13 @@ const sections = (): Section[] => [
         [0, 'Joined', 'In the order they come in.', 'Buy or deposit'],
         [2, 'Number', 'By Credit number, ascending or descending.', 'Buy or deposit'],
         [4, 'Painted', 'The creator paints the sheet using traits, like Colors or Eights. Each spot only takes a Credit that matches.', 'Buy or deposit'],
-        [6, 'Picture', 'The creator uploads an image. The site picks the listed Credits that draw it best.', 'Buy here only'],
+        [6, 'Picture', 'The creator uploads an image and picks how it’s drawn: Consolidated, from each Credit’s own cells; Assessed, one block of ink each; or Reconciled, one bar each. The site finds the Credits that draw it best.', 'Buy or deposit'],
       ] as [number, string, string, string][]
     )
-      .map(([v, name, how, join]) => `<div class="doc-type">${arrIcon(v)}<div><b>${name}</b><p>${how}</p><span class="doc-join${v === 6 ? ' only' : ''}">${join}</span></div></div>`)
+      .map(([v, name, how, join]) => `<div class="doc-type">${arrIcon(v)}<div><b>${name}</b><p>${how}</p><span class="doc-join">${join}</span></div></div>`)
       .join('')}</div>
-    <h3>Why Picture Unions are buy only</h3>
-    <p>The site plans the picture from Credits listed for sale and sells them to you in order, so each lands where it belongs. If a planned Credit sells elsewhere first, the site swaps in the next best listing for that spot. Picture Unions do not allow withdrawals, because taking a Credit out would shift the picture.</p>
+    <h3>How Picture Unions fill</h3>
+    <p>Every open spot in the picture has a Credit planned for it, from the listings and from your own. One of yours goes in when it draws its spot about as well as the best for sale. Pick them in any order: Credits of the same Colors fill their spots one after another, so picking one brings along any planned ahead of it. If a planned Credit sells elsewhere first, the site plans the next best for its spot. Picture Unions do not allow withdrawals, because taking a Credit out would shift the picture; the only member can still leave.</p>
     <h3>Limiting who can join</h3>
     <p>A Union only accepts Credits that follow the rules its creator sets. For Joined, Number and Painted Unions, those rules can cover Colors, Eights, Print, Weight, Plates, Bits, rating, payment time, a number range, or a list of up to 200 Credits. A Union with no rules accepts every Credit.</p>`,
   },
@@ -141,9 +141,9 @@ const sections = (): Section[] => [
     <h3>Buying</h3>
     <p>Tap the Credits you want on the Union’s page. One transaction buys them from OpenSea, CreditStrategy or FWA and puts them in the Union in your name. If one sells before your transaction lands, it is skipped and you get that ETH back. In a Picture Union it is all or nothing: the purchase goes through only if every Credit is still for sale.</p>
     <h3>Starting a Union</h3>
-    <p>Start with at least one Credit. It can be one you already own, or one you buy as you start the Union. A Picture Union starts with a purchase of its first Credit.</p>
+    <p>Start with at least one Credit. It can be one you already own, or one you buy as you start the Union. A Picture Union starts with yours that draw it closely, the Credits you buy for it, or both.</p>
     <h3>Leaving</h3>
-    <p>Withdraw your Credits anytime before the Union locks. Picture Unions do not allow withdrawals.</p>`,
+    <p>Withdraw your Credits anytime before the Union locks. Picture Unions do not allow withdrawals, except while you’re the only member.</p>`,
   },
   {
     id: 'auctions',

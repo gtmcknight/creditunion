@@ -309,7 +309,8 @@ async function testParty(page, p) {
 
       // The page redraws with the new state: if still open, the fit line matches the contract again.
       const state = Number(await pub.readContract({ address: b, abi: batchAbi, functionName: 'state' }));
-      await page.waitForFunction((n) => document.querySelector('.progress .row span')?.textContent?.startsWith(`${n} of 80`), after, { timeout: 60_000 }).catch(() => err('page did not refresh the count'));
+      // The facts' Credits line ("77 of 80 in"), since the union page's progress row went.
+      await page.waitForFunction((n) => [...document.querySelectorAll('dt')].find((d) => d.textContent === 'Credits')?.nextElementSibling?.textContent?.trim().startsWith(`${n} of 80`), after, { timeout: 60_000 }).catch(() => err('page did not refresh the count'));
       if (state === 0) {
         const mine2 = await owned();
         const exp2 = Math.min((await canTake(b, mine2)).filter(Boolean).length, 80 - after);
@@ -428,7 +429,7 @@ async function picture(page) {
   await page.click('label.arr-tile:has(input[value="6"])');
   await page.setInputFiles('#pic-file', join(WEB, 'public', 'examples', 'jack.jpg')); // no examples: upload one
   await page.waitForFunction(
-    () => !!document.getElementById('preview')?.dataset.designed && !document.getElementById('pic-status')?.textContent && [...document.querySelectorAll('#preview .sheet .cell')].filter((c) => c.dataset.id || c.dataset.ghost).length === 80,
+    () => !!document.getElementById('preview')?.dataset.designed && /draw it/.test(document.getElementById('pic-status')?.textContent ?? '') && [...document.querySelectorAll('#preview .sheet .cell')].filter((c) => c.dataset.id || c.dataset.ghost).length === 80,
     null,
     { timeout: 120_000 },
   );
@@ -504,7 +505,7 @@ const CREATES = [
     },
   },
   {
-    name: 'picture, a skipped slot is refused, the first goes in',
+    name: 'picture, a skipped slot brings the one ahead of it along',
     picture: true,
     setup: async (page) => {
       await picture(page);
@@ -518,13 +519,12 @@ const CREATES = [
         else if (!second && picked.includes(id) && picked.includes(firstOf.get(col[i]))) second = { id, ahead: firstOf.get(col[i]) };
       });
       if (!second) throw new Error('no Colors with two of yours in a row');
+      // Everything off, then only the second in its Colors: the one ahead of it comes along, so nothing lands early.
       for (const id of picked) await page.click(`#picker .pick[data-id="${id}"]`);
       await page.click(`#picker .pick[data-id="${second.id}"]`);
       await page.waitForTimeout(400);
-      const warn = await page.textContent('#warn');
-      if (!warn.includes(`#${second.ahead}`)) throw new Error(`skipping #${second.ahead} wasn't refused ("${warn}")`);
-      await page.click(`#picker .pick[data-id="${second.id}"]`);
-      await page.click(`#picker .pick[data-id="${second.ahead}"]`);
+      const on = await page.$$eval('#picker .pick[aria-pressed="true"]', (xs) => xs.map((x) => x.dataset.id));
+      if (!on.includes(second.ahead)) throw new Error(`picking #${second.id} didn't bring #${second.ahead} along (${on.join(',')})`);
       pictureSeen.plan = plan;
     },
     check: async (b, picked, err, page) => {
@@ -538,7 +538,7 @@ const CREATES = [
       if (!ui.offered.length) return err('union page offers none of the next Credits');
       const stray = ui.offered.filter((id) => !plan.includes(id));
       if (stray.length) err(`offered Credits the picture didn't plan: ${stray.slice(0, 5).join(',')}`);
-      if (!ui.groups.some((g) => /Not next in the picture/.test(g.why))) err('no "Not next in the picture" fold');
+      if (!ui.groups.some((g) => /open later|close match/.test(g.why))) err('no fold for yours that go in later or aren\u2019t close');
       await page.click('#pick-all');
       await page.click('#deposit');
       await waitJoined(page);
@@ -556,8 +556,9 @@ const CREATES = [
       const top = Number(Object.entries(n).sort((x, y) => y[1] - x[1])[0][0]);
       await openRules(page);
       await page.click('[data-tab-btn="palette"]:visible');
+      const was = await page.$eval('#preview', (p) => p.dataset.designed);
       await page.click(`[data-rule="palettes"] [data-bit="${top}"]`);
-      await page.waitForFunction(() => !document.getElementById('pic-status')?.textContent, null, { timeout: 120_000 });
+      await page.waitForFunction((w) => document.getElementById('preview')?.dataset.designed !== w && /draw it/.test(document.getElementById('pic-status')?.textContent ?? ''), was, { timeout: 120_000 });
       await page.waitForTimeout(1200);
       if ((await colours(page)).includes(top)) throw new Error('its Colors still painted after the tile went off');
       pictureSeen.gone = top;

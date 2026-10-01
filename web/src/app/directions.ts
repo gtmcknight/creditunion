@@ -1,7 +1,7 @@
 /// The eight Statement formats under a sheet (a union's, or the create page's preview), in the order the Statements
 /// contract lists them. Issued is the sheet itself; the other seven are drawn from the Credits' ink
 /// (shared/statement.ts), so a preview is what the contract draws.
-import { compose, inkOf, paint as paintMarks, PAGE, SHOWN, type Direction, type Ink } from '../shared/statement';
+import { compose, inkOf, paint as paintMarks, PAGE, SHOWN, slotBox, type Direction, type Ink } from '../shared/statement';
 import { ratings } from './data';
 import { drawPicture, type Pick } from './pictures';
 
@@ -19,11 +19,11 @@ const before = new Map<string, Pick>();
 /// Each Credit's ink, read once.
 const inks = new Map<string, Promise<Ink | null>>();
 /// What each canvas last drew, so a resize can redraw it.
-const drawn = new WeakMap<HTMLCanvasElement, { d: Pick; list: (Ink | null)[]; ghosts: ReadonlySet<number> }>();
+const drawn = new WeakMap<HTMLCanvasElement, { d: Pick; list: (Ink | null)[]; ghosts: ReadonlySet<number>; marks?: ReadonlySet<number> }>();
 const sized = new ResizeObserver((entries) => {
   for (const { target } of entries) {
     const last = drawn.get(target as HTMLCanvasElement);
-    if (last) paint(target as HTMLCanvasElement, last.d, last.list, last.ghosts);
+    if (last) paint(target as HTMLCanvasElement, last.d, last.list, last.ghosts, last.marks);
   }
 });
 
@@ -189,9 +189,12 @@ function hostSlots(host: HTMLElement | null) {
   const ids = cells.map((c) => c.dataset.id ?? c.dataset.ghost ?? null);
   // A host marked solid-ghosts draws its examples at full ink (the create page's picture preview).
   const show = host?.classList.contains('solid-ghosts') ? 'finished' : (host?.dataset.show ?? 'now');
-  const faded = (c: HTMLElement) => (show === 'yours' ? !c.classList.contains('mine') : show === 'now' && !!c.dataset.ghost);
+  // A planned Credit picked to go in (a picture union's `chosen`) shows at full ink in its spot.
+  const faded = (c: HTMLElement) => (show === 'yours' ? !c.classList.contains('mine') : show === 'now' && !!c.dataset.ghost && !c.classList.contains('chosen'));
   const ghosts = new Set(cells.flatMap((c, i) => (faded(c) ? [i] : [])));
-  return { ids, ghosts };
+  // …and framed, so it shows which spot it takes.
+  const marks = new Set(cells.flatMap((c, i) => (c.classList.contains('chosen') ? [i] : [])));
+  return { ids, ghosts, marks };
 }
 
 /// A sheet's Credits read for drawing elsewhere (the share images): each slot's ink, the faded slots, and the
@@ -317,17 +320,17 @@ async function show(g: HTMLElement, d: Shown, focus = false, quiet = false) {
   canvas.hidden = !drawnView(d);
   if (!drawnView(d)) return;
   sized.observe(canvas);
-  const { ids, ghosts } = slotsOf(g);
+  const { ids, ghosts, marks } = slotsOf(g);
   // Faint frames at once; the ink as soon as it's read (the first time only).
   const last = drawn.get(canvas);
-  paint(canvas, d, last?.list ?? ids.map(() => null), last?.ghosts ?? ghosts);
+  paint(canvas, d, last?.list ?? ids.map(() => null), last?.ghosts ?? ghosts, marks);
   // Only the latest draw paints: an earlier one (say, of the example Credits before a picture's plan filled the
   // sheet) whose ink arrives late must not paint over it.
   const turn = (turns.get(canvas) ?? 0) + 1;
   turns.set(canvas, turn);
   const list = await load(ids);
   if (showing.get(key) !== d || !canvas.isConnected || turns.get(canvas) !== turn) return;
-  paint(canvas, d, list, ghosts);
+  paint(canvas, d, list, ghosts, marks);
   // A Credit whose ink didn't come (a failed or throttled read) would stay a grey frame: read it again, twice at most.
   const tries = retries.get(canvas) ?? 0;
   if (tries < 2 && list.some((ink, i) => ids[i] && !ink)) {
@@ -338,17 +341,32 @@ async function show(g: HTMLElement, d: Shown, focus = false, quiet = false) {
 const retries = new WeakMap<HTMLCanvasElement, number>();
 const turns = new WeakMap<HTMLCanvasElement, number>();
 
-/// Crisp cells, snapped to device pixels, as Jack's mock draws them.
-function paint(canvas: HTMLCanvasElement, d: Pick, list: (Ink | null)[], ghosts: ReadonlySet<number>) {
-  drawn.set(canvas, { d, list, ghosts });
+/// Crisp cells, snapped to device pixels. `marks`: slots to frame (a picture union's picked Credits, in the formats
+/// that keep each Credit in its own place).
+function paint(canvas: HTMLCanvasElement, d: Pick, list: (Ink | null)[], ghosts: ReadonlySet<number>, marks?: ReadonlySet<number>) {
+  drawn.set(canvas, { d, list, ghosts, marks });
   const w = canvas.clientWidth;
   if (!w) return;
   const W = Math.round(w * Math.min(3, devicePixelRatio || 1)), H = Math.round((W * PAGE.h) / PAGE.w);
   if (canvas.width !== W) canvas.width = W;
   if (canvas.height !== H) canvas.height = H;
   const name = canvas.closest<HTMLElement>('.dir-host')?.dataset.name ?? '';
-  if (d === 'All') drawPicture(canvas.getContext('2d')!, W, H, 'All', list, ghosts, 'black', name);
-  else paintMarks(canvas.getContext('2d')!, W, compose(d, list, ghosts));
+  if (d === 'All') return drawPicture(canvas.getContext('2d')!, W, H, 'All', list, ghosts, 'black', name);
+  const g = canvas.getContext('2d')!;
+  paintMarks(g, W, compose(d, list, ghosts));
+  if (!marks?.size) return;
+  // Black outside, white inside: the frame shows on light ink and dark alike.
+  const k = W / PAGE.w, line = Math.max(1, Math.round(W / 480));
+  g.lineWidth = line;
+  for (const c of marks) {
+    const b = slotBox(d, c);
+    if (!b) continue;
+    const [x, y, w, h] = [Math.round(b[0] * k), Math.round(b[1] * k), Math.round(b[2] * k), Math.round(b[3] * k)];
+    g.strokeStyle = '#111111';
+    g.strokeRect(x - line / 2, y - line / 2, w + line, h + line);
+    g.strokeStyle = '#ffffff';
+    g.strokeRect(x + line / 2, y + line / 2, w - line, h - line);
+  }
 }
 
 document.addEventListener('click', (e) => {

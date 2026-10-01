@@ -652,9 +652,11 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     if (!sameSite(req)) return text('forbidden', 403);
     if (await limited(env.RL_MISC, req, 5)) return text('slow down', 429);
     const raw = await readBody(req, 40_000);
-    let px = '', detail = NaN, ids: (number | null)[] | null = null;
+    let px = '', detail = NaN, ids: (number | null)[] | null = null, look: string | null = null;
     try {
-      const b = JSON.parse(raw ?? '') as { px?: unknown; detail?: unknown; ids?: unknown };
+      const b = JSON.parse(raw ?? '') as { px?: unknown; detail?: unknown; ids?: unknown; look?: unknown };
+      // The format it was matched in, when not Consolidated (the union page plans and draws in it).
+      if (b.look === 'Assessed' || b.look === 'Reconciled') look = b.look;
       px = String(b.px ?? '');
       detail = Number(b.detail);
       // The Credit picked for each slot, for list cards: 80 of them (null where none was for sale).
@@ -666,7 +668,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const f = ((await client(env).readContract({ address: batch, abi: batchAbi, functionName: 'summary' })) as { filter: { layout0: bigint; layout1: bigint; layoutTrait: number } }).filter;
     if ((!f.layout0 && !f.layout1) || Number(f.layoutTrait) !== 0) return text('not a painted union', 400);
     if (await env.PLANS.get(key)) return text('already has a picture', 409);
-    await env.PLANS.put(key, JSON.stringify({ px, detail, ...(ids ? { ids } : {}) }));
+    await env.PLANS.put(key, JSON.stringify({ px, detail, ...(ids ? { ids } : {}), ...(look ? { look } : {}) }));
     return new Response(null, { status: 201 });
   }
 

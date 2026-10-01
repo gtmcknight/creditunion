@@ -342,9 +342,9 @@ export function sweepWaiting(host: HTMLElement) {
 /// `mark()` re-outlines after the grid changes (and lets the slider reach listings that paged in since).
 /// `button: false` leaves the buying to the page (the create page buys and opens in one go, a union's Buy tab
 /// deposits too); it reads `chosen()` and hears every change through `onPick`. `cap`: at most this many (a union's
-/// open slots). `inOrder`: the listings go in in the order shown (a picture union's next slots), so a tap picks every
-/// one up to it, and a tap on the last picked drops it.
-export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement, o: { button?: boolean; cap?: number; onPick?: () => void; inOrder?: () => boolean } = {}) {
+/// open slots). `along`: what a tap brings with it (a picture union's Credits of one Colors go in from its first open
+/// slot): picking `id` picks these too, dropping it drops these.
+export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement, o: { button?: boolean; cap?: number; onPick?: () => void; along?: (id: string, picking: boolean) => string[] } = {}) {
   // Nothing picked to start: drag, or tap Credits.
   const picked = new Set<string>();
   const cap = Math.min(MAX_SWEEP, o.cap ?? MAX_SWEEP);
@@ -410,17 +410,14 @@ export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement, 
     const id = art?.closest<HTMLElement>('.cc')?.dataset.id;
     if (!id || !sale.byId.has(id)) return;
     e.preventDefault();
-    if (o.inOrder?.()) {
-      const at = sale.ls.findIndex((l) => l.id === id);
-      const n = picked.has(id) && !sale.ls.slice(at + 1).some((l) => picked.has(l.id)) ? at : at + 1;
-      if (n > cap) return toast(cap < MAX_SWEEP ? `Only ${cap} to go.` : `Up to ${MAX_SWEEP} in one sweep.`, 'info');
-      picked.clear();
-      for (const l of sale.ls.slice(0, n)) picked.add(l.id);
-      return mark();
+    if (picked.has(id)) {
+      picked.delete(id);
+      for (const x of o.along?.(id, false) ?? []) picked.delete(x);
+    } else {
+      const add = [id, ...(o.along?.(id, true) ?? [])].filter((x) => !picked.has(x) && sale.byId.has(x));
+      if (picked.size + add.length > cap) return toast(cap < MAX_SWEEP ? `Only ${cap} to go.` : `Up to ${MAX_SWEEP} in one sweep.`, 'info');
+      add.forEach((x) => picked.add(x));
     }
-    if (picked.has(id)) picked.delete(id);
-    else if (picked.size >= cap) return toast(cap < MAX_SWEEP ? `Only ${cap} to go.` : `Up to ${MAX_SWEEP} in one sweep.`, 'info');
-    else picked.add(id);
     mark();
   });
   mark();

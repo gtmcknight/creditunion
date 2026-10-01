@@ -128,7 +128,9 @@ const savePictures = () => {
 /// Addresses whose saved picture has been read this visit (its planned Credits registered).
 const pictureRead = new Set<Address>();
 /// Picture reads in flight, shared by a page drawn twice at once.
-const pictureReading = new Map<Address, Promise<{ ids?: (number | null)[]; inks?: Record<string, [string, number, number]> } | null>>();
+const pictureReading = new Map<Address, Promise<{ ids?: (number | null)[]; inks?: Record<string, [string, number, number]>; look?: Direction } | null>>();
+/// A picture matched in another format than Consolidated (its saved `look`), per union: its card draws in it.
+const looks = new Map<string, Direction>();
 export async function pictureCards(list: Listed[]) {
   const todo = list.filter((b) => (b.s.state === 'Open' || b.s.state === 'Full') && hasLayout(b.s.filter) && !Number(b.s.filter.layoutTrait ?? 0) && !pictureRead.has(b.s.address));
   const found = await Promise.all(
@@ -138,7 +140,7 @@ export async function pictureCards(list: Listed[]) {
         pictureReading.set(
           b.s.address,
           (read = fetch(`/pictures/${b.s.address}`)
-            .then((r) => (r.ok ? (r.json() as Promise<{ ids?: (number | null)[]; inks?: Record<string, [string, number, number]> }>) : null))
+            .then((r) => (r.ok ? (r.json() as Promise<{ ids?: (number | null)[]; inks?: Record<string, [string, number, number]>; look?: Direction }>) : null))
             .catch(() => null)
             .finally(() => pictureReading.delete(b.s.address))),
         );
@@ -150,6 +152,7 @@ export async function pictureCards(list: Listed[]) {
       }
       primeInks(d.inks);
       warmInks(b.ids); // what's in already (the planned Credits' ink came with the picture)
+      if (d.look) looks.set(b.s.address.toLowerCase(), d.look);
       if (!pictures.has(b.s.address)) (pictures.add(b.s.address), savePictures());
       if (d.ids) planGhosts(b.s.address, d.ids);
       return true;
@@ -216,7 +219,7 @@ export function card({ s, ids, depositors, format }: Listed, fit?: bigint[], who
   // What the art draws over its sheet: a full union the format it burns in (its creator's pick, else Consolidated for a
   // picture and Issued, the sheet itself, for the rest); a picture still filling Consolidated. A burned one shows its
   // Statement instead.
-  const burnsIn: Direction = (s.state === 'Full' && format != null && DIRECTIONS[format]) || (picture ? 'Consolidated' : 'Issued');
+  const burnsIn: Direction = (s.state === 'Full' && format != null && DIRECTIONS[format]) || (picture ? (looks.get(s.address.toLowerCase()) ?? 'Consolidated') : 'Issued');
   const draw = !burned && burnsIn !== 'Issued' ? burnsIn : null;
   const ready = picture ? pictureReady({ s, ids, depositors }) : ids.length === 80;
   // The art carries no text. Under it, three lines: the name; who started it and how many are in; where it stands and

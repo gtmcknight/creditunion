@@ -1,5 +1,6 @@
 import type { Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, unionFormatsAbi } from './abi';
+import { adapterAbi } from './adapter-abi';
 import { config, onTx, pub } from './chain';
 import { fromJson } from '../shared/json';
 
@@ -316,13 +317,15 @@ export type Notice = { at: number; adapter: Address } | null;
 export let notice: Notice = null;
 /// Whether the burn contract is on (the factory's assembler is set), from the same read as `notice`.
 export let burningOn = false;
+/// The burn contract, once it's on.
+let activeAdapter: Address | null = null;
 let noticeKept: { t: number; read: Promise<Notice> } | null = null;
 export function readNotice(): Promise<Notice> {
   if (noticeKept && Date.now() - noticeKept.t < 60_000) return noticeKept.read;
   const get = (functionName: 'assembler' | 'pendingAssembler' | 'pendingUntil') => pub.readContract({ address: config.factory, abi: factoryAbi, functionName });
   const zero = '0x0000000000000000000000000000000000000000';
   const read = Promise.all([get('assembler'), get('pendingAssembler'), get('pendingUntil')]).then(
-    ([active, next, until]) => ((burningOn = active !== zero), (notice = active === zero && next !== zero ? { at: Number(until), adapter: next as Address } : null)),
+    ([active, next, until]) => ((burningOn = active !== zero), (activeAdapter = burningOn ? (active as Address) : null), (notice = active === zero && next !== zero ? { at: Number(until), adapter: next as Address } : null)),
     () => notice,
   );
   noticeKept = { t: Date.now(), read };
@@ -334,6 +337,20 @@ export const BURNING_FROM = Date.UTC(2026, 9, 2, 0, 0) / 1000; // Oct 1, 8:00 PM
 /// When burning switches on, which starts every full union's countdown: the notice's time once the burn contract is
 /// proposed, else the earliest it can be.
 export const burnsAt = (n: Notice = notice) => (n ? n.at : BURNING_FROM);
+
+/// Where a picture union's Credits will burn, spot by spot (null = open), once the burn contract is on. It keeps each
+/// Credit's spot (contracts/ADAPTER.md), so after someone leaves this differs from placeOnLayout. Null before it's
+/// on, or unread.
+export async function keptSpots(union: Address): Promise<(bigint | null)[] | null> {
+  await readNotice();
+  if (!activeAdapter) return null;
+  try {
+    const order = await pub.readContract({ address: activeAdapter, abi: adapterAbi, functionName: 'orderOf', args: [union] });
+    return order.map((id) => (id === 0n ? null : id));
+  } catch {
+    return null;
+  }
+}
 
 export async function minOpen() {
   return Number(await pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'minOpen' }));

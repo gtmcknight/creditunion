@@ -4,7 +4,7 @@
 import type { Address } from 'viem';
 import { bin } from './bins';
 import { myCredits } from './data';
-import { costs, type Candidate } from './printer-match';
+import { costs, type Candidate, type Look } from './printer-match';
 
 /// Pictures to start from: a few faces, space photos (NASA; the black hole is the Event Horizon Telescope's, CC-BY 4.0)
 /// and geometric designs in the Credits' own inks, with shapes at least a Credit wide so they survive the print.
@@ -261,6 +261,11 @@ export async function candidates(wallets: Address[], skip: ReadonlySet<number> =
 /// Most a recommended listing may cost, and how much edges count, as the Printer's defaults.
 const MAX_PRICE = 0.08;
 export const DETAIL = 2;
+/// How much a Credit you hold is favoured over one for sale when a picture union plans its next Credits, in typical
+/// patch errors: yours takes a spot only when it draws it about as well as the best for sale.
+export const OWN_GOOD = 0.25;
+/// A typical patch's match error, the unit `own` is given in (as printer-match's OWN_BONUS).
+const OWN_COST = 250_000;
 
 /// A picture against the Credits that could draw it: every candidate's cost at every slot (likeness, then price, less
 /// a bonus for ones the wallet already holds), so the sheet can be designed and each open slot given its best Credit.
@@ -270,16 +275,20 @@ export class Guide {
     private cost: Float32Array[],
     private pal: Uint8Array,
     private detail: number[],
+    /// How far yours may draw a spot worse than the best for sale (`own`, in cost units).
+    private slack: number,
   ) {}
 
   /// `wallets`: whose Credits count as theirs (the viewer's). `held`: the first wallet's Credits that can go in, when
   /// the page knows better than a chain read, and `colours` their Colors as the contract reads them. `detail`: how
-  /// much to favour Credits that keep edges (eyes, mouths), 0 to 4, as the Printer's Detail.
-  static async of(px: Uint8ClampedArray, o: { wallets?: Address[]; held?: readonly bigint[]; colours?: (id: bigint) => number; detail?: number; progress?: (f: number) => void } = {}) {
+  /// much to favour Credits that keep edges (eyes, mouths), 0 to 4, as the Printer's Detail. `own`: how much a Credit
+  /// the wallet holds is favoured over a listing, in typical patch errors (1, the Printer's "use ours"; less where only
+  /// a close match of yours should win). `look`: the format it's matched in (Consolidated unless the picture says so).
+  static async of(px: Uint8ClampedArray, o: { wallets?: Address[]; held?: readonly bigint[]; colours?: (id: bigint) => number; detail?: number; progress?: (f: number) => void; own?: number; look?: Look } = {}) {
     const { cands: all, wall, base: b } = await candidates(o.wallets ?? [], new Set(), o.held);
     const cands = all.filter((c) => c.owner >= 0 || c.price <= MAX_PRICE);
-    const cost = await costs(px, cands, wall, { features: o.detail ?? DETAIL, maxPrice: MAX_PRICE, own: 1 }, o.progress);
-    return new Guide(cands, cost, Uint8Array.from(cands, (c) => (c.owner === 0 && o.colours?.(BigInt(c.id))) || paletteOf(b, c.id)), detailOf(px));
+    const cost = await costs(px, cands, wall, { features: o.detail ?? DETAIL, maxPrice: MAX_PRICE, own: o.own ?? 1, look: o.look }, o.progress);
+    return new Guide(cands, cost, Uint8Array.from(cands, (c) => (c.owner === 0 && o.colours?.(BigInt(c.id))) || paletteOf(b, c.id)), detailOf(px), (o.own ?? 1) * OWN_COST);
   }
 
   /// A sheet for the picture: the best Credit for each slot, the most detailed slots choosing first, and its Colors
@@ -319,6 +328,38 @@ export class Guide {
       for (const s of open) if (want.get(s) === j) pick(s);
     }
     return out;
+  }
+
+  /// As fill, with yours first in each Colors where that costs the picture little. A Colors' open slots fill in the
+  /// order its Credits go in, so one of yours planned behind a Credit for sale can't go in until that one is bought.
+  /// Yours move to that Colors' first open slots, and the ones for sale into the slots yours left, when that draws the
+  /// picture about as well (each of yours worse by no more than `slack`); otherwise they stay where they draw best and
+  /// go in once the ones ahead of them are in.
+  fillYoursFirst(layout: readonly number[], placed: readonly (number | null)[], gone: ReadonlySet<number> = new Set()): (Candidate | null)[] {
+    const rec = this.fill(layout, placed, gone);
+    const at = new Map(this.cands.map((c, j) => [c, j]));
+    for (const m of new Set(layout)) {
+      if (!m) continue;
+      const slots = [...layout.keys()].filter((t) => layout[t] === m && placed[t] === null && rec[t]);
+      const own = slots.filter((t) => rec[t]!.owner >= 0), sale = slots.filter((t) => rec[t]!.owner < 0);
+      if (!own.length || own.every((t, i) => t === slots[i])) continue; // none of yours, or yours already first
+      // Yours to the first slots, the rest after, each set given its slots in the order that costs least.
+      const assign = (who: number[], to: number[]) => {
+        const left = [...who], out = new Map<number, number>();
+        for (const t of to) {
+          let best = 0;
+          for (let i = 1; i < left.length; i++) if (this.cost[t][at.get(rec[left[i]]!)!] < this.cost[t][at.get(rec[left[best]]!)!]) best = i;
+          out.set(t, left.splice(best, 1)[0]);
+        }
+        return out;
+      };
+      const moved = new Map([...assign(own, slots.slice(0, own.length)), ...assign(sale, slots.slice(own.length))]);
+      const before = slots.reduce((n, t) => n + this.cost[t][at.get(rec[t]!)!], 0);
+      const after = slots.reduce((n, t) => n + this.cost[t][at.get(rec[moved.get(t)!]!)!], 0);
+      const next = new Map(slots.map((t) => [t, rec[moved.get(t)!]]));
+      if (after - before <= own.length * this.slack) for (const t of slots) rec[t] = next.get(t)!;
+    }
+    return rec;
   }
 
   /// The cheapest unused candidate for slot `t`, of Colors `pal` (0 = any).
@@ -367,6 +408,19 @@ export function planOf(rec: readonly (Candidate | null)[], layout: readonly numb
   return plan;
 }
 
+/// The Credits of `among` in the same Colors as `id`: those planned ahead of it (they must go in with it, else it lands
+/// in their slot) and those behind it (they can't go in without it).
+export function runOf(plan: Plan, id: string, among: ReadonlySet<string>): { ahead: string[]; behind: string[] } {
+  const at = plan.slot.get(id), c = plan.colour.get(id), ahead: string[] = [], behind: string[] = [];
+  if (at === undefined) return { ahead, behind };
+  for (const o of among) {
+    const t = plan.slot.get(o);
+    if (o === id || t === undefined || plan.colour.get(o) !== c) continue;
+    (t < at ? ahead : behind).push(o);
+  }
+  return { ahead, behind };
+}
+
 /// A Credit that must come along with `ids`: one the picture puts ahead of one of them in the same Colors (else
 /// they'd land a slot early). Null when `ids` start each of their Colors' runs.
 export function gapOf(plan: Plan, ids: Iterable<string>): string | null {
@@ -394,6 +448,8 @@ function detailOf(px: Uint8ClampedArray) {
 
 /// The picture as stored with its union: 64 × 80 RGBA, base64, and the Detail it was matched with.
 /// `ids`: the Credit picked for each slot when the union was made, so lists can draw the picture without matching.
-export type Stored = { px: string; detail: number; ids?: (number | null)[] };
-export const packPicture = (px: Uint8ClampedArray, detail: number): Stored => ({ px: btoa(String.fromCharCode(...px)), detail });
+/// `look`: the format it was matched in, when not Consolidated (the union burns in it too).
+export type Stored = { px: string; detail: number; ids?: (number | null)[]; look?: Look };
+export const packPicture = (px: Uint8ClampedArray, detail: number, look: Look = 'Consolidated'): Stored => ({ px: btoa(String.fromCharCode(...px)), detail, ...(look !== 'Consolidated' ? { look } : {}) });
+export type { Look };
 export const unpackPicture = (s: string) => Uint8ClampedArray.from(atob(s), (c) => c.charCodeAt(0));

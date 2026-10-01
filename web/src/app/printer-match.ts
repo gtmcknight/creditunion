@@ -7,13 +7,18 @@
 /// friend holding more than their share is eased back (their Credits cost a little more each round) until everyone
 /// fits. Listings then go to whoever has room left, in turn.
 import { MIX } from '../shared/statement';
+import { BAYER, HUE } from '../shared/formats/statement-renderers';
 
 export type Candidate = { id: number; price: number; owner: number }; // price in ETH; owner: wallet index, -1 for a listing
 export type Pick = { id: number; wallet: number; owned: boolean; price: number };
 /// `own`: how much likeness to give up to use a Credit the wallets already hold instead of buying one (0 = none;
 /// 1 = a patch may be up to about half as good again as the best buy).
 /// `free`: no rising-number rule (a solo print: one wallet deposits all 80 in slot order).
-export type Params = { features: number; maxPrice: number; own?: number; budget?: number | null; free?: boolean };
+/// `look`: the format the picture is matched in. Consolidated draws each Credit's own cells; Assessed draws it as one
+/// block of its main ink, as dense as it's inked; Reconciled as one bar across the page, its inks in hue order, as
+/// long as it's inked.
+export type Look = 'Consolidated' | 'Assessed' | 'Reconciled';
+export type Params = { features: number; maxPrice: number; own?: number; budget?: number | null; free?: boolean; look?: Look };
 /// What each ETH of listings costs in likeness by default (a typical patch's error is ~250k).
 const PRICE_WEIGHT = 2e5;
 const OWN_BONUS = 250_000; // a typical patch's match error, per unit of `own`
@@ -23,14 +28,31 @@ const LUM = RGB.map(([r, g, b]) => 0.3 * r + 0.59 * g + 0.11 * b);
 
 /// One Credit's print at the scales the cost reads: 4 × 4 blocks of 2 × 2 cells, 2 × 2 blocks of 4 × 4, and cells.
 type Print = { cells: Float32Array; b2: Float32Array; b4: Float32Array; l2: Float32Array };
-const prints = new Map<number, Print>();
-function printOf(id: number, wall: Uint8Array): Print {
-  let p = prints.get(id);
+const prints = new Map<string, Print>();
+const HUE_RANK = HUE.reduce((r, m, i) => ((r[m] = i), r), new Array<number>(16).fill(0));
+/// A Credit's 64 cells as `look` draws them in its square: as printed, or (Assessed) its most-used ink, ties to the
+/// earlier hue, on the cells whose Bayer threshold is under how many of its cells are inked.
+function cellsOf(id: number, wall: Uint8Array, look: Look): number[] {
+  const raw = Array.from({ length: 64 }, (_, c) => {
+    const byte = wall[(id - 1) * 32 + (c >> 1)];
+    return c & 1 ? byte >> 4 : byte & 15;
+  });
+  if (look !== 'Assessed') return raw;
+  const n = new Array<number>(16).fill(0);
+  let k = 0;
+  for (const m of raw) if (m) (n[m]++, k++);
+  let t = 0;
+  for (let m = 1; m < 16; m++) if (n[m] && (!t || n[m] > n[t] || (n[m] === n[t] && HUE_RANK[m] < HUE_RANK[t]))) t = m;
+  return raw.map((_, c) => (BAYER[c >> 3][c & 7] < k ? t : 0));
+}
+function printOf(id: number, wall: Uint8Array, look: Look = 'Consolidated'): Print {
+  const key = `${look}:${id}`;
+  let p = prints.get(key);
   if (p) return p;
   const cells = new Float32Array(192), b2 = new Float32Array(48), b4 = new Float32Array(12), l2 = new Float32Array(16);
+  const ink = cellsOf(id, wall, look);
   for (let c = 0; c < 64; c++) {
-    const byte = wall[(id - 1) * 32 + (c >> 1)];
-    const m = c & 1 ? byte >> 4 : byte & 15;
+    const m = ink[c];
     const x = c & 7, y = c >> 3, k2 = (y >> 1) * 4 + (x >> 1), k4 = (y >> 2) * 2 + (x >> 2);
     for (let ch = 0; ch < 3; ch++) {
       cells[c * 3 + ch] = RGB[m][ch];
@@ -40,7 +62,7 @@ function printOf(id: number, wall: Uint8Array): Print {
     l2[k2] += LUM[m] / 4;
   }
   p = { cells, b2, b4, l2 };
-  prints.set(id, p);
+  prints.set(key, p);
   return p;
 }
 
@@ -73,10 +95,85 @@ const sq = (a: Float32Array, b: Float32Array) => {
   return s;
 };
 
+/// Assessed draws each square as one ink at a density, so a patch is read the same way: each pixel to its nearest
+/// ink (or the paper), the ink most of them take, and how many are inked. A Credit's block is its most-used ink, as
+/// dense as it's inked. A different ink costs a lot (more the further apart they look); density, by how far off.
+function assessedCosts(target: Uint8ClampedArray, cands: Candidate[], wall: Uint8Array, p: Params, priceWeight: number) {
+  const majority = (n: number[]) => {
+    let t = 0;
+    for (let m = 1; m < 16; m++) if (n[m] && (!t || n[m] > n[t] || (n[m] === n[t] && HUE_RANK[m] < HUE_RANK[t]))) t = m;
+    return t;
+  };
+  const want = Array.from({ length: 80 }, (_, slot) => {
+    const n = new Array<number>(16).fill(0);
+    let k = 0;
+    for (let c = 0; c < 64; c++) {
+      const x = (slot % 8) * 8 + (c & 7), y = Math.floor(slot / 8) * 8 + (c >> 3), i = (y * 64 + x) * 4;
+      const best = nearestInk(target, i);
+      if (best) (n[best]++, k++);
+    }
+    return { t: majority(n), k };
+  });
+  const have = cands.map((c) => {
+    const n = new Array<number>(16).fill(0);
+    let k = 0;
+    for (const m of cellsOf(c.id, wall, 'Consolidated')) if (m) (n[m]++, k++);
+    return { t: majority(n), k };
+  });
+  const own = (p.own ?? 0) * OWN_BONUS;
+  return want.map((w) => {
+    const row = new Float32Array(cands.length);
+    for (let j = 0; j < cands.length; j++) {
+      const h = have[j];
+      const ink = h.t === w.t ? 0 : 150_000 + (RGB[h.t][0] - RGB[w.t][0]) ** 2 + (RGB[h.t][1] - RGB[w.t][1]) ** 2 + (RGB[h.t][2] - RGB[w.t][2]) ** 2;
+      row[j] = ink + 300 * (h.k - w.k) ** 2 + cands[j].price * priceWeight - (cands[j].owner >= 0 ? own : 0);
+    }
+    return row;
+  });
+}
+
+/// The nearest ink (or the paper, 0) to a pixel of the picture.
+function nearestInk(target: Uint8ClampedArray, i: number) {
+  let best = 0, d = Infinity;
+  for (let m = 0; m < 16; m++) {
+    const e = (RGB[m][0] - target[i]) ** 2 + (RGB[m][1] - target[i + 1]) ** 2 + (RGB[m][2] - target[i + 2]) ** 2;
+    if (e < d) (d = e), (best = m);
+  }
+  return best;
+}
+
+/// Reconciled draws slot `r` as row `r` of the page: a bar of the Credit's inks, each as long as its count of cells,
+/// in hue order. So the picture's row `r` of 64 pixels is read as how many take each ink, and a Credit costs how far
+/// its own counts are from those.
+function reconciledCosts(target: Uint8ClampedArray, cands: Candidate[], wall: Uint8Array, p: Params, priceWeight: number) {
+  const want = Array.from({ length: 80 }, (_, row) => {
+    const n = new Array<number>(16).fill(0);
+    for (let x = 0; x < 64; x++) n[nearestInk(target, (row * 64 + x) * 4)]++;
+    return n;
+  });
+  const have = cands.map((c) => {
+    const n = new Array<number>(16).fill(0);
+    for (const m of cellsOf(c.id, wall, 'Consolidated')) n[m]++;
+    return n;
+  });
+  const own = (p.own ?? 0) * OWN_BONUS;
+  return want.map((w) => {
+    const row = new Float32Array(cands.length);
+    for (let j = 0; j < cands.length; j++) {
+      let e = 0;
+      for (let m = 1; m < 16; m++) e += (have[j][m] - w[m]) ** 2;
+      row[j] = 1000 * e + cands[j].price * priceWeight - (cands[j].owner >= 0 ? own : 0);
+    }
+    return row;
+  });
+}
+
 /// How far each candidate is from each patch: 80 rows of candidates, in the order given.
 export async function costs(target: Uint8ClampedArray, cands: Candidate[], wall: Uint8Array, p: Params, progress?: (f: number) => void, priceWeight = PRICE_WEIGHT) {
+  if (p.look === 'Assessed') return (progress?.(1), assessedCosts(target, cands, wall, p, priceWeight));
+  if (p.look === 'Reconciled') return (progress?.(1), reconciledCosts(target, cands, wall, p, priceWeight));
   const ps = patches(target);
-  const pr = cands.map((c) => printOf(c.id, wall));
+  const pr = cands.map((c) => printOf(c.id, wall, p.look));
   const out = Array.from({ length: 80 }, () => new Float32Array(cands.length));
   const own = (p.own ?? 0) * OWN_BONUS, price = priceWeight;
   for (let t = 0; t < 80; t++) {

@@ -1,7 +1,8 @@
 import { go as navigate } from '../main';
 import { dice, printGlyph, swatch, weightGlyph } from '../glyphs';
 import { decodeEventLog, parseEther, type Address } from 'viem';
-import { creditsAbi, factoryAbi } from '../abi';
+import { creditsAbi, factoryAbi, unionFormatsAbi } from '../abi';
+import { DIRECTIONS, type Direction } from '../../shared/statement';
 import { canBatch, config, send, sendBatch, session } from '../chain';
 import { INK, maskInks, maskLabel } from '../traits';
 import { earlyWeight, placeOnLayout, SPLITS, creatorFeeBps, factoryRatings, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Listed, type Rated, type Summary } from '../data';
@@ -16,7 +17,7 @@ import { directionCanvas, directions, mountDirections, rulesView, showDirection 
 import { Room, booksOf, noRoomReason } from '../slots';
 import { bin } from '../bins';
 import { TRAIT_KINDS, eightsName, parseTrait } from '../../shared/trait';
-import { DETAIL, gapOf, Guide, framer, packPicture, planOf, type Framer, type Plan } from '../picture';
+import { DETAIL, gapOf, Guide, framer, packPicture, planOf, type Framer, type Plan, OWN_GOOD, runOf, type Look } from '../picture';
 
 const CHUNK = 40;
 /// The layouts a new party can pick, by the contract's burn-order number (1 Mint time and 3 Creator's order are retired).
@@ -24,7 +25,7 @@ const ARR_OPTS: [number, string, string][] = [
   [0, 'Joined', 'In the order they joined.'],
   [2, 'Number', 'By Credit number (token ID).'],
   [4, 'Painted', 'Pick a color, then click or drag on the sheet.'],
-  [6, 'Picture', 'Uses the Credits for sale that draw your picture best.'],
+  [6, 'Picture', 'Uses the Credits that draw your picture best: yours and ones for sale.'],
 ];
 /// Number's two directions, by the contract's burn-order number.
 const NUMBER_DIRS: [number, string, string][] = [
@@ -216,11 +217,14 @@ export async function create(app: HTMLElement) {
   let pic: Framer | null = null; // the Picture layout's framer, made when it's first picked
   let guide: Guide | null = null; // the framed picture against every Credit that could draw it
   let picPx: Uint8ClampedArray | null = null; // the picture the sheet was designed from (saved with the union)
+  let picLook: Look = 'Consolidated'; // the format its Credits are matched in
+  let viewing: Direction = 'Consolidated'; // the format the preview shows: a picture burns in it
+  const LOOKS: Look[] = ['Consolidated', 'Assessed', 'Reconciled'];
   const picGone = new Set<number>(); // planned Credits found no longer for sale
   let picPlan: Plan | null = null; // what can go in first: yours that are next in their Colors, and listings
-  /// Where Credits can be bought here (mainnet), a picture union starts by buying its first Credits: the picture is
-  /// the market's best, not bent toward what you hold, and yours can join from its page when they're next. Testnets
-  /// can't buy, so there it's designed with yours too.
+  /// Where Credits can be bought here (mainnet), a picture union starts with yours and Credits bought for it: the
+  /// picture is the market's best, and one of yours takes a spot only where it draws it about as well (OWN_GOOD).
+  /// Testnets can't buy, so there it leans on yours.
   const buyToStart = !!config.sweeper;
   /// Picture is the layout and its sheet is designed: only the picture's own Credits go in, each Colors in order.
   const picturing = () => !!picPlan && layout.some(Boolean) && app.querySelector<HTMLInputElement>('input[name=arr]:checked')?.value === String(PICTURE);
@@ -271,7 +275,7 @@ export async function create(app: HTMLElement) {
         </div>
       </section>
 
-      <h2 class="form-title">Eligible Credits <button type="button" class="link small join-count" id="see-eligible" title="See them"><span class="num" id="st-edition">–</span> <span id="st-edition-label">→</span></button></h2>
+      <h2 class="form-title who-title">Eligible Credits <button type="button" class="link small join-count" id="see-eligible" title="See them"><span class="num" id="st-edition">–</span> <span id="st-edition-label">→</span></button></h2>
       <section class="rule who-bar" data-pane="who">
         <p class="rule-sentence" id="rule-sentence"></p>
         <div class="rule-list" id="add-rule" hidden></div>
@@ -351,7 +355,7 @@ export async function create(app: HTMLElement) {
       <section class="rule" data-tab="credits" data-pane="always">
         <div class="picker lg" id="picker"><p class="muted">Reading your wallet…</p></div>
         <details class="picker-off" id="picker-off-wrap" hidden><summary class="muted small" id="picker-off-sum"></summary><div class="picker lg" id="picker-off"></div></details>
-        <div class="picture-callout" id="picture-callout" hidden><b>Buy to join</b><span>Only the Credits that draw this picture can join. Buy them here, in order, so each lands in its spot.</span></div>
+        <div class="picture-callout" id="picture-callout" hidden><b>Its first Credits for sale</b><span>Each draws one spot. Pick any; one of a Colors brings those ahead of it.</span></div>
         <div class="create-buy" id="create-buy" hidden></div>
       </section>
 
@@ -396,7 +400,7 @@ export async function create(app: HTMLElement) {
     }
     traitsIn = true;
     refresh();
-    if (!buyToStart) void paintFromPicture(); // a picture framed while they were read, with yours in it
+    void paintFromPicture(); // a picture framed while they were read, with yours in it
   })();
 
   // ---------------------------------------------------------------- buy Credits that fit, when none of yours do
@@ -451,7 +455,7 @@ export async function create(app: HTMLElement) {
   }
   /// A picture: its first Credits for sale, in the order they go in (only these can start it), when none of yours are.
   async function drawPictureBuy(el: HTMLElement) {
-    if ((picPlan!.mine.size && !buyToStart) || !config.sweeper) {
+    if (!config.sweeper) {
       el.hidden = true;
       buyFor = '';
       buyer = null;
@@ -470,7 +474,7 @@ export async function create(app: HTMLElement) {
       const sold = want.filter((id) => !ls.some((l) => l.id === id));
       if (!sold.length) break;
       sold.forEach((id) => picGone.add(Number(id)));
-      picPlan = planOf(guide!.fill(layout, layout.map(() => null), picGone), layout);
+      picPlan = planOf(guide!.fillYoursFirst(layout, layout.map(() => null), picGone), layout);
     }
     ls = bySlot(ls.map((l) => l.id)).map((id) => ls.find((l) => l.id === id)!);
     drawPreview(owned.filter(qualifies));
@@ -480,7 +484,12 @@ export async function create(app: HTMLElement) {
     el.innerHTML = `<div class="jb"><div class="jb-sweep" id="cb-act"></div>
       <div class="trait-grid" id="cb-grid">${ls.map(tile).join('')}</div></div>`;
     const sale: Sale = { ls, all: [...ls], byId: new Map(ls.map((l) => [l.id, l])), mine: new Set(), preview: false };
-    buyer = sweepControls(el.querySelector<HTMLElement>('#cb-act')!, sale, el.querySelector<HTMLElement>('#cb-grid')!, { button: false, onPick: () => refresh() });
+    // A Colors' Credits go in from its first open slot (yours first): picking one brings those ahead of it.
+    const along = (id: string, picking: boolean) => {
+      const r = runOf(picPlan!, id, new Set(ls.map((l) => l.id)));
+      return picking ? r.ahead : r.behind;
+    };
+    buyer = sweepControls(el.querySelector<HTMLElement>('#cb-act')!, sale, el.querySelector<HTMLElement>('#cb-grid')!, { button: false, onPick: () => refresh(), along });
   }
   /// Bought here: into the picker, picked.
   async function gotCredits(ids: string[]) {
@@ -571,6 +580,7 @@ export async function create(app: HTMLElement) {
   /// The button says what it does: how many of your Credits go in.
   const startLabel = () => {
     const b = buying().length;
+    if (b && picks.size) return `Buy ${b} and start with ${picks.size + b} Credits`;
     if (b) return `Buy ${b} and start Credit Union`;
     return picks.size ? `Start Credit Union with ${picks.size} ${picks.size === 1 ? 'Credit' : 'Credits'}` : 'Start Credit Union';
   };
@@ -592,8 +602,10 @@ export async function create(app: HTMLElement) {
     });
   }
 
-  /// The rules as the factory takes them (Batch.Filter).
+  /// The rules as the factory takes them (Batch.Filter). A picture keeps only its Colors and layout.
   function filterOf() {
+    const pic = app.querySelector<HTMLInputElement>('input[name=arr]:checked')?.value === String(PICTURE);
+    if (pic) return { palettes: pal(), prints: 0, weights: 0, eights: 0, paidFrom: 0n, paidTo: 0n, idFrom: 0n, idTo: 0n, minScore: 0, maxScore: 0, layout0: layout.slice(0, 64).reduce((acc, m, i) => acc | (BigInt(m) << BigInt(4 * i)), 0n), layout1: layout.slice(64).reduce((acc, m, i) => acc | (BigInt(m) << BigInt(4 * i)), 0n), bitsFrom: 0, bitsTo: 0, layoutTrait: layout.some(Boolean) ? layoutTrait : 0 };
     return {
       palettes: pal(),
       prints: rules.prints,
@@ -617,11 +629,12 @@ export async function create(app: HTMLElement) {
     drawSee();
     // A picture takes only its own Credits: yours that are next in their Colors, and any bought here for it.
     const fit = owned.filter((id) => qualifies(id) && (!picturing() || picPlan!.mine.has(id.toString()) || picPlan!.buy.has(id.toString())));
-    // Buying to start: yours stay out of the way here (bought ones go in, picked, unseen).
-    const buyOnly = picturing() && buyToStart;
+    // A picture: yours that draw its first spots well, and its first Credits for sale beside them; with none of
+    // yours, buying is how it starts (bought ones go in, picked, unseen).
+    const buyOnly = picturing() && buyToStart && !picPlan!.mine.size;
     for (const id of ['picker', 'n']) document.getElementById(id)!.hidden = buyOnly;
-    document.getElementById('picture-callout')!.hidden = !buyOnly;
-    document.getElementById('dep-title')!.textContent = buyOnly ? 'Buy to start' : 'Deposit Credits';
+    document.getElementById('picture-callout')!.hidden = !(picturing() && buyToStart);
+    document.getElementById('dep-title')!.textContent = buyOnly ? 'Buy to start' : picturing() ? 'Yours that draw it' : 'Deposit Credits';
     for (const id of [...picks]) if (!fit.some((f) => f.toString() === id)) picks.delete(id);
     // Until you pick yourself, the least it takes to start is picked for you (Min 1: one of yours that fits), so
     // Start is ready as soon as the rules are; picked again if the rules change under it.
@@ -659,10 +672,14 @@ export async function create(app: HTMLElement) {
       wrap.hidden = offCount === 0 || buyOnly;
       document.getElementById('picker-off-sum')!.textContent = fit.length
         ? picturing()
-          ? `${offCount} of yours ${offCount === 1 ? 'isn’t' : 'aren’t'} next in the picture`
+          ? (() => {
+              const later = owned.filter((id) => picPlan!.slot.has(id.toString()) && !picPlan!.mine.has(id.toString())).length;
+              const loose = offCount - later;
+              return [later ? `${later} more of yours fit spots that open later` : '', loose ? `${loose} ${loose === 1 ? 'isn’t a close match' : 'aren’t close matches'}` : ''].filter(Boolean).join(' · ');
+            })()
           : `You also have ${offCount} ${offCount === 1 ? 'Credit' : 'Credits'} that don’t fit these rules`
         : picturing()
-          ? `None of your ${offCount === 1 ? 'Credit is' : `${offCount} Credits are`} next in the picture: buy its first Credits below to start it`
+          ? `None of your ${offCount === 1 ? 'Credit draws' : `${offCount} Credits draw`} its first spots closely enough: buy its first Credits below to start it`
           : `None of your ${offCount === 1 ? 'Credit fits' : `${offCount} Credits fit`} these rules`;
     }
     document.getElementById('n')!.textContent = picks.size ? `${picks.size} selected` : `Min ${min}`;
@@ -676,13 +693,13 @@ export async function create(app: HTMLElement) {
     const short = eligible >= 0 && eligible < 80 ? `Only ${eligible} ${eligible === 1 ? 'Credit' : 'Credits'} can ever join, and a Credit Union needs 80. Widen the rules.` : '';
     // A picture: none of its Colors may skip a slot.
     const gap = picturing() ? gapOf(picPlan!, [...picks, ...buying().map((l) => l.id)]) : null;
-    const reason = tooNarrow || short || (gap ? `Add #${gap} too: it goes in before the ones you picked.` : '') || (n < min && traitsIn ? (picturing() ? (picPlan!.mine.size ? 'Pick at least one of yours above.' : 'Buy at least one of the picture’s first Credits to start it.') : `Select at least ${min} of your qualifying Credits.`) : n > 80 ? 'At most 80.' : over ? overText(over) : '');
+    const reason = tooNarrow || short || (gap ? `Add #${gap} too: it goes in before the ones you picked.` : '') || (n < min && traitsIn ? (picturing() ? (picPlan!.mine.size ? 'Pick one of yours, or buy one of its first Credits.' : 'Buy at least one of the picture’s first Credits to start it.') : `Select at least ${min} of your qualifying Credits.`) : n > 80 ? 'At most 80.' : over ? overText(over) : '');
     // One line under the button: what blocks it, else how it plays out.
     // What blocks Start sits above it as a warning; the line under it always says how it plays out.
     const warn = document.getElementById('warn')!;
     warn.textContent = reason;
     warn.hidden = !reason;
-    why.innerHTML = `${n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions. ` : ''}Free to start a Credit Union. Withdraw your Credits anytime until it fills and locks.<br>${factoryIn ? `${protocolBps / 100}% protocol fee, only if it sells. ` : ''}Unofficial and experimental.`;
+    why.innerHTML = `${n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions. ` : ''}Free to start a Credit Union. ${picturing() && buyToStart ? 'Yours can come back out while you’re its only member.' : 'Withdraw your Credits anytime until it fills and locks.'}<br>${factoryIn ? `${protocolBps / 100}% protocol fee, only if it sells. ` : ''}Unofficial and experimental.`;
     go.disabled = !!reason || !traitsIn || !factoryIn; // your Credits and their traits are in (traitsIn), and the factory's numbers
     if (!go.dataset.busy) go.textContent = startLabel();
     drawSummary();
@@ -769,7 +786,7 @@ export async function create(app: HTMLElement) {
     const placed = placeOnLayout(layout, order, (id) => keyOfMine(id.toString()));
     const toBuy = buying().map((l) => l.id).filter((id) => picPlan?.slot.has(id));
     for (const id of toBuy) placed[picPlan!.slot.get(id)!] ??= BigInt(id);
-    const rec = guide!.fill(layout, placed.map((x) => (x === null ? null : Number(x))), picGone);
+    const rec = guide!.fillYoursFirst(layout, placed.map((x) => (x === null ? null : Number(x))), picGone);
     return { order, placed, toBuy, rec, ids: placed.map((x, i) => (x !== null ? Number(x) : (rec[i]?.id ?? null))) };
   }
   function drawPreview(fit: bigint[]) {
@@ -777,10 +794,11 @@ export async function create(app: HTMLElement) {
     // other slot the Credit that draws it best, as the union page will recommend it.
     if (guide && layout.some(Boolean) && app.querySelector<HTMLInputElement>('input[name=arr]:checked')?.value === String(PICTURE) && view === 'credits') {
       const { order, placed, toBuy, rec } = pictureSlots(fit);
-      // Nothing picked: the whole picture at full ink. Some picked: they show solid and the rest fades back, so you
-      // see what's going in.
-      app.querySelector('.design-preview')!.classList.toggle('solid-ghosts', !order.length && !toBuy.length);
+      // The whole picture at full ink, with what's going in framed: yours, and the ones you're buying.
+      app.querySelector('.design-preview')!.classList.add('solid-ghosts');
       document.getElementById('preview')!.innerHTML = sheet(order, { mine: new Set([...picks, ...toBuy]), placed, slotGhosts: rec.map((c) => (c ? { id: BigInt(c.id), src: artOf(BigInt(c.id)) } : null)) });
+      const going = new Set([...order.map(String), ...toBuy]);
+      document.querySelectorAll<HTMLElement>('#preview .cell[data-id]').forEach((c) => c.classList.toggle('chosen', going.has(c.dataset.id!)));
       mountDirections(app);
       return;
     }
@@ -1351,9 +1369,14 @@ export async function create(app: HTMLElement) {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>('.pick');
     if (!b || b.classList.contains('off') || b.classList.contains('full')) return;
     // A picture takes only its own Credits, each Colors from its first slot.
-    if (picturing() && !picks.has(b.dataset.id!) && !picPlan!.mine.has(b.dataset.id!)) return toast('Not next in the picture: another Credit draws that Colors’ first slot better.', 'info', 4000);
+    if (picturing() && !picks.has(b.dataset.id!) && !picPlan!.mine.has(b.dataset.id!)) return toast('Not a close match for the next spot of its Colors.', 'info', 4000);
     pickedByHand = true;
-    picks.has(b.dataset.id!) ? picks.delete(b.dataset.id!) : picks.add(b.dataset.id!);
+    const id = b.dataset.id!;
+    // A picture: yours of one Colors go in from its first slot, so one brings those ahead of it, and leaving one out
+    // leaves out those behind it.
+    const along = picturing() ? runOf(picPlan!, id, picPlan!.mine) : null;
+    if (picks.has(id)) [id, ...(along?.behind ?? [])].forEach((x) => picks.delete(x));
+    else [id, ...(along?.ahead ?? [])].forEach((x) => picks.add(x));
     refresh();
   });
   document.getElementById('all')!.addEventListener('click', () => {
@@ -1382,12 +1405,14 @@ export async function create(app: HTMLElement) {
     document.getElementById('arr-hint')!.textContent = (v === '2' ? NUMBER_DIRS.find(([x]) => String(x) === dir)?.[2] : ARR_OPTS.find(([x]) => String(x) === v)?.[2]) ?? '';
     const isPicture = v === String(PICTURE);
     const on = v === '4' || isPicture;
+    // A picture makes its own rules (its Colors, slot by slot): the rest would turn its Credits away, so only Colors stays.
+    app.querySelector('#create')!.classList.toggle('picture-mode', isPicture);
     paintBlock.hidden = !on || isPicture;
     document.getElementById('picture-block')!.hidden = !isPicture;
     // A picture previews as it will print: examples at full ink, packed together (Consolidated), as the Printer
     // matches it.
     app.querySelector('.design-preview')!.classList.toggle('solid-ghosts', isPicture);
-    if (isPicture) showDirection(app.querySelector<HTMLElement>('.dirs'), 'Consolidated');
+    if (isPicture) (showDirection(app.querySelector<HTMLElement>('.dirs'), picLook), (viewing = picLook));
     // Rules only mean something slot by slot on a painted sheet; otherwise every slot takes the same Credits.
     // The painted view (and its phone toggle) is for a sheet you paint by hand; a picture shows as its Credits.
     app.querySelector<HTMLElement>('.view-toggle')!.hidden = !on || isPicture;
@@ -1451,7 +1476,7 @@ export async function create(app: HTMLElement) {
   async function paintFromPicture() {
     if (!pic?.ready() || !preview.isConnected || arrRadios.find((r) => r.checked)?.value !== String(PICTURE)) return;
     const seq = ++picSeq;
-    if (!traitsIn && !buyToStart) return void (document.getElementById('pic-status')!.textContent = 'Reading your Credits…'); // designed once they're in
+    if (!traitsIn && session.account) return void (document.getElementById('pic-status')!.textContent = 'Reading your Credits…'); // designed once they're in
     const status = document.getElementById('pic-status')!;
     const px = pic.pixels();
     let g: Guide;
@@ -1461,9 +1486,9 @@ export async function create(app: HTMLElement) {
       const held = owned.filter((id) => mine.has(id.toString()));
       const progress = (f: number) => seq === picSeq && (status.textContent = `Matching… ${Math.round(f * 100)}%`);
       const detail = DETAIL; // the Printer's tested balance of likeness and edges
-      g = buyToStart
-        ? await Guide.of(px, { detail, progress })
-        : await Guide.of(px, { wallets: [session.account!], held, colours: (id) => paletteBit(mine.get(id.toString())!.traits.palette), detail, progress });
+      g = session.account
+        ? await Guide.of(px, { wallets: [session.account], held, colours: (id) => paletteBit(mine.get(id.toString())!.traits.palette), detail, progress, own: buyToStart ? OWN_GOOD : 1, look: picLook })
+        : await Guide.of(px, { detail, progress, look: picLook });
     } catch (e) {
       if (seq === picSeq) status.textContent = errText(e);
       return;
@@ -1480,7 +1505,6 @@ export async function create(app: HTMLElement) {
     guide = g;
     picPx = px;
     document.getElementById('pic-links')!.hidden = false;
-    status.textContent = '';
     layoutTrait = 0;
     const used = design.layout.reduce((u, m) => u | (1 << m), 0);
     picked = yours | used;
@@ -1491,7 +1515,11 @@ export async function create(app: HTMLElement) {
       paintCell(i);
     });
     // Yours that the picture puts first in their Colors' slots go in now, in slot order.
-    picPlan = planOf(g.fill(layout, layout.map(() => null), picGone), layout);
+    const rec = g.fillYoursFirst(layout, layout.map(() => null), picGone);
+    picPlan = planOf(rec, layout);
+    // What draws all 80: how many of yours, and how many for sale.
+    const ours = rec.filter((c) => c && c.owner >= 0).length;
+    status.textContent = `${ours ? `${ours} of yours and ${80 - ours} for sale draw it.` : 'Credits for sale draw it.'}`;
     picks.clear();
     pickedByHand = false;
     for (const id of bySlot([...picPlan.mine])) picks.add(id);
@@ -1509,6 +1537,14 @@ export async function create(app: HTMLElement) {
   app.addEventListener('direction', (e) => {
     const d = (e as CustomEvent<string>).detail;
     if ((d === 'Rules') !== (view === 'rules')) setView(d === 'Rules' ? 'rules' : 'credits');
+    // A picture follows the format you look at: it burns in it, and in the formats that keep each Credit in its own
+    // spot as a picture (Consolidated, Assessed, Reconciled) its Credits are matched again for it.
+    if (d === 'All' || d === 'Rules') return;
+    viewing = d as Direction;
+    if (LOOKS.includes(d as Look) && d !== picLook && arrRadios.find((r) => r.checked)?.value === String(PICTURE)) {
+      picLook = d as Look;
+      void paintFromPicture();
+    }
   });
   arrRadios.forEach((r) => r.addEventListener('change', syncOrder));
   app.querySelectorAll<HTMLInputElement>('input[name=num-dir]').forEach((r) => r.addEventListener('change', syncOrder));
@@ -1577,7 +1613,7 @@ export async function create(app: HTMLElement) {
       // A picture's first Credits: all or none, so none lands a slot early; a sold one gives its slot to the next best.
       const got = await sweepToWallet(toBuy, go, undefined, picturing() ? { onSold: (ids) => {
         ids.forEach((id) => picGone.add(Number(id)));
-        picPlan = planOf(guide!.fill(layout, layout.map(() => null), picGone), layout);
+        picPlan = planOf(guide!.fillYoursFirst(layout, layout.map(() => null), picGone), layout);
         buyFor = '';
       } } : undefined);
       if (!got?.length) {
@@ -1635,8 +1671,14 @@ export async function create(app: HTMLElement) {
         await send({ address: config.factory, abi: factoryAbi, functionName: 'deposit', args: [batch, ids.slice(i, i + CHUNK)] });
       }
       // A Picture union keeps its picture, so its page can recommend the Credit for each open slot.
-      if (painted && chosen === PICTURE && picPx && layout.some(Boolean))
-        await fetch(`/pictures/${batch}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...packPicture(picPx, DETAIL), ids: pictureIds }) }).catch(() => {});
+      if (painted && chosen === PICTURE && picPx && layout.some(Boolean)) {
+        await fetch(`/pictures/${batch}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...packPicture(picPx, DETAIL, picLook), ids: pictureIds }) }).catch(() => {});
+        // Showing another format than Consolidated: the union burns in it (the creator's pick, set as it opens).
+        if (viewing !== 'Consolidated' && config.formats) {
+          go.textContent = `Setting it to ${viewing}…`;
+          await send({ address: config.formats, abi: unionFormatsAbi, functionName: 'pick', args: [batch, DIRECTIONS.indexOf(viewing)] }).catch(() => toast(`It burns in Consolidated until it’s set to ${viewing}.`, 'info', 8000));
+        }
+      }
       // The party page picks this up and shows the congrats and share dialog, once.
       try {
         sessionStorage.setItem('cu-created', batch);

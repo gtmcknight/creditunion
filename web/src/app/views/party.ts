@@ -1,11 +1,11 @@
 import { parseAbi, parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi, unionFormatsAbi } from '../abi';
 import { canBatch, config, explorer, pub, send, sendBatch, session } from '../chain';
-import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, indexedBatch, indexedOne, keepPick, layoutSlot, me, notice, pickOf, placeOnLayout, readNotice, ratings, sinceTx, staleBatches, type Rated, burnsAt } from '../data';
+import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, indexedBatch, indexedOne, keepPick, keptSpots, layoutSlot, me, notice, pickOf, placeOnLayout, readNotice, ratings, sinceTx, staleBatches, type Rated, burnsAt } from '../data';
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { ens, hydrate, identicon, pct, who } from '../ens';
 import { creditCard, examples, fillGhosts, planGhosts, registerDeposits, registerFilter } from '../ghosts';
-import { gapOf, Guide, planOf, unpackPicture, type Plan, type Stored } from '../picture';
+import { gapOf, Guide, planOf, unpackPicture, type Plan, type Stored, OWN_GOOD, runOf } from '../picture';
 import { Room, books, keysOf, noRoomReason, placedKeys, type Books } from '../slots';
 import { MAX_SWEEP, buying, checkQuote, listedById, connectToBuy, live as keepLive, minEth, priceTag, relist, sweepControls, sweepRow, type Listed, type Quote, type Sale, type Source } from '../forsale';
 import { creditCell, creditSkel } from './trait';
@@ -96,17 +96,33 @@ async function planPicture(b: Ctx, slots: number[], placed: (bigint | null)[] | 
       .then(async (d) => {
         if (!d) return null;
         const keys = held.length ? await keysOf(0, held).catch(() => new Map<string, number>()) : new Map<string, number>();
-        return Guide.of(unpackPicture(d.px), { wallets: account ? [account] : [], held: account ? held : undefined, colours: (id) => keys.get(id.toString()) ?? 0, detail: d.detail });
+        if (d.look) looks.set(b.s.address.toLowerCase(), d.look);
+        return Guide.of(unpackPicture(d.px), { wallets: account ? [account] : [], held: account ? held : undefined, colours: (id) => keys.get(id.toString()) ?? 0, detail: d.detail, own: config.sweeper ? OWN_GOOD : 1, look: d.look }); // testnets can't buy: there yours lead
       });
     guides.set(key, g);
     g.catch(() => guides.delete(key));
   }
   const guide = await g;
   if (!guide) return null;
-  const rec = guide.fill(slots, placed ? placed.map((x) => (x === null ? null : Number(x))) : slots.map(() => null), gone);
+  const rec = guide.fillYoursFirst(slots, placed ? placed.map((x) => (x === null ? null : Number(x))) : slots.map(() => null), gone);
   planGhosts(b.s.address, rec.map((c) => c?.id ?? null));
   livePlanned.add(b.s.address.toLowerCase());
   return planOf(rec, slots, placed);
+}
+/// A picture union: the Credits picked to deposit or buy show at full ink in their spots on the sheet, so each shows
+/// where it goes before it's in. `from`: which pick changed (the Deposit tab's or the Buy tab's; both stay lit).
+const chosenSpots = { mine: new Set<string>(), buy: new Set<string>() };
+function chooseSpots(from: 'mine' | 'buy', ids: Iterable<string>) {
+  chosenSpots[from] = new Set(ids);
+  const art = document.querySelector<HTMLElement>('.batch-art');
+  if (!art) return;
+  const on = new Set([...chosenSpots.mine, ...chosenSpots.buy]);
+  let changed = false;
+  art.querySelectorAll<HTMLElement>('.sheet > .cell').forEach((c) => {
+    const lit = !c.dataset.id && !!c.dataset.ghost && on.has(c.dataset.ghost);
+    if (c.classList.contains('chosen') !== lit) (c.classList.toggle('chosen', lit), (changed = true));
+  });
+  if (changed) art.dispatchEvent(new CustomEvent('ghosts', { bubbles: true }));
 }
 /// A Picture union's buy locks (worker/locks.ts): Colors someone is buying right now can't be bought by anyone else
 /// until their transaction lands, so no Credit lands a slot late. Null answers mean locks are off (testnets, local).
@@ -184,6 +200,8 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   // The value of the painted trait each Credit in was booked under (Batch.keyOf), read alongside the wallet's
   // own reads rather than after them.
   const keysRead = slots && !burned ? placedKeys(s.address, b.ids).catch(() => null) : null;
+  // A picture's spots as the burn contract keeps them, once it's on: after a leave only that spot is open.
+  const spotsRead = slots?.every((v) => v) && !Number(s.filter.layoutTrait ?? 0) && !burned && b.ids.length ? keptSpots(s.address) : null;
   // Your side, if it's back within a moment. Otherwise the page draws without it (as for a visitor) and draws again,
   // in place, when it lands: a slow wallet read never holds the whole page blank.
   const drawing = ++draws;
@@ -238,6 +256,8 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       placed = b.ids.length ? placeOnLayout(slots, b.ids, (id) => keyed.get(id.toString()) ?? 0) : undefined;
     } catch {}
   }
+  const spots = spotsRead ? await spotsRead : null;
+  if (spots) placed = spots;
   // Keys unread even after retrying: the sheet can't show where the Credits go, so it says so instead of drawing them
   // in deposit order.
   const unplaced = !!slots && !burned && b.ids.length > 0 && !placed;
@@ -326,8 +346,11 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   if ((s.state === 'Full' || s.state === 'Expired') && slots && !Number(s.filter.layoutTrait ?? 0)) {
     const host = app.querySelector<HTMLElement>('.batch-art');
     void fetch(`/pictures/${s.address}`).then(async (r) => {
-      if (!r.ok || !host?.isConnected || !(await r.json().catch(() => null))) return; // null: not a picture
+      const saved = r.ok ? ((await r.json().catch(() => null)) as { look?: Direction } | null) : null;
+      if (!saved || !host?.isConnected) return; // null: not a picture
       isPictureUnion.add(s.address.toLowerCase());
+      // Matched in another format: the sheet opens in it (unless you've switched it yourself).
+      if (saved.look) (looks.set(s.address.toLowerCase(), saved.look), !viewerPicked(s.address) && showDirection(host.querySelector<HTMLElement>('.dirs'), opensIn(s.address, 'Consolidated')));
       app.querySelectorAll('.layout-name').forEach((e) => (e.textContent = 'Picture'));
       const takes = app.querySelector('.takes');
       if (takes) takes.innerHTML = '<dt>Rules</dt><dd>Only the Credits that draw its picture</dd>';
@@ -345,15 +368,23 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   // A Picture union: its open slots show the Credits that draw it best, and Buy and Deposit lead with them.
   if (s.state === 'Open' && slots && !Number(s.filter.layoutTrait ?? 0)) {
     const host = app.querySelector<HTMLElement>('.batch-art');
-    // Where Credits can be bought (mainnet) a picture union is bought into, never deposited from a wallet: one plan,
-    // from the listings, the same for everyone. Testnets can't buy, so there it plans with the viewer's Credits.
-    const who = config.sweeper ? undefined : (account ?? undefined), held = config.sweeper ? [] : (m?.owned ?? []);
+    // The plan counts the viewer's own Credits beside the listings: one of yours takes a spot when it draws it about as
+    // well as the best for sale (OWN_GOOD), and goes in from the Deposit tab.
+    const who = account ?? undefined, held = m?.owned ?? [];
     // Known to be a picture as soon as its saved picture answers (the plan itself takes seconds): say so, and on
     // mainnet drop Deposit at once, so nobody sees a Painted union's Deposit tab in the meantime.
     void fetch(`/pictures/${s.address}`).then(async (r) => {
-      const saved = r.ok ? ((await r.json().catch(() => null)) as { ids?: (number | null)[]; inks?: Record<string, [string, number, number]> } | null) : null;
+      const saved = r.ok ? ((await r.json().catch(() => null)) as { ids?: (number | null)[]; inks?: Record<string, [string, number, number]>; look?: Direction } | null) : null;
       if (!saved || !host?.isConnected) return; // null: not a picture
       isPictureUnion.add(s.address.toLowerCase());
+      // Matched in another format: the sheet opens in it (unless you've switched it yourself).
+      if (saved.look) (looks.set(s.address.toLowerCase(), saved.look), !viewerPicked(s.address) && showDirection(host.querySelector<HTMLElement>('.dirs'), opensIn(s.address, 'Consolidated')));
+      // Made to burn in a format (its creator's pick, set as it opened): it opens in that one.
+      void pickOf(s.address).then((f) => {
+        if (f == null || f >= DIRECTIONS.length || !host.isConnected) return;
+        picked.set(s.address.toLowerCase(), DIRECTIONS[f]);
+        if (!viewerPicked(s.address)) showDirection(host.querySelector<HTMLElement>('.dirs'), DIRECTIONS[f]);
+      });
       warmInks(b.ids); // the Credits already in: read while the picture's own answer is parsed
       // Draw the picture now from the Credits saved with it (their ink comes along); the live plan, seconds later,
       // swaps in a replacement wherever a saved one has sold.
@@ -369,22 +400,15 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       const takes = app.querySelector('.takes');
       if (takes) takes.innerHTML = '<dt>Rules</dt><dd>Only the Credits that draw its picture</dd>';
       if (config.sweeper) {
-        // Bought into only; withdrawing through the site is off too, since it would shift the picture (the contract
-        // still allows it).
+        // Withdrawing through the site is off, since it would shift the picture (the contract still allows it); the
+        // only member can still leave, all at once.
         if (solo) soloOut();
         else {
           document.querySelector<HTMLElement>('[data-add="withdraw"]')?.setAttribute('hidden', '');
           document.querySelector<HTMLElement>('[data-pane="withdraw"]')?.setAttribute('hidden', '');
-          document.querySelector<HTMLElement>('[data-add="buy"]')?.parentElement?.setAttribute('hidden', ''); // Buy alone needs no tabs
         }
-        const note = document.querySelector('.pane-note');
-        if (note) note.innerHTML = '<span id="buy-line"></span><span class="buy-how">One transaction buys your picks and deposits them in your name. </span>Unofficial, use at your own risk. <a href="/docs" target="_blank" rel="noopener">How it works</a>';
-        document.querySelector('[data-pane="buy"]')?.insertAdjacentHTML('afterbegin', `<div class="picture-rules"><p><strong>Buy only.</strong> Each open slot has one Credit for sale picked to draw that part of the picture. You buy those, in order. Credits you already own can’t go in.</p>${solo ? '<p><strong>You can leave while you’re the only member.</strong> Once someone else joins, withdrawals close.</p>' : '<p><strong>No withdrawals here.</strong> Taking a Credit out would shift the picture.</p>'}</div>`);
-      }
-      if (config.sweeper) {
-        const tab = document.querySelector<HTMLButtonElement>('[data-add="mine"]');
-        if (tab) tab.hidden = true;
-        document.querySelector<HTMLButtonElement>('[data-add="buy"]:not([aria-selected="true"])')?.click();
+        const leave = document.querySelector('.pane-note .leave-note');
+        if (leave) leave.textContent = solo ? 'You can leave while you’re the only member.' : 'Once in, a Credit stays: taking one out would shift the picture.';
       }
     }, () => {});
     const plan = planPicture(b, slots, placed, who, held).catch(() => null);
@@ -395,12 +419,6 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       // …and in Consolidated, the direction a picture is matched in, unless you picked another.
       await fillGhosts(app); // the planned Credits into the sheet first, so the direction draws them
       if (!pickedDirection(s.address)) showDirection(host.querySelector<HTMLElement>('.dirs'), opensIn(s.address, 'Consolidated'));
-      if (config.sweeper) {
-        // Bought into, never deposited: no Deposit tab for anyone.
-        const tab = document.querySelector<HTMLButtonElement>('[data-add="mine"]');
-        if (tab) tab.hidden = true;
-        document.querySelector<HTMLButtonElement>('[data-add="buy"]:not([aria-selected="true"])')?.click();
-      }
       fillGhosts(app);
     });
   }
@@ -621,7 +639,9 @@ async function chooseFormat(host: HTMLElement, union: Address, burnsIn: Directio
 
 /// The format each union's creator picked, once read: the view its sheet opens in instead of the default.
 const picked = new Map<string, Direction>();
-const opensIn = (union: string, fallback: Direction) => picked.get(union.toLowerCase()) ?? fallback;
+const opensIn = (union: string, fallback: Direction) => picked.get(union.toLowerCase()) ?? (fallback === 'Consolidated' ? (looks.get(union.toLowerCase()) ?? fallback) : fallback);
+/// A picture matched in another format than Consolidated (its saved picture's `look`), per union.
+const looks = new Map<string, Direction>();
 
 /// "Burns in …" under the sheet: its creator's pick (UnionFormats), else Consolidated for a picture and Issued for the
 /// rest, as the burn contract decides. The sheet opens in a pick. While every member can still leave, the creator
@@ -740,7 +760,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>, pending = false) {
       </div>
       <div data-pane="buy"${start === 'buy' ? '' : ' hidden'}>${buyPane(!!m)}</div>
       ${myIds.size ? `<div data-pane="withdraw"${start === 'withdraw' ? '' : ' hidden'}>${withdraw()}</div>` : ''}
-      <p class="muted small pane-note"><span id="buy-line">Finding the cheapest listings that fit… </span><span class="buy-how">One transaction buys your picks and deposits them in your name. </span>Leave anytime until it locks. Unofficial, use at your own risk. <a href="/docs" target="_blank" rel="noopener">How it works</a></p>
+      <p class="muted small pane-note"><span id="buy-line">Finding the cheapest listings that fit… </span><span class="buy-how">One transaction buys your picks and deposits them in your name. </span><span class="leave-note">${!isPictureUnion.has(s.address.toLowerCase()) || !config.sweeper ? 'Leave anytime until it locks.' : myIds.size && new Set(b.depositors.map((d) => d.toLowerCase())).size === 1 ? 'You can leave while you’re the only member.' : 'Once in, a Credit stays: taking one out would shift the picture.'}</span> Unofficial, use at your own risk. <a href="/docs" target="_blank" rel="noopener">How it works</a></p>
     </div>`;
   }
 
@@ -1080,13 +1100,6 @@ async function drawPicker(
   // A picture union takes only the Credits that draw its next slots: yours that are next in their Colors.
   const plan = await (plansOf.get(s.address.toLowerCase()) ?? Promise.resolve(null));
   if (!el.isConnected) return;
-  // A picture union on mainnet is bought into, never deposited: no Deposit tab, straight to Buy.
-  if (plan && config.sweeper) {
-    const tab = document.querySelector<HTMLButtonElement>('[data-add="mine"]');
-    if (tab) tab.hidden = true;
-    document.querySelector<HTMLButtonElement>('[data-add="buy"]:not([aria-selected="true"])')?.click();
-    return;
-  }
   const roomy = passing.filter((id) => base.fits(keyOf(id)));
   const fits = plan ? roomy.filter((id) => plan.mine.has(id.toString())) : roomy;
   const most = (() => {
@@ -1111,8 +1124,12 @@ async function drawPicker(
     const why = bk ? noRoomReason(bk, keyOf(id)) : 'No room left';
     off.set(why, [...(off.get(why) ?? []), id]);
   }
-  const notNext = plan ? roomy.filter((id) => !plan.mine.has(id.toString())) : [];
-  if (notNext.length) off.set('Not next in the picture: another Credit draws its Colors’ next slot better', notNext);
+  // A picture's: yours that draw a spot well but go in after Credits for sale in their Colors (come back once those
+  // are in), and the rest of yours of its Colors, which don't draw any open spot closely enough.
+  const later = plan ? roomy.filter((id) => !plan.mine.has(id.toString()) && plan.slot.has(id.toString())) : [];
+  const loose = plan ? roomy.filter((id) => !plan.slot.has(id.toString())) : [];
+  if (later.length) off.set('Fit spots that open later, once the Credits ahead of them are in', later);
+  if (loose.length) off.set('Not a close match for any open spot in the picture', loose);
   const outside = m.owned.filter((id) => !inRules.has(id.toString()));
   if (outside.length) off.set('Outside this Credit Union’s rules', outside);
   const offCount = [...off.values()].reduce((n, x) => n + x.length, 0);
@@ -1196,38 +1213,53 @@ async function drawPicker(
       run(e.currentTarget as HTMLElement, 'Depositing…', async () => {
         // A picture union's recommended Credits go in slot order, so each lands where it draws.
         const ids = byPlan([...picks].map((id) => ({ id })), plan).map((x) => BigInt(x.id));
-        const chunks = Array.from({ length: Math.ceil(ids.length / CHUNK) }, (_, i) => ids.slice(i * CHUNK, (i + 1) * CHUNK));
-        const deposit = (chunk: bigint[]) => ({ address: config.factory, abi: depositAbi, functionName: 'deposit', args: [s.address, chunk] });
-        // A painted sheet takes each Credit only while a slot of its kind (or an open slot) is free, which the
-        // plain rule check can't see. When already approved, test-run the deposit and drop any Credit the sheet
-        // has no room for, so the rest still go in.
-        if (way === 'deposit' && hasLayout(s.filter)) {
-          const skipped: bigint[] = [];
-          for (let tries = 0; tries < ids.length; tries++) {
-            try {
-              await pub.simulateContract({ ...(deposit(ids) as object), account: session.account! } as never);
-              break;
-            } catch (err) {
-              const id = noSlotId(err);
-              if (id === null) throw err;
-              skipped.push(id);
-              ids.splice(ids.findIndex((x) => x === id), 1);
-              if (!ids.length) throw new Error(`No room left on this sheet for ${skipped.length === 1 ? `#${skipped[0]}` : 'those Credits'}: their slots are full.`);
-            }
-          }
-          if (skipped.length && ids.length) toast(`Skipping ${skipped.map((x) => `#${x}`).join(', ')}: no slot left on this sheet for ${skipped.length === 1 ? 'it' : 'them'}.`, 'info', 5000);
-          chunks.splice(0, chunks.length, ...Array.from({ length: Math.ceil(ids.length / CHUNK) }, (_, i) => ids.slice(i * CHUNK, (i + 1) * CHUNK)));
+        // …with their Colors locked first, so nobody's buy lands in their slots meanwhile (as a picture's buys do).
+        const lockId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (x) => x.toString(16).padStart(2, '0')).join('');
+        let locked = false;
+        if (plan) {
+          const colours = [...new Set(ids.flatMap((id) => plan.colour.get(id.toString()) ?? []))];
+          const lk = await locks(s.address, { op: 'acquire', id: lockId, colours });
+          if (lk && lk.ok === false) throw new Error(`Someone is buying ${(lk.busy ?? []).map((c) => slotName(0, c)).join(', ')} for this picture right now. Try again in a minute.`);
+          locked = !!lk;
         }
-        if (way === 'direct')
-          await send({ address: config.credits, abi: directAbi, functionName: 'safeTransferFrom', args: [session.account!, s.address, ids[0]] }, txNote);
-        else if (way === 'batch')
-          await sendBatch(
-            [{ address: config.credits, abi: creditsAbi, functionName: 'setApprovalForAll', args: [config.factory, true] }, ...chunks.map(deposit)],
-            () => toast('Submitted. Waiting for confirmation…', 'info'),
-          );
-        else for (const chunk of chunks) await send(deposit(chunk), txNote);
-        picks.clear();
-        justJoined(s.address, ids.length);
+        const sent = (h: string) => (txNote(h), locked && void locks(s.address, { op: 'hold', id: lockId }));
+        try {
+          const chunks = Array.from({ length: Math.ceil(ids.length / CHUNK) }, (_, i) => ids.slice(i * CHUNK, (i + 1) * CHUNK));
+          const deposit = (chunk: bigint[]) => ({ address: config.factory, abi: depositAbi, functionName: 'deposit', args: [s.address, chunk] });
+          // A painted sheet takes each Credit only while a slot of its kind (or an open slot) is free, which the
+          // plain rule check can't see. When already approved, test-run the deposit and drop any Credit the sheet
+          // has no room for, so the rest still go in.
+          if (way === 'deposit' && hasLayout(s.filter)) {
+            const skipped: bigint[] = [];
+            for (let tries = 0; tries < ids.length; tries++) {
+              try {
+                await pub.simulateContract({ ...(deposit(ids) as object), account: session.account! } as never);
+                break;
+              } catch (err) {
+                const id = noSlotId(err);
+                if (id === null) throw err;
+                skipped.push(id);
+                ids.splice(ids.findIndex((x) => x === id), 1);
+                if (!ids.length) throw new Error(`No room left on this sheet for ${skipped.length === 1 ? `#${skipped[0]}` : 'those Credits'}: their slots are full.`);
+              }
+            }
+            if (skipped.length && ids.length) toast(`Skipping ${skipped.map((x) => `#${x}`).join(', ')}: no slot left on this sheet for ${skipped.length === 1 ? 'it' : 'them'}.`, 'info', 5000);
+            chunks.splice(0, chunks.length, ...Array.from({ length: Math.ceil(ids.length / CHUNK) }, (_, i) => ids.slice(i * CHUNK, (i + 1) * CHUNK)));
+          }
+          if (way === 'direct')
+            await send({ address: config.credits, abi: directAbi, functionName: 'safeTransferFrom', args: [session.account!, s.address, ids[0]] }, sent);
+          else if (way === 'batch')
+            await sendBatch(
+              [{ address: config.credits, abi: creditsAbi, functionName: 'setApprovalForAll', args: [config.factory, true] }, ...chunks.map(deposit)],
+              () => (toast('Submitted. Waiting for confirmation…', 'info'), locked && void locks(s.address, { op: 'hold', id: lockId })),
+            );
+          else for (const chunk of chunks) await send(deposit(chunk), sent);
+          picks.clear();
+          if (plan) chooseSpots('mine', []);
+          justJoined(s.address, ids.length);
+        } finally {
+          if (locked) void locks(s.address, { op: 'release', id: lockId }); // landed, failed or cancelled: the Colors are free
+        }
       }, ''),
     );
   };
@@ -1245,6 +1277,7 @@ async function drawPicker(
       else p.removeAttribute('aria-disabled');
       p.title = blocked ? (r.n >= room ? `All ${room} open places are picked` : bk ? noRoomReason(bk, keyOf(id), true) : '') : '';
     });
+    if (plan) chooseSpots('mine', picks);
     draw();
   };
   // Scroll the picker (not the page) to the first pick, so a preselected Credit is in view.
@@ -1254,7 +1287,11 @@ async function drawPicker(
     const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.pick');
     if (!btn || btn.classList.contains('off')) return;
     const id = btn.dataset.id!;
-    picks.has(id) ? picks.delete(id) : picks.add(id);
+    // A picture union: yours of one Colors go in from its first open slot, so picking one picks those ahead of it,
+    // and dropping one drops those behind it.
+    const along = plan ? runOf(plan, id, plan.mine) : null;
+    if (picks.has(id)) [id, ...(along?.behind ?? [])].forEach((x) => picks.delete(x));
+    else [id, ...(along?.ahead ?? [])].forEach((x) => picks.add(x));
     sync();
   });
   sync();
@@ -1325,8 +1362,11 @@ async function bindBuy(
       mainnetOnly = !!d.preview;
     }
   } catch (e) {
-    line.textContent = "Couldn’t load OpenSea listings right now. "; console.warn("[buy] listings", e);
-    return;
+    // A picture union sells its planned Credits, read one by one: it goes on without the usual listings.
+    if (!plansOf.has(batch.toLowerCase())) {
+      line.textContent = "Couldn’t load OpenSea listings right now. "; console.warn("[buy] listings", e);
+      return;
+    }
   }
   if (!grid.isConnected) return;
 
@@ -1386,7 +1426,7 @@ async function bindBuy(
   }
   // A picture's, in the order they go in; any other union's, cheapest first.
   const pictureLine = (n: number) =>
-    (n ? 'The Credits that draw the picture’s next slots, in the order they go in. ' : 'Nothing for sale draws the picture’s next slots right now. ') +
+    (n ? 'Tap one to see its spot. ' : 'Nothing for sale draws the picture’s next spots right now. ') +
     (held.size ? `Someone is buying ${[...held].map((m) => slotName(0, m)).join(', ')} right now; those are back in a moment. ` : '');
   const showing = (picked: Set<string>) => byPlan(order ? all.filter((l) => order!.buy.has(l.id) && !held.has(order!.colour.get(l.id)!)) : all, order).filter((l, i) => i < MAX_SWEEP || picked.has(l.id));
   const shown = showing(new Set());
@@ -1410,8 +1450,13 @@ async function bindBuy(
     go.disabled = mainnetOnly || !n || !connected;
     go.textContent = n ? `Buy & deposit ${n}` : 'Buy & deposit';
   };
-  // A picture's Credits go in in the order shown (each takes the first open slot of its colour): a tap picks up to it.
-  const ctl = sweepControls(host, sale, grid, { button: false, cap: 80 - b.s.count, onPick: label, inOrder: () => !!order });
+  // A picture's Credits of one Colors go in from its first open slot: picking one brings those ahead of it.
+  const along = (id: string, picking: boolean) => {
+    if (!order) return [];
+    const r = runOf(order, id, new Set(sale.ls.map((l) => l.id)));
+    return picking ? r.ahead : r.behind;
+  };
+  const ctl = sweepControls(host, sale, grid, { button: false, cap: 80 - b.s.count, onPick: () => (label(), order && chooseSpots('buy', chosen().map((l) => l.id))), along });
   chosen = ctl.chosen;
   label();
   // Live: the listings that fit, read again every 20 s (the worker's scan of them is cached 30 s). The cheapest that
