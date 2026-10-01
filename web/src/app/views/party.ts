@@ -770,7 +770,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>, pending = false) {
       case 'Waiting':
         return `<div class="box">
           <h3>Waiting for Statements</h3>
-          <p class="muted">${notice ? `Becomes a Statement ${startsAt(notice.at)}.` : 'Becomes a Statement when Statements launch.'}</p>
+          <p class="muted">${notice ? `Becomes a Statement ${startsAt(notice.at + 5 * 60)}.` : 'Becomes a Statement when Statements launch.'}</p>
           ${myIds.size ? withdraw() : ''}
         </div>`;
       case 'Countdown':
