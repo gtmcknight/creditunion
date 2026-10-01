@@ -274,7 +274,7 @@ async function leaderboard(el: HTMLElement) {
 
 /// The ticker's markup (homepage under the hero, /unions under the lede); activityTicker fills it.
 export const tickerHtml = (id: string, kind = '') =>
-  `<div class="home-ticker empty${kind ? ` ${kind}` : ''}" id="${id}"><span class="tick-label">Latest</span><span class="tick-dot" aria-hidden="true"></span><span class="tick-line" aria-live="off"></span><a class="tick-all" href="/activity">All activity →</a></div>`;
+  `<div class="home-ticker empty${kind ? ` ${kind}` : ''}" id="${id}"><span class="tick-dot" aria-label="Live"></span><span class="tick-line" aria-live="off"></span><a class="tick-all" href="/activity">Activity →</a></div>`;
 
 /// The ticker: the newest event, one line. Checked every 20 seconds; a new one fades in, and its "ago" keeps
 /// counting in between. It always holds its line (no layout shift); while the feed can't be read, the line is blank.

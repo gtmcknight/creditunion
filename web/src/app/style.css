@@ -9116,3 +9116,10 @@ dialog.share .share-swatches button {
 .meta-byline .who img { display: none; }
 .meta-byline .who-name { font-family: var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meta-byline .meta-where { flex: none; white-space: nowrap; }
+/* The site ticker, quiet: one hairline (the header's), small grey type; only who and where are ink. */
+.home-ticker.tick-bar { border-bottom: 0; font-size: 13px; color: var(--muted); gap: 10px; }
+.tick-bar .tick-who .who { font-size: 13px; color: var(--fg); }
+.tick-bar .tick-who .who img { width: 16px; height: 16px; }
+.tick-bar .tick-what a { color: var(--fg); }
+.tick-bar .tick-all { text-decoration: none; font-size: 13px; }
+.tick-bar .tick-line { gap: 5px; } .tick-bar .tick-when { margin-left: 4px; }
