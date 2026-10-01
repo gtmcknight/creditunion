@@ -6022,6 +6022,23 @@ dialog.eligible::backdrop {
 #tab-body .section-head + p + .section-head {
   margin-top: 40px;
 }
+/* Profile, Deposited: each union's name and where it stands, over your Credits in it. */
+.dep-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0 0 12px;
+  color: inherit;
+  text-decoration: none;
+}
+.trait-grid + .dep-head {
+  margin-top: 32px;
+}
+.dep-head:hover strong {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 
 /* Light mode sits on gray; the Credit sheets stay white with a soft lift, so the grids read as objects. */
 :root:not([data-mode='dark']) :is(.card .sheet, .batch-art .sheet, .dir-host .dir-canvas) {

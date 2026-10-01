@@ -55,12 +55,15 @@ let lastPath = '';
 let lastPage = '';
 async function route() {
   const run = ++seq;
+  // Your own page lives at your address, so the address bar always holds a link others can open.
+  if (pagePath()[0] === 'me' && session.account) history.replaceState(null, '', `/member/${session.account}`);
   const [page, arg] = pagePath();
+  const self = page === 'me' || (page === 'member' && !!arg && arg.toLowerCase() === session.account?.toLowerCase());
   siteTicker(page);
-  const current = page === 'party' ? 'parties' : EXPLORER.has(page) ? 'credits' : page === '' ? 'home' : page;
+  const current = self ? 'me' : page === 'party' ? 'parties' : EXPLORER.has(page) ? 'credits' : page === '' ? 'home' : page;
   document.querySelectorAll<HTMLAnchorElement>('[data-nav]').forEach((a) => a.toggleAttribute('aria-current', a.dataset.nav === current));
   document.querySelectorAll<HTMLAnchorElement>('#account [data-nav]').forEach((a) =>
-    a.classList.toggle('current', page === 'me'),
+    a.classList.toggle('current', self),
   );
   // Moving within the Credits explorer (trait to trait) swaps the page in place; elsewhere it fades in.
   const within = EXPLORER.has(page) && EXPLORER.has(lastPage);
@@ -169,7 +172,7 @@ function drawAccount() {
   const el = document.getElementById('account')!;
   el.innerHTML = session.account
     ? `<div class="acct-wrap"><button type="button" class="btn sm acct" data-nav="me" aria-haspopup="menu" aria-expanded="false">${who(session.account)}</button>
-      <div class="acct-menu" role="menu" hidden><a role="menuitem" href="/me">Profile</a><button type="button" role="menuitem" data-disconnect>Disconnect</button></div></div>`
+      <div class="acct-menu" role="menu" hidden><a role="menuitem" href="/member/${session.account}">Profile</a><button type="button" role="menuitem" data-disconnect>Disconnect</button></div></div>`
     : `<button class="btn sm" data-connect>Connect</button>`;
   hydrate(el);
 }

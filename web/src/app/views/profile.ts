@@ -5,7 +5,7 @@ import { listBatches, myCredits, type Listed } from '../data';
 import { hydrate, who } from '../ens';
 import { fillGhosts } from '../ghosts';
 import { errText, esc, eth, pageHead, same, toast } from '../ui';
-import { card, drawPictures, mineIn, pictureCards, placeCards } from './lists';
+import { card, drawPictures, fullStatus, mineIn, pictureCards, placeCards, status } from './lists';
 import { creditCell } from './trait';
 import { activityItems, activityOf } from './live';
 
@@ -98,13 +98,29 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
   // The explorer's tile, as every grid of Credits: art, number; where it sits in a union, on hover.
   const tiles = (xs: { id: bigint; b?: Listed }[]) =>
     `<div class="trait-grid">${xs.map(({ id, b }) => creditCell(Number(id), '', { title: `Credit #${id}${b ? ` · in ${b.s.name || 'Untitled'}` : ''}` })).join('')}</div>`;
+  // Deposited Credits under the union each sits in, with where it stands: closest to full first, then at auction,
+  // sold, expired.
+  const standing = (b: Listed) =>
+    b.s.state === 'Open' ? `${b.s.count} of 80` : b.s.state === 'Full' ? (b.s.phase === 'Waiting' ? 'Full' : `Full · ${fullStatus(b.s)}`) : status(b.s);
+  const rank = (b: Listed) => ({ Open: 0, Full: 0, Auction: 1, Settled: 2, Expired: 3 })[b.s.state] ?? 4;
+  const byUnion = joined
+    .filter((b) => mineIn(b, account).size)
+    .sort((x, y) => rank(x) - rank(y) || y.s.count - x.s.count);
+  const deposits = () =>
+    byUnion
+      .map(
+        (b) => `<a class="dep-head" href="/union/${b.s.address}"><strong>${esc(b.s.name || 'Untitled')}</strong><span class="muted num">${esc(standing(b))} →</span></a>${tiles(
+          [...mineIn(b, account)].map((id) => ({ id: BigInt(id) })),
+        )}`,
+      )
+      .join('');
   const body: Record<Tab, () => string> = {
     Unions: () => grid(filling, own ? 'You’re not in any Credit Union yet. <a href="/unions">Browse Credit Unions</a>' : 'Not in any Credit Union yet.'),
     Auctions: () => grid(auctions, own ? 'None of your Credit Unions has made a Statement yet.' : 'None of their Credit Unions has made a Statement yet.'),
     Credits: () =>
       `<div class="section-head"><h3>In wallet</h3><span class="muted num">${owned.length || ''}</span></div>${
         owned.length ? tiles([...owned].reverse().map((id) => ({ id }))) : `<p class="muted">None.${own && config.chainId !== 1 ? ' <a href="/mint">Mint test Credits →</a>' : ''}</p>`
-      }<div class="section-head"><h3>Deposited</h3><span class="muted num">${inUnions.length || ''}</span></div>${inUnions.length ? tiles(inUnions) : '<p class="muted">None.</p>'}`,
+      }<div class="section-head"><h3>Deposited</h3><span class="muted num">${inUnions.length || ''}</span></div>${inUnions.length ? deposits() : '<p class="muted">None.</p>'}`,
     Activity: () => (activity === undefined ? '<p class="muted">Loading…</p>' : `<ol class="live-list fold-list">${activityItems(activity, { member: true })}</ol>`),
   };
   const at = document.getElementById('tab-body')!;

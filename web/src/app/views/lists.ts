@@ -12,7 +12,7 @@ import { drawStill, primeInks, showStill, warmInks } from '../directions';
 
 /// Last deposit per union, from the activity feed (filled in after the first draw).
 
-function status(s: Summary) {
+export function status(s: Summary) {
   switch (s.state) {
     case 'Open':
       return `${80 - s.count} to go`;
