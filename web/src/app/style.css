@@ -6606,6 +6606,7 @@ dialog.eligible::backdrop {
 .logo:hover .mark { opacity: 1; }
 /* Sort: one quiet menu button in the page bar, with the native picker underneath. */
 .sort-pick { position: relative; }
+.sort-pick.idle { visibility: hidden; } /* a tab with nothing to sort keeps the bar's height */
 .sort-btn {
   position: relative;
   display: inline-flex;

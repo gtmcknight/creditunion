@@ -488,8 +488,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       // Multibid keeps itself current (its picks and amounts survive the reads), so it's drawn once.
       if (pick === 'multibid') {
         shownStage = pick;
-        const menu = app.querySelector<HTMLElement>('.sort-pick');
-        if (menu) menu.hidden = true;
+        app.querySelector<HTMLElement>('.sort-pick')?.classList.add('idle');
         if (!el.querySelector('#whale-body')) void whale(el);
         return;
       }
@@ -503,8 +502,8 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       });
       const label = app.querySelector('.sort-label');
       if (label) label.textContent = AUCTION_SORTS.find(([k, , st]) => k === order && st === pick)?.[1] ?? '';
-      const menuPick = app.querySelector<HTMLElement>('.sort-pick');
-      if (menuPick) menuPick.hidden = pick === 'upcoming';
+      // A tab with nothing to order keeps the menu's place, so the tabs don't move.
+      app.querySelector<HTMLElement>('.sort-pick')?.classList.toggle('idle', pick === 'upcoming');
       const fresh = morph(
         el,
         !list.length
