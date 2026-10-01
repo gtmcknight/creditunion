@@ -301,7 +301,7 @@ function panel(u: Union) {
   ].join('');
   if (u.state === 'Full')
     return `${head}<p class="facts">${fullText(u)}.</p>
-      ${burnable(u) ? `<button type="button" class="btn primary" data-do="assemble">Make Statement</button><p class="hint">Anyone can press it. You pay the gas.</p>` : ''}${extras}`;
+      ${burnable(u) ? `<button type="button" class="btn primary" data-do="assemble">Convert Union to Statement</button><p class="hint">Anyone can press it. You pay the gas.</p>` : ''}${extras}`;
   if (u.state === 'Settled')
     return `${head}<div class="now"><span class="k">Sold · Statement #${u.statementId}</span><strong class="big">${eth(u.highBid)}</strong><span class="sub">to ${who(u.highBidder)}</span></div>${extras || '<p class="hint">Nothing to claim here for this wallet.</p>'}<div class="bids" data-bids="${u.address}">${bidsHtml(u)}</div>`;
   const winning = !!account && u.highBid > 0n && u.highBidder.toLowerCase() === account.toLowerCase();
@@ -481,7 +481,7 @@ document.addEventListener('click', (e) => {
   const act = t.closest<HTMLElement>('[data-do]');
   if (act) {
     const what = act.dataset.do as 'settle' | 'claim' | 'withdrawOwed' | 'assemble';
-    return void write({ settle: 'Settle', claim: 'Claim', withdrawOwed: 'Withdraw', assemble: 'Make Statement' }[what], what);
+    return void write({ settle: 'Settle', claim: 'Claim', withdrawOwed: 'Withdraw', assemble: 'Convert Union to Statement' }[what], what);
   }
 });
 // A link to another union (#0x…), or Back to one: follow it.

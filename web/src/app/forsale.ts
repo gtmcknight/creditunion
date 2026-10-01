@@ -2,7 +2,7 @@ import { sweeperAbi } from './abi';
 import { config, pub, send, session } from './chain';
 import { editionArt } from './ghosts';
 import { creditCell } from './views/trait';
-import { boughtToast, errText, esc, rangeHtml, setRange, toast } from './ui';
+import { boughtToast, errText, esc, eth, ethNum, rangeHtml, setRange, toast } from './ui';
 
 /// Where a listing is: its marketplace's name and mark (Buy tab, Credit pages, For sale rows).
 export type Source = 'opensea' | 'fwa' | 'strategy';
@@ -37,7 +37,7 @@ export function rememberBought(ids: (string | number)[]) {
 // ERC-721 Transfer(address indexed from, address indexed to, uint256 indexed tokenId)
 const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 
-export const minEth = (wei: bigint) => (Number(wei) / 1e18).toFixed(4).replace(/\.?0+$/, '');
+export const minEth = (wei: bigint) => ethNum(wei, 3, true);
 
 /// The mark before a price, linking to the listing on its marketplace.
 export const sourceMark = (id: string | number, source: Source, url?: string) =>
@@ -55,7 +55,7 @@ export const sweepRow = (key: string, min: number, max: number, value: number) =
   `${rangeHtml(`${key}-n`, min, max, value)}<span class="sweep-total num" id="${key}-total"></span>`;
 export const sweepTotal = (sum: bigint, bps: bigint, n: number, hint = '') =>
   n
-    ? `<span>${(Number(sum + (sum * bps) / 10_000n) / 1e18).toFixed(4)} ETH</span>${bps ? `<span class="muted small">incl. ${Number(bps) / 100}% fee</span>` : ''}`
+    ? `<span>${eth(sum + (sum * bps) / 10_000n)}</span>${bps ? `<span class="muted small">incl. ${Number(bps) / 100}% fee</span>` : ''}`
     : hint && `<span class="muted">${hint}</span>`;
 /// Signed out, every Buy button connects first.
 export const connectToBuy = (block = false) => `<button class="btn primary${block ? ' block' : ''}" data-connect>Connect to buy</button>`;
@@ -329,7 +329,7 @@ export function listedPager(where: { trait?: string; rules?: Record<string, numb
 /// A listed Credit's price under its number: the marketplace's mark, then the price. `up`: it rose since the page
 /// loaded (a union's Buy stopped on it), shown in red.
 export const priceTag = (l: Listed, up = false) =>
-  `<span class="cc-price num${up ? ' up' : ''}" title="On ${SOURCES[l.source].name}"><img class="src" src="${SOURCES[l.source].icon}" alt="${SOURCES[l.source].name}">${minEth(BigInt(l.price))}</span>`;
+  `<span class="cc-price num${up ? ' up' : ''}" title="On ${SOURCES[l.source].name}"><img class="src" src="${SOURCES[l.source].icon}" alt="${SOURCES[l.source].name}">${ethNum(BigInt(l.price))}</span>`;
 
 /// Sweep's row before its listings are in: the same shape, with nothing to drag yet, so nothing moves when they land.
 export function sweepWaiting(host: HTMLElement) {

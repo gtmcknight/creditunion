@@ -1,4 +1,4 @@
-import { formatEther, type Address } from 'viem';
+import { type Address } from 'viem';
 import { chain, config } from './chain';
 
 export const $ = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) => root.querySelector<T>(s)!;
@@ -11,11 +11,19 @@ export const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (c) => ES
 export const short = (a?: string) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '');
 export const same = (a?: string, b?: string) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
 
-export function eth(wei: bigint, digits = 4) {
-  const s = formatEther(wei);
-  const [i, f = ''] = s.split('.');
-  const frac = f.slice(0, digits).replace(/0+$/, '');
-  return `${i}${frac ? '.' + frac : ''} ETH`;
+export function eth(wei: bigint, digits = 3) {
+  return `${ethNum(wei, digits)} ETH`;
+}
+/// Wei as an ETH number to `digits` places, rounded to the nearest (`up`: rounded up, for a minimum that must never
+/// show below itself). A nonzero amount too small to show reads <0.001.
+export function ethNum(wei: bigint, digits = 3, up = false): string {
+  if (wei < 0n) return `-${ethNum(-wei, digits, up)}`;
+  const unit = 10n ** BigInt(18 - digits);
+  const n = up ? (wei + unit - 1n) / unit : (wei + unit / 2n) / unit;
+  if (n === 0n && wei > 0n) return `<${(10 ** -digits).toFixed(digits)}`;
+  const s = n.toString().padStart(digits + 1, '0');
+  const f = s.slice(-digits).replace(/0+$/, '');
+  return `${s.slice(0, -digits)}${f ? `.${f}` : ''}`;
 }
 
 export function until(ts: number) {

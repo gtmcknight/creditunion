@@ -48,13 +48,13 @@ function what(x: Item, here = false) {
     case 'bought':
       return x.intoUnion && !here ? `bought ${credits(n)} into ${u} for ${e}` : `bought ${credits(n)} for ${e}`;
     case 'burned':
-      return here ? 'burned the 80 into a Statement' : `burned ${u} into a Statement`;
+      return here ? 'burned 80 Credits into a Statement' : `burned ${u} into a Statement`;
     case 'bid':
       return here ? `bid ${e}` : `bid ${e} on ${u}`;
     case 'won':
       return here ? `won the Statement for ${e}` : `won ${u} for ${e}`;
     case 'claimed':
-      return here ? `claimed ${e}` : `claimed ${e} from ${u}`;
+      return here ? `got ${e}` : `got ${e} from ${u}`; // settling pays members; a claim only follows a failed send
   }
 }
 

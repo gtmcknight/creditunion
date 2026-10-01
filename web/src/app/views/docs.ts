@@ -110,7 +110,7 @@ const sections = (): Section[] => [
       <li><b>Burn.</b> During that hour, anyone can burn the Union. If nobody does, it unlocks. Members can leave, or anyone can restart the countdown for another hour.</li>
       <li><b>Auction and split.</b> The Statement is auctioned onchain. There is no reserve. The auction runs 24 hours from the first bid, and a bid in the last 15 minutes resets the clock to 15 minutes. When the auction ends, the winner receives the Statement and every member is paid.</li>
     </ol>
-    <h3>When burning opens</h3>
+    <h3 id="burning">When burning opens</h3>
     <p>Jack’s Statement contract goes live on October 1. Our burn contract follows with a 30 minute public notice onchain, and then every full Union starts its countdown. Until then, Unions fill but never lock, so members can leave at any time. Picture Unions are the exception: they do not allow withdrawals.</p>
     <p>A Union has no deadline. It stays open until it fills and burns. If an hour passes without a burn, the Union unlocks and the cycle can repeat as many times as needed.</p>`,
   },

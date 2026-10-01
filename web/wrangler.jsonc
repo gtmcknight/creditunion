@@ -20,7 +20,10 @@
     // FWA (fwa.fun), mainnet only: its marketplace is a second Buy Credits source.
     "FWA_MARKET": "0x2b019cfb591988d28c64c4f4be6a24b1592bbf25",
     // CreditStrategy (nftstrategy.fun), mainnet only: the Credits it holds for sale are a third Buy Credits source.
-    "STRATEGY": "0x8e607209899b5d12bd3167a6cd0e8e11feb053d6"
+    "STRATEGY": "0x8e607209899b5d12bd3167a6cd0e8e11feb053d6",
+    // UnionFormats: where each union's creator picks its Statement format; the burn contract reads it. Zero until
+    // it's deployed, which hides the picker.
+    "FORMATS": "0x0000000000000000000000000000000000000000"
   },
   // Sepolia: SWEEPER stays zero (OpenSea can't list the mock Credits), which hides buy-in.
   // Mainnet addresses go here after DeployMainnet.

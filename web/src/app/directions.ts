@@ -12,6 +12,8 @@ const drawnView = (d: Shown): d is Exclude<Pick, 'Issued'> => d !== 'Issued' && 
 
 /// What each switch is showing, for the visit: pages re-render as Credits come in.
 const showing = new Map<string, Shown>();
+/// Switches whose viewer picked a direction themselves (a click or a key), not the page.
+const clicked = new Set<string>();
 /// The direction to go back to when the create page leaves its Rules view.
 const before = new Map<string, Pick>();
 /// Each Credit's ink, read once.
@@ -170,6 +172,8 @@ export function rulesView(g: HTMLElement | null, on: boolean) {
 /// Switch a row to a direction from the page's own controls (no `direction` event back).
 /// Whether a switch's direction was picked (by a click or a key) rather than left at its default.
 export const pickedDirection = (key: string) => showing.has(key.toLowerCase());
+/// Whether the viewer picked a direction themselves, so the page shouldn't switch it for them.
+export const viewerPicked = (key: string) => clicked.has(key.toLowerCase());
 
 export function showDirection(g: HTMLElement | null, d: Direction) {
   if (g && showing.get(g.dataset.key!) !== d) void show(g, d, false, true);
@@ -298,6 +302,7 @@ export function seedsOf(ids: readonly (string | null)[]): Promise<(Seed | null)[
 async function show(g: HTMLElement, d: Shown, focus = false, quiet = false) {
   const key = g.dataset.key!;
   showing.set(key, d);
+  if (!quiet) clicked.add(key);
   g.querySelectorAll<HTMLButtonElement>('[data-dir]').forEach((b) => {
     const on = b.dataset.dir === d;
     b.setAttribute('aria-checked', String(on));

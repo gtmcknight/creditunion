@@ -953,6 +953,115 @@ nav a .num {
   padding-top: 24px; /* same 24 as every other block boundary in the column */
   border-top: 1px solid var(--fg);
 }
+/* The creator's format box, under a union's sheet, and its window: the union in all eight formats. */
+.format-box {
+  margin-top: 24px;
+}
+/* .box sets display, which beats the hidden attribute: only the creator, while members can still leave, sees it. */
+.format-box[hidden] {
+  display: none;
+}
+.format-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.format-row .btn {
+  flex: none;
+}
+@media (max-width: 480px) {
+  .format-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+dialog.formats-pick {
+  width: min(760px, calc(100vw - 2 * var(--gutter)));
+  max-height: calc(100dvh - 32px);
+}
+/* On a short screen the formats scroll; the title and the Set button stay put. */
+dialog.formats-pick form {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  gap: 16px;
+  max-height: calc(100dvh - 32px - 40px);
+}
+dialog.formats-pick h3 {
+  margin: 0;
+}
+.fp-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  overflow-y: auto;
+  padding: 6px; /* room for the chosen one's ring */
+}
+@media (max-width: 560px) {
+  .fp-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.fp-tile {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 150ms var(--ease);
+}
+/* The chosen one: full strength, a ring set off from the paper, a check. The rest stay dimmed until hovered. */
+.fp-tile:hover,
+.fp-tile[aria-pressed='true'] {
+  opacity: 1;
+}
+.fp-tile[aria-pressed='true']::after {
+  content: '✓';
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: 13px;
+  font-weight: 600;
+}
+.fp-tile[aria-pressed='true'] span {
+  font-weight: 600;
+}
+.fp-tile:focus {
+  outline: none;
+}
+.fp-tile:focus-visible {
+  outline: 2px dashed var(--muted);
+  outline-offset: 6px;
+}
+.fp-tile canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--line);
+  transition: box-shadow 150ms var(--ease);
+}
+.fp-tile[aria-pressed='true'] canvas {
+  box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--fg);
+}
+.fp-tile em {
+  font-style: normal;
+  color: var(--muted);
+}
 .center {
   text-align: center;
 }
@@ -1033,6 +1142,7 @@ nav a .num {
 }
 .bid-now > div {
   display: grid;
+  align-content: start; /* a figure with no line under it stays level with its neighbour's */
   gap: 4px;
   min-width: 0;
 }
@@ -1633,6 +1743,18 @@ nav a[hidden] {
 .testnet a {
   color: inherit;
   white-space: nowrap;
+}
+/* Burn day's bar: CMYK yellow and black ink in either theme, centered, nothing off to the side. */
+#notice {
+  justify-content: center;
+  text-align: center;
+  background: #ffd100;
+  color: #111111;
+  font-size: 14px;
+}
+#notice a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .wallet-list a.wallet {
   justify-content: space-between;
@@ -3817,29 +3939,6 @@ dialog.people header h3 {
   box-shadow: inset 0 0 0 2px var(--fg); /* drawn over the art, inside the cell */
 }
 
-/* ---------------------------------------------------------------- bid history */
-.bid-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-}
-.bid {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 12px;
-  min-height: 44px;
-  padding: 0;
-  margin: 0;
-}
-.bid + .bid {
-  border-top: 1px solid var(--line);
-}
-/* Expanded, the heading and its rows read as one block: no rule between them. */
-.more[open] > summary + .bid-list {
-  padding-bottom: 8px;
-}
 /* A pointer click on a fold should not leave the keyboard focus ring behind. */
 .more summary:focus:not(:focus-visible) {
   outline: 0;
@@ -3847,36 +3946,8 @@ dialog.people header h3 {
 .more summary:focus-visible {
   outline-offset: -2px;
 }
-.bid-amt {
-  font-weight: 600;
-  white-space: nowrap;
-}
-.bid.high .bid-amt::after {
-  content: ' · high';
-  font-weight: 400;
-  color: var(--muted);
-}
-.bid-who {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-a.bid-when {
-  color: var(--muted);
-  text-decoration: underline;
-  text-decoration-color: var(--line);
-  text-underline-offset: 3px;
-  min-height: 40px;
-  display: inline-flex;
-  align-items: center;
-}
-a.bid-when:hover {
-  color: var(--fg);
-  text-decoration-color: var(--fg);
-}
 
-/* Stacked folds (Bids, Details) touch: one rule between them, no grid gap. */
+/* Stacked folds touch: one rule between them, no grid gap. */
 .folds {
   display: grid;
   gap: 0;
@@ -9078,13 +9149,16 @@ dialog.share .share-swatches button {
   width: 24px;
   height: 24px;
 }
-.batch-side .fold-list .live-art img:nth-child(n + 2),
-.batch-side .fold-list .live-art .small {
+/* One Credit per row: each thumbnail sits in its own link, so it's the links after the first (and the +N) that go. */
+.batch-side .fold-list .live-art > :nth-child(n + 2) {
   display: none;
 }
+/* No Credit to show (a burn, a bid): what they did takes the Credit's cell too, and when keeps the last column. */
 .batch-side .fold-list .live-art:empty {
-  display: block;
-  width: 24px;
+  display: none;
+}
+.batch-side .fold-list .live-what:has(+ .live-art:empty) {
+  grid-column: span 2;
 }
 /* A union's Activity: always open, a heading like the column's others over its latest lines. */
 .activity-block {
@@ -9120,6 +9194,9 @@ dialog.share .share-swatches button {
   }
   .batch-side .fold-list .live-art {
     display: none;
+  }
+  .batch-side .fold-list .live-what:has(+ .live-art:empty) {
+    grid-column: auto;
   }
 }
 

@@ -21,6 +21,8 @@ export type Config = {
   ratings: Address | null;
   /// FWA's marketplace on mainnet, a Buy Credits source.
   fwaMarket?: Address | null;
+  /// UnionFormats: where a union's creator picks its Statement format.
+  formats?: Address | null;
 };
 
 const CHAINS: Record<number, Chain> = { 1: mainnet, 11155111: sepolia, 31337: foundry };

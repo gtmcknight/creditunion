@@ -1,7 +1,7 @@
 import { parseAbi, parseEther, type Address } from 'viem';
-import { batchAbi, creditsAbi, factoryAbi, sweeperAbi } from '../abi';
+import { batchAbi, creditsAbi, factoryAbi, sweeperAbi, unionFormatsAbi } from '../abi';
 import { canBatch, config, explorer, pub, send, sendBatch, session } from '../chain';
-import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, indexedBatch, indexedOne, layoutSlot, me, notice, placeOnLayout, readNotice, ratings, sinceTx, staleBatches, type Rated } from '../data';
+import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, indexedBatch, indexedOne, keepPick, layoutSlot, me, notice, pickOf, placeOnLayout, readNotice, ratings, sinceTx, staleBatches, type Rated } from '../data';
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { ens, hydrate, identicon, pct, who } from '../ens';
 import { creditCard, examples, fillGhosts, planGhosts, registerDeposits, registerFilter } from '../ghosts';
@@ -10,11 +10,12 @@ import { Room, books, keysOf, noRoomReason, placedKeys, type Books } from '../sl
 import { MAX_SWEEP, buying, checkQuote, listedById, connectToBuy, live as keepLive, minEth, priceTag, relist, sweepControls, sweepRow, type Listed, type Quote, type Sale, type Source } from '../forsale';
 import { creditCell, creditSkel } from './trait';
 import { shareButton } from '../share';
-import { directionCanvas, directions, mountDirections, pickedDirection, primeInks, showDirection, warmInks } from '../directions';
-import { activityFold } from './live';
+import { directionCanvas, directions, mountDirections, pickedDirection, primeInks, sheetInks, showDirection, viewerPicked, warmInks } from '../directions';
+import { activityFold, ago } from './live';
 import { $$, art, clock, errText, esc, eth, openModal, same, setRange, sheet, short, startsAt, statementArt, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
 import { slotName } from '../../shared/layout';
+import { compose, DIRECTIONS, paint as paintMarks, PAGE, type Direction } from '../../shared/statement';
 import { go as navigate } from '../main';
 
 const CHUNK = 40; // Credits per transaction; keeps each one well under the block gas limit
@@ -121,7 +122,7 @@ const byPlan = <T extends { id: string }>(list: T[], plan: Plan | null | undefin
 let pickAsk: { at: string; id: string } | null = null;
 /// Which Add Credits tab is open, per Credit Union, so a live refresh doesn't flip it back.
 let addTab: { at: string; tab: string } | null = null;
-/// /union/0x…?burn: the union whose page shows Make Statement before burns open (our own first burn on burn day).
+/// /union/0x…?burn: the union whose page shows Convert Union to Statement before burns open (our own first burn on burn day).
 /// Read before the query string is cleared from the address bar, and kept for the visit.
 let burnAsk: string | null = null;
 /// Transactions in flight on this page: live refreshes wait while one is.
@@ -255,7 +256,8 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   const artHtml = burned
     ? `<figure class="statement"><div class="statement-host">${sheet(b.ids, { closed: true })}${statementArt(s.statementId)}</div>${directionCanvas}<figcaption class="legend muted small">${directions(s.address, false, true)}<div class="legend-end"><span>Statement #${s.statementId}</span>${shareButton()}</div></figcaption></figure>`
     : `${sheet(b.ids, { mine: myIds, fresh: placed ? undefined : seen < s.count ? seen : undefined, closing: s.state === 'Full', placed, batch: s.state === 'Open' ? s.address : undefined })}${unplaced ? '' : directionCanvas}
-       <div class="legend muted small">${unplaced ? '<span>Couldn’t read which slot each Credit fills. Refresh to try again.</span>' : `<div class="legend-end">${shareButton()}</div>${directions(s.address, false, true)}`}</div>`;
+       <div class="legend muted small">${unplaced ? '<span>Couldn’t read which slot each Credit fills. Refresh to try again.</span>' : `<div class="legend-end"><span class="burns-in" hidden></span>${shareButton()}</div>${directions(s.address, false, true)}`}</div>
+       ${unplaced ? '' : formatBox}`;
 
   app.innerHTML = `
   
@@ -286,7 +288,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         <dl class="kv">
           ${fact('Layout', `<span class="layout-name">${ARRANGEMENTS[s.arrangement] ?? 'Order joined'}</span>`)}
           ${s.count ? fact('Rating', `<span id="rating" class="muted">…</span>`) : ''}
-          ${s.reserve && (s.state === 'Open' || s.state === 'Full' || (s.state === 'Auction' && s.minBid === s.reserve && !s.highBid)) ? fact('Reserve', eth(s.reserve)) : ''}
+          ${s.reserve && (s.state === 'Open' || s.state === 'Full' || (s.state === 'Auction' && s.minBid === s.reserve && !s.highBid)) ? fact('Reserve', `${minEth(s.reserve)} ETH`) : ''}
           ${fact('Split', split(s))}
           ${fact('Contract', link(s.address))}
         </dl>
@@ -297,10 +299,6 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         <summary><span>Unclaimed</span><span class="muted small num" id="unclaimed-total"></span></summary>
         <div class="dues" id="unclaimed-list"></div>
         <p class="small muted">Anyone can send a member their share. It goes to them, you pay the gas.</p>
-      </details>` : ''}
-      ${s.state === 'Auction' || s.state === 'Settled' ? `<details class="more" id="bids" open>
-        <summary><span>Bids</span><span class="muted small" id="bids-count">…</span></summary>
-        <ol class="bid-list" id="bid-list"><li class="muted small">Loading…</li></ol>
       </details>` : ''}
       <section class="activity-block" id="activity">
         <h3>Activity</h3>
@@ -314,15 +312,15 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   void rankFaces(app);
   document.getElementById('depositors-btn')?.addEventListener('click', () => openDepositors(b, account ?? null));
   app.querySelector('.rule[data-picked]')?.addEventListener('click', () => void openPicked(b));
-  loadBids(s.address, account ?? null, s.highBid);
   void activityFold(s.address);
   // Chrome keeps a focus ring on <summary> after a mouse click; drop it for pointer use only.
   app.querySelectorAll<HTMLElement>('.more summary').forEach((el) => el.addEventListener('pointerup', () => setTimeout(() => el.blur(), 0)));
   fillGhosts(app);
   // What burns is what shows: a layout painted in colors with every slot painted burns in Consolidated unless its
   // creator picks another format (StatementAdapter.formatOf), so its sheet opens in Consolidated too.
-  if (!burned && slots?.every((v) => v) && !Number(s.filter.layoutTrait ?? 0) && !pickedDirection(s.address))
-    showDirection(app.querySelector<HTMLElement>('.batch-art .dirs'), 'Consolidated');
+  const picture = !!slots?.every((v) => v) && !Number(s.filter.layoutTrait ?? 0);
+  if (!burned && picture && !pickedDirection(s.address)) showDirection(app.querySelector<HTMLElement>('.batch-art .dirs'), opensIn(s.address, 'Consolidated'));
+  if (!burned) void burnFormat(app, s, picture);
   // A Picture union once it's full (until the burn): still a picture, drawn in Consolidated, and still no
   // withdrawing through the site, since a Credit taken out would shift it.
   if ((s.state === 'Full' || s.state === 'Expired') && slots && !Number(s.filter.layoutTrait ?? 0)) {
@@ -333,13 +331,13 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       app.querySelectorAll('.layout-name').forEach((e) => (e.textContent = 'Picture'));
       const takes = app.querySelector('.takes');
       if (takes) takes.innerHTML = '<dt>Rules</dt><dd>Only the Credits that draw its picture</dd>';
-      if (!pickedDirection(s.address)) showDirection(host.querySelector<HTMLElement>('.dirs'), 'Consolidated');
+      if (!pickedDirection(s.address)) showDirection(host.querySelector<HTMLElement>('.dirs'), opensIn(s.address, 'Consolidated'));
       if (config.sweeper && solo) soloOut();
       else if (config.sweeper) {
         app.querySelector('#withdraw')?.setAttribute('hidden', '');
         app.querySelector('#w-clear')?.setAttribute('hidden', '');
         app.querySelectorAll<HTMLElement>('.batch-side p').forEach((p) => {
-          if (p.textContent?.includes('You can still leave anytime')) p.textContent = p.textContent.replace(' You can still leave anytime.', '');
+          if (p.textContent?.includes('Withdraw your Credits, or restart')) p.textContent = p.textContent.replace('Withdraw your Credits, or restart the countdown.', 'Anyone can restart the countdown.');
         });
       }
     }, () => {});
@@ -364,7 +362,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         planGhosts(s.address, saved.ids);
         await fillGhosts(app);
         if (!host.isConnected) return;
-        if (!pickedDirection(s.address)) showDirection(host.querySelector<HTMLElement>('.dirs'), 'Consolidated');
+        if (!pickedDirection(s.address)) showDirection(host.querySelector<HTMLElement>('.dirs'), opensIn(s.address, 'Consolidated'));
       }
       app.querySelectorAll('.layout-name').forEach((e) => (e.textContent = 'Picture'));
       // Who can join: a picture union takes exactly the Credits that draw it, so the Colors chips say nothing useful.
@@ -396,7 +394,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       if (!p || !host?.isConnected) return;
       // …and in Consolidated, the direction a picture is matched in, unless you picked another.
       await fillGhosts(app); // the planned Credits into the sheet first, so the direction draws them
-      if (!pickedDirection(s.address)) showDirection(host.querySelector<HTMLElement>('.dirs'), 'Consolidated');
+      if (!pickedDirection(s.address)) showDirection(host.querySelector<HTMLElement>('.dirs'), opensIn(s.address, 'Consolidated'));
       if (config.sweeper) {
         // Bought into, never deposited: no Deposit tab for anyone.
         const tab = document.querySelector<HTMLButtonElement>('[data-add="mine"]');
@@ -560,17 +558,111 @@ const rule = (r: Rule) => {
   const text = r.slots ? `${esc(r.label)}${/left$/.test(r.value) ? ` <span class="muted">${esc(r.value)}</span>` : ''}` : `${esc(r.label)} ${esc(r.value)}`;
   return `<${tag} class="rule${r.full ? ' full' : ''}"${r.href ? ` href="${esc(r.href)}"` : ''}${r.picked ? ' type="button" data-picked' : ''} data-slots="${r.slots ? r.slots.join(',') : 'all'}">${inks}${text}</${tag}>`;
 };
-/// The same button on the union's own contract, for when this site can't be reached or is slow: Etherscan's Write as
-/// Proxy tab (a union is a clone of the verified Batch).
-const onChain = (a: string, what: string) => {
-  const u = explorer('address', a);
-  return u ? `<p class="small muted"><a href="${u}#writeProxyContract" target="_blank" rel="noopener">Or ${what} on Etherscan ↗</a></p>` : '';
-};
 const link = (a: string) => {
   const u = explorer('address', a);
   return u ? `<a href="${u}" target="_blank" rel="noopener" class="mono">${short(a)} ↗</a>` : `<span class="mono">${short(a)}</span>`;
 };
 /// Where a full party stands right now: the summary's phase, moved on by the clock, since it reads the chain only on load.
+/// The creator's box under the sheet: what it burns in, and a button to choose (the window below).
+const formatBox = `<div class="box format-box" hidden>
+  <div class="format-row">
+    <div><h3>Pick the format it burns in</h3><p class="small muted"><span id="format-now"></span> You created this union, so it’s yours to choose.</p></div>
+    <button type="button" class="btn" id="format-open">Choose format</button>
+  </div>
+</div>`;
+
+/// The window: this union in all eight formats. Click one, then Set format. Resolves with the pick once it's set.
+async function chooseFormat(host: HTMLElement, union: Address, burnsIn: Direction, at: Address): Promise<Direction | null> {
+  const { list, ghosts } = await sheetInks(host);
+  const d = document.createElement('dialog');
+  d.className = 'formats-pick';
+  d.innerHTML = `<form method="dialog">
+    <h3>Pick the format it burns in</h3>
+    <div class="fp-grid">${DIRECTIONS.map((f) => `<button type="button" class="fp-tile" data-format="${f}" aria-pressed="${f === burnsIn}"><canvas aria-hidden="true"></canvas><span>${f}${f === burnsIn ? ' <em>now</em>' : ''}</span></button>`).join('')}</div>
+    <p class="small muted">You can change it until the countdown starts. After the sale, the winner can switch formats anytime.</p>
+    <button type="button" class="btn primary block" id="fp-set" disabled>Set format</button>
+  </form>`;
+  document.body.append(d);
+  openModal(d);
+  d.querySelectorAll<HTMLButtonElement>('.fp-tile').forEach((t) => {
+    const c = t.querySelector('canvas')!, W = Math.round((c.clientWidth || 160) * Math.min(3, devicePixelRatio || 1));
+    c.width = W;
+    c.height = Math.round((W * PAGE.h) / PAGE.w);
+    paintMarks(c.getContext('2d')!, W, compose(t.dataset.format as Direction, list, ghosts));
+  });
+  const set = d.querySelector<HTMLButtonElement>('#fp-set')!;
+  let choice = burnsIn;
+  d.querySelector('.fp-grid')!.addEventListener('click', (e) => {
+    const t = (e.target as Element).closest<HTMLButtonElement>('.fp-tile');
+    if (!t) return;
+    choice = t.dataset.format as Direction;
+    d.querySelectorAll('.fp-tile').forEach((x) => x.setAttribute('aria-pressed', String(x === t)));
+    set.disabled = choice === burnsIn;
+    set.textContent = choice === burnsIn ? 'Set format' : `Set to ${choice}`;
+  });
+  return new Promise((done) => {
+    let result: Direction | null = null;
+    d.addEventListener('close', () => (d.remove(), done(result)));
+    set.addEventListener('click', async () => {
+      set.disabled = true;
+      set.textContent = 'Confirm in your wallet…';
+      try {
+        await send({ address: at, abi: unionFormatsAbi, functionName: 'pick', args: [union, DIRECTIONS.indexOf(choice)] });
+        result = choice;
+        d.close();
+      } catch (e) {
+        toast(errText(e), 'err');
+        set.disabled = false;
+        set.textContent = `Set to ${choice}`;
+      }
+    });
+  });
+}
+
+/// The format each union's creator picked, once read: the view its sheet opens in instead of the default.
+const picked = new Map<string, Direction>();
+const opensIn = (union: string, fallback: Direction) => picked.get(union.toLowerCase()) ?? fallback;
+
+/// "Burns in …" under the sheet: its creator's pick (UnionFormats), else Consolidated for a picture and Issued for the
+/// rest, as the burn contract decides. The sheet opens in a pick. While every member can still leave, the creator
+/// gets one button to make the format they're looking at the one it burns in.
+async function burnFormat(app: HTMLElement, s: Ctx['s'], picture: boolean) {
+  const k = s.address.toLowerCase(), read = await pickOf(s.address);
+  if (!app.querySelector('.burns-in')?.isConnected) return;
+  // A pick made on this page since the read began wins over the read.
+  const f = picked.has(k) ? DIRECTIONS.indexOf(picked.get(k)!) : read;
+  let burnsIn: Direction = f != null && f >= 0 && f < DIRECTIONS.length ? DIRECTIONS[f] : picture ? 'Consolidated' : 'Issued'; // a pick the contract lacks burns the default
+  const show = () => {
+    const line = app.querySelector<HTMLElement>('.burns-in'); // the page may have redrawn since
+    if (line) (line.textContent = `Set to ${burnsIn}`), (line.hidden = false);
+    const now = app.querySelector<HTMLElement>('#format-now');
+    if (now) now.textContent = `Set to ${burnsIn}.`;
+  };
+  show();
+  if (f != null && burnsIn === DIRECTIONS[f]) {
+    picked.set(k, burnsIn);
+    if (!viewerPicked(s.address)) showDirection(app.querySelector<HTMLElement>('.batch-art .dirs'), burnsIn);
+  }
+  const at = config.formats, you = session.account;
+  const box = app.querySelector<HTMLElement>('.format-box'), open = app.querySelector<HTMLButtonElement>('#format-open');
+  // Two draws of the page can both get here after their reads; only one wires the button.
+  if (!at || !you || !same(you, s.creator) || !['Open', 'Waiting', 'Expired'].includes(livePhase(s)) || !box || !open || open.dataset.wired) return;
+  open.dataset.wired = '1';
+  box.hidden = false;
+  open.addEventListener('click', async () => {
+    const host = app.querySelector<HTMLElement>('.batch-art');
+    if (!host) return;
+    const d = await chooseFormat(host, s.address, burnsIn, at);
+    if (!d) return;
+    burnsIn = d;
+    picked.set(k, d);
+    keepPick(s.address, DIRECTIONS.indexOf(d));
+    show();
+    showDirection(app.querySelector<HTMLElement>('.batch-art .dirs'), d);
+    toast(`Set to ${d}.`, 'ok');
+  });
+}
+
 function livePhase(s: Ctx['s']): PhaseName {
   const now = Date.now() / 1000;
   if ((s.phase === 'Countdown' || s.phase === 'Burnable') && now >= s.deadline) return 'Expired';
@@ -651,26 +743,24 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>, pending = false) {
       case 'Waiting':
         return `<div class="box">
           <h3>Waiting for Statements</h3>
-          <p class="muted">${notice ? `Burning starts ${startsAt(notice.at)}. You can leave until it locks, 5 minutes later.` : 'Full. Once Jack launches Statements it locks, and anyone can burn it. You can still leave anytime.'}</p>
+          <p class="muted">${notice ? `Becomes a Statement ${startsAt(notice.at)}.` : 'Becomes a Statement when Statements launch.'}</p>
           ${myIds.size ? withdraw() : ''}
         </div>`;
       case 'Countdown':
         return `<div class="box">
-          <h3>Locks in <span class="num" data-clock="${s.lockAt}">${clock(s.lockAt)}</span></h3>
-          <p class="muted">Last chance to leave. After that it’s locked for an hour so anyone can burn it.</p>
+          <h3>Withdrawals close in <span class="num" data-clock="${s.lockAt}">${clock(s.lockAt)}</span></h3>
+          <p class="muted">After that, this Union burns its 80 Credits into one Statement and puts it up for auction.</p>
           ${mine}
         </div>`;
       case 'Burnable':
         return `<div class="box">
-          <h3>Ready to burn</h3>
-          <p class="muted">Burn within <span class="num" data-clock="${s.deadline}">${clock(s.deadline)}</span> or it unlocks.</p>
-          <div id="assemble-slot"><p class="muted">Burning opens in a few minutes, once we’ve checked the first Statement.</p></div>
-          <p class="small muted">Nobody can leave during this hour.</p>
+          <h3>Ready</h3>
+          <div id="assemble-slot"><div class="stack"><button class="btn primary block" disabled>Convert Union to Statement</button><p class="small muted center">Opens in a few minutes.</p></div></div>
         </div>`;
       default:
         return `<div class="box">
           <h3>Unlocked</h3>
-          <p class="muted">Nobody burned in time. Leave, or restart the countdown.</p>
+          <p class="muted">Nobody converted it in time. ${myIds.size ? 'Withdraw your Credits, or restart the countdown.' : 'Anyone can restart the countdown.'}</p>
           ${myIds.size ? withdraw(true) : ''}
           ${m ? `<button class="btn block" id="restart">Restart countdown</button>` : connect}
         </div>`;
@@ -712,16 +802,16 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>, pending = false) {
   const myShare = early ? sharePct(Number(myUnits) / 12_640) : `${m?.shares ?? 0}/80`;
   return `<div class="box">
     <div class="bid-now">
-      <div><span>${s.highBid ? 'Current bid' : hasMin ? 'Reserve' : 'Opening bid'}</span><strong class="num">${s.highBid ? eth(s.highBid) : hasMin ? eth(s.minBid) : 'Any'}</strong><em class="sub">${s.highBid ? `by ${who(s.highBidder, 'sm', true)}` : 'The clock starts at the first bid.'}</em></div>
-      <div><span>${ended ? 'Ended' : 'Ends in'}</span><strong class="num"${s.highBid && !ended ? ` data-countdown="${s.auctionEnd}"` : ''}>${!s.highBid ? '24h' : ended ? '—' : until(s.auctionEnd)}</strong>${!ended ? '<em class="sub">Late bids add 15 min</em>' : ''}</div>
+      <div><span>${s.highBid ? (ended ? 'Winning bid' : 'Current bid') : hasMin ? 'Reserve' : 'Opening bid'}</span><strong class="num">${s.highBid ? eth(s.highBid) : hasMin ? `${minEth(s.minBid)} ETH` : 'Any'}</strong><em class="sub">${s.highBid ? `by ${who(s.highBidder, 'sm', true)}` : 'The clock starts at the first bid.'}</em></div>
+      <div><span>${ended ? 'Ended' : 'Ends in'}</span><strong class="num"${s.highBid && !ended ? ` data-countdown="${s.auctionEnd}"` : ''}>${!s.highBid ? '24h' : ended ? ago(s.auctionEnd) : until(s.auctionEnd)}</strong>${!ended ? '<em class="sub">Late bids add 15 min</em>' : ''}</div>
     </div>
     ${
       ended
-        ? `<button class="btn primary block" id="settle">Settle</button>${onChain(s.address, 'settle')}`
+        ? `<div class="stack"><button class="btn primary block" id="settle">Settle auction</button><p class="small muted center">Sends the Statement to the winner and pays every member.</p></div>`
         : m
           ? `<form class="bid-form" id="bid-form"><label class="field"><input id="bid" inputmode="decimal" autocomplete="off" placeholder="${hasMin ? minEth(s.minBid) : '0.1'}" aria-label="Bid in ETH"><span>ETH</span></label><button class="btn primary">Bid</button></form>
-             <p class="small muted">${hasMin ? `Min ${minEth(s.minBid)}. ` : ''}Outbid ETH returns instantly. Credit Union is unofficial and experimental, so use it at your own risk.</p>${onChain(s.address, 'bid')}`
-          : `${connect}${onChain(s.address, 'bid')}`
+             <p class="small muted">${hasMin ? `Min ${minEth(s.minBid)}. ` : ''}Outbid ETH returns instantly. Credit Union is unofficial and experimental, so use it at your own risk.</p>`
+          : connect
     }
     ${m?.shares ? `<p class="small">Your share <strong class="num">${myShare}</strong>${s.highBid ? ` · <span class="num">≈${eth(perUnit * myUnits)}</span> now` : ''}</p>` : ''}
     ${owed}
@@ -805,15 +895,15 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
     }, 'Credits returned to your wallet.');
   });
 
-  // Make Statement waits for the burns-open flag (?burn shows it anyway, for our own first burn).
+  // Convert Union to Statement stays disabled until the burns-open flag (?burn opens it anyway, for our own first burn).
   const slot = document.getElementById('assemble-slot');
   if (slot) {
     const show = () => {
       if (!slot.isConnected) return;
-      slot.innerHTML = `${m ? `<button class="btn primary block" id="assemble">Make Statement</button>` : `<button class="btn primary block" data-connect>Connect wallet</button>`}
-        <p class="small muted">Anyone can press it. You pay the gas.</p>`;
+      slot.innerHTML = `<div class="stack">${m ? `<button class="btn primary block" id="assemble">Convert Union to Statement</button>` : `<button class="btn primary block" data-connect>Connect wallet</button>`}
+        <p class="small muted center">Anyone can press it. You pay the gas.</p></div>`;
       document.getElementById('assemble')?.addEventListener('click', (e) =>
-        run(e.currentTarget as HTMLElement, 'Burning…', () =>
+        run(e.currentTarget as HTMLElement, 'Converting…', () =>
           send({ address: s.address, abi: batchAbi, functionName: 'assemble', gas: 16_000_000n }, txNote),
         'The Statement exists. Auction is open.'),
       );
@@ -825,7 +915,7 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
   document.getElementById('settle')?.addEventListener('click', (e) =>
     run(e.currentTarget as HTMLElement, 'Settling…', () =>
       send({ address: s.address, abi: batchAbi, functionName: 'settle' }, txNote),
-    'Settled. Members can claim.'),
+    'Settled. Every member is paid.'),
   );
 
   document.getElementById('claim')?.addEventListener('click', (e) =>
@@ -1571,41 +1661,3 @@ async function openPicked(b: Ctx) {
   note.textContent = `Only these can join. ${inside.size} in · ${sale.size} for sale.`;
 }
 
-/// The auction's bids, newest first: amount, who, when, and the transaction. Asked for by the high bid the page
-/// shows, so the list always has it (and is kept for good once it does).
-async function loadBids(address: Address, account: string | null, high: bigint) {
-  const list = document.getElementById('bid-list');
-  const count = document.getElementById('bids-count');
-  if (!list || !count) return;
-  type Row = { bidder: Address; amount: string; end: number; block: number; tx: string; time: number };
-  let rows: Row[] = [];
-  try {
-    const r = await fetch(`/bids/${address}?v=${high}`);
-    const j = (await r.json()) as { bids?: Row[]; error?: string };
-    if (!r.ok || j.error) throw new Error(j.error ?? 'No bids');
-    rows = j.bids ?? [];
-  } catch {
-    count.textContent = 'unavailable';
-    list.innerHTML = '';
-    return;
-  }
-  count.textContent = rows.length ? `${rows.length} bid${rows.length === 1 ? '' : 's'}` : 'None yet';
-  const ago = (t: number) => {
-    const d = Math.max(0, Math.floor(Date.now() / 1000 - t));
-    return d < 60 ? 'just now' : d < 3600 ? `${Math.floor(d / 60)}m ago` : d < 86400 ? `${Math.floor(d / 3600)}h ago` : `${Math.floor(d / 86400)}d ago`;
-  };
-  list.innerHTML = rows.length
-    ? rows
-        .map(
-          (r, i) => `<li class="bid${i === 0 ? ' high' : ''}">
-            <span class="num bid-amt">${eth(BigInt(r.amount))}</span>
-            <span class="bid-who">${who(r.bidder, 'sm', true)}${account && same(r.bidder, account) ? '<span class="tag you">You</span>' : ''}</span>
-            ${explorer('tx', r.tx)
-              ? `<a class="muted small num bid-when" href="${explorer('tx', r.tx)}" target="_blank" rel="noopener" title="View transaction">${r.time ? ago(r.time) : 'tx'} ↗</a>`
-              : `<span class="muted small num bid-when">${r.time ? ago(r.time) : ''}</span>`}
-          </li>`,
-        )
-        .join('')
-    : '';
-  hydrate(list);
-}

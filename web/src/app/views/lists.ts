@@ -548,7 +548,7 @@ const HOW_STEPS: [string, string][] = [
   ['Oct 1: Jack publishes the Statement contract', 'From then on, 80 Credits can burn into one Statement.'],
   ['We build our burn contract', 'It lets Credit Unions use Jack’s contract. We test it first.'],
   ['We launch it: 35 minute warning', 'Full unions (80/80) lock in 35 minutes. Until then, anyone can leave.'],
-  ['Full unions (80/80) lock for an hour', 'Withdrawals close. Anyone can press Make Statement to burn the 80 Credits into one Statement.'],
+  ['Full unions (80/80) lock for an hour', 'Withdrawals close. Anyone can press Convert Union to Statement to burn the 80 Credits.'],
   ['The auction starts', 'No reserve. The 24 hour clock starts at the first bid.'],
   ['The auction ends', 'The Statement goes to the winner. The ETH goes to every member.'],
 ];

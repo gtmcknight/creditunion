@@ -4169,3 +4169,112 @@ export const creditArtAbi = [
   }
 ] as const;
 
+export const unionFormatsAbi = [
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "factory_",
+        "type": "address",
+        "internalType": "contract IUnionFactory"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "factory",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IUnionFactory"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "pick",
+    "inputs": [
+      {
+        "name": "union",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "format",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "pickOf",
+    "inputs": [
+      {
+        "name": "union",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "picked",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "format",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "FormatPicked",
+    "inputs": [
+      {
+        "name": "union",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "format",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "uint8"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "FormatFixed",
+    "inputs": [
+      {
+        "name": "phase",
+        "type": "uint8",
+        "internalType": "enum Batch.Phase"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "NotAUnion",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotTheCreator",
+    "inputs": []
+  }
+] as const;
+

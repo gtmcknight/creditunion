@@ -1,5 +1,5 @@
 import type { Address } from 'viem';
-import { chain, config, connect, disconnect, explorer, loadConfig, onSession, restore, session, wallets } from './chain';
+import { chain, config, connect, disconnect, loadConfig, onSession, restore, session, wallets } from './chain';
 import { party } from './views/party';
 import './sheet-paint';
 import { create } from './views/create';
@@ -17,8 +17,8 @@ import { credit } from './views/credit';
 import { traitPage } from './views/trait';
 import { timePage } from './views/time';
 import { bitsPage, ratingPage } from './views/scale';
-import { esc, errText, openModal, startsAt, toast } from './ui';
-import { indexedBatch, me, readNotice } from './data';
+import { esc, errText, openModal, toast } from './ui';
+import { burningOn, indexedBatch, me, readNotice } from './data';
 
 const app = document.getElementById('app')!;
 let seq = 0;
@@ -141,15 +141,22 @@ function drawTestnet() {
   el.innerHTML = `<span><strong>Testnet</strong> · ${esc(chain.name)}</span><a href="/mint">Mint test Credits →</a>`;
 }
 
-/// Burn day: from the moment the burn adapter is proposed until it's on, a bar above the header with when burning
-/// turns on (the 30-minute notice in contracts/ADAPTER.md), in the viewer's own time, so members who don't trust it
-/// know to leave in time.
+/// The earliest burning can open: the Statement contract goes live at 8:00 PM ET on Oct 1. Ours follows after checks and its
+/// 30-minute notice (contracts/RUNBOOK.md), so "starting" this time holds either way.
+const BURNING_FROM = Date.UTC(2026, 9, 2, 0, 0) / 1000; // Oct 1, 8:00 PM EDT
+const day = (unix: number) => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(unix * 1000));
+const time = (unix: number) => new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(new Date(unix * 1000));
+
+/// Burn day, one bar above the header for everyone, in their own time: when full Unions become Statements and go up
+/// for auction. Until the burn contract is proposed that's the earliest it can be; then the time from its 30-minute
+/// notice onchain. Nothing once burning is on.
 async function drawNotice() {
   const n = await readNotice();
-  if (!n) return;
-  const link = explorer('address', n.adapter);
   const el = document.getElementById('notice')!;
-  el.innerHTML = `<span><strong>Burning starts ${startsAt(n.at)}.</strong> Full Credit Unions lock 5 minutes later. Withdraw before then.</span>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">The burn contract ↗</a>` : ''}`;
+  if (!n && (burningOn || Date.now() / 1000 > BURNING_FROM + 6 * 3600)) return;
+  const at = n ? n.at : BURNING_FROM, ahead = at * 1000 > Date.now();
+  const lead = ahead ? `Starting ${day(at)} at ${time(at)}, full Unions become Statements and go up for auction.` : n ? 'Any minute now, full Unions become Statements and go up for auction.' : 'Full Unions become Statements and go up for auction soon.';
+  el.innerHTML = `<span><strong>${lead}</strong> <a href="/docs#burning">How it works</a></span>`;
   el.hidden = false;
 }
 

@@ -1,5 +1,5 @@
 import type { Address } from 'viem';
-import { batchAbi, creditsAbi, factoryAbi } from './abi';
+import { batchAbi, creditsAbi, factoryAbi, unionFormatsAbi } from './abi';
 import { config, onTx, pub } from './chain';
 import { fromJson } from '../shared/json';
 
@@ -313,13 +313,15 @@ function passesOf(batch: Address, ids: readonly bigint[]) {
 /// `notice` holds the last read for renders that can't wait.
 export type Notice = { at: number; adapter: Address } | null;
 export let notice: Notice = null;
+/// Whether the burn contract is on (the factory's assembler is set), from the same read as `notice`.
+export let burningOn = false;
 let noticeKept: { t: number; read: Promise<Notice> } | null = null;
 export function readNotice(): Promise<Notice> {
   if (noticeKept && Date.now() - noticeKept.t < 60_000) return noticeKept.read;
   const get = (functionName: 'assembler' | 'pendingAssembler' | 'pendingUntil') => pub.readContract({ address: config.factory, abi: factoryAbi, functionName });
   const zero = '0x0000000000000000000000000000000000000000';
   const read = Promise.all([get('assembler'), get('pendingAssembler'), get('pendingUntil')]).then(
-    ([active, next, until]) => (notice = active === zero && next !== zero ? { at: Number(until), adapter: next as Address } : null),
+    ([active, next, until]) => ((burningOn = active !== zero), (notice = active === zero && next !== zero ? { at: Number(until), adapter: next as Address } : null)),
     () => notice,
   );
   noticeKept = { t: Date.now(), read };
@@ -343,3 +345,23 @@ export async function factoryRatings() {
 export async function creatorFeeBps() {
   return Number(await pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'creatorFeeBps' }));
 }
+
+/// The format a union's creator picked (UnionFormats.pickOf), as an index into the Statement formats; null with no
+/// pick, or before UnionFormats is deployed. `fresh` reads it again (after a pick of one's own).
+const picks = new Map<string, Promise<number | null>>();
+export function pickOf(union: Address, fresh = false): Promise<number | null> {
+  const at = config.formats;
+  if (!at) return Promise.resolve(null);
+  const k = union.toLowerCase();
+  if (fresh || !picks.has(k))
+    picks.set(
+      k,
+      pub.readContract({ address: at, abi: unionFormatsAbi, functionName: 'pickOf', args: [union] }).then(
+        ([picked, format]) => (picked ? format : null),
+        () => null,
+      ),
+    );
+  return picks.get(k)!;
+}
+/// A pick of one's own, once its transaction lands: read back as-is until the next fresh read.
+export const keepPick = (union: Address, format: number) => void picks.set(union.toLowerCase(), Promise.resolve(format));

@@ -1,5 +1,5 @@
 /// The keeper (a Cron Trigger, every 5 minutes): presses the buttons nobody is paid to press. It never burns: every
-/// burn is a person pressing Make Statement (contracts/ADAPTER.md). Each run sends up to five transactions, most urgent
+/// burn is a person pressing Convert Union to Statement (contracts/ADAPTER.md). Each run sends up to five transactions, most urgent
 /// first, each only if it would land:
 ///   1. factory.activateAssembler(), once the 30-minute notice has run;
 ///   2. settle() on an auction that has ended;

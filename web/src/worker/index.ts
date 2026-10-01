@@ -72,6 +72,8 @@ interface Env {
   CHAIN?: DurableObjectNamespace<ChainBook>;
   /// FWA's marketplace on mainnet: a second Buy Credits source. Empty to turn it off.
   FWA_MARKET?: string;
+  /// UnionFormats: where each union's creator picks its Statement format. Zero until deployed.
+  FORMATS?: string;
   /// CreditStrategy (nftstrategy.fun) on mainnet: the Credits it holds for sale are a third Buy Credits source.
   /// Empty to turn it off.
   STRATEGY?: string;
@@ -314,7 +316,7 @@ async function activityItems(env: Env, store: Cache, stateKey: string): Promise<
   return filling.size ? items.filter((x) => !x.union || !filling.has(x.union.toLowerCase())) : items;
 }
 
-/// Burn day's hold: until the PLANS key `burns-open` is "1", the page hides Make Statement (anyone can still call
+/// Burn day's hold: until the PLANS key `burns-open` is "1", the page disables Convert Union to Statement (anyone can still call
 /// assemble() directly; the keeper never burns). Flip it once the first Statement checks out, no deploy needed:
 ///   pnpm wrangler kv key put --binding PLANS burns-open 1 --remote
 async function burnsOpen(env: Env) {
@@ -336,6 +338,7 @@ const publicConfig = (env: Env) => ({
   sweeper: env.OPENSEA_API_KEY && !/^0x0+$/.test(env.SWEEPER ?? '0x0') ? env.SWEEPER : null,
   ratings: env.RATINGS && !/^0x0+$/.test(env.RATINGS) ? env.RATINGS : null,
   fwaMarket: addrOrNull(env.FWA_MARKET),
+  formats: addrOrNull(env.FORMATS),
 });
 
 /// /edition/match answers kept per isolate: the edition never changes within a deploy, and every visitor of /unions
@@ -1981,7 +1984,7 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
   // Every call in a batch counts against the limit, not just the request (one was charged above).
   if (await limited(env.RL_RPC, req, calls.length - 1)) return text('slow down', 429);
 
-  const allowed = new Set([env.CREDITS, env.FACTORY, env.SWEEPER].map((a) => a?.toLowerCase()).filter(Boolean));
+  const allowed = new Set([env.CREDITS, env.FACTORY, env.SWEEPER, addrOrNull(env.FORMATS)].map((a) => a?.toLowerCase()).filter(Boolean));
   const clean: { jsonrpc: string; id: unknown; method: string; params: unknown[] }[] = [];
   // Targets outside `allowed`, by the call that first names each. They are checked together below (Credits' art
   // contract once, each batch address once, in parallel), not one call at a time.
@@ -2022,7 +2025,7 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
     clean.push({ jsonrpc: '2.0', id: id ?? null, method, params: out });
     return null;
   }
-  // eth_call only to our contracts: Credits, the factory, the Sweeper, Credits' art contract, or a batch the
+  // eth_call only to our contracts: Credits, the factory, the Sweeper, UnionFormats, Credits' art contract, or a batch the
   // factory made. Every target named before the first malformed call must pass, as when checked in order.
   if (others.size) {
     const art = await artOf(env);

@@ -327,7 +327,8 @@ export function binary(words) {
 export const BAYER = [[0, 32, 8, 40, 2, 34, 10, 42], [48, 16, 56, 24, 50, 18, 58, 26], [12, 44, 4, 36, 14, 46, 6, 38], [60, 28, 52, 20, 62, 30, 54, 22], [3, 35, 11, 43, 1, 33, 9, 41], [51, 19, 59, 27, 49, 17, 57, 25], [15, 47, 7, 39, 13, 45, 5, 37], [63, 31, 55, 23, 61, 29, 53, 21]];
 export const HUE = [0, 6, 2, 1, 4, 5, 3, 7, 12, 11, 9, 10, 8, 13, 14, 15];
 const HUE_RANK = HUE.reduce((r, m, i) => { r[m] = i; return r; }, new Array(16).fill(0));
-const PIXEL_GROUP = '<g fill="none" stroke-width="1" transform="translate(6 8)">';
+// crispEdges: neighbouring runs meet with no hairline of paper between them at any scale.
+const PIXEL_GROUP = '<g fill="none" stroke-width="1" shape-rendering="crispEdges" transform="translate(6 8)">';
 function pixelModel(grid) {
   const runs = Array.from({ length: 16 }, () => '');
   for (let y = 0; y < 80; y++) { let x = 0; while (x < 64) { const m = grid[y * 64 + x]; let e = x + 1; while (e < 64 && grid[y * 64 + e] === m) e++; if (m) runs[m] += `M${x} ${y}h${e - x}`; x = e; } }
