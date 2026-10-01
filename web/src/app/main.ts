@@ -151,7 +151,8 @@ async function drawNotice() {
   const n = await readNotice();
   const el = document.getElementById('notice')!;
   if (!n && (burningOn || Date.now() / 1000 > BURNING_FROM + 6 * 3600)) return;
-  const at = burnsAt(n), ahead = at * 1000 > Date.now();
+  // Full unions lock and open for burning 5 minutes (Batch.LOCK_DELAY) after burning switches on.
+  const at = burnsAt(n) + (n ? 5 * 60 : 0), ahead = at * 1000 > Date.now();
   const lead = ahead ? `Starting ${dayAndTime(at)}, full Unions become Statements and go up for auction.` : n ? 'Any minute now, full Unions become Statements and go up for auction.' : 'Full Unions become Statements and go up for auction soon.';
   el.innerHTML = `<span><strong>${lead}</strong> <a href="/docs#burning">How it works</a></span>`;
   el.hidden = false;
