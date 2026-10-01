@@ -49,7 +49,9 @@ export async function keep(o: { key: string; chainId: number; factory: Address; 
   const jobs: Job[] = [];
   const read = (functionName: 'assembler' | 'pendingAssembler' | 'pendingUntil') => c.readContract({ address: o.factory, abi: factoryAbi, functionName });
   const [active, next, until] = await Promise.all([read('assembler'), read('pendingAssembler'), read('pendingUntil')]);
-  if (active === ZERO && next !== ZERO && now >= BigInt(until)) jobs.push({ what: 'turn burning on', address: o.factory, abi: factoryAbi, functionName: 'activateAssembler' });
+  // Switching on is permanent: never for an address with no contract yet.
+  if (active === ZERO && next !== ZERO && now >= BigInt(until) && ((await c.getCode({ address: next as Address })) ?? '0x').length > 2)
+    jobs.push({ what: 'turn burning on', address: o.factory, abi: factoryAbi, functionName: 'activateAssembler' });
 
   const unions = await o.unions();
   for (const u of unions)
