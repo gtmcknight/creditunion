@@ -221,7 +221,7 @@ export function canBatch(): Promise<boolean> {
   return p;
 }
 
-type Call = { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[] };
+type Call = { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[]; value?: bigint };
 
 /// Several calls as one wallet step, all or nothing (EIP-5792 `wallet_sendCalls`), then wait for them to land.
 /// Only the first call is simulated: the rest depend on it (an approval, then what it allows), and the RPC
@@ -235,7 +235,7 @@ export async function sendBatch(calls: Call[], onSubmit?: (id: string) => void) 
     account: session.account,
     chain,
     forceAtomic: true,
-    calls: calls.map((c) => ({ to: c.address, abi: c.abi, functionName: c.functionName, args: c.args })) as never,
+    calls: calls.map((c) => ({ to: c.address, abi: c.abi, functionName: c.functionName, args: c.args, value: c.value })) as never,
   });
   onSubmit?.(id);
   try {

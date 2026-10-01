@@ -32,6 +32,8 @@ function pagePath(): string[] {
   parts[0] = LEGACY[parts[0]] ?? parts[0];
   return parts;
 }
+// /whale is Auctions → Multibid.
+if (location.pathname.replace(/\/+$/, '') === '/whale') history.replaceState(null, '', '/auctions/multibid');
 if (location.hash.startsWith('#/')) {
   const [p, ...rest] = location.hash.slice(2).split('/');
   history.replaceState(null, '', '/' + [LEGACY[p] ?? p, ...rest].filter(Boolean).join('/'));

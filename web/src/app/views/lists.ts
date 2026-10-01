@@ -5,10 +5,11 @@ import { hydrate, who } from '../ens';
 import { fitByBatch } from '../fit';
 import { editionArt, examples, fillGhosts, hasPlan, planGhosts, registerDeposits, registerFilter } from '../ghosts';
 import type { Address } from 'viem';
-import { clock, eth, esc, openModal, pageHead, same, sheet, startsAt, statementArt, until } from '../ui';
+import { clock, eth, esc, openModal, pageHead, same, sheet, startsAt, statementArt, toast, until } from '../ui';
 import { TRAIT_KINDS, parseTrait, type TraitValue } from '../../shared/trait';
 import { creditsOf, takes } from './trait';
 import { drawStill, primeInks, showStill, warmInks } from '../directions';
+import { whale } from './whale';
 import { DIRECTIONS, type Direction } from '../../shared/statement';
 
 /// Last deposit per union, from the activity feed (filled in after the first draw).
@@ -36,6 +37,29 @@ export function fullStatus(s: Summary) {
   if ((s.phase === 'Countdown' || s.phase === 'Burnable') && now < s.deadline) return 'Ready to burn';
   return 'Unlocked';
 }
+
+/// A clock the auctions page ticks every second (`data-ends`): red inside the last 15 minutes, when a bid extends an
+/// auction to 15 minutes from then.
+const LATE = 15 * 60;
+const ends = (at: number) => `<span class="ends${at - Date.now() / 1000 < LATE ? ' late' : ''}" data-ends="${at}">${clock(at)}</span>`;
+
+/// A card's line for a union at auction: the bid and its clock, or what opens it, or the winning bid once time's up.
+function auctionLine(s: Summary) {
+  if (!s.highBid) return `No bids yet · from ${eth(s.minBid)}`;
+  if (Date.now() / 1000 >= s.auctionEnd) return `Won at ${eth(s.highBid)}`;
+  return `High bid ${eth(s.highBid)} · ${ends(s.auctionEnd)}`;
+}
+
+/// A full union's card line: its lock clock once it counts down, then Ready to burn.
+function fullLine(s: Summary) {
+  const now = Date.now() / 1000;
+  if (s.phase === 'Countdown' && now < s.lockAt) return `Locks in ${ends(s.lockAt)}`;
+  if ((s.phase === 'Countdown' || s.phase === 'Burnable') && now < s.deadline) return 'Ready to burn';
+  return '80/80 Full';
+}
+
+/// Auctions you led when last drawn and someone has since outbid (this visit).
+const outbid = new Set<string>();
 
 const SORTS = [
   ['fullest', 'Fullest'],
@@ -77,6 +101,49 @@ function sortList(list: Listed[], k: SortKey) {
 }
 
 const membersOf = (b: Pick<Listed, 'depositors'>) => new Set(b.depositors.map((d) => d.toLowerCase())).size;
+
+/// Auctions: each tab its own orders, Live opening on the soonest to end.
+const AUCTION_SORTS = [
+  ['ending', 'Ending soon', 'live'],
+  ['high', 'Highest bid', 'live'],
+  ['low', 'Lowest bid', 'live'],
+  ['new', 'Newest', 'live'],
+  ['recent', 'Recently sold', 'sold'],
+  ['top', 'Highest price', 'sold'],
+  ['bottom', 'Lowest price', 'sold'],
+] as const;
+type AuctionSort = (typeof AUCTION_SORTS)[number][0];
+function auctionSort(stage: string): AuctionSort {
+  const ok = AUCTION_SORTS.filter((x) => x[2] === stage);
+  try {
+    const v = localStorage.getItem(`cu-auction-sort-${stage}`);
+    if (ok.some(([k]) => k === v)) return v as AuctionSort;
+  } catch {}
+  return ok[0]?.[0] ?? 'ending';
+}
+const desc = (x: bigint, y: bigint) => (x === y ? 0 : x > y ? -1 : 1);
+function sortAuctions(items: Listed[], k: AuctionSort) {
+  const ended = (s: Summary) => s.auctionEnd || s.assembledAt;
+  return items.sort((a, b) => {
+    const x = a.s, y = b.s;
+    if (x.state === 'Full' || y.state === 'Full') return (x.lockAt || Infinity) - (y.lockAt || Infinity) || y.filledAt - x.filledAt; // the next to lock first
+    switch (k) {
+      case 'ending': // running clocks first, the soonest to end first; then those still waiting for a first bid
+        return Number(!x.highBid) - Number(!y.highBid) || (x.highBid ? x.auctionEnd - y.auctionEnd : y.assembledAt - x.assembledAt);
+      case 'high':
+      case 'top':
+        return desc(x.highBid, y.highBid) || x.auctionEnd - y.auctionEnd;
+      case 'low':
+        return desc(y.highBid || y.minBid, x.highBid || x.minBid) || x.auctionEnd - y.auctionEnd;
+      case 'bottom':
+        return desc(y.highBid, x.highBid) || ended(y) - ended(x);
+      case 'recent':
+        return ended(y) - ended(x);
+      default:
+        return y.assembledAt - x.assembledAt;
+    }
+  });
+}
 
 /// Each union's total rating (the sum of its Credits' scores), read only once someone sorts by rating.
 const totals = new Map<string, number>(); // by address:count, so a new deposit re-totals
@@ -224,13 +291,18 @@ export function card({ s, ids, depositors, format }: Listed, fit?: bigint[], who
   const ready = picture ? pictureReady({ s, ids, depositors }) : ids.length === 80;
   // The art carries no text. Under it, three lines: the name; who started it and how many are in; where it stands and
   // what of yours is in or fits.
-  const cta = s.state === 'Open' && !mine.size ? 'Join' : live ? 'Bid' : '';
+  const won = s.state === 'Auction' && !live; // the clock ran out: anyone can settle it
+  const cta = s.state === 'Open' && !mine.size ? 'Join' : live ? 'Bid' : won ? 'Settle' : '';
   const members = membersOf({ depositors });
   const people = `${members} ${members === 1 ? 'member' : 'members'}`;
   const where =
     s.state === 'Open' ? `${s.count}/80 Credits`
-    : s.state === 'Full' ? '80/80 Full'
+    : s.state === 'Full' ? fullLine(s)
+    : s.state === 'Auction' ? auctionLine(s)
     : esc(status(s));
+  const you = session.account;
+  const lead = live && !!you && !!s.highBid && same(s.highBidder, you);
+  const standing = lead ? ' · <span class="meta-win">You’re winning</span>' : live && outbid.has(s.address.toLowerCase()) ? ' · <span class="meta-outbid">Outbid</span>' : '';
   const more = s.state === 'Open' && whose === 'yours' ? canJoin : 0;
   const theirs = whose === 'yours' ? 'yours' : whose;
   const yoursText = mine.size ? `${mine.size} of ${theirs} in${more ? ` · ${more} more fit` : ''}` : more ? `${more} of ${theirs} fit` : '';
@@ -242,7 +314,7 @@ export function card({ s, ids, depositors, format }: Listed, fit?: bigint[], who
       <div class="meta-text">
         <strong>${esc(s.name || 'Untitled')}</strong>
         <span class="meta-line num"><span class="meta-line-text meta-byline">${who(s.creator, 'sm', 'nested')}<span class="meta-where">&nbsp;·&nbsp;${people}&nbsp;·&nbsp;${payWord(s.split === 1)}</span></span></span>
-        <span class="meta-line num"><span class="meta-line-text">${where}${yoursText ? ` · <span class="meta-yours">${yoursText}</span>` : ''}</span></span>
+        <span class="meta-line num"><span class="meta-line-text">${where}${standing}${yoursText ? ` · <span class="meta-yours">${yoursText}</span>` : ''}</span></span>
         ${rating === undefined ? '' : `<span class="meta-line num">Rating ${rating.toLocaleString()}</span>`}
       </div>
       ${cta ? `<span class="btn sm primary cta">${cta}</span>` : ''}
@@ -251,9 +323,11 @@ export function card({ s, ids, depositors, format }: Listed, fit?: bigint[], who
 }
 
 const PARTY_STATES = new Set(['Open', 'Full', 'Expired']);
-const STAGES = [['live', 'Live'], ['upcoming', 'Upcoming'], ['sold', 'Sold']] as const;
+const STAGES = [['live', 'Live'], ['upcoming', 'Upcoming'], ['sold', 'Sold'], ['multibid', 'Multibid']] as const;
 type Stage = (typeof STAGES)[number][0];
-const stageOf = (b: Listed): Stage => (b.s.state === 'Full' ? 'upcoming' : b.s.state === 'Settled' ? 'sold' : 'live');
+/// Live is what you can bid on now; an auction whose clock ran out is sold, waiting for anyone to settle it.
+const stageOf = (b: Listed): Stage =>
+  b.s.state === 'Full' ? 'upcoming' : b.s.state === 'Settled' || (b.s.highBid && Date.now() / 1000 >= b.s.auctionEnd) ? 'sold' : 'live';
 export type HomeTab = 'parties' | 'auctions';
 
 
@@ -270,7 +344,11 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       : ['Auctions', 'Every Statement a Credit Union makes is sold here. 24 hours from the first bid, split among its members.'];
   // One small menu, not a second row of tabs: a sort glyph and the current order; the choices drop down under it.
   const cur = sortKey();
-  const sort = `<div class="sort-pick"><button type="button" class="sort-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Sort"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10M1.5 10.5 4 13l2.5-2.5M12 13V3M9.5 5.5 12 3l2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="sort-label">${SORTS.find(([k]) => k === cur)?.[1] ?? ''}</span></button><ul class="sort-menu" role="listbox" aria-label="Sort" hidden>${SORTS.map(([k, l]) => `<li role="option" tabindex="-1" data-sort="${k}" aria-selected="${k === cur}">${l}</li>`).join('')}</ul></div>`;
+  const items =
+    tab === 'parties'
+      ? SORTS.map(([k, l]) => `<li role="option" tabindex="-1" data-sort="${k}" aria-selected="${k === cur}">${l}</li>`)
+      : AUCTION_SORTS.map(([k, l, st]) => `<li role="option" tabindex="-1" data-sort="${k}" data-stage="${st}" aria-selected="false"${st === 'live' ? '' : ' hidden'}>${l}</li>`);
+  const sort = `<div class="sort-pick"><button type="button" class="sort-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Sort"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10M1.5 10.5 4 13l2.5-2.5M12 13V3M9.5 5.5 12 3l2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="sort-label">${tab === 'parties' ? (SORTS.find(([k]) => k === cur)?.[1] ?? '') : ''}</span></button><ul class="sort-menu" role="listbox" aria-label="Sort" hidden>${items.join('')}</ul></div>`;
   app.innerHTML = `
   <section class="home">
     ${pageHead({
@@ -279,8 +357,8 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       tabs:
         tab === 'parties'
           ? [{ label: 'Open <span class="num muted" id="n-all"></span>', attrs: 'data-view="all"' }, { label: 'Can join <span class="num muted" id="n-invited"></span>', attrs: 'data-view="invited"' }, { label: 'Joined <span class="num muted" id="n-yours"></span>', attrs: 'data-view="yours"' }, { label: 'Full <span class="num muted" id="n-filled"></span>', attrs: 'data-view="filled"' }]
-          : STAGES.map(([k, l]) => ({ label: `${l} <span class="num muted" id="n-${k}"></span>`, attrs: `data-stage="${k}"` })),
-      tools: tab === 'parties' ? sort : undefined,
+          : STAGES.map(([k, l]) => ({ label: k === 'multibid' ? l : `${l} <span class="num muted" id="n-${k}"></span>`, attrs: `data-stage-tab="${k}"` })),
+      tools: sort,
       action: tab === 'parties' ? '<a class="btn primary" href="/create">Start a Credit Union</a>' : '<button type="button" class="btn" id="how-auctions">How it works</button>',
       label: 'Show',
     })}
@@ -325,6 +403,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     if (query.has('tab') || location.pathname.split('/').length > 3) remember(tab === 'parties' ? (view ? SLUGS[view] || null : null) : stage);
     let fit = new Map<Address, bigint[]>();
     let showEmpty = false; // All tabs its empty (0/80) unions behind a button: they're mostly abandoned
+    let shownStage: Stage = 'live'; // the auctions tab showing, whose order the menu sets
     const grid = (items: Listed[]) => {
       const rated = tab === 'parties' && sortFor(view) === 'rating';
       return `<div class="grid">${items.map((b) => card(b, fit.get(b.s.address), 'yours', rated ? totalOf(b) : undefined)).join('')}</div>`;
@@ -404,9 +483,28 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         if (n) n.textContent = String(items.length);
       }
       // Until someone picks, open on Live when there is any, else the first stage that has any, else Live.
-      const pick = stage ?? (staged.find(([k, items]) => k === 'live' && items.length) ?? staged.find(([, items]) => items.length) ?? staged[0])[0];
-      app.querySelectorAll<HTMLElement>('[data-stage]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.stage === pick)));
-      const shown = staged.find(([k]) => k === pick)![1];
+      const pick = stage ?? (staged.find(([k, items]) => k === 'live' && items.length) ?? staged.find(([k, items]) => k !== 'multibid' && items.length) ?? staged[0])[0];
+      app.querySelectorAll<HTMLElement>('[data-stage-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.stageTab === pick)));
+      // Multibid keeps itself current (its picks and amounts survive the reads), so it's drawn once.
+      if (pick === 'multibid') {
+        shownStage = pick;
+        const menu = app.querySelector<HTMLElement>('.sort-pick');
+        if (menu) menu.hidden = true;
+        if (!el.querySelector('#whale-body')) void whale(el);
+        return;
+      }
+      // This tab's orders in the menu (Upcoming has one: the next to lock first).
+      const order = auctionSort(pick);
+      const shown = sortAuctions([...staged.find(([k]) => k === pick)![1]], order);
+      shownStage = pick;
+      app.querySelectorAll<HTMLElement>('.sort-menu [data-sort]').forEach((o) => {
+        o.hidden = o.dataset.stage !== pick;
+        o.setAttribute('aria-selected', String(o.dataset.stage === pick && o.dataset.sort === order));
+      });
+      const label = app.querySelector('.sort-label');
+      if (label) label.textContent = AUCTION_SORTS.find(([k, , st]) => k === order && st === pick)?.[1] ?? '';
+      const menuPick = app.querySelector<HTMLElement>('.sort-pick');
+      if (menuPick) menuPick.hidden = pick === 'upcoming';
       const fresh = morph(
         el,
         !list.length
@@ -426,9 +524,9 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
           ph.querySelector('.sheet')!.outerHTML = sheet([], { size: 'sm', ghosts: ids.slice(0, 80).map((id) => ({ id: BigInt(id), src: editionArt(id) })) });
         });
     };
-    app.querySelectorAll<HTMLElement>('[data-stage]').forEach((b) =>
+    app.querySelectorAll<HTMLElement>('[data-stage-tab]').forEach((b) =>
       b.addEventListener('click', () => {
-        stage = b.dataset.stage as Stage;
+        stage = b.dataset.stageTab as Stage;
         remember(stage);
         draw();
       }),
@@ -441,7 +539,20 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       }),
     );
     draw();
-    // Live: read the list again every 20 seconds while the page is showing, and redraw only when a union changed
+    // The clocks tick between reads. One that runs out redraws: its auction moves to Sold, a lock to Ready to burn.
+    const tick = setInterval(() => {
+      if (document.getElementById('batches') !== el) return clearInterval(tick);
+      const now = Date.now() / 1000;
+      let out = false;
+      el.querySelectorAll<HTMLElement>('[data-ends]').forEach((n) => {
+        const at = Number(n.dataset.ends);
+        if (now >= at) out = true;
+        n.textContent = clock(at);
+        n.classList.toggle('late', at - now < LATE);
+      });
+      if (out) draw();
+    }, 1000);
+    // Live: read the list again every 20 seconds (10 on Auctions) while the page is showing, and redraw only when a union changed
     // (a deposit, a withdrawal, a new one, a state change).
     // Burn day's notice is part of it: cards of full unions say when burning starts.
     const sig = (xs: Listed[]) => `${notice?.at ?? ''}|` + xs.map((b) => `${b.s.address}:${b.ids.length}:${b.s.state}:${b.s.phase}:${b.s.highBid}`).join('|');
@@ -457,13 +568,29 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       }
       if (!next || document.getElementById('batches') !== el) return;
       seen = sig(next);
+      const was = new Map(list.map((b) => [b.s.address, b.s]));
       const nextParties = next.filter((b) => PARTY_STATES.has(b.s.state));
       const nextList = want ? nextParties.filter((b) => b.s.state === 'Open' && want.test(b)) : tab === 'parties' ? nextParties : next.filter((b) => b.s.state !== 'Open' && b.s.state !== 'Expired');
       list.splice(0, list.length, ...nextList);
       parties.splice(0, parties.length, ...nextParties);
       await Promise.all([placeCards(list), pictureCards(list)]);
-      if (document.getElementById('batches') === el) draw();
-    }, 20_000);
+      if (document.getElementById('batches') !== el) return;
+      // A new bid: its card flashes. If it took the lead from you, it says Outbid until you lead again.
+      const me = session.account, bumped: Address[] = [];
+      for (const b of list) {
+        const before = was.get(b.s.address);
+        if (!before || b.s.state !== 'Auction' || b.s.highBid === before.highBid) continue;
+        bumped.push(b.s.address);
+        const key = b.s.address.toLowerCase();
+        if (me && same(b.s.highBidder, me)) outbid.delete(key);
+        else if (me && same(before.highBidder, me) && !outbid.has(key)) {
+          outbid.add(key);
+          toast(`Outbid on ${b.s.name || 'a Statement'}: ${eth(b.s.highBid)}`);
+        }
+      }
+      draw();
+      for (const a of bumped) el.querySelector(`a.card[href="/union/${a}"]`)?.classList.add('bumped');
+    }, tab === 'auctions' ? 10_000 : 20_000);
     Promise.all([placeCards(list), pictureCards(list)]).then((got) => {
       if (got.some(Boolean) && document.getElementById('batches') === el) draw();
     });
@@ -489,7 +616,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         opts.forEach((x) => x.setAttribute('aria-selected', String(x === o)));
         pick.querySelector('.sort-label')!.textContent = o.textContent;
         try {
-          localStorage.setItem('cu-sort', o.dataset.sort!);
+          localStorage.setItem(tab === 'parties' ? 'cu-sort' : `cu-auction-sort-${shownStage}`, o.dataset.sort!);
         } catch {}
         open(false);
         btn.focus();

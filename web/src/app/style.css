@@ -9213,6 +9213,20 @@ dialog.share .share-swatches button {
 .join-head h3 { margin: 0; }
 .join-head #pick-count { margin-left: auto; }
 .meta-yours { color: var(--fg); font-weight: 500; }
+/* Auction cards: the clock ticks (lists.ts) and turns red inside the last 15 minutes, when each bid adds 15 more. */
+.ends { font-variant-numeric: tabular-nums; }
+.ends.late { color: var(--err); font-weight: 500; }
+.meta-win { color: var(--ok); font-weight: 500; }
+.meta-outbid { color: var(--err); font-weight: 500; }
+/* A new bid since the last read: the card flashes once. */
+.card.bumped { animation: bumped 1.6s ease-out; }
+@keyframes bumped {
+  0% { box-shadow: 0 0 0 2px var(--ok); }
+  100% { box-shadow: 0 0 0 2px transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .card.bumped { animation: none; }
+}
 /* Card lines 2 and 3: one left edge, one font, one height; the creator name gives way first. */
 .card-meta .meta-line { height: 18px; line-height: 18px; font-size: 13px; color: var(--muted); }
 .meta-byline { display: flex; align-items: center; gap: 0; }
@@ -9236,4 +9250,45 @@ dialog.share .share-swatches button {
 #create.picture-mode #add-rule .rrow:not([data-row='palette']),
 #create.picture-mode .rule[data-pane='who']:not([data-tab='palette']):not(.who-bar) {
   display: none;
+}
+
+/* /whale: every live auction as a row; pick several, set each bid (or one for all), and bid on them together
+   (views/whale.ts). Each bid has to be the new high bid, so a row under its next bid turns red. */
+.whale-each { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 4px 0 12px; }
+.whale-each label { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.whale-each input { width: 96px; height: 36px; text-align: right; }
+.whale-list { border-top: 1px solid var(--line); }
+.whale-row {
+  display: grid;
+  grid-template-columns: 18px 56px minmax(0, 1fr) minmax(130px, auto) 132px;
+  grid-template-areas: 'pick art name now bid';
+  align-items: center;
+  gap: 8px 16px;
+  padding: 12px 8px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  transition: background 150ms var(--ease);
+}
+.whale-row.on { background: var(--raised); }
+.whale-pick { grid-area: pick; appearance: auto; -webkit-appearance: checkbox; width: 18px; height: 18px; padding: 0; box-shadow: none; accent-color: var(--fg); cursor: pointer; }
+.whale-art { grid-area: art; position: relative; display: block; width: 56px; aspect-ratio: 76 / 95; background: var(--empty); border-radius: 3px; overflow: hidden; }
+.whale-name { grid-area: name; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.whale-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.whale-now { grid-area: now; display: flex; flex-direction: column; gap: 2px; text-align: right; }
+.whale-now strong { font-weight: 500; }
+.whale-bid { grid-area: bid; display: flex; flex-direction: column; gap: 4px; }
+.whale-amt { height: 36px; text-align: right; }
+.whale-min { text-align: right; }
+.whale-row.low .whale-amt { box-shadow: inset 0 0 0 1.5px var(--err); }
+.whale-row.low .whale-min { color: var(--err); }
+.whale-bar { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; gap: 12px; padding: 12px 0; margin-top: 8px; background: var(--bg); border-top: 1px solid var(--line); }
+.whale-sum { font-weight: 500; white-space: nowrap; }
+.whale-why { flex: 1; color: var(--muted); }
+.whale-bar .btn { margin-left: auto; white-space: nowrap; }
+@media (max-width: 640px) {
+  .whale-row { grid-template-columns: 18px 48px minmax(0, 1fr) 112px; grid-template-areas: 'pick art name bid' 'pick art now bid'; }
+  .whale-art { width: 48px; }
+  .whale-now { text-align: left; }
+  .whale-bar { flex-wrap: wrap; }
+  .whale-why { order: 3; flex-basis: 100%; }
 }
