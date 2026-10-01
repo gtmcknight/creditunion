@@ -3,15 +3,17 @@
 /// first, each only if it would land:
 ///   1. factory.activateAssembler(), once the 30-minute notice has run;
 ///   2. settle() on an auction that has ended;
-///   3. claim(member) for a member whose payout failed at settle (anyone may send it for them), for three days.
-/// It never restarts a countdown either: a burn hour nobody used unlocks, and restarting it stays with people, on the
-/// page. Every call is simulated first; nothing is sent while the keeper's last transactions are pending, or while
+///   3. claim(member) for a member whose payout failed at settle (anyone may send it for them), for three days;
+///   4. record(union) on the adapter for a picture whose Credits moved since its spots were last written, so a leave
+///      opens only the leaver's spot (contracts/ADAPTER.md). From the adapter's proposal on.
+/// Every call is simulated first; nothing is sent while the keeper's last transactions are pending, or while
 /// gas is over its cap. The key (secret KEEPER_KEY) holds no role in any contract: all it can lose is its gas money.
 /// Without it, the keeper does nothing.
 import { createPublicClient, createWalletClient, type Address, type Hex, type Transport } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { mainnet, sepolia } from 'viem/chains';
 import { batchAbi, factoryAbi } from '../app/abi';
+import { adapterAbi } from '../app/adapter-abi';
 
 /// What the keeper reads of each Credit Union (Batch.summary and slots).
 export type Kept = {
@@ -26,7 +28,7 @@ const PAY_FOR = 3n * 86_400n; // how long after an auction ends a failed payout 
 /// Up to this many a run, 5 minutes apart.
 const PER_RUN = 5;
 
-type Job = { what: string; address: Address; abi: typeof batchAbi | typeof factoryAbi; functionName: string; args?: readonly unknown[] };
+type Job = { what: string; address: Address; abi: typeof batchAbi | typeof factoryAbi | typeof adapterAbi; functionName: string; args?: readonly unknown[] };
 
 export async function keep(o: { key: string; chainId: number; factory: Address; maxGwei: number; transport: Transport; unions: () => Promise<Kept[]> }) {
   if (!/^0x[0-9a-fA-F]{64}$/.test(o.key)) return console.error('[keeper] KEEPER_KEY is not a private key');
@@ -57,6 +59,24 @@ export async function keep(o: { key: string; chainId: number; factory: Address; 
     const members = [...new Set(u.depositors.map((d) => d.toLowerCase() as Address))];
     const owed = await Promise.all(members.map((m) => c.readContract({ address: u.address, abi: batchAbi, functionName: 'claimable', args: [m] }).catch(() => 0n)));
     members.forEach((m, i) => owed[i] > 0n && jobs.push({ what: `pay ${m} from ${u.address}`, address: u.address, abi: batchAbi, functionName: 'claim', args: [m] }));
+  }
+  // Spots, for unions that can still change hands. orderOf reverts for anything but a picture.
+  const adapter = (active !== ZERO ? active : next) as Address;
+  const live = adapter === ZERO ? [] : unions.filter((u) => u.summary.state < AUCTION);
+  for (let i = 0; i < live.length; i += 20) {
+    const part = live.slice(i, i + 20);
+    const res = await c.multicall({
+      contracts: part.flatMap((u) => [
+        { address: adapter, abi: adapterAbi, functionName: 'orderOf', args: [u.address] } as const,
+        { address: adapter, abi: adapterAbi, functionName: 'spotsOf', args: [u.address] } as const,
+      ]),
+      allowFailure: true,
+    });
+    part.forEach((u, k) => {
+      const [order, kept] = [res[2 * k], res[2 * k + 1]];
+      if (order.status !== 'success' || kept.status !== 'success') return;
+      if (order.result.some((id, s) => id !== kept.result[s])) jobs.push({ what: `record ${u.address}'s spots`, address: adapter, abi: adapterAbi, functionName: 'record', args: [u.address] });
+    });
   }
   if (!jobs.length) return;
 

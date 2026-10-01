@@ -902,11 +902,37 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
     }, 'Credits returned to your wallet.');
   });
 
-  // Convert Union to Statement stays disabled until the burns-open flag (?burn opens it anyway, for our own first burn).
+  // Convert Union to Statement opens at an exact time, counted down on the page: the burns-open time we set on burn
+  // day. ?burn skips it, for our own first burn.
   const slot = document.getElementById('assemble-slot');
   if (slot) {
-    const show = () => {
+    let tick: ReturnType<typeof setInterval> | undefined;
+    const wait = (at: number, note: string) => {
+      slot.innerHTML = `<div class="stack"><button class="btn primary block" disabled>Opens in <span class="num">${clock(at)}</span></button>
+        <p class="small muted center">${esc(`${startsAt(at).replace(/^at /, 'At ')}.${note ? ` ${note}` : ''}`)}</p></div>`;
+      const n = slot.querySelector('.num')!;
+      clearInterval(tick);
+      tick = setInterval(() => {
+        if (!slot.isConnected) return clearInterval(tick);
+        n.textContent = clock(at);
+        if (Date.now() / 1000 >= at + 1) {
+          clearInterval(tick);
+          void show();
+        }
+      }, 1000);
+    };
+    const show = async (): Promise<void> => {
       if (!slot.isConnected) return;
+      if (burnAsk !== s.address.toLowerCase()) {
+        const b = await fetch('/burns').then((r) => r.json() as Promise<{ open?: boolean; at?: number | null }>).catch(() => ({}) as { open?: boolean; at?: number | null });
+        if (!b.open) {
+          if (b.at && b.at > Date.now() / 1000) return wait(b.at, '');
+          if (b.at) setTimeout(() => void show(), 5000); // its time has come; the flag is a few seconds behind
+          return;
+        }
+      }
+      if (!slot.isConnected) return;
+      clearInterval(tick);
       slot.innerHTML = `<div class="stack">${m ? `<button class="btn primary block" id="assemble">Convert Union to Statement</button>` : `<button class="btn primary block" data-connect>Connect wallet</button>`}
         <p class="small muted center">Anyone can press it. You pay the gas.</p></div>`;
       document.getElementById('assemble')?.addEventListener('click', (e) =>
@@ -915,8 +941,7 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
         'The Statement exists. Auction is open.'),
       );
     };
-    if (burnAsk === s.address.toLowerCase()) show();
-    else fetch('/burns').then((r) => r.json()).then((b: { open?: boolean }) => b.open && show()).catch(() => {});
+    void show();
   }
 
   document.getElementById('settle')?.addEventListener('click', (e) =>

@@ -316,11 +316,15 @@ async function activityItems(env: Env, store: Cache, stateKey: string): Promise<
   return filling.size ? items.filter((x) => !x.union || !filling.has(x.union.toLowerCase())) : items;
 }
 
-/// Burn day's hold: until the PLANS key `burns-open` is "1", the page disables Convert Union to Statement (anyone can still call
-/// assemble() directly; the keeper never burns). Flip it once the first Statement checks out, no deploy needed:
-///   pnpm wrangler kv key put --binding PLANS burns-open 1 --remote
-async function burnsOpen(env: Env) {
-  return (await env.PLANS?.get('burns-open', { cacheTtl: 30 })) === '1';
+/// Burn day's hold: the PLANS key `burns-open` is "1" (open now) or a unix time (open from then, and every union page
+/// counts down to it). Unset: held, no time yet. The page keeps Convert Union to Statement disabled while held (anyone can still call
+/// assemble() directly; the keeper never burns). No deploy needed:
+///   pnpm wrangler kv key put --binding PLANS burns-open 1790902800 --remote
+async function burnsOpen(env: Env): Promise<{ open: boolean; at: number | null }> {
+  const v = (await env.PLANS?.get('burns-open', { cacheTtl: 30 })) ?? '';
+  if (v === '1') return { open: true, at: null };
+  const at = /^\d{10}$/.test(v) ? Number(v) : null;
+  return { open: at !== null && Date.now() / 1000 >= at, at };
 }
 
 /// The keeper's address, never its key, at /burns: so its gas money can be checked before burn day.
@@ -377,7 +381,7 @@ function matchRules(b: Record<string, unknown>): { rules: Rules; page: number } 
 }
 
 async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): Promise<Response> {
-  if (url.pathname === '/burns') return Response.json({ open: await burnsOpen(env), keeper: keeperOf(env) }, { headers: { 'cache-control': 'public, max-age=15' } });
+  if (url.pathname === '/burns') return Response.json({ ...(await burnsOpen(env)), keeper: keeperOf(env) }, { headers: { 'cache-control': 'public, max-age=15' } });
   if (url.pathname === '/config.json') return Response.json(publicConfig(env), { headers: { 'cache-control': 'public, max-age=60' } });
 
   if (url.pathname === '/rpc') return rpc(req, env, url);
@@ -2040,11 +2044,12 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
     clean.push({ jsonrpc: '2.0', id: id ?? null, method, params: out });
     return null;
   }
-  // eth_call only to our contracts: Credits, the factory, the Sweeper, UnionFormats, Credits' art contract, or a batch the
-  // factory made. Every target named before the first malformed call must pass, as when checked in order.
+  // eth_call only to our contracts: Credits, the factory, the Sweeper, UnionFormats, Credits' art contract, the
+  // factory's burn contract (a picture's spots), or a batch the factory made. Every target named before the first
+  // malformed call must pass, as when checked in order.
   if (others.size) {
-    const art = await artOf(env);
-    const rest = [...others.keys()].filter((to) => to !== art);
+    const [art, adapter] = await Promise.all([artOf(env), assemblerOf(env)]);
+    const rest = [...others.keys()].filter((to) => to !== art && to !== adapter);
     const ok = await Promise.all(rest.map((to) => isBatch(env, url, to as Address)));
     if (ok.some((x) => !x)) return text('target not allowed', 403);
   }
@@ -2606,6 +2611,19 @@ const statementsAbi = [
   { type: 'function', name: 'statementSVG', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'string' }] },
   { type: 'function', name: 'tokenURI', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'string' }] },
 ] as const;
+/// The factory's burn contract (lowercase), or null until one is active. Read once a minute per isolate; once set it
+/// can never change.
+let assemblerKept: { at: number; addr: Promise<string | null> } | null = null;
+function assemblerOf(env: Env): Promise<string | null> {
+  if (assemblerKept && Date.now() - assemblerKept.at < 60_000) return assemblerKept.addr;
+  const addr = client(env)
+    .readContract({ address: env.FACTORY as Address, abi: factoryAbi, functionName: 'assembler' })
+    .then((a) => (/^0x0{40}$/i.test(a as string) ? null : (a as string).toLowerCase()))
+    .catch(() => null);
+  assemblerKept = { at: Date.now(), addr };
+  return addr;
+}
+
 /// The Statements contract burned unions mint into: the factory's burn contract's statement(). Read once a minute per
 /// isolate; null until a burn contract is active.
 let statementsKept: { at: number; addr: Promise<Address | null> } | null = null;
