@@ -96,7 +96,7 @@ export async function credit(app: HTMLElement, raw: string) {
     </div>
   </section>
   ${r ? howMade(seedText(String(seed)), r) : ''}
-  ${owner && !union ? `<section class="credit-fits"><div class="section-head"><h3>Invited</h3><span class="muted num" id="fits-n"></span></div><p class="muted section-sub">Credit Unions that this Credit can join.</p><div id="fits"><p class="muted">Checking open Credit Unions…</p></div></section>` : ''}`;
+  ${owner && !union ? `<section class="credit-fits"><div class="section-head"><h3>Can join</h3><span class="muted num" id="fits-n"></span></div><p class="muted section-sub">Credit Unions that this Credit can join.</p><div id="fits"><p class="muted">Checking open Credit Unions…</p></div></section>` : ''}`;
   hydrate(app);
 
   if (owner && !union) {

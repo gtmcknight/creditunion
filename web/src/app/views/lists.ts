@@ -246,16 +246,16 @@ const stageOf = (b: Listed): Stage => (b.s.state === 'Full' ? 'upcoming' : b.s.s
 export type HomeTab = 'parties' | 'auctions';
 
 
-/// Two pages over one list: Credit Unions still pooling (All, Invited, Yours, Full), and Statements at or past
+/// Two pages over one list: Credit Unions still pooling (Open, Can join, Joined, Full), and Statements at or past
 /// auction (by stage).
 /// A page drawn twice at once (a wallet reconnecting as it loads) runs lists() twice over the same buttons; only the
-/// latest run wires them, or a sort would redraw from the first run's state (before the wallet: no Invited, no Yours).
+/// latest run wires them, or a sort would redraw from the first run's state (before the wallet: no Can join, no Joined).
 let listsRun = 0;
 export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
   const run = ++listsRun;
   const head =
     tab === 'parties'
-      ? ['Credit Unions', 'Each Credit Union pools Credits toward 80. Join with ones that fit, and leave anytime before it fills.']
+      ? ['Unions', 'Each Credit Union pools Credits toward 80. Join with ones that fit, and leave anytime before it fills.']
       : ['Auctions', 'Every Statement a Credit Union makes is sold here. 24 hours from the first bid, split among its members.'];
   // One small menu, not a second row of tabs: a sort glyph and the current order; the choices drop down under it.
   const cur = sortKey();
@@ -267,7 +267,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       lede: head[1],
       tabs:
         tab === 'parties'
-          ? [{ label: 'All <span class="num muted" id="n-all"></span>', attrs: 'data-view="all"' }, { label: 'Invited <span class="num muted" id="n-invited"></span>', attrs: 'data-view="invited"' }, { label: 'Yours <span class="num muted" id="n-yours"></span>', attrs: 'data-view="yours"' }, { label: 'Full <span class="num muted" id="n-filled"></span>', attrs: 'data-view="filled"' }]
+          ? [{ label: 'Open <span class="num muted" id="n-all"></span>', attrs: 'data-view="all"' }, { label: 'Can join <span class="num muted" id="n-invited"></span>', attrs: 'data-view="invited"' }, { label: 'Joined <span class="num muted" id="n-yours"></span>', attrs: 'data-view="yours"' }, { label: 'Full <span class="num muted" id="n-filled"></span>', attrs: 'data-view="filled"' }]
           : STAGES.map(([k, l]) => ({ label: `${l} <span class="num muted" id="n-${k}"></span>`, attrs: `data-stage="${k}"` })),
       tools: tab === 'parties' ? sort : undefined,
       action: tab === 'parties' ? '<a class="btn primary" href="/create">Start a Credit Union</a>' : '<button type="button" class="btn" id="how-auctions">How it works</button>',
@@ -291,22 +291,27 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       app.querySelector('.page-head')?.insertAdjacentHTML('beforeend', `<p class="filter-line">Open to ${esc(want.label)} · <a href="/unions">Show all</a></p>`);
     }
     const bar = app.querySelector<HTMLElement>('.page-bar');
-    // All / Invited / Yours / Full: opens on All, the first tab, until someone picks. All is the ones still
-    // taking Credits; Invited, open ones your Credits fit that you haven't joined; Yours, ones you're in or
-    // started; Full, full ones until their auction starts.
+    // Open / Can join / Joined / Full (views all, invited, yours, filled): opens on Open until someone picks. Open is
+    // the ones still taking Credits; Can join, open ones your Credits fit that you haven't joined; Joined, ones
+    // you're in or started; Full, full ones until their auction starts.
     type View = 'all' | 'invited' | 'yours' | 'filled';
-    // The tab lives in the address (?tab=full), so Back from a union returns to it. 'full' for the Full tab (View 'filled').
-    const tabParam = new URLSearchParams(location.search).get('tab');
-    const VIEWS: View[] = ['all', 'invited', 'yours', 'filled'];
-    const fromParam = tabParam === 'full' ? 'filled' : tabParam;
-    let view: View | null = VIEWS.includes(fromParam as View) ? (fromParam as View) : null;
-    let stage: Stage | null = STAGES.some(([k]) => k === tabParam) ? (tabParam as Stage) : null;
+    // The tab lives in the path (/unions/join, /auctions/sold), so Back from a union returns to it. Old
+    // ?tab= links (?tab=invited, ?tab=yours, ?tab=full) still land and are rewritten to the path.
+    const base = tab === 'parties' ? '/unions' : '/auctions';
+    const SLUGS: Record<View, string> = { all: '', invited: 'join', yours: 'joined', filled: 'full' };
+    const OLD: Record<string, View> = { all: 'all', invited: 'invited', yours: 'yours', full: 'filled' };
+    const query = new URLSearchParams(location.search);
+    const slug = location.pathname.split('/')[2] || query.get('tab') || '';
+    const VIEWS = Object.keys(SLUGS) as View[];
+    let view: View | null = VIEWS.find((v) => SLUGS[v] && SLUGS[v] === slug) ?? OLD[slug] ?? null;
+    let stage: Stage | null = STAGES.some(([k]) => k === slug) ? (slug as Stage) : null;
     const remember = (t: string | null) => {
       const u = new URL(location.href);
-      if (t) u.searchParams.set('tab', t);
-      else u.searchParams.delete('tab');
+      u.searchParams.delete('tab');
+      u.pathname = t ? `${base}/${t}` : base;
       history.replaceState(history.state, '', u.pathname + u.search + u.hash);
     };
+    if (query.has('tab') || location.pathname.split('/').length > 3) remember(tab === 'parties' ? (view ? SLUGS[view] || null : null) : stage);
     let fit = new Map<Address, bigint[]>();
     let showEmpty = false; // All tabs its empty (0/80) unions behind a button: they're mostly abandoned
     const grid = (items: Listed[]) => {
@@ -344,7 +349,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
           .finally(() => (totaling = false));
       }
       if (tab === 'parties') {
-        // Invited and Yours always show; signed out they ask to connect.
+        // Can join and Joined always show; signed out they ask to connect.
         const v = view ?? 'all';
         app.querySelectorAll<HTMLElement>('[data-view]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === v)));
         const acct = session.account;
@@ -365,14 +370,13 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
           yours: 'You haven’t joined or started a Credit Union yet.',
           filled: 'None full right now. A Credit Union stays here from 80/80 until its auction starts.',
         };
-        const note = v === 'invited' ? '<p class="muted view-note">Open Credit Unions your Credits qualify for. You haven’t joined these yet.</p>' : '';
         const fresh = morph(
           el,
           !list.length
             ? `<div class="empty-state"><p>No Credit Unions yet.</p><a class="btn primary" href="/create">Start a Credit Union</a></div>`
             : (v === 'invited' || v === 'yours') && !acct
               ? `<div class="empty-state"><p>Connect to see the Credit Unions ${v === 'invited' ? 'your Credits qualify for' : 'you’re in'}.</p><button class="btn primary" data-connect>Connect wallet</button></div>`
-              : note + (views[v].length ? shownGrid(v, views[v]) : `<p class="muted">${empty[v]}</p>`),
+              : (views[v].length ? shownGrid(v, views[v]) : `<p class="muted">${empty[v]}</p>`),
         );
         el.querySelector('#show-empty')?.addEventListener('click', () => ((showEmpty = true), draw()));
         hydrate(el);
@@ -425,7 +429,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     app.querySelectorAll<HTMLElement>('[data-view]').forEach((b) =>
       b.addEventListener('click', () => {
         view = b.dataset.view as View;
-        remember(view === 'all' ? null : view === 'filled' ? 'full' : view);
+        remember(SLUGS[view] || null);
         draw();
       }),
     );
