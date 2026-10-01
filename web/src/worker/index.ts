@@ -1061,7 +1061,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         ctx.waitUntil(cache.put(key, res.clone()));
         return res;
       }
-      if (e && (e[2] !== 'opensea' || (e[3] && e[4]))) {
+      // A listed row counts only from a fresh book too: a stalled loop must not keep selling a Credit that sold.
+      if (fresh && e && (e[2] !== 'opensea' || (e[3] && e[4]))) {
         const [eid, eprice, esource, ea, eb] = e.map(String);
         const l: Listing = esource === 'opensea' ? { id: eid, price: eprice, source: 'opensea', hash: ea, protocol: eb } : { id: eid, price: eprice, source: esource as Listing['source'], listingId: ea || undefined };
         const res = Response.json(
