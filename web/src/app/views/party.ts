@@ -198,6 +198,13 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   // A color layout's rows already name every mix that fits, so its Palette row would only repeat them.
   const rules = filterRules(s.filter, s.allowlistSize, (i) => layoutSlot(s.filter, i)).filter((r, _, all) => !(r.label === 'Palette' && all.some((x) => x.swatch)));
   const depositors = new Set(b.depositors.map((d) => d.toLowerCase())).size;
+  // The only member of a picture union can still leave: with nobody else in, nothing of theirs shifts. All at once,
+  // so the picture restarts from an empty union rather than a gap.
+  const solo = myIds.size > 0 && depositors === 1;
+  const soloOut = () => {
+    document.getElementById('w-picker')?.setAttribute('hidden', '');
+    document.getElementById('w-clear')?.setAttribute('hidden', '');
+  };
   // Faces beside the member count: the 8 who put in the most Credits (avatars and names fill in by hydrate).
   const byCredits = new Map<string, { a: Address; n: number }>();
   for (const d of b.depositors) {
@@ -327,7 +334,8 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       const takes = app.querySelector('.takes');
       if (takes) takes.innerHTML = '<dt>Rules</dt><dd>Only the Credits that draw its picture</dd>';
       if (!pickedDirection(s.address)) showDirection(host.querySelector<HTMLElement>('.dirs'), 'Consolidated');
-      if (config.sweeper) {
+      if (config.sweeper && solo) soloOut();
+      else if (config.sweeper) {
         app.querySelector('#withdraw')?.setAttribute('hidden', '');
         app.querySelector('#w-clear')?.setAttribute('hidden', '');
         app.querySelectorAll<HTMLElement>('.batch-side p').forEach((p) => {
@@ -365,12 +373,15 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       if (config.sweeper) {
         // Bought into only; withdrawing through the site is off too, since it would shift the picture (the contract
         // still allows it).
-        document.querySelector<HTMLElement>('[data-add="withdraw"]')?.setAttribute('hidden', '');
-        document.querySelector<HTMLElement>('[data-pane="withdraw"]')?.setAttribute('hidden', '');
-        document.querySelector<HTMLElement>('[data-add="buy"]')?.parentElement?.setAttribute('hidden', ''); // Buy alone needs no tabs
+        if (solo) soloOut();
+        else {
+          document.querySelector<HTMLElement>('[data-add="withdraw"]')?.setAttribute('hidden', '');
+          document.querySelector<HTMLElement>('[data-pane="withdraw"]')?.setAttribute('hidden', '');
+          document.querySelector<HTMLElement>('[data-add="buy"]')?.parentElement?.setAttribute('hidden', ''); // Buy alone needs no tabs
+        }
         const note = document.querySelector('.pane-note');
         if (note) note.innerHTML = '<span id="buy-line"></span><span class="buy-how">One transaction buys your picks and deposits them in your name. </span>Unofficial, use at your own risk. <a href="/docs" target="_blank" rel="noopener">How it works</a>';
-        document.querySelector('[data-pane="buy"]')?.insertAdjacentHTML('afterbegin', '<div class="picture-rules"><p><strong>Buy only.</strong> Each open slot has one Credit for sale picked to draw that part of the picture. You buy those, in order. Credits you already own can’t go in.</p><p><strong>No withdrawals here.</strong> Taking a Credit out would shift the picture.</p></div>');
+        document.querySelector('[data-pane="buy"]')?.insertAdjacentHTML('afterbegin', `<div class="picture-rules"><p><strong>Buy only.</strong> Each open slot has one Credit for sale picked to draw that part of the picture. You buy those, in order. Credits you already own can’t go in.</p>${solo ? '<p><strong>You can leave while you’re the only member.</strong> Once someone else joins, withdrawals close.</p>' : '<p><strong>No withdrawals here.</strong> Taking a Credit out would shift the picture.</p>'}</div>`);
       }
       if (config.sweeper) {
         const tab = document.querySelector<HTMLButtonElement>('[data-add="mine"]');
@@ -777,15 +788,18 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
   }
   document.getElementById('withdraw')?.addEventListener('click', (e) => {
     const btn = e.currentTarget as HTMLElement;
+    const picture = isPictureUnion.has(s.address.toLowerCase());
+    // The only member of a picture union leaves with everything, so nothing shifts and there's nothing to warn about.
+    const soloPicture = picture && new Set(b.depositors.map((d) => d.toLowerCase())).size === 1;
     // A picture union: a Credit taken out moves every later one of its Colors up a slot. Say so once, then go.
-    if (isPictureUnion.has(s.address.toLowerCase()) && !btn.dataset.warned) {
+    if (picture && !soloPicture && !btn.dataset.warned) {
       btn.dataset.warned = '1';
       btn.textContent = 'Withdraw anyway';
       btn.insertAdjacentHTML('beforebegin', '<p class="small withdraw-warn">Taking a Credit out moves every later Credit of its color up a slot, so part of the picture shifts for good.</p>');
       return;
     }
     return run(btn, 'Withdrawing…', async () => {
-      const ids = [...(wPicks.size ? wPicks : myIds)].map(BigInt);
+      const ids = [...(wPicks.size && !soloPicture ? wPicks : myIds)].map(BigInt);
       for (let i = 0; i < ids.length; i += CHUNK)
         await send({ address: s.address, abi: batchAbi, functionName: 'withdraw', args: [ids.slice(i, i + CHUNK)] }, txNote);
     }, 'Credits returned to your wallet.');
