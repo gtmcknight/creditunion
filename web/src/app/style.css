@@ -1391,6 +1391,9 @@ input::placeholder {
   transition-timing-function: var(--ease);
   pointer-events: auto;
 }
+/* A link or button in a toast (Outbid on …, Bid again, Turn on): the toast's own ink, underlined. */
+.toast a,
+.toast .link { color: inherit; text-decoration: underline; text-decoration-color: currentColor; text-underline-offset: 2px; }
 .toast.in {
   opacity: 1;
   transform: none;

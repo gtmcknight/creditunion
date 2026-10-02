@@ -11,6 +11,7 @@ import { MAX_SWEEP, buying, checkQuote, listedById, connectToBuy, live as keepLi
 import { creditCell, creditSkel } from './trait';
 import { shareButton } from '../share';
 import { directionCanvas, directions, mountDirections, pickedDirection, primeInks, sheetInks, showDirection, viewerPicked, warmInks } from '../directions';
+import { markOutbidSeen, offerAlerts } from '../outbid';
 import { activityFold, ago } from './live';
 import { $$, art, clock, errText, dayAndTime, esc, eth, openModal, same, setRange, sheet, short, startsAt, statementArt, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
@@ -519,6 +520,7 @@ function watchLive(app: HTMLElement, address: Address, b: Ctx, rerender: () => v
         const topped = !!you && same(b.s.highBidder, you) && !same(n.s.highBidder, you);
         if (topped && n.s.state === 'Auction') {
           bidAgain.add(address.toLowerCase());
+          markOutbidSeen(address, n.s.highBid);
           toast(`You’ve been outbid: the high bid is now ${eth(n.s.highBid)}. ${minEth(n.s.minBid)} ETH takes it back.`, 'err', 8000);
         }
         await party(app, address, rerender, n, n.s.state === b.s.state && !topped ? m : undefined);
@@ -1057,6 +1059,7 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
       await check();
       try {
         await send({ address: s.address, abi: batchAbi, functionName: 'bid', value }, txNote);
+        offerAlerts();
       } catch (err) {
         await check();
         throw err;

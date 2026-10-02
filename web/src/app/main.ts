@@ -18,6 +18,7 @@ import { traitPage } from './views/trait';
 import { timePage } from './views/time';
 import { bitsPage, ratingPage } from './views/scale';
 import { dayAndTime, esc, errText, openModal, toast } from './ui';
+import { watchOutbid } from './outbid';
 import { BURNING_FROM, burningOn, burnsAt, indexedBatch, listBatches, me, readNotice } from './data';
 
 const app = document.getElementById('app')!;
@@ -295,6 +296,7 @@ onSession(() => {
   drawAccount();
   drawTestnet();
   route();
+  watchOutbid();
 });
 window.addEventListener('popstate', () => route());
 // Same-site links navigate in place; new tabs, modified clicks and the Worker's own paths load normally.
@@ -350,6 +352,7 @@ document.addEventListener('click', (e) => {
   }
   drawTestnet();
   void drawNotice();
+  watchOutbid();
   document.getElementById('magic-eye')?.addEventListener('click', () => import('./magic').then((m) => m.openMagic()));
   // Draw with the wallet if it answers quickly; never wait on it. A slow extension (Rainbow can take seconds to
   // answer eth_accounts) reconnects whenever it answers, and the page redraws then (onSession).

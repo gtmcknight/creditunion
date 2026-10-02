@@ -7,6 +7,7 @@ import { batchAbi } from '../abi';
 import { canBatch, pub, send, sendBatch, session } from '../chain';
 import { listBatches, type Listed, type Summary } from '../data';
 import { ens, hydrate, who } from '../ens';
+import { offerAlerts } from '../outbid';
 import { errText, esc, eth, ethNum, same, statementArt, timeLeft, toast } from '../ui';
 
 /// Biddable now: at auction, and its clock (if a first bid started it) still running.
@@ -309,6 +310,7 @@ export async function whale(host: HTMLElement) {
       if (bids.length > 1 && (await canBatch())) {
         await sendBatch(bids.map((x) => ({ address: x.b.s.address, abi: batchAbi, functionName: 'bid', value: x.value })));
         toast(`${bids.length} bids in. You lead all ${bids.length}.`, 'ok');
+        offerAlerts();
       } else {
         let done = 0;
         for (const x of bids) {
@@ -320,6 +322,7 @@ export async function whale(host: HTMLElement) {
           done++;
         }
         toast(`${bids.length} ${bids.length === 1 ? 'bid' : 'bids'} in.`, 'ok');
+        offerAlerts();
       }
       picked.clear();
       amounts.clear();
