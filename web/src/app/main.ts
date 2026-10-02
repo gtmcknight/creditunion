@@ -105,6 +105,7 @@ async function route() {
     else if (page === 'create') await create(app);
     else if (page === 'printer' && (!arg || arg === 'mine' || /^[A-Za-z0-9]{10}$/.test(arg))) await printer(app, arg, route);
     else if (page === 'credit') await credit(app, arg ?? '');
+    else if (page === 'lab') await (await import('./views/lab')).lab(app);
     else if (page === 'time') await timePage(app);
     else if (page === 'rating') await ratingPage(app);
     else if (page === 'bits') await bitsPage(app);

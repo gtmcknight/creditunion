@@ -2,7 +2,7 @@ import { go as navigate } from '../main';
 import { dice, printGlyph, swatch, weightGlyph } from '../glyphs';
 import { decodeEventLog, parseEther, type Address } from 'viem';
 import { creditsAbi, factoryAbi, unionFormatsAbi } from '../abi';
-import { DIRECTIONS, type Direction } from '../../shared/statement';
+import { compose, DIRECTIONS, paint as paintMarks, PAGE, type Direction } from '../../shared/statement';
 import { canBatch, config, send, sendBatch, session } from '../chain';
 import { INK, maskInks, maskLabel } from '../traits';
 import { earlyWeight, placeOnLayout, SPLITS, creatorFeeBps, factoryRatings, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Listed, type Rated, type Summary } from '../data';
@@ -17,28 +17,33 @@ import { directionCanvas, directions, mountDirections, rulesView, showDirection 
 import { Room, booksOf, noRoomReason } from '../slots';
 import { bin } from '../bins';
 import { TRAIT_KINDS, eightsName, parseTrait } from '../../shared/trait';
+import { WAVE_SHAPES, inkFor, mazeIndex, planMaze, waveColors, type Maze, type MazeIndex, type Pool, type WaveShape } from '../../shared/lab';
 import { DETAIL, gapOf, Guide, framer, packPicture, planOf, type Framer, type Plan, OWN_GOOD, runOf, type Look } from '../picture';
 
 const CHUNK = 40;
 /// The layouts a new party can pick, by the contract's burn-order number (1 Mint time and 3 Creator's order are retired).
 const ARR_OPTS: [number, string, string][] = [
   [0, 'Joined', 'In the order they joined.'],
-  [2, 'Number', 'By Credit number (token ID).'],
-  [4, 'Painted', 'Pick a color, then click or drag on the sheet.'],
-  [6, 'Picture', 'Uses the Credits that draw your picture best: yours and ones for sale.'],
-];
-/// Number's two directions, by the contract's burn-order number.
-const NUMBER_DIRS: [number, string, string][] = [
-  [2, '↑ Low to high', 'By Credit number (token ID), lowest to highest.'],
-  [5, '↓ High to low', 'By Credit number (token ID), highest to lowest.'],
+  [6, 'Picture', 'Your picture, drawn by your Credits and ones for sale.'],
+  [4, 'Painted', 'Pick a color, then paint the sheet.'],
+  [8, 'Wave', 'Each row as long as its Credit’s ink.'],
+  [9, 'Maze', 'One way through, from 80 Credits for sale.'],
 ];
 /// Picture is Painted on-chain: the tile only changes how the paint is made.
 const PICTURE = 6;
+/// Wave is Painted on-chain too (a Colors per slot, made for you); Maze is these 80 Credits, in order.
+const WAVE = 8, MAZE = 9;
+const DESIGNED = new Set([WAVE]);
 /// A 4×5 thumbnail per layout: shade steps show the order the sheet fills in. Also on /docs.
 export const arrIcon = (v: number) => {
   const cells = Array.from({ length: 20 }, (_, i) => {
     const k = v === 2 ? i : v === 5 ? 19 - i : v === 0 ? [3, 11, 7, 15, 0, 18, 9, 5, 13, 1, 16, 6, 10, 2, 19, 8, 14, 4, 17, 12][i] : -1;
     if (v === PICTURE) return `<rect x="${(i % 4) * 7}" y="${((i / 4) | 0) * 7}" width="6" height="6" fill="${PICTURE_ICON[i]}"/>`;
+    if (v === WAVE || v === MAZE) {
+      const on = (v === WAVE ? '##..###.####.###.##.' : '#.###...###.#.....##')[i] === '#';
+      const fill = v === MAZE ? (on ? '#111111' : 'rgba(17,17,17,0.12)') : on ? '#00b5e2' : 'rgba(17,17,17,0.12)';
+      return `<rect x="${(i % 4) * 7}" y="${((i / 4) | 0) * 7}" width="6" height="6" fill="${fill}"/>`;
+    }
     const fill = v === 4 ? ([0, 3, 5, 6, 9, 10, 13, 14, 16, 19].includes(i) ? '#00b5e2' : '#e4007c') : `rgba(17,17,17,${(0.12 + (0.88 * (19 - k)) / 19).toFixed(2)})`;
     return `<rect x="${(i % 4) * 7}" y="${((i / 4) | 0) * 7}" width="6" height="6" fill="${fill}"/>`;
   }).join('');
@@ -227,6 +232,8 @@ export async function create(app: HTMLElement) {
   /// Testnets can't buy, so there it leans on yours.
   const buyToStart = !!config.sweeper;
   /// Picture is the layout and its sheet is designed: only the picture's own Credits go in, each Colors in order.
+  let maze: Maze | null = null; // the Maze layout's 80, once planned
+  const mazeOn = () => app.querySelector<HTMLInputElement>('input[name=arr]:checked')?.value === String(MAZE);
   const picturing = () => !!picPlan && layout.some(Boolean) && app.querySelector<HTMLInputElement>('input[name=arr]:checked')?.value === String(PICTURE);
   const bySlot = (ids: string[]) => (picPlan ? [...ids].sort((a, b) => (picPlan!.slot.get(a) ?? 99) - (picPlan!.slot.get(b) ?? 99)) : ids);
   const layout: number[] = new Array(80).fill(0); // slot values of the painted trait, 0 = any
@@ -253,8 +260,7 @@ export async function create(app: HTMLElement) {
       <h2 class="form-title">Layout</h2>
       <section class="rule layout-opts" data-tab="order" data-pane="order">
         <div class="arr-tiles" role="radiogroup" aria-label="Layout">${ARR_OPTS.map(([v, l, h]) => `<label class="arr-tile" title="${h}"><input type="radio" name="arr" value="${v}" ${v === 0 ? 'checked' : ''}>${arrIcon(v)}<b>${l}</b></label>`).join('')}</div>
-        <div class="seg sm num-dir" role="radiogroup" aria-label="Number order" id="num-dir" hidden>${NUMBER_DIRS.map(([v, l, h], i) => `<label title="${h}"><input type="radio" name="num-dir" value="${v}" ${i === 0 ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>
-        <p class="term-desc muted" id="arr-hint">${ARR_OPTS[0][2]}</p>
+        <p class="term-desc muted" id="arr-hint">${ARR_OPTS.find(([v]) => v === 0)![2]}</p>
         <div class="picture-block" id="picture-block" hidden>
           <input type="file" id="pic-file" accept="image/*" hidden>
           <div class="picture-frame">
@@ -269,6 +275,7 @@ export async function create(app: HTMLElement) {
             </div>
           </div>
         </div>
+        <div class="design-block" id="design-block" hidden></div>
         <div class="paint-block" id="paint-block" hidden>
           <div class="brushes" id="brushes"></div>
           <div class="lgrid" id="lgrid" hidden>${Array.from({ length: 80 }, (_, i) => `<button type="button" class="lcell" data-i="${i}" aria-label="Slot ${i + 1}"></button>`).join('')}</div>
@@ -418,6 +425,7 @@ export async function create(app: HTMLElement) {
   async function drawBuy(fits: number) {
     const el = document.getElementById('create-buy')!;
     if (picturing()) return drawPictureBuy(el);
+    if (mazeOn()) return void ((el.hidden = true), (buyer = null));
     if (fits || !traitsIn || rules.list.length || !config.sweeper) {
       el.hidden = true;
       buyFor = '';
@@ -579,6 +587,7 @@ export async function create(app: HTMLElement) {
   };
   /// The button says what it does: how many of your Credits go in.
   const startLabel = () => {
+    if (mazeOn()) return 'Maze unions coming soon'; // buying all 80 at once isn't ready yet: the preview is there to play with
     const b = buying().length;
     if (b && picks.size) return `Buy ${b} and start with ${picks.size + b} Credits`;
     if (b) return `Buy ${b} and start Credit Union`;
@@ -693,14 +702,14 @@ export async function create(app: HTMLElement) {
     const short = eligible >= 0 && eligible < 80 ? `Only ${eligible} ${eligible === 1 ? 'Credit' : 'Credits'} can ever join, and a Credit Union needs 80. Widen the rules.` : '';
     // A picture: none of its Colors may skip a slot.
     const gap = picturing() ? gapOf(picPlan!, [...picks, ...buying().map((l) => l.id)]) : null;
-    const reason = tooNarrow || short || (gap ? `Add #${gap} too: it goes in before the ones you picked.` : '') || (n < min && traitsIn ? (picturing() ? (picPlan!.mine.size ? 'Pick one of yours, or buy one of its first Credits.' : 'Buy at least one of the picture’s first Credits to start it.') : `Select at least ${min} of your qualifying Credits.`) : n > 80 ? 'At most 80.' : over ? overText(over) : '');
+    const reason = mazeOn() ? (maze ? '' : 'Making a maze…') : tooNarrow || short || (gap ? `Add #${gap} too: it goes in before the ones you picked.` : '') || (n < min && traitsIn ? (picturing() ? (picPlan!.mine.size ? 'Pick one of yours, or buy one of its first Credits.' : 'Buy at least one of the picture’s first Credits to start it.') : `Select at least ${min} of your qualifying Credits.`) : n > 80 ? 'At most 80.' : over ? overText(over) : '');
     // One line under the button: what blocks it, else how it plays out.
     // What blocks Start sits above it as a warning; the line under it always says how it plays out.
     const warn = document.getElementById('warn')!;
     warn.textContent = reason;
     warn.hidden = !reason;
     why.innerHTML = `${n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions. ` : ''}Free to start a Credit Union. ${picturing() && buyToStart ? 'Yours can come back out while you’re its only member.' : 'Withdraw your Credits anytime until it fills and locks.'}<br>${factoryIn ? `${protocolBps / 100}% protocol fee, only if it sells. ` : ''}Unofficial and experimental.`;
-    go.disabled = !!reason || !traitsIn || !factoryIn; // your Credits and their traits are in (traitsIn), and the factory's numbers
+    go.disabled = !!reason || !traitsIn || !factoryIn || mazeOn(); // your Credits and their traits are in (traitsIn), and the factory's numbers
     if (!go.dataset.busy) go.textContent = startLabel();
     drawSummary();
 
@@ -790,6 +799,11 @@ export async function create(app: HTMLElement) {
     return { order, placed, toBuy, rec, ids: placed.map((x, i) => (x !== null ? Number(x) : (rec[i]?.id ?? null))) };
   }
   function drawPreview(fit: bigint[]) {
+    if (mazeOn()) {
+      document.getElementById('preview')!.innerHTML = sheet([], { mine: new Set(), ghosts: (maze?.ids ?? []).map((id) => ({ id: BigInt(id), src: artOf(BigInt(id)) })) });
+      mountDirections(app);
+      return;
+    }
     // A picture: yours where the contract will put them (each Colors' slots in the order they go in), and in every
     // other slot the Credit that draws it best, as the union page will recommend it.
     if (guide && layout.some(Boolean) && app.querySelector<HTMLInputElement>('input[name=arr]:checked')?.value === String(PICTURE) && view === 'credits') {
@@ -802,6 +816,9 @@ export async function create(app: HTMLElement) {
       mountDirections(app);
       return;
     }
+    // A Wave shows at full ink, as it will print, until you pick Credits yourself; then the rest fade.
+    const arrV = Number(app.querySelector<HTMLInputElement>('input[name=arr]:checked')?.value);
+    if (DESIGNED.has(arrV)) app.querySelector('.design-preview')!.classList.toggle('solid-ghosts', !pickedByHand);
     // Only the Credits you've selected go in solid; the rest of yours read like any other possible match.
     const mineIds = fit.filter((id) => picks.has(id.toString())).slice(0, 80);
     const mineSet = new Set(mineIds.map(String));
@@ -1396,31 +1413,73 @@ export async function create(app: HTMLElement) {
   // Painted is a layout: picking it opens the painter (brushes from your rules, paint on the sheet itself);
   // leaving it clears the paint.
   const paintBlock = document.getElementById('paint-block')!;
+  // ---------------------------------------------------------------- Wave: a sheet painted for you
+  // Each slot gets a Colors (layoutTrait 0) from the wave; it burns in Reconciled.
+  const design = { wave: 'Wave' as WaveShape, waves: 2, shift: 0 };
+  const applyDesign = (kind: number) => {
+    const masks = waveColors({ shape: design.wave, waves: design.waves, shift: design.shift });
+    layoutTrait = 0;
+    masks.forEach((m, i) => ((layout[i] = m), paintCell(i)));
+    syncLayout();
+    const d: Direction = 'Reconciled';
+    showDirection(app.querySelector<HTMLElement>('.dirs'), d);
+    viewing = d;
+    syncHint();
+  };
+  function drawDesign(kind: number) {
+    const el = document.getElementById('design-block')!;
+    const pills = (name: string, items: readonly string[], on: string) =>
+      `<div class="lab-pills" role="radiogroup" aria-label="${name}">${items.map((x) => `<button type="button" role="radio" data-${name.toLowerCase()}="${x}" aria-checked="${x === on}">${x}</button>`).join('')}</div>`;
+    const slider = (k: 'waves' | 'shift', label: string, min: number, max: number, step: number) =>
+      `<label class="lab-slider"><span>${label}</span><input type="range" id="design-${k}" min="${min}" max="${max}" step="${step}" value="${design[k]}"><output class="num">${design[k]}</output></label>`;
+    el.innerHTML = `${pills('Wave', WAVE_SHAPES, design.wave)}${slider('waves', 'Waves', 0.5, 6, 0.5)}${slider('shift', 'Shift', 0, 360, 15)}`;
+    el.querySelectorAll<HTMLButtonElement>('[role=radio]').forEach((b) =>
+      b.addEventListener('click', () => {
+        if (b.dataset.wave) design.wave = b.dataset.wave as WaveShape;
+        b.parentElement!.querySelectorAll('[role=radio]').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+        applyDesign(kind);
+      }),
+    );
+    el.querySelectorAll<HTMLInputElement>('input[type=range]').forEach((r) =>
+      r.addEventListener('input', () => {
+        design[r.id === 'design-waves' ? 'waves' : 'shift'] = Number(r.value);
+        r.nextElementSibling!.textContent = r.value;
+        applyDesign(kind);
+      }),
+    );
+    applyDesign(kind);
+  }
   const preview = document.getElementById('preview')!;
+  /// The layout's line, ending with the format it's set to: the one the preview shows.
+  const syncHint = () => {
+    const v = arrRadios.find((r) => r.checked)?.value;
+    document.getElementById('arr-hint')!.textContent = `${ARR_OPTS.find(([x]) => String(x) === v)?.[2] ?? ''} Format set to ${viewing}.`;
+  };
   const syncOrder = () => {
     const v = arrRadios.find((r) => r.checked)?.value;
-    // Number: one tile, its direction underneath; the line under them says what the pick does.
-    const dir = app.querySelector<HTMLInputElement>('input[name=num-dir]:checked')!.value;
-    document.getElementById('num-dir')!.hidden = v !== '2';
-    document.getElementById('arr-hint')!.textContent = (v === '2' ? NUMBER_DIRS.find(([x]) => String(x) === dir)?.[2] : ARR_OPTS.find(([x]) => String(x) === v)?.[2]) ?? '';
+    syncHint();
     const isPicture = v === String(PICTURE);
-    const on = v === '4' || isPicture;
+    const isDesigned = DESIGNED.has(Number(v));
+    const isMaze = v === String(MAZE);
+    const on = v === '4' || isPicture || isDesigned;
     // A picture makes its own rules (its Colors, slot by slot): the rest would turn its Credits away, so only Colors stays.
     app.querySelector('#create')!.classList.toggle('picture-mode', isPicture);
-    paintBlock.hidden = !on || isPicture;
+    paintBlock.hidden = !on || isPicture || isDesigned;
+    document.getElementById('design-block')!.hidden = !isDesigned && !isMaze;
     document.getElementById('picture-block')!.hidden = !isPicture;
     // A picture previews as it will print: examples at full ink, packed together (Consolidated), as the Printer
     // matches it.
-    app.querySelector('.design-preview')!.classList.toggle('solid-ghosts', isPicture);
+    app.querySelector('.design-preview')!.classList.toggle('solid-ghosts', isPicture || isMaze);
     if (isPicture) (showDirection(app.querySelector<HTMLElement>('.dirs'), picLook), (viewing = picLook));
     // Rules only mean something slot by slot on a painted sheet; otherwise every slot takes the same Credits.
     // The painted view (and its phone toggle) is for a sheet you paint by hand; a picture shows as its Credits.
-    app.querySelector<HTMLElement>('.view-toggle')!.hidden = !on || isPicture;
+    app.querySelector<HTMLElement>('.view-toggle')!.hidden = !on || isPicture || isDesigned;
     app.querySelector<HTMLElement>('.dirs [data-dir="Rules"]')!.hidden = !on || isPicture;
-    preview.classList.toggle('paintable', on && !isPicture); // a picture's sheet comes from its Credits, not a brush
+    preview.classList.toggle('paintable', on && !isPicture && !isDesigned); // a picture's sheet comes from its Credits, not a brush
     // A picture shows as the Credits that would draw it; a sheet you paint by hand, as its rules.
-    setView(on && !isPicture ? 'rules' : 'credits');
-    if (isPicture) {
+    setView(on && !isPicture && !isDesigned ? 'rules' : 'credits');
+    if (isDesigned) drawDesign(Number(v));
+    else if (isPicture) {
       if (!pic) pic = mountPicture(); // paints once its first picture loads
       else paintFromPicture();
     } else if (on) {
@@ -1444,7 +1503,123 @@ export async function create(app: HTMLElement) {
       drawBrushes();
       syncLayout();
     }
+    if (isMaze) void drawMaze();
+    else syncRoute();
+    syncHint();
   };
+  // ---------------------------------------------------------------- Maze: one buyer, 80 Credits for sale
+  // Amortized outlines ink, so paper reads as passages: 80 listed Credits whose doors line up, one way through. You
+  // buy all 80 and they go in in order (a named list, deposit order), so each lands in its room.
+  let mazeData: Promise<{ pool: Pool; index: MazeIndex }> | null = null;
+  let mazeSeed = 1 + Math.floor(Math.random() * 1e6);
+  const ethOf = (w: bigint) => `${(Number(w) / 1e18).toFixed(3)} ETH`;
+  const loadMaze = () =>
+    (mazeData ??= Promise.all([
+      fetch('/lab/inks.bin').then((r) => r.arrayBuffer()),
+      fetch('/market.json').then((r) => r.json() as Promise<{ items?: [string, string][] }>).catch(() => ({ items: [] })),
+    ]).then(async ([buf, m]) => {
+      const price = new Map((m.items ?? []).map(([id, wei]) => [Number(id), BigInt(wei)]));
+      // No book here (a local worker): the lab's snapshot of every listing.
+      if (!price.size) for (const [id, v] of Object.entries(await fetch('/lab/listed.json').then((r) => r.json() as Promise<Record<string, { price: string }>>))) price.set(Number(id), BigInt(v.price));
+      const pool: Pool = { inks: new Uint8Array(buf), price };
+      return { pool, index: mazeIndex(pool) };
+    }).catch((e) => {
+      mazeData = null;
+      throw e;
+    }));
+  /// The way through, run over the Amortized preview: the maze redrawn with every wall one grey, and a red runner
+  /// running down the passage cell by cell, start to exit, then again. Never part of the art: it shows only here, on the
+  /// drawn format, while Show path is on. Cells are the lab's field (76 across, the page 95 down, 1.5 down).
+  let showRoute = false;
+  let runFrame = 0;
+  async function syncRoute() {
+    const host = app.querySelector<HTMLElement>('.design-preview')!;
+    let run = host.querySelector<HTMLCanvasElement>(':scope > .maze-run');
+    cancelAnimationFrame(runFrame);
+    const on = showRoute && mazeOn() && !!maze && viewing === 'Amortized';
+    if (!on) return void run?.remove();
+    const m = maze!;
+    const { pool } = await loadMaze();
+    if (maze !== m || !showRoute || !mazeOn()) return;
+    if (!run) {
+      run = document.createElement('canvas');
+      run.className = 'maze-run';
+      run.setAttribute('aria-hidden', 'true');
+      host.append(run);
+    }
+    const W = Math.round((run.clientWidth || 480) * Math.min(3, devicePixelRatio || 1)), H = Math.round((W * PAGE.h) / PAGE.w);
+    run.width = W;
+    run.height = H;
+    // The maze in one grey: each pixel's darkest channel says how much ink it has, whatever its colour.
+    const base = document.createElement('canvas');
+    base.width = W;
+    base.height = H;
+    const b = base.getContext('2d')!;
+    paintMarks(b, W, compose('Amortized', m.ids.map((id) => inkFor(pool, id))));
+    const img = b.getImageData(0, 0, W, H), px = img.data;
+    for (let i = 0; i < px.length; i += 4) {
+      const v = 255 - ((255 - Math.min(px[i], px[i + 1], px[i + 2])) * 120) / 255;
+      px[i] = px[i + 1] = px[i + 2] = v;
+    }
+    b.putImageData(img, 0, 0);
+    const cells = m.path.filter(([x, y], i) => !i || x !== m.path[i - 1][0] || y !== m.path[i - 1][1]);
+    const k = W / 76, g = run.getContext('2d')!;
+    const draw = (n: number) => {
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.drawImage(base, 0, 0);
+      // A thin line down the middle of the passage, about as thick as a wall.
+      g.strokeStyle = '#e40000';
+      g.lineWidth = Math.max(1.5, k * 0.3);
+      g.lineJoin = g.lineCap = 'round';
+      g.beginPath();
+      for (let i = 0; i < n; i++) (i ? g.lineTo : g.moveTo).call(g, (cells[i][0] + 0.5) * k, (cells[i][1] + 2) * k);
+      g.stroke();
+    };
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return draw(cells.length);
+    const STEP = 18, HOLD = 1600; // ms per cell, and the finished path before it runs again
+    const t0 = performance.now();
+    const tick = (t: number) => {
+      if (!run!.isConnected) return;
+      draw(Math.min(cells.length, Math.floor(((t - t0) % (cells.length * STEP + HOLD)) / STEP) + 1));
+      runFrame = requestAnimationFrame(tick);
+    };
+    runFrame = requestAnimationFrame(tick);
+  }
+  async function drawMaze(again = false) {
+    const el = document.getElementById('design-block')!;
+    if (!el.querySelector('#maze-new')) {
+      el.innerHTML = `<button type="button" class="btn block" id="maze-route" aria-pressed="${showRoute}">${showRoute ? 'Hide path' : 'Show path'}</button>
+        <p class="term-desc muted maze-row"><span id="maze-status"></span><span class="maze-note">Path is a preview, not printed.</span><button type="button" class="link small" id="maze-new">Find another maze</button></p>`;
+      el.querySelector('#maze-new')!.addEventListener('click', () => void drawMaze(true));
+      el.querySelector<HTMLButtonElement>('#maze-route')!.addEventListener('click', (e) => {
+        showRoute = !showRoute;
+        const b = e.currentTarget as HTMLButtonElement;
+        b.setAttribute('aria-pressed', String(showRoute));
+        b.textContent = showRoute ? 'Hide path' : 'Show path';
+        syncRoute();
+      });
+    }
+    showDirection(app.querySelector<HTMLElement>('.dirs'), 'Amortized');
+    viewing = 'Amortized';
+    syncHint();
+    const status = el.querySelector<HTMLElement>('#maze-status')!;
+    if (maze && !again) return void ((status.textContent = `80 for sale · ${ethOf(maze.cost)}`), refresh(), syncRoute());
+    status.textContent = mazeData ? 'Making a maze…' : 'Reading every Credit for sale…';
+    let d: Awaited<ReturnType<typeof loadMaze>>;
+    try {
+      d = await loadMaze();
+    } catch (e) {
+      return void (status.textContent = errText(e));
+    }
+    status.textContent = 'Making a maze…';
+    await new Promise((r) => setTimeout(r, 30)); // let it say so before the planner holds the page
+    if (!mazeOn()) return;
+    if (again) mazeSeed++;
+    maze = planMaze(d.pool, d.index, mazeSeed);
+    status.textContent = maze ? `80 for sale · ${ethOf(maze.cost)}` : 'No maze from what’s for sale right now. Try again.';
+    refresh();
+    syncRoute();
+  }
   // ---------------------------------------------------------------- picture
   const mountPicture = () =>
     framer({
@@ -1539,15 +1714,16 @@ export async function create(app: HTMLElement) {
     if ((d === 'Rules') !== (view === 'rules')) setView(d === 'Rules' ? 'rules' : 'credits');
     // A picture follows the format you look at: it burns in it, and in the formats that keep each Credit in its own
     // spot as a picture (Consolidated, Assessed, Reconciled) its Credits are matched again for it.
-    if (d === 'All' || d === 'Rules') return;
+    if (d === 'All' || d === 'Rules') return void syncRoute();
     viewing = d as Direction;
+    syncRoute();
+    syncHint();
     if (LOOKS.includes(d as Look) && d !== picLook && arrRadios.find((r) => r.checked)?.value === String(PICTURE)) {
       picLook = d as Look;
       void paintFromPicture();
     }
   });
   arrRadios.forEach((r) => r.addEventListener('change', syncOrder));
-  app.querySelectorAll<HTMLInputElement>('input[name=num-dir]').forEach((r) => r.addEventListener('change', syncOrder));
   // Paint straight onto the preview sheet: tap or drag across its slots.
   const slotAt = (x: number, y: number) => {
     const c = document.elementFromPoint(x, y)?.closest<HTMLElement>('#preview .cell');
@@ -1600,14 +1776,51 @@ export async function create(app: HTMLElement) {
     const name = nameEl.value.trim() || nameEl.placeholder; // left blank: take the suggested name
     const days = 90; // required by the factory, no longer enforced: open parties don't expire, full ones follow the countdown and burn hour
     const chosen = Number((app.querySelector('input[name=arr]:checked') as HTMLInputElement).value);
-    const painted = chosen === 4 || chosen === PICTURE;
-    const numberDir = Number(app.querySelector<HTMLInputElement>('input[name=num-dir]:checked')!.value); // Number ↑ (2) or ↓ (5)
-    const arr = chosen === 2 ? numberDir : !painted ? chosen : layout.some(Boolean) ? 4 : 0; // Painted with nothing painted burns in deposit order
+    if (chosen === MAZE) return; // coming soon
+    const painted = chosen === 4 || chosen === PICTURE || DESIGNED.has(chosen);
+    // A maze goes in in deposit order (0), so each Credit lands in its room.
+    const arr = chosen === MAZE ? 0 : !painted ? chosen : layout.some(Boolean) ? 4 : 0; // Painted with nothing painted burns in deposit order
     const split = Number((app.querySelector('input[name=split]:checked') as HTMLInputElement).value);
     go.disabled = true;
     go.dataset.busy = '1'; // progress labels below own the button until this finishes
     // Credits picked in Buy Credits that fit: bought first (the explorer's price-checked buy, into your wallet),
     // then picked here, then the union opens with them.
+    // A maze: all 80 bought in one go (none, if any just sold), then opened as a named list of exactly them.
+    let mazeIds: bigint[] | null = null;
+    if (chosen === MAZE && maze) {
+      const m = maze;
+      const stop = (msg?: string) => {
+        if (msg) toast(msg, 'err', 8000);
+        delete go.dataset.busy;
+        refresh();
+      };
+      const sold = (ids: string[]) => {
+        const out = new Set(ids.map(Number));
+        mazeData = mazeData?.then(({ pool }) => {
+          for (const id of out) pool.price?.delete(id);
+          return { pool, index: mazeIndex(pool) };
+        }) ?? null;
+      };
+      go.textContent = 'Checking prices…';
+      let ls: Listing[];
+      try {
+        ls = await listedById(m.ids.map(String), true);
+      } catch (x) {
+        return stop(errText(x));
+      }
+      const gone = m.ids.map(String).filter((id) => !ls.some((l) => l.id === id));
+      if (gone.length) {
+        sold(gone);
+        maze = null;
+        void drawMaze(true);
+        return stop(`${gone.map((id) => `#${id}`).join(', ')} ${gone.length === 1 ? 'is' : 'are'} no longer for sale. Here’s a new maze.`);
+      }
+      const got = await sweepToWallet(ls, go, undefined, { onSold: (ids) => (sold(ids), (maze = null), void drawMaze(true)) });
+      if (!got?.length) return stop();
+      await gotCredits(got);
+      go.disabled = true;
+      mazeIds = m.ids.map(BigInt);
+    }
     const toBuy = buying();
     if (toBuy.length) {
       // A picture's first Credits: all or none, so none lands a slot early; a sold one gives its slot to the next best.
@@ -1624,17 +1837,19 @@ export async function create(app: HTMLElement) {
       go.disabled = true;
     }
     // A picture's Credits go in slot order, so each lands in its slot.
-    const ids = (picturing() ? bySlot([...picks]) : [...picks]).map(BigInt);
+    const ids = mazeIds ?? (picturing() ? bySlot([...picks]) : [...picks]).map(BigInt);
     // The picture's 80 Credits as picked now (its list card draws them), before the page moves on.
     const pictureIds = picturing() && guide ? pictureSlots(owned.filter(qualifies)).ids : null;
-    const f = filterOf();
+    // A maze's list is the whole rule: nothing else may turn one of its Credits away.
+    const f = mazeIds ? { ...filterOf(), palettes: 0, prints: 0, weights: 0, eights: 0, paidFrom: 0n, paidTo: 0n, idFrom: 0n, idTo: 0n, minScore: 0, maxScore: 0, layout0: 0n, layout1: 0n, bitsFrom: 0, bitsTo: 0, layoutTrait: 0 } : filterOf();
+    const list = mazeIds ?? rules.list.map(BigInt);
     try {
       const open = {
         address: config.factory,
         abi: factoryAbi,
         functionName: 'create',
         // The fees and score table shown on this page go along: the open reverts if either changed underneath you.
-        args: [name, f, rules.list.map(BigInt), reserve, arr, split, BigInt(days * 86400), ids.slice(0, CHUNK), BigInt(protocolBps), BigInt(creatorBps), table],
+        args: [name, f, list, reserve, arr, split, BigInt(days * 86400), ids.slice(0, CHUNK), BigInt(protocolBps), BigInt(creatorBps), table],
       };
       const approve = { address: config.credits, abi: creditsAbi, functionName: 'setApprovalForAll', args: [config.factory, true] };
       let logs: { address: string; data: `0x${string}`; topics: readonly `0x${string}`[] }[];
@@ -1673,11 +1888,11 @@ export async function create(app: HTMLElement) {
       // A Picture union keeps its picture, so its page can recommend the Credit for each open slot.
       if (painted && chosen === PICTURE && picPx && layout.some(Boolean)) {
         await fetch(`/pictures/${batch}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...packPicture(picPx, DETAIL, picLook), ids: pictureIds }) }).catch(() => {});
-        // Showing another format than Consolidated: the union burns in it (the creator's pick, set as it opens).
-        if (viewing !== 'Consolidated' && config.formats) {
-          go.textContent = `Setting it to ${viewing}…`;
-          await send({ address: config.formats, abi: unionFormatsAbi, functionName: 'pick', args: [batch, DIRECTIONS.indexOf(viewing)] }).catch(() => toast(`It burns in Consolidated until it’s set to ${viewing}.`, 'info', 8000));
-        }
+      }
+      // Any layout burns in the format its preview shows (the creator's pick, set as it opens); Consolidated is the default.
+      if (viewing !== 'Consolidated' && config.formats) {
+        go.textContent = `Setting it to ${viewing}…`;
+        await send({ address: config.formats, abi: unionFormatsAbi, functionName: 'pick', args: [batch, DIRECTIONS.indexOf(viewing)] }).catch(() => toast(`It burns in Consolidated until it’s set to ${viewing}. Set it from its page.`, 'info', 8000));
       }
       // The party page picks this up and shows the congrats and share dialog, once.
       try {
