@@ -9282,6 +9282,8 @@ dialog.share .share-swatches button {
 .tick-bar .tick-who .who img { width: 16px; height: 16px; }
 .tick-bar .tick-what a { color: var(--fg); }
 .tick-bar .tick-all { text-decoration: none; font-size: 13px; }
+/* The bar keeps the word on phones (its own size beats the 600px rule that shrinks it to an arrow): no second arrow. */
+@media (max-width: 600px) { .tick-bar .tick-all::after { content: none; } }
 .tick-bar .tick-line { gap: 5px; } .tick-bar .tick-when { margin-left: 4px; }
 
 /* The create page with Picture chosen: the picture makes its own rules (its Colors, slot by slot), so the other rules

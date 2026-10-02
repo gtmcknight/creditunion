@@ -366,12 +366,13 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       action: tab === 'parties' ? '<a class="btn primary" href="/create">Start a Credit Union</a>' : '<button type="button" class="btn" id="how-auctions">How it works</button>',
       label: 'Show',
     })}
-    <div id="batches"></div>
+    <div id="batches"><p class="muted">Loading…</p></div>
   </section>`;
   document.getElementById('how-auctions')?.addEventListener('click', howAuctions);
 
   try {
-    const [all] = await Promise.all([listBatches(), readNotice()]);
+    // The notice (burn day's countdown) waits at most a moment: the lists don't hang on it.
+    const [all] = await Promise.all([listBatches(), Promise.race([readNotice(), new Promise((r) => setTimeout(r, 2500))])]);
     const el = document.getElementById('batches');
     if (!el || run !== listsRun) return; // navigated away, or drawn again since
     const parties = all.filter((b) => PARTY_STATES.has(b.s.state));
@@ -659,7 +660,10 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     }
   } catch (e) {
     const el = document.getElementById('batches');
-    if (el) el.innerHTML = `<p class="error">Couldn't read Credit Unions from chain. ${esc((e as Error).message)}</p>`;
+    if (el && run === listsRun) {
+      el.innerHTML = `<p class="error">Couldn't load the Credit Unions. ${esc((e as Error).message)}</p><button type="button" class="btn" id="lists-retry">Try again</button>`;
+      document.getElementById('lists-retry')?.addEventListener('click', () => void lists(app, tab));
+    }
   }
 }
 

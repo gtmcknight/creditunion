@@ -1795,6 +1795,13 @@ export class ChainBook extends DurableObject<Env> {
   async unions(maxMs: number): Promise<{ at: number; body: string }> {
     await this.wake();
     const asked = Date.now();
+    // Too old for this caller: read again. One that can take the last copy (maxMs > 0) gets it at once while the
+    // read runs, so a slow chain never holds a page up; only a caller after its own transaction (0) waits for it.
+    if (this.index && maxMs > 0 && asked - this.index.at > maxMs) {
+      this.indexing ??= this.readIndex().finally(() => (this.indexing = null));
+      this.indexing.catch(() => {});
+      return this.index;
+    }
     while (!this.index || asked - this.index.at > maxMs) {
       this.indexing ??= this.readIndex().finally(() => (this.indexing = null));
       try {

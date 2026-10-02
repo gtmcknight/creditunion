@@ -203,7 +203,8 @@ export const sinceTx = () => Date.now() - txAt;
 
 type Indexed = { address: Address; summary: Record<string, unknown>; ids: number[]; depositors: Address[]; format?: number | null };
 async function readBatches(fresh: boolean): Promise<Listed[]> {
-  const r = await fetch(fresh ? `/unions.json?fresh=${Date.now()}` : '/unions.json');
+  // A stalled request fails after 15 s rather than leaving a page waiting on it for good.
+  const r = await fetch(fresh ? `/unions.json?fresh=${Date.now()}` : '/unions.json', { signal: AbortSignal.timeout(15_000) });
   if (!r.ok) throw new Error('Credit Unions are unavailable right now.');
   const { unions } = fromJson(await r.text()) as { unions: Indexed[] };
   return unions.map((u) => ({ s: toSummary(u.address, u.summary), ids: u.ids.map(BigInt), depositors: u.depositors, format: u.format ?? null }));
