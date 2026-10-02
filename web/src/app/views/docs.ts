@@ -131,7 +131,8 @@ const sections = (): Section[] => [
     <h3>How Picture Unions fill</h3>
     <p>Every open spot in the picture has a Credit planned for it, from the listings and from your own. One of yours goes in when it draws its spot about as well as the best for sale. Pick them in any order: Credits of the same Colors fill their spots one after another, so picking one brings along any planned ahead of it. If a planned Credit sells elsewhere first, the site plans the next best for its spot. Leaving a Picture Union opens only your spots: the rest of the picture stays put. If the spots are not saved yet, your leave saves them first.</p>
     <h3>Limiting who can join</h3>
-    <p>A Union only accepts Credits that follow the rules its creator sets. For Joined, Number and Painted Unions, those rules can cover Colors, Eights, Print, Weight, Plates, Bits, rating, payment time, a number range, or a list of up to 200 Credits. A Union with no rules accepts every Credit.</p>`,
+    <p>A Union only accepts Credits that follow the rules its creator sets. For Joined, Number and Painted Unions, those rules can cover Colors, Eights, Print, Weight, Plates, Bits, rating, payment time, a number range, or a list of up to 200 Credits. A Union with no rules accepts every Credit.</p>
+    <p>Ratings are Jack’s, as his Statements contract scores each Credit, so a Union’s Rating is the Credit Rating its Statement will carry. Unions opened before October 2 check a rating rule against the earlier published table.</p>`,
   },
   {
     id: 'deposits',
@@ -190,7 +191,8 @@ const sections = (): Section[] => [
       [
         ['Credit Union factory', config.factory],
         ['Sweeper, for buying', config.sweeper],
-        ['Ratings', config.ratings],
+        ['Ratings (Unions opened since Oct 2)', '0xe27fC60dcE0a9c33743581bfCD72F619DB3612a6'],
+        ['Ratings (earlier Unions)', config.ratings],
         ['Credits, by Jack Butcher', config.credits],
       ] as [string, string | null][]
     )

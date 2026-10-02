@@ -9287,6 +9287,11 @@ dialog.share .share-swatches button {
 /* The bar keeps the word on phones (its own size beats the 600px rule that shrinks it to an arrow): no second arrow. */
 @media (max-width: 600px) { .tick-bar .tick-all::after { content: none; } }
 .tick-bar .tick-line { gap: 5px; } .tick-bar .tick-when { margin-left: 4px; }
+/* The ticker's last two actions side by side, a line between; one on phones. */
+.tick-item { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 0 1 auto; }
+.tick-item + .tick-item { margin-left: 12px; padding-left: 16px; border-left: 1px solid var(--line); }
+.tick-item:nth-child(n + 3) { display: none; } /* three only squeeze each to a word */
+@media (max-width: 760px) { .tick-item:nth-child(n + 2) { display: none; } }
 
 /* The create page with Picture chosen: the picture makes its own rules (its Colors, slot by slot), so the other rules
    fold away; Colors stays, to keep an ink out of it. */
@@ -9407,3 +9412,22 @@ a.whale-name:hover { text-decoration: underline; text-underline-offset: 3px; }
 #maze-route[aria-pressed='true'] { border-color: var(--fg); color: var(--fg); }
 .design-preview > .maze-run { grid-area: 1 / 1; display: block; width: 100%; aspect-ratio: 4 / 5; pointer-events: none; background: #fff; }
 @media (max-width: 820px) { .design-preview > .maze-run { display: none; } }
+/* Market: one row over the grid, the count (and what it links to) left, sort and sweep right. */
+.jb-sorter { margin-left: 0; }
+.jb-count { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-right: auto; font-size: 15px; font-weight: 400; letter-spacing: 0; }
+.jb-count b { font-weight: 600; }
+.jb-count .src-toggles { margin-left: 0; }
+.page-bar > .page-side { display: flex; gap: 16px; margin-left: auto; font-size: 15px; }
+/* Market: Credits and Statements side by side at the top, the one you're on in full ink. */
+.jb-crumb .crumb-alt { color: var(--muted); text-decoration: none; margin-left: 20px; }
+.jb-crumb .crumb-alt:first-child { margin: 0 20px 0 0; }
+.jb-crumb .crumb-alt:hover { color: var(--fg); }
+/* Market → Statements: each listed Statement, its art in the 4:5 frame, name, rating and format, price and Buy. */
+.st-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 24px 16px; }
+.st-card { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.st-art { position: relative; display: block; aspect-ratio: 76 / 95; background: var(--empty); box-shadow: 0 0 0 1px var(--line); overflow: hidden; }
+.st-art .statement-art { position: absolute; inset: 0; width: 100%; height: 100%; }
+.st-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.st-name { color: var(--fg); text-decoration: none; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-name:hover { text-decoration: underline; text-underline-offset: 3px; }
+.st-buy { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }

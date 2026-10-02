@@ -323,6 +323,19 @@ function zoneExpiry(extraData: string): number | null {
   return Number.isFinite(exp) && exp > 1_600_000_000 ? exp : null;
 }
 
+/// One listing's signed order for `buyer` to fill themselves (a Statement, bought one at a time), as Seaport's
+/// AdvancedOrder, and the ETH it pays.
+export async function fillFor(key: string, hash: string, protocol: string, buyer: Address): Promise<{ order: Json; value: bigint }> {
+  const r = await os(key, '/listings/fulfillment_data', {
+    method: 'POST',
+    body: JSON.stringify({ listing: { hash, chain: 'ethereum', protocol_address: protocol }, fulfiller: { address: buyer } }),
+  });
+  const order = toAdvanced(r);
+  const c = order.parameters.consideration as Json[];
+  if (c.some((x) => Number(x.itemType) !== 0)) throw new Error('This listing asks for something other than ETH.');
+  return { order, value: c.reduce((a, x) => a + BigInt(x.endAmount), 0n) };
+}
+
 /// Normalise OpenSea's fulfillment response into Seaport's AdvancedOrder.
 function toAdvanced(r: Json): Json {
   const fd = r.fulfillment_data ?? {};

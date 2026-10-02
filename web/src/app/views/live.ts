@@ -288,16 +288,22 @@ export async function activityTicker(el: HTMLElement) {
   const line = el.querySelector<HTMLElement>('.tick-line')!;
   let shown = '';
   let time = 0;
+  // The last three, newest first; a narrower screen shows fewer (CSS hides the rest).
+  let times: number[] = [];
   const load = async (fresh: boolean) => {
-    const x = (await readActivity('limit=1', fresh).catch(() => null))?.items[0];
+    const xs = (await readActivity('limit=3', fresh).catch(() => null))?.items ?? [];
     if (!el.isConnected) return;
+    const x = xs[0];
     if (!x) return void el.classList.toggle('empty', !shown);
     el.classList.remove('empty');
     time = x.time;
-    if (keyOf(x) === shown) return;
-    shown = keyOf(x);
+    times = xs.map((i) => i.time);
+    if (xs.map(keyOf).join('|') === shown) return;
+    shown = xs.map(keyOf).join('|');
     line.classList.remove('in');
-    line.innerHTML = `<span class="tick-who">${who(x.who, 'sm', true)}</span><span class="tick-what">${what(x)}</span><span class="muted tick-when">${x.time ? ago(x.time) : ''}</span>`;
+    line.innerHTML = xs
+      .map((i) => `<span class="tick-item"><span class="tick-who">${who(i.who, 'sm', true)}</span><span class="tick-what">${what(i)}</span><span class="muted tick-when">${i.time ? ago(i.time) : ''}</span></span>`)
+      .join('');
     hydrate(line);
     requestAnimationFrame(() => line.classList.add('in'));
     setTimeout(() => line.classList.add('in'), 60); // a withheld frame mustn't hide it
@@ -309,8 +315,7 @@ export async function activityTicker(el: HTMLElement) {
     if (!el.isConnected) return clearInterval(timer);
     if (document.visibilityState !== 'visible' || el.closest('[hidden]')) return; // nobody sees it: don't read it
     void load(true);
-    const when = line.querySelector('.tick-when');
-    if (when && time) when.textContent = ago(time);
+    line.querySelectorAll('.tick-when').forEach((w, i) => times[i] && (w.textContent = ago(times[i])));
   }, POLL);
 }
 

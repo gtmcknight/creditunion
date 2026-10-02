@@ -287,7 +287,7 @@ export const YOURS = '<span class="cc-price yours">Yours</span>';
 /// Every Credit listed anywhere (of one trait, `palette/K`, or within rules like { minScore, maxScore }), cheapest first, paged in from /opensea/listed as asked
 /// for. A Credit listed more than once keeps its cheapest. `sale.ls` is the same list, for Sweep. Marketplaces hidden
 /// this visit are left out; `seen` is every marketplace with Credits listed (as the Worker says), hidden or not.
-export function listedPager(where: { trait?: string; rules?: Record<string, number> } = {}) {
+export function listedPager(where: { trait?: string; rules?: Record<string, number>; order?: 'value' | 'rating' } = {}) {
   const items: Listed[] = []; // the grid's order, just-bought included
   const sale: Sale = { ls: [], preview: true, byId: new Map(), all: items, mine: new Set() };
   const seen = new Set<Source>();
@@ -297,18 +297,22 @@ export function listedPager(where: { trait?: string; rules?: Record<string, numb
     sale,
     seen,
     done: false,
+    /// How many different Credits are for sale here (the market book's count), once a read says.
+    total: null as number | null,
     /// Pages in until at least `n` are in hand, or there are no more (at most `calls` requests).
     async fill(n: number, most = 20) {
       for (let calls = 0; items.length < n && cursor !== null && calls < most; calls++) {
         const qs = new URLSearchParams();
         if (where.trait) qs.set('trait', where.trait);
         if (where.rules) qs.set('rules', JSON.stringify(where.rules));
+        if (where.order) qs.set('order', where.order);
         if (cursor) qs.set('c', cursor);
         const res = await fetch(`/opensea/listed?${qs}`);
         if (!res.ok) break;
-        const d = (await res.json()) as { items?: Listed[]; next?: string | null; preview?: boolean; sources?: Source[]; error?: string };
+        const d = (await res.json()) as { items?: Listed[]; next?: string | null; preview?: boolean; sources?: Source[]; error?: string; total?: number };
         if (d.error) break;
         sale.preview = !!d.preview;
+        if (typeof d.total === 'number') self.total = d.total;
         for (const src of d.sources ?? []) if (src in SOURCES) seen.add(src);
         for (const l of d.items ?? []) {
           if (!SOURCES[l.source] || sale.byId.has(l.id) || sale.mine.has(l.id) || justBought(l.id)) continue;

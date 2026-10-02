@@ -23,7 +23,8 @@ import { setSpareKey, best, bestOrder, bestPage, events, quote, scan, type Cand,
 import type { Row } from './market';
 import { cacheStore, confirmListing, marketListings, type FwaListing } from './fwa';
 import { confirmStrategy, strategyAbi, strategyListings } from './strategy';
-import { ratings } from './ratings';
+import { ratings, loadTable } from './ratings';
+import { buyStatement, statementsForSale } from './statements-market';
 import { load, loadScores, match, predicate, type Rules } from './match';
 import { cardFor, creditCard, creditsCard, partyCard, rangeCard, ruleLine, timeCard, traitCard, withCard, type Filter } from './og';
 import { parseTrait } from '../shared/trait';
@@ -869,6 +870,40 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
   }
 
+  // Market → Statements: every Statement listed on OpenSea with its rating and format, kept a minute at the edge.
+  if (url.pathname === '/market/statements.json') {
+    if (!env.OPENSEA_API_KEY) return text('OpenSea is not configured', 501);
+    const key = new Request(`${url.origin}/market/statements.json`);
+    const hit = await caches.default.match(key);
+    if (hit) return hit;
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    try {
+      const statements = await statementsOf(env);
+      if (!statements) return Response.json({ items: [] });
+      const items = await statementsForSale(env.OPENSEA_API_KEY, statements, client(env) as never);
+      const res = Response.json({ items, at: Date.now() }, { headers: { 'cache-control': 'public, max-age=60' } });
+      ctx.waitUntil(caches.default.put(key, res.clone()));
+      return res;
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502 });
+    }
+  }
+  // Buying one Statement: OpenSea's signed order for this buyer, as a Seaport call their wallet sends.
+  if (url.pathname === '/market/statements/buy') {
+    if (req.method !== 'POST' || !sameSite(req)) return text('forbidden', 403);
+    if (!env.OPENSEA_API_KEY) return text('OpenSea is not configured', 501);
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    try {
+      const raw = await readBody(req, 2_000);
+      const b = JSON.parse(raw ?? '') as { hash?: unknown; protocol?: unknown; buyer?: unknown };
+      const hash = String(b.hash ?? ''), protocol = String(b.protocol ?? ''), buyer = /^0x[0-9a-fA-F]{40}$/.test(String(b.buyer ?? '')) ? (String(b.buyer) as Address) : null;
+      if (!/^0x[0-9a-fA-F]{64}$/.test(hash) || !/^0x[0-9a-fA-F]{40}$/.test(protocol) || !buyer) return text('bad request', 400);
+      return Response.json(await buyStatement(env.OPENSEA_API_KEY, hash, protocol, buyer), { headers: { 'cache-control': 'no-store' } });
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502 });
+    }
+  }
+
   // Every Credit for sale, cheapest first, a chunk at a time (?trait=palette/K&c=<cursor>): OpenSea's listings page
   // by page with CreditStrategy's and FWA's merged in by price, then whatever of those is left. Shown as listed;
   // a sweep's quote re-checks each one.
@@ -918,12 +953,21 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
           const ok = trait ? await predicate(env.ASSETS, url.origin, trait.rules) : rules ? await predicate(env.ASSETS, url.origin, rules) : () => true;
           // An OpenSea row without its order can't be bought through the Sweeper: left out.
           const pass = bk.rows.filter((r) => ok(Number(r[0])) && (r[2] !== 'opensea' || (r[3] && r[4])));
+          // ?order=value: the most rating per ETH first (the Statements contract's score over the price).
+          // ?order=rating: the highest rated first.
+          const order = url.searchParams.get('order');
+          if (order === 'value' || order === 'rating') {
+            const sc = (await loadTable(env.ASSETS, url.origin)).score;
+            const s = (r: (typeof pass)[number]) => sc[Number(r[0]) - 1] ?? 0;
+            const v = (r: (typeof pass)[number]) => (order === 'rating' ? s(r) : s(r) / Number(BigInt(r[1]) / 1_000_000_000n || 1n));
+            pass.sort((a, b) => v(b) - v(a));
+          }
           const items = pass.slice(bookCur, bookCur + LISTED_CHUNK).map((r) => {
             const l: Listing = r[2] === 'opensea' ? { id: r[0], price: r[1], source: 'opensea', hash: r[3], protocol: r[4] } : { id: r[0], price: r[1], source: r[2] as Listing['source'], ...(r[3] ? { listingId: r[3] } : {}) };
             return { ...l, url: listingUrl(env, true, l) };
           });
           const next = bookCur + LISTED_CHUNK < pass.length ? btoa(JSON.stringify({ b: bookCur + LISTED_CHUNK })) : null;
-          return Response.json({ items, next, preview: false, sources: sourcesOf(env, pass.map((r) => ({ source: r[2] }))) }, { headers: { 'cache-control': 'no-store' } });
+          return Response.json({ items, next, preview: false, total: new Set(pass.map((r) => r[0])).size, sources: sourcesOf(env, pass.map((r) => ({ source: r[2] }))) }, { headers: { 'cache-control': 'no-store' } });
         }
       } catch (e) {
         console.warn('[listed] from OpenSea', safeError(e));

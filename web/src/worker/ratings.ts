@@ -13,7 +13,7 @@ const MAINNET_CREDITS = '0x97630aa70ab14ed9883b41dafccbc11349723043';
 
 /// Jack's scores (ten-thousandths, by id − 1), each one's rank (1 + Credits scored strictly higher), and the rule table.
 let table: Promise<{ score: Uint32Array; rank: Uint32Array; rule: Uint16Array }> | null = null;
-async function loadTable(assets: Fetcher, origin: string) {
+export async function loadTable(assets: Fetcher, origin: string) {
   if (!table) {
     table = (async () => {
       const [a, b] = await Promise.all(['credit-score.bin', 'scores.bin'].map(async (f) => {

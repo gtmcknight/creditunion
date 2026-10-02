@@ -31,10 +31,10 @@ Credit Union lets holders of Jack Butcher's [Credits](https://jack.art/credits) 
 
 ```
 contracts/          Foundry
-  src/              Batch, BatchFactory, Sweeper, Ratings, interfaces, mocks, vendored Credits art
+  src/              Batch, BatchFactory, Sweeper, Ratings, LiveRatings, interfaces, mocks, vendored Credits art
   script/           deploy and check scripts
   test/             unit, fuzz, invariant, adversarial and mainnet fork tests; test/formal/ the Halmos proofs
-  data/scores.bin   the frozen rating table deployed onchain
+  data/scores.bin   the v3.4.0 rating table deployed onchain (unions opened before LiveRatings)
   AUDIT.md          internal review log
   ADAPTER.md        the plan for connecting Jack's Statement contract
   ORDER.md          how each Credit Union decides where every Credit goes on the sheet
@@ -61,7 +61,8 @@ There is no database or indexer. Credit Unions, slots and bids are read from the
 | `BatchFactory` | Deploys Credit Unions as minimal clones, moves Credits from its caller into its own Credit Unions, holds fees and the one-time assembler setting. |
 | `Batch` | One Credit Union: eligibility checks, deposits and withdrawals, lock, burn through the assembler, auction, split, claims. |
 | `Sweeper` | Buys OpenSea listings through Seaport 1.6 and deposits them in the buyer's name. Unused ETH is refunded; listings that sold first are skipped. 2% fee. |
-| `Ratings` | Jack's rating for all 122,154 Credits under one methodology version (`version()`), stored as data contracts and read by eligibility rules. Anyone can call `scoreOf`. The factory can move new Credit Unions to a later version; each Credit Union keeps the table it opened with, and `ratingsHistory()` lists every table used. |
+| `Ratings` | Jack's rating for all 122,154 Credits under methodology v3.4.0 (`version()`), stored as data contracts. Credit Unions opened before Oct 2 2026 check their rating rules against it. Each Credit Union keeps the table it opened with, and `ratingsHistory()` lists every table used. |
+| `LiveRatings` | Since Oct 2 2026 the factory's table: each Credit's score as Jack's Statements contract computes it (the number a Statement's Credit Rating adds up), asked of that contract when a rule checks it, ×10 rounded down. Nothing stored. |
 | `IAssembler` | The adapter a Credit Union calls (never delegatecalls) to burn 80 Credits into a Statement. `MockAssembler` stands in for tests and local chains. |
 | `StatementAdapter` | **Draft, not deployed.** The mainnet adapter: takes a full Credit Union's 80, has Jack's Statement contract burn them in the direction the creator chose, and hands the Statement back. Finished once Jack's contract is published; until then its one call into it is a guess and the deploy script refuses mainnet. See [contracts/ADAPTER.md](contracts/ADAPTER.md) and [contracts/RUNBOOK.md](contracts/RUNBOOK.md). |
 

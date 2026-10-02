@@ -80,5 +80,5 @@ from the Statements contract's scorer (0x817A9cFfb4d6E7c206e745A4229001A472C1b7B
 
 - [x] `scoreOf(9)` 7970 (797.0310), `scoreOf(53739)` 7451; `scorer()` and `credits()` as above
 - [x] `proposeRatings(0xe27f…12a6)` simulates from the Safe (calldata `0xf9489bd7…e27fc60dce0a9c33743581bfcd72f619db3612a6`)
-- [ ] Safe proposes; 30 minutes later anyone calls `activateRatings()`; `factory.ratings()` reads it
-- [ ] Unions opened before keep 0x61Ca…371d for their rating rules; the site picks each union's table
+- [x] Safe proposed (Safe nonce 2); `activateRatings()` in tx 0x8480e4df…3db00; `factory.ratings()` reads it
+- [x] Unions opened before keep 0x61Ca…371d for their rating rules; the site picks each union's table
