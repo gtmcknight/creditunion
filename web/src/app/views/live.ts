@@ -131,7 +131,7 @@ function row(x: Item, o: { here?: boolean; who?: boolean } = {}) {
     ? `<span class="live-art">${ids
         .slice(0, THUMBS)
         .map((id) => `<a href="/credit/${id}" title="Credit #${id}"><img src="${art(id)}" alt="" loading="lazy" decoding="async"></a>`)
-        .join('')}${ids.length > THUMBS ? `<span class="muted small num">+${ids.length - THUMBS}</span>` : ''}</span>`
+        .join('')}${ids.length > THUMBS ? `<span class="muted small num live-more">+${ids.length - THUMBS}</span>` : ''}${ids.length > 3 ? `<span class="muted small num live-more-sm">+${ids.length - 3}</span>` : ''}</span>`
     : '<span class="live-art"></span>'; // an empty cell keeps the time column lined up
   const tx = x.tx !== '0x' ? explorer('tx', x.tx) : null; // 0x: a bid read onchain the feed hasn't caught yet
   const when = `<span class="num" data-time="${x.time}">${x.time ? ago(x.time) : ''}</span>`;

@@ -1775,6 +1775,11 @@ nav a[hidden] {
   text-align: center;
   vertical-align: 2px;
 }
+/* Small phones: the nav and its count tighten so Credits clears Connect. */
+@media (max-width: 420px) {
+  .main-nav a { padding: 0 6px; }
+  .nav-count { margin-left: 3px; min-width: 16px; padding: 0 4px; font-size: 10px; line-height: 16px; }
+}
 .wallet-list a.wallet {
   justify-content: space-between;
   text-decoration: none;
@@ -7227,7 +7232,24 @@ a.quiet:hover { text-decoration: underline; text-underline-offset: 3px; }
     grid-column: 1 / -1;
     grid-row: 3;
   }
+  /* /activity on a phone: two lines a row, who and when, then what they did with up to three of its Credits. */
+  #live-list .live-row {
+    grid-template-areas: 'who when' 'what art';
+    gap: 2px 12px;
+    min-height: 0;
+    padding: 8px 0;
+  }
+  #live-list .live-who { grid-area: who; font-size: 13px; color: var(--muted); }
+  #live-list .live-who img { width: 16px; height: 16px; }
+  #live-list .live-when { grid-area: when; }
+  #live-list .live-what { grid-area: what; }
+  #live-list .live-art { grid-area: art; justify-self: end; }
+  #live-list .live-art img { width: 24px; height: 24px; }
+  #live-list .live-art > a:nth-child(n + 4),
+  #live-list .live-more { display: none; }
+  #live-list .live-more-sm { display: inline; }
 }
+.live-more-sm { display: none; }
 /* The Activity fold on a union's or a member's page: the phone layout at any width, who and when above what they
    did. A member's own rows have no who: what they did and when share the first line. */
 .fold-list .live-row {
