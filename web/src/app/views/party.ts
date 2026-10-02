@@ -195,6 +195,8 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   if (location.search) history.replaceState(history.state, '', location.pathname);
   const s = b.s;
   const burned = s.state === 'Auction' || s.state === 'Settled';
+  // Once it's a Statement, the union lives under Auctions.
+  document.querySelectorAll<HTMLAnchorElement>('[data-nav="parties"], [data-nav="auctions"]').forEach((a) => a.toggleAttribute('aria-current', a.dataset.nav === (burned ? 'auctions' : 'parties')));
   // On a layout batch the sheet shows every Credit in the slot it will burn into, not in deposit order.
   const slots = hasLayout(s.filter) ? Array.from({ length: 80 }, (_, i) => layoutSlot(s.filter, i)) : null;
   // The value of the painted trait each Credit in was booked under (Batch.keyOf), read alongside the wallet's
@@ -332,7 +334,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   void rankFaces(app);
   document.getElementById('depositors-btn')?.addEventListener('click', () => openDepositors(b, account ?? null));
   app.querySelector('.rule[data-picked]')?.addEventListener('click', () => void openPicked(b));
-  void activityFold(s.address);
+  void activityFold(s.address, s.state === 'Auction' ? { who: s.highBidder, wei: s.highBid } : undefined);
   // Chrome keeps a focus ring on <summary> after a mouse click; drop it for pointer use only.
   app.querySelectorAll<HTMLElement>('.more summary').forEach((el) => el.addEventListener('pointerup', () => setTimeout(() => el.blur(), 0)));
   fillGhosts(app);

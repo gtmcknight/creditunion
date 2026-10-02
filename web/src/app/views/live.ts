@@ -77,10 +77,10 @@ function readActivity(query: string, fresh = false): Promise<Slice> {
 }
 
 /// A union's rows (`union`) or a wallet's (`member`), newest first, all of them; null when the feed can't be read.
-export async function activityOf(o: { union?: Address; member?: Address }): Promise<Item[] | null> {
+export async function activityOf(o: { union?: Address; member?: Address }, fresh = false): Promise<Item[] | null> {
   const q = o.union ? `union=${o.union}` : o.member ? `member=${o.member}` : '';
   if (!q) return [];
-  const got = await readActivity(`${q}&limit=1000`).catch(() => null);
+  const got = await readActivity(`${q}&limit=1000`, fresh).catch(() => null);
   return got && got.items.filter((x) => (o.union ? !!x.union && same(x.union, o.union) : same(x.who, o.member!)));
 }
 /// Those rows as list items: on a union's page the union goes without saying; on a member's page, who does.
@@ -91,12 +91,18 @@ export const activityItems = (rows: Item[] | null, o: { union?: boolean; member?
       ? rows.map((x) => row(x, { here: o.union, who: !o.member })).join('')
       : '<li class="muted live-empty">Nothing yet.</li>';
 
-/// A union's Activity: the page draws #activity-list (and #activity-all, its Show all) inside #activity.
-export async function activityFold(union: Address) {
+/// A union's Activity: the page draws #activity-list (and #activity-all, its Show all) inside #activity. `bid` is the
+/// union's high bid as read onchain: the feed runs a few seconds behind the chain, so until it has that bid, the bid
+/// shows at the top anyway and the list reads again.
+export async function activityFold(union: Address, bid?: { who: Address; wei: bigint }, tries = 0) {
   const list = document.getElementById('activity-list');
   if (!list) return;
-  const rows = await activityOf({ union });
+  let rows = await activityOf({ union }, tries > 0);
   if (!list.isConnected) return;
+  if (rows && bid && bid.wei > 0n && !rows.some((x) => x.kind === 'bid' && same(x.who, bid.who) && x.eth === String(bid.wei))) {
+    rows = [{ kind: 'bid', who: bid.who, union, eth: String(bid.wei), time: Math.floor(Date.now() / 1000), tx: '0x', i: 0 }, ...rows];
+    if (tries < 6) setTimeout(() => list.isConnected && void activityFold(union, bid, tries + 1), 10_000);
+  }
   const count = document.getElementById('activity-count');
   if (count) count.textContent = rows?.length ? String(rows.length) : '';
   list.innerHTML = activityItems(rows, { union: true });
@@ -127,7 +133,7 @@ function row(x: Item, o: { here?: boolean; who?: boolean } = {}) {
         .map((id) => `<a href="/credit/${id}" title="Credit #${id}"><img src="${art(id)}" alt="" loading="lazy" decoding="async"></a>`)
         .join('')}${ids.length > THUMBS ? `<span class="muted small num">+${ids.length - THUMBS}</span>` : ''}</span>`
     : '<span class="live-art"></span>'; // an empty cell keeps the time column lined up
-  const tx = explorer('tx', x.tx);
+  const tx = x.tx !== '0x' ? explorer('tx', x.tx) : null; // 0x: a bid read onchain the feed hasn't caught yet
   const when = `<span class="num" data-time="${x.time}">${x.time ? ago(x.time) : ''}</span>`;
   return `<li class="live-row" data-key="${esc(keyOf(x))}">
     ${o.who === false ? '' : `<span class="live-who">${who(x.who, 'sm', true)}${me}</span>`}
