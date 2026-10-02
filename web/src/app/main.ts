@@ -195,11 +195,35 @@ function mobileWalletLinks() {
     <button class="btn block" id="copy-link" value="">Copy link</button>`;
 }
 
+// Looks: Normal, or Jack (white, small all-caps mono, square corners). Remembered per browser; public/theme.js puts
+// it on before the first paint.
+type Look = 'normal' | 'jack';
+const LOOKS: [Look, string][] = [['normal', 'Normal'], ['jack', 'Jack']];
+/// Each theme's mark in the picker: ours (the bank, its four ink columns), and Jack's signature as jack.art draws it.
+const LOOK_ICONS: Record<Look, string> = {
+  normal: '<svg viewBox="0 0 9 8" width="27" height="24" shape-rendering="crispEdges" aria-hidden="true"><rect x="0" y="7" width="9" height="1" fill="currentColor"/><rect x="1" y="4" width="1" height="3" fill="#00b5e2"/><rect x="3" y="4" width="1" height="3" fill="#e4007c"/><rect x="5" y="4" width="1" height="3" fill="#ffd100"/><rect x="7" y="4" width="1" height="3" fill="currentColor"/><rect x="0" y="2" width="9" height="1" fill="currentColor"/><rect x="2" y="1" width="5" height="1" fill="currentColor"/><rect x="4" y="0" width="1" height="1" fill="currentColor"/></svg>',
+  jack: '<svg viewBox="0 0 183 100" width="44" height="24" fill="none" aria-hidden="true"><path d="M67.4511 61.136C77.8181 47.5879 88.3416 34.9648 101.171 21.5386C107.567 14.8452 110.661 16.1106 106.921 25.8323C100.777 41.8081 94.749 50.7817 86.6896 65.8361C85.0297 68.9367 69.8638 93.7851 73.7319 96.6586C77.298 99.3077 94.5775 76.4745 96.7338 74.0401C100.989 69.2355 108.407 59.9466 115.289 58.6288C118.551 58.0042 117.589 66.6435 117.589 68.1363C117.589 89.744 143.44 56.8015 147.338 51.2682C153.909 41.9397 165.553 25.8167 163.823 13.5451C161.236 -4.7985 117.931 4.8688 108.081 6.49125C80.1386 11.0942 52.2127 19.1932 26.0413 30.0298C24.5439 30.6499 -5.22675 43.5499 4.41959 47.5879C8.73849 49.3958 21.4133 49.7755 24.6612 49.8881C41.7608 50.4809 58.9257 50.1948 76.0321 50.1948C96.3248 50.1948 159.454 50.1948 179.747 50.1948" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></svg>',
+};
+const look = (): Look => (document.documentElement.dataset.look === 'jack' ? 'jack' : 'normal');
+function setLook(l: Look) {
+  if (l === 'jack') document.documentElement.dataset.look = 'jack';
+  else delete document.documentElement.dataset.look;
+  try {
+    localStorage.setItem('cu-look', l);
+  } catch {}
+  drawTheme();
+}
+
+/// Your profile's tabs, straight from the account menu.
+const ME_TABS = ['Unions', 'Auctions', 'Credits', 'Activity'] as const;
+
 function drawAccount() {
   const el = document.getElementById('account')!;
   el.innerHTML = session.account
     ? `<div class="acct-wrap"><button type="button" class="btn sm acct" data-nav="me" aria-haspopup="menu" aria-expanded="false">${who(session.account)}</button>
-      <div class="acct-menu" role="menu" hidden><a role="menuitem" href="/member/${session.account}">Profile</a><button type="button" role="menuitem" data-disconnect>Disconnect</button></div></div>`
+      <div class="acct-menu" role="menu" hidden>${ME_TABS.map((t) => `<a role="menuitem" href="/member/${session.account}?tab=${t.toLowerCase()}">${t}</a>`).join('')}
+        <div class="acct-foot"><span class="acct-looks" role="group" aria-label="Theme">${LOOKS.map(([k, l]) => `<button type="button" role="menuitemradio" data-look="${k}" aria-checked="${look() === k}" aria-label="${l} theme" title="${l} theme">${LOOK_ICONS[k]}</button>`).join('')}</span>
+        <button type="button" role="menuitem" class="acct-off" data-disconnect>Disconnect</button></div></div></div>`
     : `<button class="btn sm" data-connect>Connect</button>`;
   hydrate(el);
 }
@@ -218,6 +242,12 @@ document.addEventListener('click', (e) => {
   if (t.closest('[data-disconnect]')) {
     disconnect();
     go('/');
+  }
+  const pick = t.closest<HTMLElement>('.acct-looks [data-look]');
+  if (pick) {
+    setLook(pick.dataset.look as Look);
+    menu.querySelectorAll('.acct-looks [data-look]').forEach((b) => b.setAttribute('aria-checked', String(b === pick)));
+    return; // stays open, so the two can be compared
   }
   menu.hidden = true;
   document.querySelector('.btn.acct')?.setAttribute('aria-expanded', 'false');
@@ -277,10 +307,10 @@ function currentTheme(): 'light' | 'dark' {
   return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 function drawTheme() {
-  const t = currentTheme();
+  const t = look() === 'jack' ? 'light' : currentTheme(); // Jack is only ever white
   document.documentElement.dataset.mode = t;
   document.getElementById('theme')?.setAttribute('aria-label', `Switch to ${t === 'dark' ? 'light' : 'dark'} theme`);
-  document.querySelector<HTMLMetaElement>('meta[name=theme-color]:not([media])')?.setAttribute('content', t === 'dark' ? '#0a0a0a' : '#ffffff');
+  document.querySelector<HTMLMetaElement>('meta[name=theme-color]:not([media])')?.setAttribute('content', look() === 'jack' ? '#ffffff' : t === 'dark' ? '#0a0a0a' : '#ffffff');
 }
 document.getElementById('theme')?.addEventListener('pointerup', (e) => setTimeout(() => (e.currentTarget as HTMLElement | null)?.blur(), 0));
 document.getElementById('theme')?.addEventListener('click', () => {

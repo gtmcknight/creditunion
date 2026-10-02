@@ -9437,3 +9437,92 @@ a.whale-name:hover { text-decoration: underline; text-underline-offset: 3px; }
 .st-page-art .statement-art { position: absolute; inset: 0; width: 100%; height: 100%; }
 .st-buy-page { margin-top: 16px; font-size: 20px; }
 .st-from { margin-top: 40px; }
+
+/* ---------------------------------------------------------------- Jack look
+   Picked in the account menu (data-look on <html>), measured off jack.art/credits: white paper, #111 ink, one size
+   (11px SF Mono, all caps, 1.65 leading) with bold as the only hierarchy, greys for what's secondary, 1px hairlines,
+   no fills, no shadows, no rounded corners, no colour but the art's. The page keeps its own width. Always light, so the day/night button steps
+   aside. */
+:root[data-look='jack'] {
+  color-scheme: only light;
+  --bg: #fff;
+  --fg: #111;
+  --muted: #929292;
+  --faint: #bbb;
+  --line: #e8e8e8;
+  --line-strong: #e3e3e3;
+  --surface: #fff;
+  --raised: #fff;
+  --raised-shadow: 0 0 0 1px #111;
+  --empty: #f7f7f7;
+  --accent: #111;
+  --on-accent: #fff;
+  --img-outline: #e8e8e8;
+  --r: 0px;
+  --r-lg: 0px;
+  --sans: 'SF Mono', SFMono-Regular, Menlo, monospace;
+  --mono: 'SF Mono', SFMono-Regular, Menlo, monospace;
+}
+:root[data-look='jack'] body {
+  background: #fff;
+  color: #111;
+  font: 11px/1.65 var(--mono);
+  text-transform: uppercase;
+}
+:root[data-look='jack'] body *:not(svg):not(svg *):not(canvas) {
+  font-family: var(--mono) !important;
+  font-size: 11px !important;
+  letter-spacing: 0 !important;
+  line-height: 1.65;
+  text-transform: uppercase !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+:root[data-look='jack'] :is(input, textarea)::placeholder { text-transform: uppercase; color: #bbb; }
+:root[data-look='jack'] :is(h1, h2, h3, h4, strong, b, th) { font-weight: 700 !important; }
+:root[data-look='jack'] :is(.btn, button) { font-weight: 400 !important; }
+:root[data-look='jack'] .btn.primary { background: #111; color: #fff; border: 1px solid #111; }
+:root[data-look='jack'] .btn:not(.primary) { background: #fff; border: 1px solid #ddd; color: #111; }
+:root[data-look='jack'] .btn:not(.primary):hover { border-color: #111; }
+:root[data-look='jack'] a:not(.btn) { text-underline-offset: 4px; }
+/* The header as his: the name in words, the nav as plain text, no rule under it. */
+:root[data-look='jack'] .theme,
+:root[data-look='jack'] .logo .mark { display: none; }
+:root[data-look='jack'] .top { border: 0 !important; padding-block: 30px; }
+:root[data-look='jack'] .top::after { display: none; }
+:root[data-look='jack'] .logo-word { font-weight: 400 !important; }
+/* One line under the whole label, count included (an underline breaks at the count's gap). */
+:root[data-look='jack'] .main-nav a[aria-current] { text-decoration: none; border-bottom: 1px solid #111; padding-bottom: 3px; }
+:root[data-look='jack'] .main-nav a[aria-current] .nav-count { text-decoration: none; }
+/* No yellow: the burn bar is a hairline strip, the live count is plain text. */
+:root[data-look='jack'] #notice { background: #fff; color: #111; border-bottom: 1px solid #e3e3e3; }
+:root[data-look='jack'] .nav-count { background: none; color: #929292; padding: 0; min-width: 0; font-weight: 400; vertical-align: 0; }
+/* Picked tabs underline instead of filling. */
+:root[data-look='jack'] .subtabs :is(a, button)[aria-selected='true'] { background: none; font-weight: 700; text-decoration: underline; text-underline-offset: 7px; }
+:root[data-look='jack'] .tick-dot { background: #111; }
+/* Addresses read as text, without the little pictures. */
+:root[data-look='jack'] .who img { display: none; }
+
+/* The theme picker inside the account menu: a label, then two tiles (its mark over its name) between Profile and
+   Disconnect. The menu stays open on a pick so the two can be compared. */
+/* Under your profile's tabs, one small row: the two theme switches (our mark, his signature) and Disconnect. */
+.acct-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; padding: 6px 4px 2px 6px; border-top: 1px solid var(--line); }
+.acct-looks { display: flex; gap: 2px; }
+.acct-menu .acct-looks > button { display: grid; place-items: center; width: 32px; height: 26px; padding: 0; border: 1px solid transparent; border-radius: calc(var(--r) - 2px); background: none; color: var(--fg); cursor: pointer; opacity: 0.4; }
+.acct-menu .acct-looks > button svg { height: 13px; width: auto; }
+.acct-menu .acct-looks > button:hover { opacity: 0.8; }
+.acct-menu .acct-looks > button[aria-checked='true'] { opacity: 1; border-color: var(--line-strong); }
+.acct-menu .acct-foot > .acct-off { width: auto; padding: 4px 6px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.acct-menu .acct-foot > .acct-off:hover { color: var(--fg); background: none; }
+.acct-menu { min-width: 180px; }
+/* Jack-look fixes: one leading everywhere (fixed line heights from the old sizes misalign 11px text), the nav underline
+   as text under the whole label, tabs flush left with no fill, the Credits · Statements crumb on one baseline. */
+:root[data-look='jack'] body *:not(svg):not(svg *):not(canvas) { line-height: 1.65 !important; }
+:root[data-look='jack'] .main-nav a[aria-current] { border: 0; padding-bottom: 0; text-decoration: underline; text-underline-offset: 7px; }
+:root[data-look='jack'] .nav-count { display: inline; margin-left: 0; }
+:root[data-look='jack'] .nav-count::before { content: '\a0'; }
+:root[data-look='jack'] .subtabs { gap: 28px; }
+:root[data-look='jack'] .subtabs :is(a, button) { padding: 0 !important; background: none !important; min-height: 0; }
+:root[data-look='jack'] .subtabs :is(a, button):is([aria-current], [aria-selected='true']) { font-weight: 700; text-decoration: underline; text-underline-offset: 7px; color: var(--fg); }
+:root[data-look='jack'] .jb-crumb { align-items: baseline; gap: 28px; }
+:root[data-look='jack'] .acct-menu .acct-looks > button svg { color: #111; }

@@ -124,7 +124,9 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
     Activity: () => (activity === undefined ? '<p class="muted">Loading…</p>' : `<ol class="live-list fold-list">${activityItems(activity, { member: true })}</ol>`),
   };
   const at = document.getElementById('tab-body')!;
-  let tab: Tab = filling.length || !auctions.length ? 'Unions' : 'Auctions';
+  // ?tab= (the account menu's links) opens that tab; otherwise what's live comes first.
+  const asked = TABS.find((t) => t.toLowerCase() === new URLSearchParams(location.search).get('tab'));
+  let tab: Tab = asked ?? (filling.length || !auctions.length ? 'Unions' : 'Auctions');
   const draw = () => {
     for (const t of TABS) {
       const n = count[t]();
