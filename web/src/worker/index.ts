@@ -14,7 +14,7 @@
 /// Every response carries the security headers in `secure()` (headers.ts; the build copies them into _headers for
 /// what the asset layer serves on its own).
 import { DurableObject } from 'cloudflare:workers';
-import { BaseError, ContractFunctionRevertedError, createPublicClient, decodeFunctionData, fallback, hexToBytes, http, type Address, type Hex, parseAbiItem } from 'viem';
+import { BaseError, ContractFunctionRevertedError, ccipRequest, createPublicClient, decodeFunctionData, fallback, hexToBytes, http, type Address, type Hex, parseAbiItem } from 'viem';
 import { mainnet } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { normalize } from 'viem/ens';
@@ -122,10 +122,25 @@ const rpcTransport = (env: Env) =>
 const inflight = new Map<string, Promise<Awaited<ReturnType<typeof scan>>>>();
 // No request batching here: viem's batch scheduler is shared across concurrent requests in one isolate, and a
 // promise resolved in another request's context is cancelled when that request ends (the Worker then "hangs").
-// This client and the ENS ones don't follow CCIP-Read (ccipRead: false): a contract or a name a caller picks (a smart
-// wallet checking a signature, a name's resolver) could answer OffchainLookup and have the Worker fetch a URL of its
-// choosing. Names with onchain resolvers resolve as before; offchain ones (cb.id, base.eth) don't.
+// This client doesn't follow CCIP-Read (ccipRead: false): a contract a caller picks (a smart wallet checking a
+// signature) could answer OffchainLookup and have the Worker fetch a URL of its choosing. The ENS clients follow it
+// only to Coinbase's gateway (namesCcip), which serves base.eth and cb.id names; any other gateway is refused.
 const client = (env: Env) => createPublicClient({ transport: rpcTransport(env), ccipRead: false });
+const CCIP_HOSTS = new Set(['api.coinbase.com']);
+const namesCcip = {
+  request: (p: Parameters<typeof ccipRequest>[0]) => {
+    const urls = p.urls.filter((u) => {
+      try {
+        return new URL(u).protocol === 'https:' && CCIP_HOSTS.has(new URL(u).host);
+      } catch {
+        return false;
+      }
+    });
+    if (!urls.length) throw new Error('offchain name served by a gateway this site doesn’t follow');
+    // ccipRequest's fetch has no timeout of its own: five seconds, like the RPC
+    return Promise.race([ccipRequest({ ...p, urls }), new Promise<never>((_, no) => setTimeout(() => no(new Error('gateway timed out')), 5_000))]);
+  },
+};
 const isDev = (url: URL) => url.hostname === 'localhost' || url.hostname === '127.0.0.1';
 
 /// What never changes (a Credit's art, its seed) or changes slowly (an ENS name, with `ttl`), kept once in KV for
@@ -1384,7 +1399,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     if (hit) return hit;
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
     const rpc = env.ENS_RPC || (env.CHAIN_ID === '1' ? rpcUrl(env) : 'https://eth.drpc.org');
-    const c = createPublicClient({ chain: mainnet, transport: http(rpc, { timeout: 5_000 }), ccipRead: false });
+    const c = createPublicClient({ chain: mainnet, transport: http(rpc, { timeout: 5_000 }), ccipRead: namesCcip });
     try {
       const address = await c.getEnsAddress({ name: normalize(named[1]) });
       const res = Response.json({ address }, { headers: { 'cache-control': `public, max-age=${address ? 3600 : 300}` } });
@@ -2762,7 +2777,7 @@ async function ensOf(env: Env, url: URL, ctx: ExecutionContext, addr: Address, g
   }
   if (gate && (await gate())) return null;
   const rpc = env.ENS_RPC || (env.CHAIN_ID === '1' ? rpcUrl(env) : 'https://eth.drpc.org');
-  const c = createPublicClient({ chain: mainnet, transport: http(rpc, { timeout: 5_000 }), ccipRead: false });
+  const c = createPublicClient({ chain: mainnet, transport: http(rpc, { timeout: 5_000 }), ccipRead: namesCcip });
   let name: string | null = null;
   let ttl = 86400;
   let has = false;
