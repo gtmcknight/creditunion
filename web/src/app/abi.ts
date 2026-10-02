@@ -4485,7 +4485,7 @@ export const tokenAdapterAbi = [
         "internalType": "uint256"
       },
       {
-        "name": "perUnit",
+        "name": "net",
         "type": "uint256",
         "internalType": "uint256"
       },
@@ -4654,6 +4654,67 @@ export const tokenAdapterAbi = [
         "name": "",
         "type": "address",
         "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "rate",
+    "inputs": [
+      {
+        "name": "union",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "rated",
+    "inputs": [
+      {
+        "name": "union",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "ratingOf",
+    "inputs": [
+      {
+        "name": "union",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "member",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "mine",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "total",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -4926,7 +4987,7 @@ export const tokenAdapterAbi = [
         "internalType": "uint256"
       },
       {
-        "name": "perUnit",
+        "name": "net",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -4952,6 +5013,25 @@ export const tokenAdapterAbi = [
       },
       {
         "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Rated",
+    "inputs": [
+      {
+        "name": "union",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "total",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -5125,6 +5205,11 @@ export const tokenAdapterAbi = [
   {
     "type": "error",
     "name": "NotEighty",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotRated",
     "inputs": []
   },
   {

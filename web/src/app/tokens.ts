@@ -23,6 +23,9 @@ export const isTokenUnion = (union: Address) =>
   ),
   known.get(union.toLowerCase())!);
 
+/// Whether a token union's current 80 are rated (TokenAdapter.rate), which its burn needs.
+export const isRated = (union: Address) => pub.readContract({ address: config.tokenAdapter!, abi: tokenAdapterAbi, functionName: 'rated', args: [union] }) as Promise<boolean>;
+
 let meta: Promise<{ token: Address; symbol: string; decimals: number }> | null = null;
 const tokenMeta = () =>
   (meta ??= (async () => {
@@ -46,12 +49,19 @@ export async function mountTokens(el: HTMLElement, union: Address, run: (btn: HT
       pub.readContract({ address: config.tokenAdapter!, abi: tokenAdapterAbi, functionName: 'conversionOf', args: [union] }) as Promise<readonly [bigint, bigint, bigint, bigint, bigint, boolean, boolean]>,
     ]);
     const [, total, , protocolFee, creatorFee] = c;
-    const perCredit = (total - protocolFee - creatorFee) / 80n; // the average, as Early splits it 0.5–1.5×
     const you = session.account;
-    const mine = you ? ((await pub.readContract({ address: config.tokenAdapter!, abi: tokenAdapterAbi, functionName: 'claimable', args: [union, you] })) as bigint) : 0n;
+    const [mine, [put, all]] = you
+      ? await Promise.all([
+          pub.readContract({ address: config.tokenAdapter!, abi: tokenAdapterAbi, functionName: 'claimable', args: [union, you] }) as Promise<bigint>,
+          pub.readContract({ address: config.tokenAdapter!, abi: tokenAdapterAbi, functionName: 'ratingOf', args: [union, you] }) as Promise<readonly [bigint, bigint]>,
+        ])
+      : [0n, [0n, 0n] as const];
+    const net = total - protocolFee - creatorFee;
+    const yours = all > 0n ? (net * put) / all : 0n; // by the rating you put in
+
     const fees = !c[5] || !c[6];
     el.innerHTML = `<div class="box">
-      <div class="bid-now"><div><span>Converted</span><strong class="num">${amount(total, decimals)}</strong><em class="sub">${symbol}</em></div><div><span>Per Credit</span><strong class="num">${amount(perCredit, decimals)}</strong><em class="sub">${symbol}</em></div></div>
+      <div class="bid-now"><div><span>Converted</span><strong class="num">${amount(total, decimals)}</strong><em class="sub">${symbol}</em></div><div><span>Yours</span><strong class="num">${amount(yours, decimals)}</strong><em class="sub">${put ? `${((Number(put) / Number(all)) * 100).toFixed(1)}% of the rating` : symbol}</em></div></div>
       ${mine > 0n || fees ? `<div class="stack"><button class="btn primary block" id="token-pay">${mine > 0n ? `Pay out · ${amount(mine, decimals)} ${symbol} are yours` : 'Pay out'}</button><p class="small muted center">Sends every member their tokens. Anyone can press it.</p></div>` : '<p class="small muted">Every member is paid.</p>'}
     </div>`;
     el.querySelector('#token-pay')?.addEventListener('click', (e) =>

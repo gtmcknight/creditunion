@@ -20,8 +20,12 @@ interface ITokenUnions {
 /// @title TokenAdapter
 /// @notice The burn contract for token unions: a second BatchFactory, the same Batch code, with this as its assembler.
 ///         When a full union burns, its 80 Credits become a Statement as usual, but the Statement goes straight into
-///         the vault (IStatementVault), and the tokens it pays out are split among the members by the union's own
-///         split (Equal or Early) after the same protocol and creator fees a sale would pay. No auction.
+///         the vault (IStatementVault), and the tokens it pays out are split among the members by the rating each
+///         put in (their Credits' scores over the union's total), after the same protocol and creator fees a sale
+///         would pay. The union's own Equal/Early split is ignored. No auction.
+///
+///         Scores are read while the Credits still exist: `rate` writes them down for the union's 80 as they stand
+///         (anyone can call it; the site does before the burn), and the burn refuses a union whose 80 changed since.
 ///
 ///         The union checks that it owns what `statement()` names, so this contract is also that: a receipt NFT, one
 ///         per converted Statement, same number, drawn as the Statement (its tokenURI). The union holds the receipt
@@ -33,7 +37,6 @@ interface ITokenUnions {
 ///         No owner, no admin, no upgrades.
 contract TokenAdapter is IAssembler, ERC721 {
     uint256 public constant SIZE = 80;
-    uint256 internal constant EARLY_UNITS = 12_640; // Batch's Early split: 237 - 2i over the 80 positions
     uint8 public constant CONSOLIDATED = 1;
 
     ICredits public immutable credits;
@@ -46,17 +49,26 @@ contract TokenAdapter is IAssembler, ERC721 {
     struct Conversion {
         uint256 statementId;
         uint256 amount; // tokens the vault paid for it
-        uint256 perUnit; // tokens per unit of the split
+        uint256 net; // what the members split, after fees
         uint256 protocolFee;
         uint256 creatorFee;
         bool protocolPaid;
         bool creatorPaid;
     }
 
+    /// @dev Each union's 80 scores as rated, in deposit order, sixteen uint16s to a word, and which 80 they were.
+    struct Rating {
+        bytes32 idsHash;
+        uint256 total;
+        uint256[5] packed;
+    }
+
     mapping(address union => Conversion) public conversionOf;
+    mapping(address union => Rating) internal _rating;
     mapping(address union => mapping(address member => bool)) public claimed;
 
-    event Converted(address indexed union, uint256 indexed statementId, uint256 amount, uint256 perUnit);
+    event Rated(address indexed union, uint256 total);
+    event Converted(address indexed union, uint256 indexed statementId, uint256 amount, uint256 net);
     event Paid(address indexed union, address indexed to, uint256 amount);
     event Unpaid(address indexed union, address indexed to, uint256 amount);
 
@@ -65,6 +77,7 @@ contract TokenAdapter is IAssembler, ERC721 {
     error WrongCredits();
     error WrongFormats();
     error NothingPaid();
+    error NotRated();
     error NotConverted();
     error NothingToClaim();
     error PaymentFailed();
@@ -95,6 +108,7 @@ contract TokenAdapter is IAssembler, ERC721 {
     function assemble(uint256[] calldata ids, uint8) external returns (uint256 statementId) {
         if (!factory.isBatch(msg.sender)) revert NotAUnion();
         if (ids.length != SIZE) revert NotEighty();
+        if (_rating[msg.sender].idsHash != keccak256(abi.encode(Batch(msg.sender).ids()))) revert NotRated();
         uint256[80] memory cells;
         for (uint256 i; i < SIZE; ++i) {
             credits.transferFrom(msg.sender, address(this), ids[i]);
@@ -110,11 +124,9 @@ contract TokenAdapter is IAssembler, ERC721 {
         Batch b = Batch(msg.sender);
         uint256 creatorFee = amount * b.creatorFeeBps() / 10_000;
         uint256 fee = amount * b.protocolFeeBps() / 10_000;
-        uint256 units = b.split() == Batch.Split.Equal ? SIZE : EARLY_UNITS;
-        uint256 per = (amount - fee - creatorFee) / units;
-        fee = amount - creatorFee - per * units; // rounding dust goes with the protocol fee, as in a sale
-        conversionOf[msg.sender] = Conversion(statementId, amount, per, fee, creatorFee, false, false);
-        emit Converted(msg.sender, statementId, amount, per);
+        uint256 net = amount - fee - creatorFee;
+        conversionOf[msg.sender] = Conversion(statementId, amount, net, fee, creatorFee, false, false);
+        emit Converted(msg.sender, statementId, amount, net);
 
         _mint(msg.sender, statementId); // the receipt the union checks for
     }
@@ -140,13 +152,57 @@ contract TokenAdapter is IAssembler, ERC721 {
         return true;
     }
 
+    // ---------------------------------------------------------------- ratings
+
+    /// @notice Write down the score of each of a full union's 80 Credits, from the score table it opened with, so
+    ///         the burn can pay by rating once the Credits are gone. Anyone can call it, again whenever its 80
+    ///         change. A union with no table counts every Credit the same.
+    function rate(address union) external {
+        if (!factory.isBatch(union)) revert NotAUnion();
+        uint256[] memory ids = Batch(union).ids();
+        if (ids.length != SIZE) revert NotEighty();
+        Rating storage r = _rating[union];
+        uint256[5] memory packed;
+        uint256 total;
+        address table = address(Batch(union).ratings());
+        for (uint256 i; i < SIZE; ++i) {
+            uint256 sc = table == address(0) ? 1 : Batch(union).ratings().scoreOf(ids[i]);
+            total += sc;
+            packed[i >> 4] |= sc << (16 * (i & 15));
+        }
+        r.idsHash = keccak256(abi.encode(ids));
+        r.total = total;
+        r.packed = packed;
+        emit Rated(union, total);
+    }
+
+    /// @notice Whether a union's current 80 are rated, so it can burn.
+    function rated(address union) external view returns (bool) {
+        return _rating[union].idsHash != bytes32(0) && _rating[union].idsHash == keccak256(abi.encode(Batch(union).ids()));
+    }
+
+    /// @notice The rating a member put in, and the union's total, as written down by `rate`. A union whose Credits
+    ///         all scored 0 counts each Credit as 1.
+    function ratingOf(address union, address member) public view returns (uint256 mine, uint256 total) {
+        Rating storage r = _rating[union];
+        (uint256[] memory ids, address[] memory who) = Batch(union).slots();
+        bool flat = r.total == 0;
+        total = flat ? ids.length : r.total;
+        for (uint256 i; i < ids.length && i < SIZE; ++i) {
+            if (who[i] != member) continue;
+            mine += flat ? 1 : (r.packed[i >> 4] >> (16 * (i & 15))) & 0xffff;
+        }
+    }
+
     // ---------------------------------------------------------------- payouts
 
-    /// @notice Tokens a member of `union` is owed and hasn't been paid.
+    /// @notice Tokens a member of `union` is owed and hasn't been paid: their share of the rating, of what's left
+    ///         after fees.
     function claimable(address union, address member) public view returns (uint256) {
         Conversion storage c = conversionOf[union];
         if (c.amount == 0 || claimed[union][member]) return 0;
-        return Batch(union).unitsOf(member) * c.perUnit;
+        (uint256 mine, uint256 total) = ratingOf(union, member);
+        return c.net * mine / total;
     }
 
     /// @notice Pays the fees and every member of `union` their tokens. Anyone can call it, as often as they like; a
@@ -160,7 +216,7 @@ contract TokenAdapter is IAssembler, ERC721 {
         for (uint256 i; i < members.length; ++i) {
             address m = members[i];
             if (claimed[union][m]) continue; // already paid (a member with several Credits shows up once each)
-            uint256 amount = Batch(union).unitsOf(m) * c.perUnit;
+            uint256 amount = claimable(union, m);
             claimed[union][m] = true;
             if (!_pay(union, m, amount)) claimed[union][m] = false;
         }

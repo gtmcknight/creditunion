@@ -1,5 +1,5 @@
 import { parseAbi, parseEther, type Address } from 'viem';
-import { batchAbi, creditsAbi, factoryAbi, sweeperAbi, unionFormatsAbi } from '../abi';
+import { batchAbi, creditsAbi, factoryAbi, sweeperAbi, tokenAdapterAbi, unionFormatsAbi } from '../abi';
 import { adapterAbi } from '../adapter-abi';
 import { canBatch, config, explorer, pub, send, sendBatch, session } from '../chain';
 import { ARRANGEMENTS, burnAdapter, ratingTotal, getSummary, spotsSaved, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, indexedBatch, indexedOne, keepPick, keptSpots, layoutSlot, me, notice, pickOf, placeOnLayout, readNotice, ratings, sinceTx, staleBatches, type Rated, burnsAt } from '../data';
@@ -16,7 +16,7 @@ import { markOutbidSeen, offerAlerts } from '../outbid';
 import { activityFold, ago } from './live';
 import { $$, art, clock, errText, dayAndTime, esc, eth, openModal, same, setRange, sheet, short, startsAt, statementArt, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
-import { converted, isTokenUnion, mountTokens } from '../tokens';
+import { converted, isRated, isTokenUnion, mountTokens } from '../tokens';
 import { slotName } from '../../shared/layout';
 import { compose, DIRECTIONS, paint as paintMarks, PAGE, SHOWN, type Direction } from '../../shared/statement';
 import { go as navigate } from '../main';
@@ -1014,7 +1014,11 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
         <p class="small muted center">Anyone can press it. You pay the gas.</p></div>`;
       document.getElementById('assemble')?.addEventListener('click', (e) =>
         run(e.currentTarget as HTMLElement, 'Converting…', () =>
-          send({ address: s.address, abi: batchAbi, functionName: 'assemble', gas: 16_000_000n }, txNote),
+          (async () => {
+            // A token union pays by rating, so its 80 are rated first (once, while the Credits still exist).
+            if (tokenish && !(await isRated(s.address))) await send({ address: config.tokenAdapter!, abi: tokenAdapterAbi, functionName: 'rate', args: [s.address] }, txNote);
+            return send({ address: s.address, abi: batchAbi, functionName: 'assemble', gas: 16_000_000n }, txNote);
+          })(),
         tokenish ? 'The Statement is in the vault. Pay out the tokens.' : 'The Statement exists. Auction is open.'),
       );
     };

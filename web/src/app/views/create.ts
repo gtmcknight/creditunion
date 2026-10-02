@@ -33,7 +33,7 @@ const ARR_OPTS: [number, string, string][] = [
 /// What happens at 80: the Statement is auctioned and the sale split, or it converts into tokens split the same way.
 const END_HINTS = {
   auction: 'The Statement is auctioned for 24 hours and the sale is split.',
-  tokens: 'The Statement converts into tokens, split the same way. No auction.',
+  tokens: 'The Statement converts into tokens. Each member gets tokens for the rating they put in. No auction.',
 };
 /// Picture is Painted on-chain: the tile only changes how the paint is made.
 const PICTURE = 6;
@@ -1742,7 +1742,11 @@ export async function create(app: HTMLElement) {
   });
   arrRadios.forEach((r) => r.addEventListener('change', syncOrder));
   app.querySelectorAll<HTMLInputElement>('input[name=ending]').forEach((r) =>
-    r.addEventListener('change', () => (document.getElementById('end-hint')!.textContent = END_HINTS[r.value as keyof typeof END_HINTS])),
+    r.addEventListener('change', () => {
+      document.getElementById('end-hint')!.textContent = END_HINTS[r.value as keyof typeof END_HINTS];
+      // Tokens always pay by rating put in, so Equal and Early don't apply.
+      app.querySelector<HTMLElement>('.pay-field:not(.end-field)')!.hidden = r.value === 'tokens';
+    }),
   );
   // Paint straight onto the preview sheet: tap or drag across its slots.
   const slotAt = (x: number, y: number) => {
