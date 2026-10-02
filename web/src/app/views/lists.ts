@@ -1,9 +1,10 @@
 import { config, session } from '../chain';
-import { listBatches, notice, readNotice, ratingTotal, scores, type Listed, type Summary, hasLayout, layoutSlot, placeOnLayout } from '../data';
+import { eligible, listBatches, notice, readNotice, ratingTotal, scores, type Listed, type Summary, hasLayout, layoutSlot, placeOnLayout } from '../data';
 import { placedKeys } from '../slots';
 import { idsKey } from '../../shared/ids';
 import { hydrate, who } from '../ens';
-import { fitByBatch } from '../fit';
+import { fitByBatch, fitsRules, myTraits } from '../fit';
+import { pictureFit } from '../picture-fit';
 import { editionArt, examples, fillGhosts, hasPlan, planGhosts, registerDeposits, registerFilter } from '../ghosts';
 import type { Address } from 'viem';
 import { clock, eth, esc, openModal, pageHead, same, sheet, startsAt, statementArt, timeLeft, toast, until } from '../ui';
@@ -229,6 +230,11 @@ export async function placeCards(list: Listed[]) {
   return todo.some((b) => placements.has(placeKey(b)));
 }
 
+/// Picture unions whose Can join count has been worked out by the picture's own test (pictureFit): until then a
+/// picture's card and Can join leave its Colors-only count out, since most of those Credits don't draw it.
+const pictureChecked = new Set<string>();
+const checkedKey = (union: Address, account = session.account) => `${account?.toLowerCase()}:${union.toLowerCase()}`;
+const paintedAll = (s: Summary) => hasLayout(s.filter) && !Number(s.filter.layoutTrait ?? 0) && Array.from({ length: 80 }, (_, i) => layoutSlot(s.filter, i)).every(Boolean);
 /// Picture unions: the Credit picked for each slot when it was made (saved with its picture), drawn in its open
 /// slots so the card shows the picture, and "Picture" where a painted one says "Painted".
 const PICS = 'cu-pictures';
@@ -332,8 +338,8 @@ export function card({ s, ids, depositors, format }: Listed, fit?: bigint[], who
   const mine = mineIn({ s, ids, depositors });
   const room = 80 - s.count;
   const picture = pictures.has(s.address);
-  // A Picture union takes only Credits bought for it (where the site can buy), so yours never "fit" one.
-  if (picture && config.sweeper) fit = [];
+  // A Picture union's count of yours waits for its picture's own test (Can join's checkPictures): Colors alone overcount.
+  if (picture && config.sweeper && !pictureChecked.has(checkedKey(s.address))) fit = [];
   const canJoin = fit?.length ? Math.min(fit.length, room) : 0;
   const burned = s.state === 'Auction' || s.state === 'Settled';
   const live = s.state === 'Auction' && !(s.highBid && Date.now() / 1000 >= s.auctionEnd);
@@ -470,7 +476,34 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         .finally(() => {
           fitRead = 'done';
           if (document.getElementById('batches') === el) draw();
+          void checkPictures();
         });
+    };
+    // Fully painted unions your Credits' Colors fit: each runs its picture's own test, one at a time once the rest of
+    // Can join is in, and shows up there only if some of yours draw an open spot.
+    const checkPictures = async () => {
+      const acct = session.account;
+      if (!acct || !config.sweeper) return;
+      const { owned, traits } = await myTraits(acct);
+      for (const b of parties) {
+        const ids = fit.get(b.s.address);
+        if (!ids?.length || b.s.state !== 'Open' || !paintedAll(b.s) || pictureChecked.has(checkedKey(b.s.address, acct))) continue;
+        try {
+          // As its page does: the picture's plan picks from all of yours, then only the picked ones its rules take.
+          const picked = await pictureFit(b, acct, owned, traits);
+          if (picked) {
+            let mine = picked.filter((id) => fitsRules(b.s, id, traits.get(id.toString())));
+            if (mine.length && (b.s.allowlistSize || b.s.filter.minScore || b.s.filter.maxScore)) mine = await eligible(b.s.address, mine);
+            if (mine.length) fit.set(b.s.address, mine);
+            else fit.delete(b.s.address);
+          }
+          pictureChecked.add(checkedKey(b.s.address, acct));
+        } catch {
+          continue; // unread: it stays out rather than promise a fit
+        }
+        if (session.account !== acct) return;
+        if (document.getElementById('batches') === el) draw();
+      }
     };
     let showEmpty = false; // All tabs its empty (0/80) unions behind a button: they're mostly abandoned
     let shownStage: Stage = 'live'; // the auctions tab showing, whose order the menu sets
@@ -517,10 +550,9 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         const isYours = (b: Listed) => !!acct && (mineIn(b).size > 0 || same(b.s.creator, acct));
         const views: Record<View, Listed[]> = {
           all: list.filter((b) => b.s.state !== 'Full'),
-          // A picture takes one of yours only where it draws an open spot about as well as the best for sale, which
-          // only its own page can tell (it matches the picture against the market): Can join leaves pictures out
-          // rather than list one its page then refuses.
-          invited: list.filter((b) => b.s.state === 'Open' && fit.has(b.s.address) && !isYours(b) && !(config.sweeper && pictures.has(b.s.address))),
+          // A picture takes one of yours only where it draws an open spot about as well as the best for sale: a fully
+          // painted union joins Can join once that test has run on it (checkPictures), never on its Colors alone.
+          invited: list.filter((b) => b.s.state === 'Open' && fit.has(b.s.address) && !isYours(b) && (!config.sweeper || !paintedAll(b.s) || pictureChecked.has(checkedKey(b.s.address)))),
           yours: list.filter(isYours),
           filled: list.filter((b) => b.s.state === 'Full'),
         };
