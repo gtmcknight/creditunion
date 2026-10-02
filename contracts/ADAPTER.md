@@ -1,25 +1,25 @@
-# The adapter: what happens when Jack's Statement contract ships
+# The adapter: how a Credit Union becomes a Statement
 
-> **Status, Sep 28 2026: a draft, not live.** `src/StatementAdapter.sol` is written except for `_compose`, the one
-> call into Jack's contract, which follows our guess of it until he publishes. It isn't deployed, and the deploy
-> script refuses mainnet until it's finished. No Credit Union can lock or burn until an adapter is switched on.
-> `MockAssembler` and `MockStatement` in `src/mocks/` are test stand-ins only: they are not Jack's contract and never
-> go to mainnet. The burn-day checklist is [RUNBOOK.md](RUNBOOK.md).
+> **Status, Oct 1 2026: live.** `StatementAdapter` at
+> [0x6CAEb9953bA8625226345CF39F93541CE53AbFd2](https://etherscan.io/address/0x6CAEb9953bA8625226345CF39F93541CE53AbFd2)
+> (source verified) has been the factory's adapter since 8:10 PM ET on Oct 1, for good. It burns into Jack
+> Butcher's Statements contract at
+> [0x75Edd94b7e49b3bD5C8047b91F165A5e265a069b](https://etherscan.io/address/0x75Edd94b7e49b3bD5C8047b91F165A5e265a069b).
+> A union burn takes 10–12M gas, under mainnet's 16,777,216 per-transaction cap (EIP-7825). The burn-day
+> checklist is [RUNBOOK.md](RUNBOOK.md).
 
-Credit Union pools Credits now. It can't burn them into Statements until Jack Butcher publishes the Statement
-contract, expected around October 1 ([his announcement](https://x.com/jackbutcher/status/2102910106451021935)).
-The piece that connects the two is the **adapter** (called the assembler in the code). This doc is the plan
-for writing it, testing it and switching it on, written down before we know the details so anyone can check
-it against what we actually do.
+Credit Union pools Credits, and Jack Butcher's Statement contract
+([his announcement](https://x.com/jackbutcher/status/2102910106451021935)) burns 80 Credits into a Statement. The
+piece that connects the two is the **adapter** (called the assembler in the code). This doc is how it works, how
+it was switched on, and what can go wrong.
 
-Parts marked **Guess** depend on a contract we haven't seen. They get replaced with facts once it ships.
+## How it fits
 
-## What exists today
-
-- `BatchFactory` is deployed with no adapter. Credit Unions fill, but a Credit Union with no adapter never locks: anyone
-  can withdraw at any time, even at 80/80.
+- `BatchFactory`'s adapter is `StatementAdapter`, for good. Before it, a Credit Union never locked: anyone could
+  withdraw at any time, even at 80/80.
 - Each Credit Union already decides its own burn order (`Batch.burnOrder()`: deposit order, Credit number up or
-  down, or the painted sheet). The adapter receives that exact list and must not reorder it.
+  down, or the painted sheet). The adapter receives that list and burns it as is, except for a picture with
+  recorded spots (below).
 - The adapter interface is fixed: `contracts/src/interfaces/IAssembler.sol`.
   - `statement()`: the Statement contract it mints from.
   - `assemble(uint256[] ids, uint8 arrangement)`: burn these 80 Credits and give the calling Credit Union the Statement.
@@ -27,22 +27,39 @@ Parts marked **Guess** depend on a contract we haven't seen. They get replaced w
   the Credit Union must own the Statement the adapter reports. If either check fails, the whole burn reverts.
 - The adapter is an operator for the Credit Union's Credits only for the length of that one call.
 
-## The draft: `StatementAdapter`
+## `StatementAdapter`
 
-- **It takes the 80 in first.** A union can approve only the adapter, never Jack's contract, so the adapter moves the
-  80 to itself (in the union's order), has Jack's contract burn them and mint the Statement, and hands the Statement
-  to the union. If his contract turns out to accept Credits sent straight to it, the adapter can skip that step.
-- **Directions.** A union always tells the adapter "Deposit" (its code can't change), so the adapter keeps each
-  union's direction itself: Issued, Consolidated, Balance or Reconciled, Issued until the creator picks another.
-  The creator can change it while every member can still leave (while the union fills, while it waits for burning
-  to open, after a burn hour lapses) and not from the countdown on.
+- **It takes the 80 in first.** Jack's `compose` burns only its caller's own Credits, and a union can approve only
+  the adapter, so the adapter moves the 80 to itself (in the union's order) and calls `compose` with the union as
+  the recipient: the Statement is minted straight to the union. Moving them in costs 3.1M gas; there is no way
+  around it with his contract.
+- **Formats.** His contract calls the drawing a format: an index into a list he can append to until he seals it.
+  At launch: 0 Issued, 1 Consolidated, 2 Assessed, 3 Reconciled, 4 Accrued, 5 Amortized, 6 Liquidated,
+  7 Recorded. A union always tells the adapter "Deposit" (its code can't change), so the adapter keeps each
+  union's format outside the union (`formatOf`): the creator's pick in UnionFormats, a separate contract deployed
+  ahead so creators can pick before burning opens. With no pick it's Consolidated for a picture,
+  a layout painted in colors with every slot painted (`isPicture`), and Issued for everything else. Only
+  Consolidated shows a picture edge to edge, the way the site previews it; in Issued it's faint tiles, and
+  Reconciled and Liquidated don't keep cell positions at all. The creator can change it while every member can
+  still leave (while the union fills, while it waits for burning to open, after a burn hour lapses) and not from
+  the countdown on. Any format on his list is choosable, Issued for a picture included, and ones he adds later.
+  The format is only where the Statement starts: whoever owns it (the auction's winner, once it settles) can switch
+  it any time with his `setFormat`.
+- **Order.** Cell i of the Statement is the union's i-th Credit (`burnOrder()`), 8 across and 10 down, row by row.
+- **A picture's Credits keep their spots.** A picture's own layout order gives each Colors' spots to that Colors'
+  Credits in the order they went in, so one early leave slides every later Credit of that Colors back a spot and
+  scrambles the picture. `record(union)` writes down where each Credit sits. Anyone can call it, and it only
+  ever writes `orderOf(union)`. From then on a leave opens only the leaver's spot, and the next Credit of that
+  Colors fills it. The site's keeper records after deposits and leaves. The burn puts recorded Credits in their
+  spots and the rest of each Colors in layout order, working only from the 80 the union hands over: always those
+  80, each in a spot of its own Colors. With nothing recorded, the burn is the layout order. The most this adds
+  to a burn is about 230k gas.
 - **Only the factory's unions** can use it, and it holds nothing between calls.
-- **`ADAPTER_READY` is false** until `_compose` meets Jack's real contract on a mainnet fork. The deploy script
-  (`script/DeployAdapter.s.sol`) refuses mainnet while it is.
-- **Tested now against the stand-in:** `test/StatementAdapter.t.sol` (the burn, directions and when they're fixed,
-  waiting for Jack's contract to open, his cap, what it refuses) and `test/StatementAdapter.fork.t.sol` (burn day on
-  a copy of mainnet: the real All Credits union filled with real holders' Credits, the real Safe's proposal, the
-  burn, the auction, every member paid; 6.4M gas for one burn).
+- **`ADAPTER_READY`** kept the deploy script (`script/DeployAdapter.s.sol`) off mainnet until the fork test passed
+  against the deployed Statements contract. It's true in the deployed adapter.
+- **Tests:** `test/StatementAdapter.fork.t.sol` runs burn day on a copy of mainnet, on the block before the adapter
+  switched on, against the live Statements contract: the real All Credits union, the Safe's proposal, the burn, the
+  auction, every member paid, and the gas against the cap.
 
 ## Who can switch it on
 
@@ -51,22 +68,16 @@ One address, the factory's **setter**, can propose an adapter. It has no other p
 - It can replace a pending proposal (restarting the notice), but only until an adapter is live.
 - Once an adapter is active it's permanent. Nobody, including the setter, can change it.
 
-**Setter on mainnet:** a multisig (a Safe) held by the Credit Union team, 2 of 3 signers. The address goes here
-and in the README before mainnet deploy. On Sepolia the setter is the deployer.
+**Setter on mainnet:** the Credit Union team's Safe,
+[0xFE4761e66C2A37492871d30d0e83bcBC454A7C10](https://etherscan.io/address/0xFE4761e66C2A37492871d30d0e83bcBC454A7C10),
+2 of 3 signers. On Sepolia the setter is the deployer.
 
 ## The switch-on, step by step
 
-1. **Jack publishes the Statement contract.** We read it, and its source must be verified on Etherscan
-   before we build against it.
-2. **We write the adapter** against that contract. **Guess:** it will take 80 Credit ids (possibly in a
-   required order, which is why each Credit Union fixes its order in advance), burn them through Jack's contract,
-   and mint one Statement to the caller. If Jack's contract works differently (for example it needs
-   approvals, payment, a signature, or a different count), the adapter handles that. The Credit Union side checks
-   above don't change.
-3. **We publish it before proposing it:**
-   - Adapter source in this repo, under `contracts/src/`, with tests.
-   - Deployed and verified on Etherscan.
-   - A post with the address and a link here, so anyone can read it.
+1. **Jack deployed the Statement contract** (Oct 1, block 26100733).
+2. **We checked the adapter** against it: the fork test with `STATEMENTS=<his address>`, every test passing. The
+   Credit Union side checks above don't change.
+3. **It's public:** deployed and verified on Etherscan, and its source here, under `contracts/src/`.
 4. **Test it** (next section). Nothing is proposed until every step passes.
 5. **The setter proposes it:** `factory.proposeAssembler(adapter)`. This starts a **30-minute notice**,
    shown on the site. Nothing locks during it, and anyone who doesn't trust the adapter can withdraw.
@@ -83,8 +94,8 @@ and in the README before mainnet deploy. On Sepolia the setter is the deployer.
 
 The site's keeper (`web/src/worker/keeper.ts`, every 5 minutes) activates the adapter once the notice has run and
 settles ended auctions. It never burns: every Statement is made by someone pressing Make Statement. The site shows
-the notice as a bar above every page, with when burning starts, in the viewer's own time. **Guess:** only 1,526 Statements can ever
-exist, so there may be a race once burning opens.
+the notice as a bar above every page, with when burning starts, in the viewer's own time. There is no race: a union's 80 are its own, and
+his contract has no cap beyond the Credits themselves.
 
 ## How we'll test it before proposing
 
@@ -93,7 +104,7 @@ exist, so there may be a race once burning opens.
    - Fill a Credit Union with real Credit ids (impersonated holders) in every burn order.
    - Run the full path: countdown, lock, `assemble()`, auction, settle (which pays every member).
    - Check that the Credits are burned, the Statement is owned by the Credit Union, and the order Jack's contract
-     received equals `burnOrder()`.
+     received equals `burnOrder()` (`orderOf()` for a picture with recorded spots).
 2. **Adversarial cases:**
    - An adapter that doesn't burn, keeps the Statement, returns a wrong id or reenters: every one must revert.
    - These already exist for the mock adapter in `contracts/test/` and get rerun against the real one.
@@ -116,11 +127,17 @@ exist, so there may be a race once burning opens.
   still be left at any time before their countdown ends, and locked ones unlock after the hour if they can't
   burn. The fix would be a new factory, and people moving to it by withdrawing and re-depositing.
 
-## Open questions (filled in when Jack's contract ships)
+## The Statements contract, as deployed
 
-- The exact function the adapter calls, and how it maps the order of the 80 onto the sheet (see [ORDER.md](ORDER.md)).
-- How it takes the direction (Issued, Consolidated, Balance, Reconciled).
-- Whether minting needs payment, a signature, a whitelist or an approval.
-- Whether a Credit Union contract can call it directly (some mints are limited to regular wallets).
-- Gas for a full burn of 80.
-- Any per-address or per-time limits on minting Statements.
+| Question | Answer |
+|---|---|
+| The call | `compose(uint256[80] creditIds, uint8 format) returns (uint256)`. Burns the caller's own 80, mints to the caller with `_mint` (no receiver hook). Also `compose(creditIds, format, address to)`, minting to `to`; the adapter uses it to mint to the union. |
+| Order | Cell i = `creditIds[i]`, 8 across, 10 down, row by row. |
+| Format | An index into his list (above). Not fixed: the owner can switch it any time with `setFormat(id, format)` (the owner itself, not an approved operator). |
+| Payment, signature, allowlist | None. The holder approves Statements on Credits (`setApprovalForAll`); the adapter does that once in its constructor. |
+| Can a contract call it | Yes. |
+| Opening time | `composeOpensAt`: 8:00 PM ET on Oct 1, 2026 (1790899200). Every compose before it reverts. |
+| Cap, per-address limits | None. 1,526 is just 122,154 / 80; a union's Credits are its own, so there is no race. |
+| Gas | Union burns on Oct 1 took 10–12M (Union Jack's: 10.2M), under the 16,777,216 transaction cap. The fork test checks the heaviest sheet a union can hold fits too. |
+| Overprinting | Any Statement can be burned onto another its owner controls; the ink, Credits and rating add up. The union never approves anyone, so nobody can overprint a union's Statement while it's up for auction. The winner can. |
+| Rating | His contract prints its own Credit Rating (a new curve over the same rarities, not jack.art's v3.4.0). Ranks are identical; single Credits differ by up to ±2.75, a random sheet by about +23. |

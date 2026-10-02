@@ -20,7 +20,7 @@ contract RecordingStatement is MockStatement {
     function make(uint256[] calldata ids) external override returns (uint256 id) {
         last = ids;
         credits.burn(msg.sender, ids);
-        id = ++totalSupply;
+        id = ++supply;
         _safeMint(msg.sender, id);
     }
 
