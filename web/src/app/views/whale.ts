@@ -81,8 +81,8 @@ export async function whale(host: HTMLElement) {
     const next = ledger(s.minBid, true);
     return `<label class="whale-row${picked.has(k) ? ' on' : ''}${lead ? ' lead' : ''}" data-union="${k}">
       <input type="checkbox" class="whale-pick"${picked.has(k) ? ' checked' : ''} aria-label="Bid on ${esc(s.name || 'this Statement')}">
-      <span class="whale-art statement-host">${statementArt(s.statementId)}</span>
-      <strong class="whale-name">${esc(s.name || 'Untitled')} <span class="stmt-no num">#${s.statementId}</span></strong>
+      <a class="whale-art statement-host" href="/union/${s.address}" tabindex="-1" aria-hidden="true">${statementArt(s.statementId)}</a>
+      <a class="whale-name" href="/union/${s.address}">${esc(s.name || 'Untitled')} <span class="stmt-no num">#${s.statementId}</span></a>
       <span class="whale-creator small">${who(s.creator, 'sm', 'nested')}</span>
       <span class="whale-members muted small num">${members}</span>
       <span class="whale-bids muted small num">${n}</span>
