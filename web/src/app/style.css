@@ -741,6 +741,10 @@ nav a .num {
   opacity: 1;
   z-index: 1; /* over a picture union's preview canvas; the card's tags come after it and stay on top */
 }
+/* Previewing another format: the Statement steps aside for the preview (party.ts realFormat). */
+.statement-host.drawn.previewing > .statement-art {
+  opacity: 0;
+}
 
 /* Statement directions: Issued is the sheet; the other three draw on a canvas in its place. */
 .batch-art > .sheet,
@@ -1755,6 +1759,21 @@ nav a[hidden] {
 #notice a {
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+/* Live auctions beside Auctions in the nav (main.ts drawAuctions): the bar's yellow, in either theme. */
+.nav-count {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #ffd100;
+  color: #111111;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+  vertical-align: 2px;
 }
 .wallet-list a.wallet {
   justify-content: space-between;

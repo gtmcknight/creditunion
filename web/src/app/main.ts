@@ -18,7 +18,7 @@ import { traitPage } from './views/trait';
 import { timePage } from './views/time';
 import { bitsPage, ratingPage } from './views/scale';
 import { dayAndTime, esc, errText, openModal, toast } from './ui';
-import { BURNING_FROM, burningOn, burnsAt, indexedBatch, me, readNotice } from './data';
+import { BURNING_FROM, burningOn, burnsAt, indexedBatch, listBatches, me, readNotice } from './data';
 
 const app = document.getElementById('app')!;
 let seq = 0;
@@ -62,6 +62,7 @@ async function route() {
   const [page, arg] = pagePath();
   const self = page === 'me' || (page === 'member' && !!arg && arg.toLowerCase() === session.account?.toLowerCase());
   siteTicker(page);
+  void drawAuctions(page);
   const current = self ? 'me' : page === 'party' ? 'parties' : EXPLORER.has(page) ? 'credits' : page === '' ? 'home' : page;
   document.querySelectorAll<HTMLAnchorElement>('[data-nav]').forEach((a) => a.toggleAttribute('aria-current', a.dataset.nav === current));
   document.querySelectorAll<HTMLAnchorElement>('#account [data-nav]').forEach((a) =>
@@ -156,6 +157,23 @@ async function drawNotice() {
   const lead = ahead ? `Starting ${dayAndTime(at)}, full Unions become Statements and go up for auction.` : n ? 'Any minute now, full Unions become Statements and go up for auction.' : 'Full Unions become Statements and go up for auction soon.';
   el.innerHTML = `<span><strong>${lead}</strong> <a href="/docs#burning">How it works</a></span>`;
   el.hidden = false;
+}
+
+/// Live auctions, for people who live on Unions: counted beside Auctions in the nav, and once burning is on, the bar
+/// above the header says so on every page but Auctions itself.
+async function drawAuctions(page: string) {
+  const all = await listBatches().catch(() => null);
+  if (!all) return;
+  const now = Date.now() / 1000;
+  const live = all.filter(({ s }) => s.state === 'Auction' && !(s.highBid > 0n && now >= s.auctionEnd)).length;
+  const a = document.querySelector<HTMLAnchorElement>('.main-nav [data-nav="auctions"]');
+  if (a) a.innerHTML = live ? `Auctions <span class="nav-count num" aria-label="${live} live">${live}</span>` : 'Auctions';
+  await readNotice();
+  const el = document.getElementById('notice');
+  if (!el || !burningOn || (el.innerHTML && !el.classList.contains('auctions-bar'))) return;
+  el.classList.add('auctions-bar');
+  el.innerHTML = `<span><strong>${live === 1 ? '1 Statement is' : `${live} Statements are`} up for auction.</strong> <a href="/auctions">See auctions</a></span>`;
+  el.hidden = !live || page === 'auctions';
 }
 
 /// Phone browsers have no wallet inside them: open this page in a wallet's own browser instead.

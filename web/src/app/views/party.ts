@@ -343,6 +343,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   const picture = !!slots?.every((v) => v) && !Number(s.filter.layoutTrait ?? 0);
   if (!burned && picture && !pickedDirection(s.address)) showDirection(app.querySelector<HTMLElement>('.batch-art .dirs'), opensIn(s.address, 'Consolidated'));
   if (!burned) void burnFormat(app, s, picture);
+  else void realFormat(app, s);
   // A Picture union once it's full (until the burn): still a picture, drawn in Consolidated, and still no
   // withdrawing through the site, since a Credit taken out would shift it.
   if ((s.state === 'Full' || s.state === 'Expired') && slots && !Number(s.filter.layoutTrait ?? 0)) {
@@ -644,6 +645,23 @@ const picked = new Map<string, Direction>();
 const opensIn = (union: string, fallback: Direction) => picked.get(union.toLowerCase()) ?? (fallback === 'Consolidated' ? (looks.get(union.toLowerCase()) ?? fallback) : fallback);
 /// A picture matched in another format than Consolidated (its saved picture's `look`), per union.
 const looks = new Map<string, Direction>();
+
+/// A burned union opens on its real Statement, its format checked under it. Any other format shows that preview in
+/// the Statement's place, and its own format brings the Statement back.
+async function realFormat(app: HTMLElement, s: Ctx['s']) {
+  const g = app.querySelector<HTMLElement>('.batch-art .dirs');
+  const host = app.querySelector<HTMLElement>('.batch-art .statement-host');
+  if (!g || !host) return;
+  let real: Direction | null = null, touched = false;
+  g.addEventListener('direction', (e) => ((touched = true), host.classList.toggle('previewing', (e as CustomEvent<Direction>).detail !== real)));
+  const i = await pub
+    .readContract({ address: s.statement, abi: parseAbi(['function formatOf(uint256) view returns (uint8)']), functionName: 'formatOf', args: [s.statementId] })
+    .catch(() => null);
+  real = i == null ? null : (DIRECTIONS[i] ?? null);
+  if (!real || !g.isConnected) return;
+  if (!touched) showDirection(g, real);
+  else host.classList.toggle('previewing', g.querySelector<HTMLElement>('[aria-checked="true"]')?.dataset.dir !== real);
+}
 
 /// "Burns in …" under the sheet: its creator's pick (UnionFormats), else Consolidated for a picture and Issued for the
 /// rest, as the burn contract decides. The sheet opens in a pick. While every member can still leave, the creator
