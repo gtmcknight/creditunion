@@ -478,7 +478,10 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         const isYours = (b: Listed) => !!acct && (mineIn(b).size > 0 || same(b.s.creator, acct));
         const views: Record<View, Listed[]> = {
           all: list.filter((b) => b.s.state !== 'Full'),
-          invited: list.filter((b) => b.s.state === 'Open' && fit.has(b.s.address) && !isYours(b)),
+          // A picture takes one of yours only where it draws an open spot about as well as the best for sale, which
+          // only its own page can tell (it matches the picture against the market): Can join leaves pictures out
+          // rather than list one its page then refuses.
+          invited: list.filter((b) => b.s.state === 'Open' && fit.has(b.s.address) && !isYours(b) && !(config.sweeper && pictures.has(b.s.address))),
           yours: list.filter(isYours),
           filled: list.filter((b) => b.s.state === 'Full'),
         };
