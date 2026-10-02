@@ -18,7 +18,8 @@ import { Room, booksOf, noRoomReason } from '../slots';
 import { bin } from '../bins';
 import { TRAIT_KINDS, eightsName, parseTrait } from '../../shared/trait';
 import { WAVE_SHAPES, inkFor, mazeIndex, planMaze, waveColors, type Maze, type MazeIndex, type Pool, type WaveShape } from '../../shared/lab';
-import { DETAIL, gapOf, Guide, framer, inOrder, landing, packPicture, planOf, type Framer, type Plan, OWN_GOOD, runOf, type Look } from '../picture';
+import { DETAIL, gapOf, Guide, framer, inOrder, landing, packPicture, planOf, type Framer, type Plan, OWN_GOOD, runOf, type Look, type Stored } from '../picture';
+import { pictureMessage, pictureRecord } from '../../shared/picture-save';
 
 const CHUNK = 40;
 /// The layouts a new party can pick, by the contract's burn-order number (1 Mint time and 3 Creator's order are retired).
@@ -173,6 +174,22 @@ const PALETTE_ROWS = [1, 2, 3, 4].map((n) => TRAITS.colors.filter((p) => p.lengt
 function markPaint(cell: HTMLElement, icon: string) {
   cell.querySelector('.paint')?.remove();
   if (icon) cell.insertAdjacentHTML('afterbegin', `<b class="paint">${icon}</b>`);
+}
+
+/// A Picture union's picture, kept by the Worker so the union's page can recommend the Credit for each open slot. Only
+/// its creator can save it, by signing for it (one wallet prompt, no transaction). Refused or failed, the union goes on
+/// without it, and says so.
+async function savePicture(batch: Address, pic: Omit<Stored, 'ids'> & { ids: (number | null)[] | null }, btn: HTMLButtonElement) {
+  const record = pictureRecord(pic);
+  if (!record || !session.wallet || !session.account) return;
+  btn.textContent = 'Sign to save the picture…';
+  try {
+    const sig = await session.wallet.signMessage({ account: session.account, message: pictureMessage(batch, config.chainId, record) });
+    const r = await fetch(`/pictures/${batch}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...pic, sig }) });
+    if (!r.ok) throw new Error(await r.text());
+  } catch (x) {
+    toast(`Picture not saved: ${errText(x)}`, 'err', 8000);
+  }
 }
 
 // ---------------------------------------------------------------- page
@@ -1883,13 +1900,11 @@ export async function create(app: HTMLElement) {
         })
         .find((x) => x?.eventName === 'BatchCreated');
       const batch = (ev?.args as { batch: `0x${string}` }).batch;
+      // A Picture union's picture, saved as soon as the union exists, before the rest of its Credits go in.
+      if (painted && chosen === PICTURE && picPx && layout.some(Boolean)) await savePicture(batch, { ...packPicture(picPx, DETAIL, picLook), ids: pictureIds }, go);
       for (let i = CHUNK; i < ids.length; i += CHUNK) {
         go.textContent = `Depositing ${i}–${Math.min(i + CHUNK, ids.length)}…`;
         await send({ address: config.factory, abi: factoryAbi, functionName: 'deposit', args: [batch, ids.slice(i, i + CHUNK)] });
-      }
-      // A Picture union keeps its picture, so its page can recommend the Credit for each open slot.
-      if (painted && chosen === PICTURE && picPx && layout.some(Boolean)) {
-        await fetch(`/pictures/${batch}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...packPicture(picPx, DETAIL, picLook), ids: pictureIds }) }).catch(() => {});
       }
       // Any layout burns in the format its preview shows (the creator's pick, set as it opens); Consolidated is the default.
       if (viewing !== 'Consolidated' && config.formats) {

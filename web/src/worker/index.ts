@@ -36,6 +36,7 @@ import { ALWAYS, CSP, HSTS } from './headers';
 import { fromJson, toJson } from '../shared/json';
 import { idsKey } from '../shared/ids';
 import { keep, type Kept } from './keeper';
+import { pictureMessage, pictureRecord } from '../shared/picture-save';
 
 interface RateLimit {
   limit(o: { key: string }): Promise<{ success: boolean }>;
@@ -544,7 +545,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   }
 
   // A Picture union's picture (64 × 80 RGBA, base64, and the Detail it was matched with): the page it was made on keeps it here, so every visitor's union
-  // page can recommend the Credit that draws each open slot best. Once per union: the first save stands.
+  // page can recommend the Credit that draws each open slot best. Only the union's creator saves it, signed; they can
+  // change it until anyone else joins, then it stands.
   // /market/moved: a transaction of ours that moved Credits (a buy or a deposit). Its receipt says which Credits left
   // whom; the market book drops those listings now instead of at its next read of the chain.
   if (url.pathname === '/market/moved') {
@@ -665,23 +667,35 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     if (!sameSite(req)) return text('forbidden', 403);
     if (await limited(env.RL_MISC, req, 5)) return text('slow down', 429);
     const raw = await readBody(req, 40_000);
-    let px = '', detail = NaN, ids: (number | null)[] | null = null, look: string | null = null;
+    // The picture as kept (shared/picture-save.ts: the pixels and Detail, the Credit picked for each slot for list
+    // cards, the format it was matched in), and its creator's signature over it.
+    let record: string | null = null, sig = '';
     try {
-      const b = JSON.parse(raw ?? '') as { px?: unknown; detail?: unknown; ids?: unknown; look?: unknown };
-      // The format it was matched in, when not Consolidated (the union page plans and draws in it).
-      if (b.look === 'Assessed' || b.look === 'Reconciled') look = b.look;
-      px = String(b.px ?? '');
-      detail = Number(b.detail);
-      // The Credit picked for each slot, for list cards: 80 of them (null where none was for sale).
-      if (Array.isArray(b.ids) && b.ids.length === 80 && b.ids.every((x) => x === null || (Number.isInteger(x) && inSupply(x as number)))) ids = b.ids as (number | null)[];
+      const b = JSON.parse(raw ?? '') as Record<string, unknown>;
+      record = pictureRecord(b);
+      sig = String(b.sig ?? '');
     } catch {}
-    if (!/^[A-Za-z0-9+/]{27307}=$/.test(px) || !(detail >= 0 && detail <= 4)) return text('bad picture', 400); // 20,480 bytes
+    if (!record) return text('bad picture', 400);
+    if (!/^0x(?:[0-9a-fA-F]{2}){1,4096}$/.test(sig)) return text('the union’s creator signs its picture', 403);
     if (!(await isBatch(env, url, batch))) return text('not a batch', 404);
+    const c = client(env);
+    const s = (await c.readContract({ address: batch, abi: batchAbi, functionName: 'summary' })) as unknown as { state: number; creator: Address; filter: { layout0: bigint; layout1: bigint; layoutTrait: number } };
     // Only a sheet painted by Colors can use one.
-    const f = ((await client(env).readContract({ address: batch, abi: batchAbi, functionName: 'summary' })) as { filter: { layout0: bigint; layout1: bigint; layoutTrait: number } }).filter;
+    const f = s.filter;
     if ((!f.layout0 && !f.layout1) || Number(f.layoutTrait) !== 0) return text('not a painted union', 400);
-    if (await env.PLANS.get(key)) return text('already has a picture', 409);
-    await env.PLANS.put(key, JSON.stringify({ px, detail, ...(ids ? { ids } : {}), ...(look ? { look } : {}) }));
+    // Only its creator saves it: signed for this union, on this chain, for exactly this picture. A smart wallet's
+    // signature is checked by the wallet itself (ERC-1271).
+    const message = pictureMessage(batch, Number(env.CHAIN_ID), record);
+    if (!(await c.verifyMessage({ address: s.creator, message, signature: sig as Hex, mode: 'eoa' }).catch(() => false))) return text('the union’s creator signs its picture', 403);
+    // A saved picture can change until anyone but its creator joins, then stands: they joined for it. Pictures saved
+    // before signing was asked for stand the same way.
+    if (await env.PLANS.get(key)) {
+      const [, depositors] = (await c.readContract({ address: batch, abi: batchAbi, functionName: 'slots' })) as readonly [readonly bigint[], readonly Address[]];
+      if (Number(s.state) !== 0 || depositors.some((d) => d.toLowerCase() !== s.creator.toLowerCase())) return text('already has a picture', 409);
+    }
+    await env.PLANS.put(key, record);
+    // This data center's inked copy was of the old one.
+    ctx.waitUntil(caches.default.delete(new Request(`${url.origin}/pictures-inked/${batch}`)));
     return new Response(null, { status: 201 });
   }
 
