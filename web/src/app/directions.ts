@@ -2,7 +2,7 @@
 /// contract lists them. Issued is the sheet itself; the other seven are drawn from the Credits' ink
 /// (shared/statement.ts), so a preview is what the contract draws.
 import { compose, inkOf, paint as paintMarks, PAGE, SHOWN, slotBox, type Direction, type Ink } from '../shared/statement';
-import { ratings } from './data';
+import { seeds, type Seed } from './data';
 import { drawPicture, type Pick } from './pictures';
 
 /// The create page adds its Rules view to the same row.
@@ -206,7 +206,6 @@ export async function sheetInks(host: HTMLElement): Promise<{ list: (Ink | null)
 }
 
 /// A Credit's seed never changes, so what's been read is kept in this browser too: a repeat visit draws at once.
-type Seed = [string, number, number]; // seed, paid at, score
 const SEEDS = 'cu-seeds-v1', KEEP = 4000; // keys are 'c' + id, so they keep insertion order (oldest drop first)
 let kept: Record<string, Seed> = {};
 try {
@@ -242,43 +241,39 @@ function load(slots: readonly (string | null)[]): Promise<(Ink | null)[]> {
   }
   const need = [...new Set(slots.filter((s): s is string => !!s && !inks.has(s)))];
   if (need.length) {
-    const read = ratings(need.map(BigInt)).then(
-      (r) => r.ratings,
-      () => {
-        for (const id of need) inks.delete(id); // try again next time
-        return {} as Awaited<ReturnType<typeof ratings>>['ratings'];
-      },
-    );
+    const read = seeds(need).catch(() => {
+      for (const id of need) inks.delete(id); // try again next time
+      return {} as Record<string, Seed>;
+    });
     for (const id of need)
       inks.set(id, read.then((r) => {
         const v = r[id];
-        if (!v?.seed) return null;
-        keep(id, [v.seed, v.paidAt, v.score]);
-        return inkOf(v.seed, v.paidAt, v.score);
+        if (!v?.[0]) return null;
+        keep(id, v);
+        return inkOf(v[0], v[1], v[2]);
       }));
   }
   return Promise.all(slots.map((s) => (s ? (inks.get(s) ?? null) : null)));
 }
 
 /// Each Credit's seed and payment second (what its art is drawn from), from this browser's keep or a ratings read.
-/// Asked for in the same moment (every card on a page), they go out together, 200 to a request.
+/// Asked for in the same moment (every card on a page), they go out together, 500 to a request.
 const seedReads = new Map<string, Promise<Seed | null>>();
 let seedAsk: Map<string, (v: Seed | null) => void> | null = null;
 async function askSeeds() {
   const all = seedAsk!;
   seedAsk = null;
   const ids = [...all.keys()];
-  for (let i = 0; i < ids.length; i += 200) {
-    const part = ids.slice(i, i + 200);
-    const r = await ratings(part.map(BigInt)).then((x) => x.ratings, () => null);
+  for (let i = 0; i < ids.length; i += 500) {
+    const part = ids.slice(i, i + 500);
+    const r = await seeds(part).catch(() => null);
     for (const id of part) {
-      const v = r?.[id];
-      if (!v?.seed) {
+      const seed = r?.[id];
+      if (!seed?.[0]) {
         seedReads.delete(id); // asked again next time
         all.get(id)!(null);
         continue;
       }
-      const seed: Seed = [v.seed, v.paidAt, v.score];
       keep(id, seed);
       all.get(id)!(seed);
     }

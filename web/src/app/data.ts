@@ -3,6 +3,7 @@ import { batchAbi, creditsAbi, factoryAbi, unionFormatsAbi } from './abi';
 import { adapterAbi } from './adapter-abi';
 import { config, onTx, pub } from './chain';
 import { fromJson } from '../shared/json';
+import { binsVersion } from './bins';
 
 export const STATES = ['Open', 'Full', 'Expired', 'Auction', 'Settled'] as const;
 export type StateName = (typeof STATES)[number];
@@ -65,17 +66,44 @@ export type Rated = {
 /// drawn again (a live refresh) asks only for Credits it hasn't seen.
 const rated = new Map<string, Rated>();
 let ratedOf: { n: number; version: string } | null = null;
+/// /ratings for these ids, 200 to a request (500 for inks), each a GET the edge and the browser keep (sorted, so the
+/// same Credits make the same URL; ?v= names the edition files the answer was worked out from).
+async function rate<T>(ids: readonly string[], form: '' | 'scores' | 'inks'): Promise<T[]> {
+  const all = [...ids].sort((a, b) => Number(a) - Number(b));
+  const per = form === 'inks' ? 500 : 200;
+  return Promise.all(
+    Array.from({ length: Math.ceil(all.length / per) }, async (_, i) => {
+      const r = await fetch(`/ratings?ids=${all.slice(i * per, i * per + per).join(',')}${form ? `&${form}` : ''}&v=${binsVersion}`);
+      if (!r.ok) throw new Error('Ratings unavailable.');
+      return r.json() as Promise<T>;
+    }),
+  );
+}
 export async function ratings(ids: readonly bigint[]): Promise<{ n: number; version: string; ratings: Record<string, Rated> }> {
   const all = [...new Set(ids.map(String))];
   const want = all.filter((id) => !rated.has(id));
   if (want.length || !ratedOf) {
-    const r = await fetch('/ratings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: want.length ? want : all }) });
-    if (!r.ok) throw new Error('Ratings unavailable.');
-    const j = (await r.json()) as { n: number; version: string; ratings: Record<string, Rated> };
-    ratedOf = { n: j.n, version: j.version };
-    for (const [id, v] of Object.entries(j.ratings ?? {})) rated.set(id, v);
+    for (const j of await rate<{ n: number; version: string; ratings: Record<string, Rated> }>(want.length ? want : all, '')) {
+      ratedOf = { n: j.n, version: j.version };
+      for (const [id, v] of Object.entries(j.ratings ?? {})) rated.set(id, v);
+    }
   }
   return { ...ratedOf!, ratings: Object.fromEntries(all.flatMap((id) => (rated.has(id) ? [[id, rated.get(id)!]] : []))) };
+}
+
+/// What drawing these Credits takes, each one's seed, payment second and score (a quarter of a full rating's bytes):
+/// from ratings already read here, else /ratings?inks.
+export type Seed = [string, number, number];
+export async function seeds(ids: readonly string[]): Promise<Record<string, Seed>> {
+  const out: Record<string, Seed> = {};
+  const want: string[] = [];
+  for (const id of new Set(ids)) {
+    const r = rated.get(id);
+    if (r) out[id] = [r.seed, r.paidAt, r.score];
+    else want.push(id);
+  }
+  if (want.length) for (const j of await rate<{ inks?: Record<string, Seed> }>(want, 'inks')) Object.assign(out, j.inks);
+  return out;
 }
 
 /// A set of Credits' Credit Rating as a Statement made of them states it: the scores in ten-thousandths, summed, then
@@ -91,13 +119,7 @@ const scored = new Map<string, number>();
 export async function scores(ids: readonly bigint[]): Promise<Map<string, number>> {
   const all = [...new Set(ids.map(String))];
   const want = all.filter((id) => !scored.has(id) && !rated.has(id));
-  await Promise.all(
-    Array.from({ length: Math.ceil(want.length / 200) }, async (_, i) => {
-      const r = await fetch('/ratings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: want.slice(i * 200, i * 200 + 200), scores: true }) });
-      if (!r.ok) throw new Error('Ratings unavailable.');
-      for (const [id, v] of Object.entries(((await r.json()) as { scores?: Record<string, number> }).scores ?? {})) scored.set(id, v);
-    }),
-  );
+  if (want.length) for (const j of await rate<{ scores?: Record<string, number> }>(want, 'scores')) for (const [id, v] of Object.entries(j.scores ?? {})) scored.set(id, v);
   return new Map(all.flatMap((id) => { const v = scored.get(id) ?? rated.get(id)?.score; return v === undefined ? [] : [[id, v] as const]; }));
 }
 

@@ -1,6 +1,7 @@
 import { config, session } from '../chain';
 import { listBatches, notice, readNotice, ratingTotal, scores, type Listed, type Summary, hasLayout, layoutSlot, placeOnLayout } from '../data';
 import { placedKeys } from '../slots';
+import { idsKey } from '../../shared/ids';
 import { hydrate, who } from '../ens';
 import { fitByBatch } from '../fit';
 import { editionArt, examples, fillGhosts, hasPlan, planGhosts, registerDeposits, registerFilter } from '../ghosts';
@@ -8,7 +9,7 @@ import type { Address } from 'viem';
 import { clock, eth, esc, openModal, pageHead, same, sheet, startsAt, statementArt, timeLeft, toast, until } from '../ui';
 import { TRAIT_KINDS, parseTrait, type TraitValue } from '../../shared/trait';
 import { creditsOf, takes } from './trait';
-import { drawStill, primeInks, showStill, warmInks } from '../directions';
+import { drawStill, primeInks, showStill } from '../directions';
 import { outbidNow } from '../outbid';
 import { onReturn } from '../visible';
 import { whale } from './whale';
@@ -171,18 +172,54 @@ async function totalCards(list: Listed[]) {
   return true;
 }
 
+/// Every card's data in one request (/pictures/cards), not one per card: the saved pictures of the unions that can
+/// have one (without their pixels) and the edge's /placed answers for layout unions' Credits, their ink primed as it
+/// lands. Shared by placeCards and pictureCards (a page calls both at once); what it lacks, each reads on its own.
+type Saved = { ids?: (number | null)[]; inks?: Record<string, [string, number, number]>; look?: Direction };
+type Cards = { pictures: Record<string, Saved | null>; placed: Record<string, { ids?: string[]; keys?: number[]; inks?: Record<string, [string, number, number]> }> };
+const canPicture = (b: Listed) => (b.s.state === 'Open' || b.s.state === 'Full') && hasLayout(b.s.filter) && !Number(b.s.filter.layoutTrait ?? 0);
+const canPlace = (b: Listed) => b.ids.length > 0 && hasLayout(b.s.filter) && (b.s.state === 'Open' || b.s.state === 'Full');
+const cardAsks = new Map<string, Promise<Cards>>();
+function cardsOf(list: Listed[]): Promise<Cards> {
+  const p = list.filter((b) => canPicture(b) && !pictureRead.has(b.s.address)).map((b) => b.s.address.toLowerCase());
+  const k = list.filter((b) => canPlace(b) && !placements.has(placeKey(b))).map((b) => `${b.s.address.toLowerCase()}.${idsKey(b.ids)}`);
+  const key = `${p}|${k}`;
+  let ask = cardAsks.get(key);
+  if (!ask) {
+    const parts: Promise<Cards | null>[] = [];
+    for (let i = 0; i < Math.max(p.length, k.length); i += 60)
+      parts.push(fetch(`/pictures/cards?p=${p.slice(i, i + 60).join(',')}&k=${k.slice(i, i + 60).join(',')}`).then((r) => (r.ok ? (r.json() as Promise<Cards>) : null), () => null));
+    const got = Promise.all(parts).then((all) => {
+      const out: Cards = { pictures: {}, placed: {} };
+      for (const d of all) if (d) Object.assign(out.pictures, d.pictures), Object.assign(out.placed, d.placed);
+      for (const x of Object.values(out.placed)) primeInks(x?.inks);
+      return out;
+    });
+    cardAsks.set(key, (ask = got));
+    void got.finally(() => cardAsks.delete(key));
+  }
+  return ask;
+}
+
 /// Layout batches before the burn: each Credit in the slot it will burn into, as the union page shows it.
 const placements = new Map<string, (bigint | null)[]>(); // by address:count, so a new deposit re-places
 const placeKey = (b: { s: { address: Address }; ids: readonly bigint[] }) => `${b.s.address.toLowerCase()}:${b.ids.length}`;
 const placing = new Map<string, Promise<Map<string, number> | null>>();
 export async function placeCards(list: Listed[]) {
-  const todo = list.filter((b) => b.ids.length && hasLayout(b.s.filter) && (b.s.state === 'Open' || b.s.state === 'Full') && !placements.has(placeKey(b)));
+  const todo = list.filter((b) => canPlace(b) && !placements.has(placeKey(b)));
+  const cards = todo.length ? cardsOf(list) : null;
   await Promise.all(
     todo.map(async (b) => {
       // A page drawn twice at once (a wallet reconnecting as it loads) shares the read in flight.
       const k = placeKey(b);
       let read = placing.get(k);
-      if (!read) placing.set(k, (read = placedKeys(b.s.address, b.ids).catch(() => null).finally(() => placing.delete(k))));
+      // The batch's answer when the edge had it, else /placed for this one.
+      const batched = async () => {
+        const got = (await cards)?.placed[b.s.address.toLowerCase()];
+        const m = got?.ids && got.keys ? new Map(got.ids.map((id, i) => [id, got.keys![i]] as const)) : null;
+        return m && b.ids.every((id) => m.has(id.toString())) ? m : null;
+      };
+      if (!read) placing.set(k, (read = batched().then((m) => m ?? placedKeys(b.s.address, b.ids)).catch(() => null).finally(() => placing.delete(k))));
       const keys = await read;
       if (!keys) return;
       const slots = Array.from({ length: 80 }, (_, i) => layoutSlot(b.s.filter, i));
@@ -214,15 +251,17 @@ const pictureReading = new Map<Address, Promise<{ ids?: (number | null)[]; inks?
 /// A picture matched in another format than Consolidated (its saved `look`), per union: its card draws in it.
 const looks = new Map<string, Direction>();
 export async function pictureCards(list: Listed[]) {
-  const todo = list.filter((b) => (b.s.state === 'Open' || b.s.state === 'Full') && hasLayout(b.s.filter) && !Number(b.s.filter.layoutTrait ?? 0) && !pictureRead.has(b.s.address));
+  const todo = list.filter((b) => canPicture(b) && !pictureRead.has(b.s.address));
+  const cards = todo.length ? cardsOf(list) : null;
+  const alone = (a: Address) => fetch(`/pictures/${a}`).then((r) => (r.ok ? (r.json() as Promise<Saved | null>) : null));
   const found = await Promise.all(
     todo.map(async (b) => {
       let read = pictureReading.get(b.s.address);
       if (!read)
         pictureReading.set(
           b.s.address,
-          (read = fetch(`/pictures/${b.s.address}`)
-            .then((r) => (r.ok ? (r.json() as Promise<{ ids?: (number | null)[]; inks?: Record<string, [string, number, number]>; look?: Direction }>) : null))
+          (read = Promise.resolve(cards)
+            .then((c) => (c && b.s.address.toLowerCase() in c.pictures ? (c.pictures[b.s.address.toLowerCase()] ?? null) : alone(b.s.address)))
             .catch(() => null)
             .finally(() => pictureReading.delete(b.s.address))),
         );
@@ -232,8 +271,8 @@ export async function pictureCards(list: Listed[]) {
         if (pictures.delete(b.s.address)) savePictures();
         return false;
       }
+      // The planned Credits' ink came with the picture; what's in already comes with its placing (placeCards).
       primeInks(d.inks);
-      warmInks(b.ids); // what's in already (the planned Credits' ink came with the picture)
       if (d.look) looks.set(b.s.address.toLowerCase(), d.look);
       if (!pictures.has(b.s.address)) (pictures.add(b.s.address), savePictures());
       if (d.ids) planGhosts(b.s.address, d.ids);

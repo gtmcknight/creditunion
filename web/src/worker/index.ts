@@ -23,7 +23,7 @@ import { setSpareKey, best, bestOrder, bestPage, events, quote, scan, type Cand,
 import type { Row } from './market';
 import { cacheStore, confirmListing, marketListings, type FwaListing } from './fwa';
 import { confirmStrategy, strategyAbi, strategyListings } from './strategy';
-import { ratings, loadTable } from './ratings';
+import { inks, ratings, loadTable } from './ratings';
 import { buyStatement, statementsForSale } from './statements-market';
 import { load, loadScores, match, predicate, type Rules } from './match';
 import { cardFor, creditCard, creditsCard, partyCard, rangeCard, ruleLine, timeCard, traitCard, withCard, type Filter } from './og';
@@ -219,6 +219,11 @@ async function readBody(req: Request, max: number): Promise<string | null> {
     off += p.byteLength;
   }
   return new TextDecoder().decode(all);
+}
+
+/// SHA-256 of a string, as hex: a short cache key for a long query.
+async function sha(s: string): Promise<string> {
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 /// Charges `n` hits to the caller's limit; true if any of them is over.
@@ -485,13 +490,21 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   // Design-time counts: how many Credits in the edition satisfy a rule set.
   // { many: [rules…] } (up to 50): each answered in turn, as { many: [answer…] }, for a page that needs several (the
   // union cards' examples) in one request.
+  // GET ?q=<the same JSON> answers the same, kept a day at the edge and by the browser (?v= names the edition files).
   if (url.pathname === '/edition/match') {
-    if (req.method !== 'POST' || !sameSite(req)) return text('forbidden', 403);
+    const get = req.method === 'GET';
+    if ((!get && req.method !== 'POST') || !sameSite(req)) return text('forbidden', 403);
+    const q = get ? (url.searchParams.get('q') ?? '') : '';
+    const v = (url.searchParams.get('v') ?? '').slice(0, 200).replace(/[^0-9a-f.]/g, '');
+    // Which rating table rule checks use (the factory's now) is part of an answer: the edge keeps it under that too.
+    const edge = get && q.length <= 12_000 ? new Request(`${url.origin}/edition/match-cache/v1/${v}/${(await liveTable(env)) ? 'live' : 'first'}/${await sha(q)}`) : null;
+    const hit = edge && (await caches.default.match(edge));
+    if (hit) return hit;
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
     let asks: { rules: Rules; page: number; key: string }[];
     let many = false;
     try {
-      const raw = await readBody(req, 64_000);
+      const raw = get ? (q.length <= 12_000 ? q : null) : await readBody(req, 64_000);
       if (raw === null) return text('too large', 413);
       const b = JSON.parse(raw) as Record<string, unknown>;
       many = Array.isArray(b.many);
@@ -516,7 +529,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         }
         out.push(m);
       }
-      return Response.json(many ? { many: out } : out[0], { headers: { 'cache-control': 'no-store' } });
+      const res = Response.json(many ? { many: out } : out[0], { headers: { 'cache-control': edge ? 'public, max-age=86400' : 'no-store' } });
+      if (edge) ctx.waitUntil(caches.default.put(edge, res.clone()));
+      return res;
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502 });
     }
@@ -638,6 +653,47 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502 });
     }
+  }
+
+  // Card data for a page of unions in one request, not one per card: ?p= unions' saved pictures (as /pictures/<union>
+  // answers, less the 20 KB of pixels a card never draws from) and ?k= <union>.<ids key> layout unions' /placed answers
+  // where the edge already holds them (the page reads the rest from /placed). At most 100 of each; kept a minute.
+  if (url.pathname === '/pictures/cards') {
+    if (req.method !== 'GET' || !sameSite(req)) return text('forbidden', 403);
+    const list = (k: string) => [...new Set((url.searchParams.get(k) ?? '').toLowerCase().split(',').filter(Boolean))].sort();
+    const pics = list('p'), keyed = list('k');
+    if (pics.length > 100 || keyed.length > 100 || pics.some((a) => !/^0x[0-9a-f]{40}$/.test(a)) || keyed.some((x) => !/^0x[0-9a-f]{40}\.[0-9a-z]{1,8}-\d{1,2}$/.test(x)))
+      return text('bad request', 400);
+    const key = new Request(`${url.origin}/pictures/cards-cache/v1?p=${pics.join(',')}&k=${keyed.join(',')}`);
+    const hit = await caches.default.match(key);
+    if (hit) return hit;
+    if (await limited(env.RL_MISC, req, 1 + Math.ceil(pics.length / 20))) return text('slow down', 429);
+    const pictures: Record<string, unknown> = {}, placed: Record<string, unknown> = {};
+    await Promise.all([
+      // Each picture through its own route (its edge copy, else KV and its Credits' ink), ten at a time.
+      (async () => {
+        for (let i = 0; i < pics.length; i += 10)
+          await Promise.all(
+            pics.slice(i, i + 10).map(async (a) => {
+              const one = new URL(`/pictures/${a}`, url.origin);
+              const r = await handle(new Request(one), env, ctx, one).catch(() => null);
+              const d = r?.ok ? ((await r.json().catch(() => undefined)) as { px?: unknown } | null | undefined) : undefined;
+              if (d === undefined) return; // unread: the page asks for it alone
+              if (d) delete d.px;
+              pictures[a] = d;
+            }),
+          );
+      })(),
+      // The edge's copy of each /placed answer (its key there: /placed-cache/v2/<union>/<ids key>); no chain read here.
+      ...keyed.map(async (x) => {
+        const [a, v] = x.split('.');
+        const got = await caches.default.match(new Request(`${url.origin}/placed-cache/v2/${a}/${v}`));
+        if (got) placed[a] = await got.json().catch(() => undefined);
+      }),
+    ]);
+    const res = Response.json({ pictures, placed }, { headers: { 'cache-control': 'public, max-age=60' } });
+    ctx.waitUntil(caches.default.put(key, res.clone()));
+    return res;
   }
 
   // /placed/<union>: a layout union's Credits in deposit order, the value it recorded for each (Batch.keyOf: which
@@ -906,27 +962,47 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
 
   // Official ratings for up to 200 Credits, computed from the frozen edition (see shared/credits.ts). `scores: true`
   // returns just each score, for totals (the list's Top rated sort).
+  // GET ?ids=1,2,3 the same, kept at the edge and by the browser (a Credit's rating never changes); with &scores, as
+  // `scores: true`; with &inks, each one's seed, payment second and score: all a drawing of it takes.
   if (url.pathname === '/ratings') {
-    if (req.method !== 'POST' || !sameSite(req)) return text('forbidden', 403);
-    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
-    let ids: bigint[], only = false;
+    const get = req.method === 'GET';
+    if ((!get && req.method !== 'POST') || !sameSite(req)) return text('forbidden', 403);
+    let ids: bigint[], form: 'full' | 'scores' | 'inks' = 'full';
     try {
-      const raw = await readBody(req, 16_000);
-      if (raw === null) return text('too large', 413);
-      const body = JSON.parse(raw) as { ids?: unknown; scores?: unknown };
-      only = body.scores === true;
-      if (!Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > 200) throw 0;
-      ids = body.ids.map((x) => {
+      let list: unknown[] = [];
+      if (get) {
+        list = (url.searchParams.get('ids') ?? '').split(',');
+        form = url.searchParams.has('inks') ? 'inks' : url.searchParams.has('scores') ? 'scores' : 'full';
+      } else {
+        const raw = await readBody(req, 16_000);
+        if (raw === null) return text('too large', 413);
+        const body = JSON.parse(raw) as { ids?: unknown; scores?: unknown };
+        if (body.scores === true) form = 'scores';
+        if (Array.isArray(body.ids)) list = body.ids;
+      }
+      if (list.length === 0 || list.length > (form === 'inks' ? 500 : 200)) throw 0; // inks are read, not worked out
+      ids = list.map((x) => {
         if (!/^\d{1,6}$/.test(String(x)) || !inSupply(Number(x))) throw 0;
         return BigInt(String(x));
       });
     } catch {
       return text('bad request', 400);
     }
+    // Keyed by the edition files the app names (?v=) too: a deploy with new ones starts afresh.
+    const v = (url.searchParams.get('v') ?? '').slice(0, 200).replace(/[^0-9a-f.]/g, '');
+    const edge = get ? new Request(`${url.origin}/ratings-cache/v1/${form}/${v}/${[...new Set(ids.map(Number))].sort((a, b) => a - b).join('.')}`) : null;
+    const hit = edge && (await caches.default.match(edge));
+    if (hit) return hit;
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
     try {
-      const r = await ratings({ assets: env.ASSETS, origin: url.origin, rpcs: rpcList(env), kv: env.PLANS, credits: env.CREDITS, ids });
-      const out = only ? { n: r.n, version: r.version, scores: Object.fromEntries(Object.entries(r.ratings).map(([id, v]) => [id, v.score])) } : r;
-      return Response.json(out, { headers: { 'cache-control': 'no-store' } });
+      const ask = { assets: env.ASSETS, origin: url.origin, rpcs: rpcList(env), kv: env.PLANS, credits: env.CREDITS, ids };
+      const out = form === 'inks' ? await inks(ask) : await ratings(ask).then((r) => (form === 'scores' ? { n: r.n, version: r.version, scores: Object.fromEntries(Object.entries(r.ratings).map(([id, v]) => [id, v.score])) } : r));
+      // Every Credit asked about answered (a busy RPC can leave some unread): kept a day, else not at all.
+      const got = 'inks' in out ? out.inks : 'scores' in out ? out.scores : out.ratings;
+      const whole = !!edge && Object.keys(got).length === new Set(ids.map(String)).size;
+      const res = Response.json(out, { headers: { 'cache-control': whole ? 'public, max-age=86400' : 'no-store' } });
+      if (whole) ctx.waitUntil(caches.default.put(edge!, res.clone()));
+      return res;
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502 });
     }

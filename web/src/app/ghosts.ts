@@ -68,7 +68,8 @@ function keepMatch(body: string, m: Match) {
   }, 1000);
 }
 
-/// Asks made in the same moment (a page of cards) go to the Worker together, 50 to a request.
+/// Asks made in the same moment (a page of cards) go to the Worker together, 40 to a request: a GET the edge and the
+/// browser keep (the same page asks the same, so the next visitor's comes from the edge).
 let queue: { body: string; done: (m: Match | null) => void }[] = [];
 let flushing: ReturnType<typeof setTimeout> | null = null;
 function ask(body: string): Promise<Match | null> {
@@ -81,10 +82,10 @@ async function flush() {
   const q = queue;
   queue = [];
   flushing = null;
-  for (let i = 0; i < q.length; i += 50) {
-    const part = q.slice(i, i + 50);
+  for (let i = 0; i < q.length; i += 40) {
+    const part = q.slice(i, i + 40);
     try {
-      const r = await fetch('/edition/match', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ many: part.map((x) => JSON.parse(x.body)) }) });
+      const r = await fetch(`/edition/match?q=${encodeURIComponent(JSON.stringify({ many: part.map((x) => JSON.parse(x.body)) }))}&v=${binsVersion}`);
       const d = r.ok ? ((await r.json()) as { many?: Partial<Match>[] }) : null;
       part.forEach((x, k) => {
         const m = d?.many?.[k];

@@ -93,7 +93,7 @@ async function seeds(rpcs: string[], credits: Address, ids: bigint[]): Promise<{
   return { out, failed };
 }
 
-export async function ratings(o: {
+type Ask = {
   assets: Fetcher;
   origin: string;
   rpcs: string[];
@@ -101,8 +101,36 @@ export async function ratings(o: {
   ids: bigint[];
   /// Where seeds are kept once for every data center (the colo cache is per data center).
   kv?: KVNamespace;
-}): Promise<{ n: number; version: string; ratings: Record<string, Rated> }> {
+};
+
+export async function ratings(o: Ask): Promise<{ n: number; version: string; ratings: Record<string, Rated> }> {
   const ed = await loadEdition(o.assets, o.origin);
+  const known = await seedsOf(o);
+  const out: Record<string, Rated> = {};
+  const t = o.credits.toLowerCase() === MAINNET_CREDITS ? await loadTable(o.assets, o.origin) : null;
+  for (const [id, [seed, paidAt]] of known) {
+    const r = rate(seed, paidAt, ed);
+    const i = Number(id) - 1;
+    out[id] = t ? { id, seed, paidAt, ...r, score: t.score[i] / 10_000, rank: t.rank[i], rule: t.rule[i] } : { id, seed, paidAt, ...r, rule: Math.round(r.score * 10) };
+  }
+  return { n: ed.n, version: t ? 'onchain' : '3.4.0', ratings: out };
+}
+
+/// What drawing a Credit takes, its seed, payment second and score, without the rest of its rating: on mainnet the
+/// score is the table's, so nothing is worked out.
+export async function inks(o: Ask): Promise<{ n: number; version: string; inks: Record<string, [string, number, number]> }> {
+  const t = o.credits.toLowerCase() === MAINNET_CREDITS ? await loadTable(o.assets, o.origin) : null;
+  if (!t) {
+    const r = await ratings(o);
+    return { n: r.n, version: r.version, inks: Object.fromEntries(Object.entries(r.ratings).map(([id, v]) => [id, [v.seed, v.paidAt, v.score]])) };
+  }
+  const [ed, known] = await Promise.all([loadEdition(o.assets, o.origin), seedsOf(o)]);
+  return { n: ed.n, version: 'onchain', inks: Object.fromEntries([...known].map(([id, [seed, paidAt]]) => [id, [seed, paidAt, t.score[Number(id) - 1] / 10_000]])) };
+}
+
+/// Each Credit's seed and payment second: this data center's copy, else KV's, else the chain. Ids that can't be read
+/// now are left out.
+async function seedsOf(o: Ask): Promise<Map<string, [string, number]>> {
   const cache = caches.default;
   const key = (id: bigint) => new Request(`${o.origin}/seed2/${o.credits.toLowerCase()}/${id}`);
   const known = new Map<string, [string, number]>();
@@ -144,12 +172,5 @@ export async function ratings(o: {
     // Ids the RPCs couldn't read at all are left out for now, not remembered as missing.
     await Promise.all(unread.filter((id) => !fresh.has(id.toString()) && !failed.has(id.toString())).map((id) => cache.put(key(id), Response.json(null, { headers: { 'cache-control': 'public, max-age=60' } }))));
   }
-  const out: Record<string, Rated> = {};
-  const t = o.credits.toLowerCase() === MAINNET_CREDITS ? await loadTable(o.assets, o.origin) : null;
-  for (const [id, [seed, paidAt]] of known) {
-    const r = rate(seed, paidAt, ed);
-    const i = Number(id) - 1;
-    out[id] = t ? { id, seed, paidAt, ...r, score: t.score[i] / 10_000, rank: t.rank[i], rule: t.rule[i] } : { id, seed, paidAt, ...r, rule: Math.round(r.score * 10) };
-  }
-  return { n: ed.n, version: t ? 'onchain' : '3.4.0', ratings: out };
+  return known;
 }
