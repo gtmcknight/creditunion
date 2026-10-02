@@ -155,7 +155,11 @@ export async function send(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { request } = await pub.simulateContract({ ...(req as any), account: session.account });
   try {
-    const hash = await session.wallet.writeContract({ ...request, chain } as never);
+    const hash = await session.wallet.writeContract({ ...request, chain } as never).catch(async (e) => {
+      // Short of gas money, wallets say things like "Unexpected error". Check before passing their word on.
+      if (!/rejected|denied/i.test(String((e as Error)?.message ?? e))) await coversGas(request as never);
+      throw e;
+    });
     onHash?.(hash);
     // No time limit while the network can see it: a slow transaction is still pending, and calling it failed would
     // invite a second one. A speed-up in the wallet lands as this one; a cancel, or another transaction on its
@@ -176,6 +180,23 @@ export async function send(
   } finally {
     settled();
   }
+}
+
+/// Throws a plain message when the wallet can't cover value plus gas at today's max fee (what wallets reserve).
+async function coversGas(req: { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[]; value?: bigint }) {
+  const ok = await Promise.all([
+    pub.getBalance({ address: session.account! }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    pub.estimateContractGas({ ...(req as any), account: session.account }),
+    pub.estimateFeesPerGas(),
+  ]).then(
+    ([have, gas, fees]) => {
+      const need = (req.value ?? 0n) + ((gas * 3n) / 2n) * (fees.maxFeePerGas ?? 0n); // wallets pad the gas limit
+      return have >= need ? null : `Not enough ETH for gas. This needs about ${short(need)}; your wallet has ${short(have)}.`;
+    },
+    () => null,
+  );
+  if (ok) throw new Error(ok);
 }
 
 const short = (wei: bigint) => `${Number(formatEther(wei)).toFixed(4)} ETH`;
