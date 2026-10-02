@@ -170,6 +170,8 @@ const AUCTION_MS = 4_000;
 /// A bid that lost the race to someone else's: the page redraws with the new minimum filled in (`bidAgain`).
 class Outbid extends Error {}
 const bidAgain = new Set<string>();
+/// A bid typed signed out, kept for the drawing after the wallet connects.
+let typedBid: { at: string; v: string } | null = null;
 /// How long after this wallet's own transaction the page reads the chain rather than the index.
 const TX_MS = 30_000;
 
@@ -876,18 +878,23 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>, pending = false) {
   const myUnits = early ? b.ids.reduce((n, id, i) => (myIds.has(String(id)) ? n + 237n - 2n * BigInt(i) : n), 0n) : BigInt(m?.shares ?? 0);
   const perUnit = (s.highBid - (s.highBid * BigInt(s.protocolFeeBps)) / 10_000n - (s.highBid * BigInt(s.creatorFeeBps)) / 10_000n) / (early ? 12_640n : 80n);
   const myShare = early ? sharePct(Number(myUnits) / 12_640) : `${m?.shares ?? 0}/80`;
+  // Signed out, the same box with the next bid in it, and Connect to bid where Bid goes: what it takes shows before
+  // connecting, as on Multibid.
+  const bidBox = (button: string) => `<form class="bid-form" id="bid-form"><label class="field"><input id="bid" inputmode="decimal" autocomplete="off" placeholder="${hasMin ? minEth(s.minBid) : '0.1'}"${again} aria-label="Bid in ETH"><span>ETH</span></label>${button}</form>
+             <p class="small muted">${hasMin ? `<button type="button" class="link bid-min" data-fill="${minEth(s.minBid)}">Min ${minEth(s.minBid)}</button>` : ''}<span class="bid-wallet" hidden></span>${hasMin ? '. ' : ''}Outbid ETH returns instantly. Credit Union is unofficial and experimental, so use it at your own risk.</p>`;
+  // No bids yet: the least the first may be (Batch.minBid). There's no reserve, so it's the opening bid.
+  const opening = s.reserve > 0n && s.minBid === s.reserve ? 'Reserve' : 'Opening bid';
   return `<div class="box">
     <div class="bid-now">
-      <div><span>${s.highBid ? (ended ? 'Winning bid' : 'Current bid') : hasMin ? 'Reserve' : 'Opening bid'}</span><strong class="num">${s.highBid ? eth(s.highBid) : hasMin ? `${minEth(s.minBid)} ETH` : 'Any'}</strong><em class="sub">${s.highBid ? `by ${who(s.highBidder, 'sm', true)}` : 'The clock starts at the first bid.'}</em></div>
+      <div><span>${s.highBid ? (ended ? 'Winning bid' : 'Current bid') : opening}</span><strong class="num">${s.highBid ? eth(s.highBid) : hasMin ? `${minEth(s.minBid)} ETH` : 'Any'}</strong><em class="sub">${s.highBid ? `by ${who(s.highBidder, 'sm', true)}` : 'The clock starts at the first bid.'}</em></div>
       <div><span>${ended ? 'Ended' : 'Ends in'}</span><strong class="num"${s.highBid && !ended ? ` data-countdown="${s.auctionEnd}"` : ''}>${!s.highBid ? '24h' : ended ? ago(s.auctionEnd) : until(s.auctionEnd)}</strong>${!ended ? '<em class="sub">Late bids add 15 min</em>' : ''}</div>
     </div>
     ${
       ended
         ? `<div class="stack"><button class="btn primary block" id="settle">Settle auction</button><p class="small muted center">Sends the Statement to the winner and pays every member.</p></div>`
-        : m
-          ? `<form class="bid-form" id="bid-form"><label class="field"><input id="bid" inputmode="decimal" autocomplete="off" placeholder="${hasMin ? minEth(s.minBid) : '0.1'}"${again} aria-label="Bid in ETH"><span>ETH</span></label><button class="btn primary">Bid</button></form>
-             <p class="small muted">${hasMin ? `<button type="button" class="link bid-min" data-fill="${minEth(s.minBid)}">Min ${minEth(s.minBid)}</button>` : ''}<span class="bid-wallet" hidden></span>${hasMin ? '. ' : ''}Outbid ETH returns instantly. Credit Union is unofficial and experimental, so use it at your own risk.</p>`
-          : connect
+        : pending && !m
+          ? connect
+          : bidBox(session.account ? '<button class="btn primary">Bid</button>' : '<button type="button" class="btn primary" data-connect>Connect to bid</button>')
     }
     ${m?.shares ? `<p class="small">Your share <strong class="num">${myShare}</strong>${s.highBid ? ` · <span class="num">≈${eth(perUnit * myUnits)}</span> now` : ''}</p>` : ''}
     ${owed}
@@ -1065,8 +1072,12 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
   // The minimum fills the box; beside it, what your wallet holds.
   document.querySelector<HTMLElement>('.bid-min')?.addEventListener('click', (e) => {
     const input = document.getElementById('bid') as HTMLInputElement | null;
-    if (input) (input.value = (e.currentTarget as HTMLElement).dataset.fill ?? ''), input.focus();
+    if (input) (input.value = (e.currentTarget as HTMLElement).dataset.fill ?? ''), input.focus(), input.dispatchEvent(new Event('input'));
   });
+  // A bid typed before connecting is still in the box when the page draws again with the wallet.
+  const bidIn = document.getElementById('bid') as HTMLInputElement | null;
+  if (bidIn && !session.account) bidIn.addEventListener('input', () => (typedBid = { at: s.address.toLowerCase(), v: bidIn.value.trim() }));
+  else if (bidIn && typedBid?.at === s.address.toLowerCase()) (bidIn.value ||= typedBid.v), (typedBid = null);
   const wallet = document.querySelector<HTMLElement>('.bid-wallet');
   if (wallet && session.account)
     void pub.getBalance({ address: session.account }).then((bal) => {
@@ -1077,6 +1088,8 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
 
   document.getElementById('bid-form')?.addEventListener('submit', (e) => {
     e.preventDefault();
+    // Signed out, Enter asks to connect, as the button beside the box does.
+    if (!session.account) return void (e.currentTarget as HTMLElement).querySelector<HTMLElement>('[data-connect]')?.click();
     const input = document.getElementById('bid') as HTMLInputElement;
     let value: bigint;
     try {

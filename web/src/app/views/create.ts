@@ -194,23 +194,37 @@ async function savePicture(batch: Address, pic: Omit<Stored, 'ids'> & { ids: (nu
 
 // ---------------------------------------------------------------- page
 
-export async function create(app: HTMLElement) {
-  if (!session.account) {
-    app.innerHTML = `
-    <section class="narrow"><h1>Start a Credit Union</h1><p class="lede">Set the rules, add your Credits, invite everyone. At 80 they burn into a Statement and everyone in splits the sale.</p>
-    <button class="btn primary" data-connect>Connect wallet</button></section>`;
-    return;
-  }
+/// The page as drawn signed out: connecting brings your Credits into it without drawing it again, so a design made
+/// before connecting stays.
+let signedOut: { app: HTMLElement; connect: (account: Address) => void } | null = null;
+/// Drawings of the page started: one that a newer one (a wallet answering late) overtook stops before drawing.
+let draws = 0;
 
-  // The page draws at once. Your Credits come in when the wallet answers (the Deposit picker says so meanwhile), the
-  // factory's numbers (the minimum to open, the fees, the score table) behind them; Start waits for both.
+export async function create(app: HTMLElement) {
+  // Drawn signed out, connected since (the router draws the page again on a wallet change): your Credits come in.
+  if (session.account && signedOut?.app === app && app.querySelector('#create')) {
+    const page = signedOut;
+    signedOut = null;
+    return page.connect(session.account);
+  }
+  signedOut = null;
+  const drawing = ++draws;
+
+  // The page draws at once, signed out too: the layouts, the rules and the preview need no wallet, only Start does.
+  // Your Credits come in when the wallet answers (the Deposit picker says so meanwhile), the factory's numbers (the
+  // minimum to open, the fees, the score table) behind them; Start waits for both.
   app.innerHTML = `<header class="create-head"><h1>Start a Credit Union</h1><p class="create-lede">Set the rules, add your Credits, invite everyone. At 80 they burn into a Statement and everyone in splits the sale.</p></header>`;
-  const account = session.account;
-  const walletRead = Promise.all([myCredits(account), isApproved(account)]);
+  let account = session.account;
+  const readOf = (a: Address) => {
+    const read = Promise.all([myCredits(a), isApproved(a)]);
+    read.catch(() => {});
+    return read;
+  };
+  let walletRead = account ? readOf(account) : null;
   const factoryRead = Promise.all([minOpen(), protocolFeeBps(), creatorFeeBps(), factoryRatings()]);
-  walletRead.catch(() => {});
   factoryRead.catch(() => {});
   const minutes = await fetch('/minutes.json').then((r) => r.json() as Promise<Minutes>).catch(() => [] as Minutes);
+  if (drawing !== draws) return;
   let factoryIn = false;
   let isOk = false; // the factory may move your Credits (read with them)
   let min = 1, protocolBps = 0, creatorBps = 0;
@@ -398,14 +412,14 @@ export async function create(app: HTMLElement) {
 
   // ---------------------------------------------------------------- your Credits' traits (for the live preview)
   const mine = new Map<string, Rated>();
-  let traitsIn = false;
+  let traitsIn = !account; // signed out there are none to read
   /// Once you pick or unpick a Credit yourself, the page stops picking for you.
   let pickedByHand = false;
-  (async () => {
+  const readWallet = async (read: NonNullable<typeof walletRead>) => {
     // Your Credits, once the wallet answers (awaiting it also lets the page finish setting up first).
     let held: readonly bigint[];
     try {
-      [held, isOk] = await walletRead;
+      [held, isOk] = await read;
     } catch {
       const p = document.getElementById('picker');
       if (p) p.innerHTML = '<p class="muted">Couldn’t read your wallet. Refresh to try again.</p>';
@@ -425,7 +439,9 @@ export async function create(app: HTMLElement) {
     traitsIn = true;
     refresh();
     void paintFromPicture(); // a picture framed while they were read, with yours in it
-  })();
+  };
+  if (walletRead) void readWallet(walletRead);
+  else document.getElementById('picker')!.innerHTML = '<p class="muted">Connect to see which of your Credits fit.</p>';
 
   // ---------------------------------------------------------------- buy Credits that fit, when none of yours do
   // The Credits explorer's Buy row, over the cheapest listings these rules take, without its own button: the Start
@@ -443,7 +459,8 @@ export async function create(app: HTMLElement) {
     const el = document.getElementById('create-buy')!;
     if (picturing()) return drawPictureBuy(el);
     if (mazeOn()) return void ((el.hidden = true), (buyer = null));
-    if (fits || !traitsIn || rules.list.length || !config.sweeper) {
+    // Signed out it can't know whether yours fit, so it doesn't offer to buy instead.
+    if (fits || !traitsIn || !account || rules.list.length || !config.sweeper) {
       el.hidden = true;
       buyFor = '';
       buyer = null;
@@ -720,15 +737,19 @@ export async function create(app: HTMLElement) {
     const short = eligible >= 0 && eligible < 80 ? `Only ${eligible} ${eligible === 1 ? 'Credit' : 'Credits'} can ever join, and a Credit Union needs 80. Widen the rules.` : '';
     // A picture: none of its Colors may skip a slot.
     const gap = picturing() ? gapOf(picPlan!, [...picks, ...buying().map((l) => l.id)]) : null;
-    const reason = mazeOn() ? (maze ? '' : 'Making a maze…') : tooNarrow || short || (gap ? `Add #${gap} too: it goes in before the ones you picked.` : '') || (n < min && traitsIn ? (picturing() ? (picPlan!.mine.size ? 'Pick one of yours, or buy one of its first Credits.' : 'Buy at least one of the picture’s first Credits to start it.') : `Select at least ${min} of your qualifying Credits.`) : n > 80 ? 'At most 80.' : over ? overText(over) : '');
+    const reason = mazeOn() ? (maze ? '' : 'Making a maze…') : tooNarrow || short || (gap ? `Add #${gap} too: it goes in before the ones you picked.` : '') || (n < min && traitsIn && account ? (picturing() ? (picPlan!.mine.size ? 'Pick one of yours, or buy one of its first Credits.' : 'Buy at least one of the picture’s first Credits to start it.') : `Select at least ${min} of your qualifying Credits.`) : n > 80 ? 'At most 80.' : over ? overText(over) : '');
     // One line under the button: what blocks it, else how it plays out.
     // What blocks Start sits above it as a warning; the line under it always says how it plays out.
     const warn = document.getElementById('warn')!;
     warn.textContent = reason;
     warn.hidden = !reason;
     why.innerHTML = `${n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions. ` : ''}Free to start a Credit Union. ${picturing() && buyToStart ? 'Yours can come back out while you’re its only member.' : 'Withdraw your Credits anytime until it fills and locks.'}<br>${factoryIn ? `${protocolBps / 100}% protocol fee, only if it sells. ` : ''}Unofficial and experimental.`;
-    go.disabled = !!reason || !traitsIn || !factoryIn || mazeOn(); // your Credits and their traits are in (traitsIn), and the factory's numbers
-    if (!go.dataset.busy) go.textContent = startLabel();
+    // Signed out, Start is the one thing that asks to connect; the design stays as it is while the wallet does.
+    const connectFirst = !account && !mazeOn();
+    go.type = connectFirst ? 'button' : 'submit';
+    go.toggleAttribute('data-connect', connectFirst);
+    go.disabled = !connectFirst && (!!reason || !traitsIn || !factoryIn || mazeOn()); // your Credits and their traits are in (traitsIn), and the factory's numbers
+    if (!go.dataset.busy) go.textContent = connectFirst ? 'Connect to start' : startLabel();
     drawSummary();
 
     clearTimeout(editionTimer);
@@ -792,7 +813,7 @@ export async function create(app: HTMLElement) {
           const o = overPainted();
           if (o) {
             why.textContent = overText(o);
-            go.disabled = true;
+            go.disabled = !go.hasAttribute('data-connect');
           }
         }
         if (!el.isConnected) return;
@@ -1788,6 +1809,7 @@ export async function create(app: HTMLElement) {
   // ---------------------------------------------------------------- open
   document.getElementById('create')!.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (!session.account) return; // Start reads Connect to start until a wallet is in
     const reserve = 0n; // no reserve: the auction opens at its minimum bid
     if (rules.idTo && rules.idFrom > rules.idTo) return toast('The number range is backwards.', 'err');
     if (rules.list.length > 200) return toast('At most 200 listed Credits.', 'err');
@@ -2155,6 +2177,18 @@ export async function create(app: HTMLElement) {
   applyPanes();
 
   refresh();
+  // Signed out: connecting brings your Credits in here, with the design as you left it.
+  if (!account)
+    signedOut = {
+      app,
+      connect: (a) => {
+        account = a;
+        traitsIn = false;
+        document.getElementById('picker')!.innerHTML = '<p class="muted">Reading your wallet…</p>';
+        void readWallet((walletRead = readOf(a)));
+        refresh();
+      },
+    };
   // The factory's numbers: the minimum shown and checked, the fee line, and what Start sends along.
   void factoryRead.then(
     ([m, p, c, t]) => {

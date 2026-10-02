@@ -6810,6 +6810,26 @@ a.quiet:hover { text-decoration: underline; text-underline-offset: 3px; }
 .logo .mark { opacity: 1; }
 .main-nav { justify-self: center; margin-left: 0; }
 @media (max-width: 720px) { .logo .logo-word { display: none; } }
+/* Docs: small, at the right before the theme switch, quieter than the centre nav. */
+.side-nav .docs-link { padding: 0 8px; font-size: 13px; }
+/* Phones: equal side columns gave the mark the account's width and pushed Market under Connect. The nav takes what
+   the mark and the account leave, centred in it, and tightens; Docs steps aside where there's no room for it. */
+@media (max-width: 560px) {
+  .top { grid-template-columns: auto minmax(0, 1fr) auto; gap: 0; }
+}
+@media (max-width: 480px) {
+  .main-nav a { padding: 0 5px; font-size: 14px; }
+  .side-nav .docs-link { padding: 0 6px; }
+  #account [data-connect] { padding: 0 10px; }
+}
+@media (max-width: 400px) {
+  .side-nav .docs-link { display: none; }
+}
+@media (max-width: 360px) {
+  .logo .mark { width: 26px; }
+  .main-nav a { padding: 0 4px; }
+  #account [data-connect] { padding: 0 8px; }
+}
 
 /* Eight to a row, as the Statement is laid out; four on phones. Equal columns whatever the captions say. */
 .trait-grid { grid-template-columns: repeat(8, minmax(0, 1fr)); }
