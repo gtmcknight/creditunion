@@ -1590,8 +1590,8 @@ async function bindBuy(
   const ctl = sweepControls(host, sale, grid, { button: false, cap: 80 - b.s.count, onPick: () => (label(), order && chooseSpots('buy', chosen().map((l) => l.id))), along });
   chosen = ctl.chosen;
   label();
-  // Live: the listings that fit, read again every 20 s (the worker's scan of them is cached 30 s). The cheapest that
-  // many show, and any you picked stay while they're listed.
+  // Live: the listings that fit, read again every 20 s (the Worker scans the market for them at most once a minute,
+  // and drops what sold in between). The cheapest that many show, and any you picked stay while they're listed.
   keepLive(
     grid,
     async () => {
