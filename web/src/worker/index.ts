@@ -74,6 +74,10 @@ interface Env {
   FWA_MARKET?: string;
   /// UnionFormats: where each union's creator picks its Statement format. Zero until deployed.
   FORMATS?: string;
+  /// Token unions (TokenAdapter's factory, the adapter, that factory's UnionFormats). Empty until deployed.
+  TOKEN_FACTORY?: string;
+  TOKEN_ADAPTER?: string;
+  TOKEN_FORMATS?: string;
   /// CreditStrategy (nftstrategy.fun) on mainnet: the Credits it holds for sale are a third Buy Credits source.
   /// Empty to turn it off.
   STRATEGY?: string;
@@ -344,6 +348,9 @@ const publicConfig = (env: Env) => ({
   ratings: env.RATINGS && !/^0x0+$/.test(env.RATINGS) ? env.RATINGS : null,
   fwaMarket: addrOrNull(env.FWA_MARKET),
   formats: addrOrNull(env.FORMATS),
+  tokenFactory: addrOrNull(env.TOKEN_FACTORY),
+  tokenAdapter: addrOrNull(env.TOKEN_ADAPTER),
+  tokenFormats: addrOrNull(env.TOKEN_FORMATS),
 });
 
 /// /edition/match answers kept per isolate: the edition never changes within a deploy, and every visitor of /unions
@@ -2049,7 +2056,7 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
   // Every call in a batch counts against the limit, not just the request (one was charged above).
   if (await limited(env.RL_RPC, req, calls.length - 1)) return text('slow down', 429);
 
-  const allowed = new Set([env.CREDITS, env.FACTORY, env.SWEEPER, addrOrNull(env.FORMATS)].map((a) => a?.toLowerCase()).filter(Boolean));
+  const allowed = new Set([env.CREDITS, env.FACTORY, env.SWEEPER, addrOrNull(env.FORMATS), addrOrNull(env.TOKEN_FACTORY), addrOrNull(env.TOKEN_ADAPTER), addrOrNull(env.TOKEN_FORMATS)].map((a) => a?.toLowerCase()).filter(Boolean));
   const clean: { jsonrpc: string; id: unknown; method: string; params: unknown[] }[] = [];
   // Targets outside `allowed`, by the call that first names each. They are checked together below (Credits' art
   // contract once, each batch address once, in parallel), not one call at a time.
@@ -2735,8 +2742,11 @@ async function isBatch(env: Env, url: URL, addr: Address): Promise<boolean> {
   const hit = await cache.match(key);
   if (hit) return (await hit.text()) === '1';
   let ok = false;
+  // A union from either factory: the auction one, or the token one once it's deployed (same Batch code).
+  const tokens = addrOrNull(env.TOKEN_FACTORY);
   try {
     ok = await client(env).readContract({ address: env.FACTORY, abi: factoryAbi, functionName: 'isBatch', args: [addr] });
+    if (!ok && tokens) ok = await client(env).readContract({ address: tokens, abi: factoryAbi, functionName: 'isBatch', args: [addr] });
   } catch {
     return false;
   }

@@ -16,6 +16,7 @@ import { markOutbidSeen, offerAlerts } from '../outbid';
 import { activityFold, ago } from './live';
 import { $$, art, clock, errText, dayAndTime, esc, eth, openModal, same, setRange, sheet, short, startsAt, statementArt, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
+import { converted, isTokenUnion, mountTokens } from '../tokens';
 import { slotName } from '../../shared/layout';
 import { compose, DIRECTIONS, paint as paintMarks, PAGE, SHOWN, type Direction } from '../../shared/statement';
 import { go as navigate } from '../main';
@@ -831,6 +832,9 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>, pending = false) {
     </div>`;
   }
 
+  // A token union converted instead of auctioning: its box is drawn by mountTokens (bind).
+  if (converted(s.statement)) return '<div id="token-box"></div>';
+
   // Auction or Settled
   const ended = s.highBid > 0n && Date.now() / 1000 >= s.auctionEnd;
   const per = s.payoutPerShare;
@@ -887,6 +891,8 @@ function buyPane(connected: boolean) {
 
 function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: Map<string, number> | null) {
   const s = b.s;
+  let tokenish = false; // a token union: its burn converts instead of opening an auction
+  void isTokenUnion(s.address).then((v) => (tokenish = v));
   const run = async (btn: HTMLElement | null, label: string, fn: () => Promise<unknown>, ok: string) => {
     if (btn) {
       btn.setAttribute('disabled', '');
@@ -1009,11 +1015,14 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
       document.getElementById('assemble')?.addEventListener('click', (e) =>
         run(e.currentTarget as HTMLElement, 'Converting…', () =>
           send({ address: s.address, abi: batchAbi, functionName: 'assemble', gas: 16_000_000n }, txNote),
-        'The Statement exists. Auction is open.'),
+        tokenish ? 'The Statement is in the vault. Pay out the tokens.' : 'The Statement exists. Auction is open.'),
       );
     };
     void show();
   }
+
+  const tokenBox = document.getElementById('token-box');
+  if (tokenBox) void mountTokens(tokenBox, s.address, run, rerender);
 
   document.getElementById('settle')?.addEventListener('click', (e) =>
     run(e.currentTarget as HTMLElement, 'Settling…', () =>

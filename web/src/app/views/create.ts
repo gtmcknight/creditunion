@@ -3,7 +3,8 @@ import { dice, printGlyph, swatch, weightGlyph } from '../glyphs';
 import { decodeEventLog, parseEther, type Address } from 'viem';
 import { creditsAbi, factoryAbi, unionFormatsAbi } from '../abi';
 import { compose, DIRECTIONS, paint as paintMarks, PAGE, type Direction } from '../../shared/statement';
-import { canBatch, config, send, sendBatch, session } from '../chain';
+import { canBatch, config, pub, send, sendBatch, session } from '../chain';
+import { tokensOn } from '../tokens';
 import { INK, maskInks, maskLabel } from '../traits';
 import { earlyWeight, placeOnLayout, SPLITS, creatorFeeBps, factoryRatings, isLiveTable, liveTenths, rulesBin, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Listed, type Rated, type Summary } from '../data';
 import { paletteBit, TRAITS } from '../traits';
@@ -29,6 +30,11 @@ const ARR_OPTS: [number, string, string][] = [
   [8, 'Wave', 'Each row as long as its Credit’s ink.'],
   [9, 'Maze', 'One way through, from 80 Credits for sale.'],
 ];
+/// What happens at 80: the Statement is auctioned and the sale split, or it converts into tokens split the same way.
+const END_HINTS = {
+  auction: 'The Statement is auctioned for 24 hours and the sale is split.',
+  tokens: 'The Statement converts into tokens, split the same way. No auction.',
+};
 /// Picture is Painted on-chain: the tile only changes how the paint is made.
 const PICTURE = 6;
 /// Wave is Painted on-chain too (a Colors per slot, made for you); Maze is these 80 Credits, in order.
@@ -232,6 +238,8 @@ export async function create(app: HTMLElement) {
   /// Testnets can't buy, so there it leans on yours.
   const buyToStart = !!config.sweeper;
   /// Picture is the layout and its sheet is designed: only the picture's own Credits go in, each Colors in order.
+  /// Tokens picked under When it burns (only once the token factory is deployed).
+  const endingTokens = () => tokensOn() && app.querySelector<HTMLInputElement>('input[name=ending]:checked')?.value === 'tokens';
   let maze: Maze | null = null; // the Maze layout's 80, once planned
   const mazeOn = () => app.querySelector<HTMLInputElement>('input[name=arr]:checked')?.value === String(MAZE);
   const picturing = () => !!picPlan && layout.some(Boolean) && app.querySelector<HTMLInputElement>('input[name=arr]:checked')?.value === String(PICTURE);
@@ -356,6 +364,13 @@ export async function create(app: HTMLElement) {
 
       <div class="pay-field" role="radiogroup" aria-label="Payout"><span>Payout</span>
         <div class="pay-opts">${SPLITS.map((l, i) => `<label class="pay-opt"><input type="radio" name="split" value="${i}" ${i === 0 ? 'checked' : ''}><span class="pay-head"><b>${l}</b><span class="num">${PAYOUT_HINTS[i]}</span></span>${payoutChart(i)}</label>`).join('')}</div>
+      </div>
+      <div class="pay-field end-field" role="radiogroup" aria-label="When it burns"><span>When it burns</span>
+        <div class="seg end-opts">
+          <label><input type="radio" name="ending" value="auction" checked><span>Auction</span></label>
+          <label${tokensOn() ? '' : ' class="soon" title="Coming soon"'}><input type="radio" name="ending" value="tokens"${tokensOn() ? '' : ' disabled'}><span>Tokens${tokensOn() ? '' : ' <em>Soon</em>'}</span></label>
+        </div>
+        <p class="term-desc muted" id="end-hint">${END_HINTS.auction}</p>
       </div>
 
       <h2 class="form-title"><span id="dep-title">Deposit Credits</span> <span class="muted num" id="n">Min ${min}</span><button type="button" class="link small" id="all">Select all that fit</button></h2>
@@ -1726,6 +1741,9 @@ export async function create(app: HTMLElement) {
     }
   });
   arrRadios.forEach((r) => r.addEventListener('change', syncOrder));
+  app.querySelectorAll<HTMLInputElement>('input[name=ending]').forEach((r) =>
+    r.addEventListener('change', () => (document.getElementById('end-hint')!.textContent = END_HINTS[r.value as keyof typeof END_HINTS])),
+  );
   // Paint straight onto the preview sheet: tap or drag across its slots.
   const slotAt = (x: number, y: number) => {
     const c = document.elementFromPoint(x, y)?.closest<HTMLElement>('#preview .cell');
@@ -1845,35 +1863,46 @@ export async function create(app: HTMLElement) {
     // A maze's list is the whole rule: nothing else may turn one of its Credits away.
     const f = mazeIds ? { ...filterOf(), palettes: 0, prints: 0, weights: 0, eights: 0, paidFrom: 0n, paidTo: 0n, idFrom: 0n, idTo: 0n, minScore: 0, maxScore: 0, layout0: 0n, layout1: 0n, bitsFrom: 0, bitsTo: 0, layoutTrait: 0 } : filterOf();
     const list = mazeIds ?? rules.list.map(BigInt);
+    // Tokens: the token factory opens it (same Batch, its burn converts the Statement and pays members tokens). Its
+    // fees and score table are read now, since create reverts if what it's sent differs.
+    const tokens = endingTokens();
+    const fac = tokens ? config.tokenFactory! : config.factory;
+    const formatsAt = tokens ? config.tokenFormats : config.formats;
     try {
+      let [pBps, cBps, tbl, ok] = [protocolBps, creatorBps, table, isOk];
+      if (tokens) {
+        const read = (functionName: 'protocolFeeBps' | 'creatorFeeBps' | 'ratings') => pub.readContract({ address: fac, abi: factoryAbi, functionName });
+        const [p, c, t, a] = await Promise.all([read('protocolFeeBps'), read('creatorFeeBps'), read('ratings'), pub.readContract({ address: config.credits, abi: creditsAbi, functionName: 'isApprovedForAll', args: [session.account!, fac] })]);
+        [pBps, cBps, tbl, ok] = [Number(p), Number(c), t as Address, a as boolean];
+      }
       const open = {
-        address: config.factory,
+        address: fac,
         abi: factoryAbi,
         functionName: 'create',
         // The fees and score table shown on this page go along: the open reverts if either changed underneath you.
-        args: [name, f, list, reserve, arr, split, BigInt(days * 86400), ids.slice(0, CHUNK), BigInt(protocolBps), BigInt(creatorBps), table],
+        args: [name, f, list, reserve, arr, split, BigInt(days * 86400), ids.slice(0, CHUNK), BigInt(pBps), BigInt(cBps), tbl],
       };
-      const approve = { address: config.credits, abi: creditsAbi, functionName: 'setApprovalForAll', args: [config.factory, true] };
+      const approve = { address: config.credits, abi: creditsAbi, functionName: 'setApprovalForAll', args: [fac, true] };
       let logs: { address: string; data: `0x${string}`; topics: readonly `0x${string}`[] }[];
-      if (!isOk && (await canBatch())) {
+      if (!ok && (await canBatch())) {
         // First party from this wallet, and the wallet batches: approve and open in one step.
         go.textContent = 'Opening…';
         const receipts = await sendBatch([approve, open]);
-        isOk = true;
+        if (!tokens) isOk = true;
         logs = receipts.flatMap((r) => r.logs);
       } else {
         // First party from this wallet: the factory needs permission to move your Credits, once.
-        if (!isOk) {
+        if (!ok) {
           go.textContent = 'Allow Credit Union to move your Credits…';
           await send(approve);
-          isOk = true;
+          if (!tokens) isOk = true;
         }
         go.textContent = 'Opening…';
         logs = (await send(open)).logs;
       }
       // Only the factory's own logs: any contract the call touched could emit a look-alike BatchCreated.
       const ev = logs
-        .filter((l) => l.address.toLowerCase() === config.factory.toLowerCase())
+        .filter((l) => l.address.toLowerCase() === fac.toLowerCase())
         .map((l) => {
           try {
             return decodeEventLog({ abi: factoryAbi, data: l.data, topics: l.topics as [`0x${string}`, ...`0x${string}`[]] });
@@ -1885,16 +1914,16 @@ export async function create(app: HTMLElement) {
       const batch = (ev?.args as { batch: `0x${string}` }).batch;
       for (let i = CHUNK; i < ids.length; i += CHUNK) {
         go.textContent = `Depositing ${i}–${Math.min(i + CHUNK, ids.length)}…`;
-        await send({ address: config.factory, abi: factoryAbi, functionName: 'deposit', args: [batch, ids.slice(i, i + CHUNK)] });
+        await send({ address: fac, abi: factoryAbi, functionName: 'deposit', args: [batch, ids.slice(i, i + CHUNK)] });
       }
       // A Picture union keeps its picture, so its page can recommend the Credit for each open slot.
       if (painted && chosen === PICTURE && picPx && layout.some(Boolean)) {
         await fetch(`/pictures/${batch}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...packPicture(picPx, DETAIL, picLook), ids: pictureIds }) }).catch(() => {});
       }
       // Any layout burns in the format its preview shows (the creator's pick, set as it opens); Consolidated is the default.
-      if (viewing !== 'Consolidated' && config.formats) {
+      if (viewing !== 'Consolidated' && formatsAt) {
         go.textContent = `Setting it to ${viewing}…`;
-        await send({ address: config.formats, abi: unionFormatsAbi, functionName: 'pick', args: [batch, DIRECTIONS.indexOf(viewing)] }).catch(() => toast(`It burns in Consolidated until it’s set to ${viewing}. Set it from its page.`, 'info', 8000));
+        await send({ address: formatsAt, abi: unionFormatsAbi, functionName: 'pick', args: [batch, DIRECTIONS.indexOf(viewing)] }).catch(() => toast(`It burns in Consolidated until it’s set to ${viewing}. Set it from its page.`, 'info', 8000));
       }
       // The party page picks this up and shows the congrats and share dialog, once.
       try {

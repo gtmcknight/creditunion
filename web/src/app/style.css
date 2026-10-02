@@ -9407,3 +9407,8 @@ a.whale-name:hover { text-decoration: underline; text-underline-offset: 3px; }
 #maze-route[aria-pressed='true'] { border-color: var(--fg); color: var(--fg); }
 .design-preview > .maze-run { grid-area: 1 / 1; display: block; width: 100%; aspect-ratio: 4 / 5; pointer-events: none; background: #fff; }
 @media (max-width: 820px) { .design-preview > .maze-run { display: none; } }
+/* When it burns: Auction or Tokens, one even pair; Tokens greys out with "Soon" until the token factory exists. */
+#create .end-field { margin-top: 28px; }
+.end-opts { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+.end-opts .soon { opacity: 0.55; cursor: not-allowed; }
+.end-opts em { font-style: normal; font-size: 11px; margin-left: 6px; color: var(--muted); }

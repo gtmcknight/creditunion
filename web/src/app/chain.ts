@@ -23,6 +23,11 @@ export type Config = {
   fwaMarket?: Address | null;
   /// UnionFormats: where a union's creator picks its Statement format.
   formats?: Address | null;
+  /// Token unions: a second factory whose burn puts the Statement in a vault and pays members its tokens
+  /// (TokenAdapter), and that factory's own UnionFormats. Null until the vault exists and they're deployed.
+  tokenFactory?: Address | null;
+  tokenAdapter?: Address | null;
+  tokenFormats?: Address | null;
 };
 
 const CHAINS: Record<number, Chain> = { 1: mainnet, 11155111: sepolia, 31337: foundry };
