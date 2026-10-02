@@ -697,12 +697,10 @@ function filterFromQuery(): { label: string; test: (b: Listed) => boolean } | nu
   return null;
 }
 
-/// Auctions → How it works: burn day in order, then the auction and the split. Same steps as the launch thread.
+/// Auctions → How it works: from a full union to the split.
 const HOW_STEPS: [string, string][] = [
-  ['Oct 1: Jack publishes the Statement contract', 'From then on, 80 Credits can burn into one Statement.'],
-  ['We build our burn contract', 'It lets Credit Unions use Jack’s contract. We test it first.'],
-  ['We launch it: 35 minute warning', 'Full unions (80/80) lock in 35 minutes. Until then, anyone can leave.'],
-  ['Full unions (80/80) lock for an hour', 'Withdrawals close. Anyone can press Convert Union to Statement to burn the 80 Credits.'],
+  ['A union fills (80/80)', 'A 5 minute countdown starts. Anyone can still leave.'],
+  ['It locks for an hour', 'Withdrawals close. Anyone can press Convert Union to Statement to burn the 80 Credits. If nobody does, it unlocks.'],
   ['The auction starts', 'No reserve. The 24 hour clock starts at the first bid.'],
   ['The auction ends', 'The Statement goes to the winner. The ETH goes to every member.'],
 ];

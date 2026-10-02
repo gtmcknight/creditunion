@@ -24,7 +24,7 @@ const cards = (): Card[] => [
     tag: 'Jack Butcher', official: true, q: 'What are Statements?',
     a: 'Also by Jack Butcher. Burn 80 Credits from one wallet and they become one Statement, a single work made of all 80.',
     art: grid(),
-    facts: [['80', 'Credits each'], ['1,526', 'Max, ever'], ['Oct 1', 'Burning opens']],
+    facts: [['80', 'Credits each'], ['1,526', 'Max, ever'], ['Oct 1', 'Burning opened']],
   },
   {
     tag: 'Credit Union', official: false, q: 'What is Credit Union?',
@@ -111,7 +111,7 @@ const sections = (): Section[] => [
       <li><b>Auction and split.</b> The Statement is auctioned onchain. There is no reserve. The auction runs 24 hours from the first bid, and a bid in the last 15 minutes resets the clock to 15 minutes. When the auction ends, the winner receives the Statement and every member is paid.</li>
     </ol>
     <h3 id="burning">When burning opens</h3>
-    <p>Jack’s Statement contract goes live on October 1. Our burn contract follows with a 30 minute public notice onchain, and then every full Union starts its countdown. Until then, Unions fill but never lock, so members can leave at any time.</p>
+    <p>Burning opened on October 1, when Jack’s Statement contract and our burn contract went live. Every full Union now counts down and locks as above.</p>
     <p>A Union has no deadline. It stays open until it fills and burns. If an hour passes without a burn, the Union unlocks and the cycle can repeat as many times as needed.</p>`,
   },
   {

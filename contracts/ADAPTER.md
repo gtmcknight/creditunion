@@ -48,12 +48,14 @@ it was switched on, and what can go wrong.
 - **Order.** Cell i of the Statement is the union's i-th Credit (`burnOrder()`), 8 across and 10 down, row by row.
 - **A picture's Credits keep their spots.** A picture's own layout order gives each Colors' spots to that Colors'
   Credits in the order they went in, so one early leave slides every later Credit of that Colors back a spot and
-  scrambles the picture. `record(union)` writes down where each Credit sits. Anyone can call it, and it only
-  ever writes `orderOf(union)`. From then on a leave opens only the leaver's spot, and the next Credit of that
-  Colors fills it. The site's keeper records after deposits and leaves. The burn puts recorded Credits in their
-  spots and the rest of each Colors in layout order, working only from the 80 the union hands over: always those
-  80, each in a spot of its own Colors. With nothing recorded, the burn is the layout order. The most this adds
-  to a burn is about 230k gas.
+  scrambles the picture. `record(union)` writes down where each Credit sits. Anyone can call it, and it only ever
+  writes `orderOf(union)`. From then on a leave opens only the leaver's spot, and the next Credit of that Colors
+  fills it. On the site, a leave saves the spots first when they aren't saved (one batch where the wallet allows,
+  else save, check, then leave), and the keeper records each picture once when it reaches 80/80. A leave sent
+  straight to the contract skips that, so Credits that joined since the last save can slide. The burn puts recorded
+  Credits in their spots and the rest of each Colors in layout order, working only from the 80 the union hands
+  over: always those 80, each in a spot of its own Colors. With nothing recorded, the burn is the layout order. The
+  most this adds to a burn is about 230k gas.
 - **Only the factory's unions** can use it, and it holds nothing between calls.
 - **`ADAPTER_READY`** kept the deploy script (`script/DeployAdapter.s.sol`) off mainnet until the fork test passed
   against the deployed Statements contract. It's true in the deployed adapter.
@@ -86,14 +88,14 @@ One address, the factory's **setter**, can propose an adapter. It has no other p
    - Every Credit Union already at 80 starts a **5-minute countdown**. Withdrawals still work, so it's a last
      chance to leave.
    - After the countdown the Credit Union is **locked for 1 hour**. Nobody can withdraw, and anyone can press
-     **Make Statement** (`assemble()`), paying the gas.
+     **Convert Union to Statement** (`assemble()`), paying the gas.
    - If nobody burns within the hour, the Credit Union unlocks. People can leave, and anyone can restart the
      countdown.
 8. **Statement auctions** run as they do today: 24 hours from the first bid, and the sale is split among the
    Credit Union.
 
-The site's keeper (`web/src/worker/keeper.ts`, every 5 minutes) activates the adapter once the notice has run and
-settles ended auctions. It never burns: every Statement is made by someone pressing Make Statement. The site shows
+The site's keeper (`web/src/worker/keeper.ts`, every 5 minutes) activates the adapter once the notice has run,
+settles ended auctions and records full pictures' spots. It never burns: every Statement is made by someone pressing Convert Union to Statement. The site shows
 the notice as a bar above every page, with when burning starts, in the viewer's own time. There is no race: a union's 80 are its own, and
 his contract has no cap beyond the Credits themselves.
 
