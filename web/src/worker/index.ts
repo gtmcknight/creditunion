@@ -1148,7 +1148,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   if (url.pathname === '/live') return Response.redirect(`${url.origin}/activity${url.search}`, 301);
 
   // /activity.json: what wallets have done on the site, newest first (activity.ts), served in slices:
-  //   ?limit=100 (max 1000)  ?after=<tx>:<i>:<kind> (the last row you have)  ?union=0x… or ?member=0x…  ?last
+  //   ?limit=100 (max 1000)  ?after=<tx>:<i>:<kind> (the last row you have)  ?union=0x… or ?member=0x…  ?last  ?bids
   // The whole list is built at most once per 15 seconds per colo; every slice is cut from it.
   if (url.pathname === '/activity.json') {
     // Local preview without an RPC key: .dev.vars can point this at the live site's feed.
@@ -1161,6 +1161,12 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         const last: Record<string, number> = {};
         for (const x of all) if (x.union && x.time && (x.kind === 'deposited' || (x.kind === 'bought' && x.intoUnion))) last[x.union.toLowerCase()] ??= x.time;
         return Response.json({ last }, { headers: { 'cache-control': 'public, max-age=15' } });
+      }
+      // ?bids: how many bids each union's auction has taken: { union: count }.
+      if (q.has('bids')) {
+        const bids: Record<string, number> = {};
+        for (const x of all) if (x.kind === 'bid' && x.union) bids[x.union.toLowerCase()] = (bids[x.union.toLowerCase()] ?? 0) + 1;
+        return Response.json({ bids }, { headers: { 'cache-control': 'public, max-age=15' } });
       }
       const union = q.get('union')?.toLowerCase(), member = q.get('member')?.toLowerCase(), after = q.get('after');
       const limit = Math.min(Math.max(Number(q.get('limit')) || 100, 1), 1000);

@@ -9277,38 +9277,51 @@ dialog.share .share-swatches button {
 .whale-each { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 4px 0 12px; }
 .whale-each label { display: flex; align-items: center; gap: 8px; color: var(--muted); }
 .whale-each input { width: 96px; height: 36px; text-align: right; }
+.whale-acts { display: flex; gap: 8px; }
 .whale-list { border-top: 1px solid var(--line); }
-.whale-row {
+.whale-row,
+.whale-head {
   display: grid;
-  grid-template-columns: 18px 56px minmax(0, 1fr) minmax(130px, auto) 132px;
-  grid-template-areas: 'pick art name now bid';
+  /* A ledger: words left, figures right, every column a fixed width but the name, and three groups set apart by
+     space (the Statement, its auction, your bid). */
+  grid-template-columns: 18px 28px minmax(0, 1fr) 148px 60px 16px 36px 96px 148px 72px 16px 112px;
+  grid-template-areas: 'pick art name creator members . bids now by ends . bid';
   align-items: center;
-  gap: 8px 16px;
-  padding: 12px 8px;
+  gap: 12px;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--line);
   cursor: pointer;
   transition: background 150ms var(--ease);
 }
+.whale-head { position: sticky; top: 0; z-index: 1; padding-top: 10px; padding-bottom: 6px; background: var(--bg); cursor: default; }
+.whale-head > * { font-weight: 400; white-space: nowrap; }
+.whale-row:not(.whale-head):hover { background: var(--raised); }
+/* Auctions you lead: a hairline of green at the row's edge, so a scan finds them. */
+.whale-row.lead { box-shadow: inset 2px 0 0 var(--ok); }
+.whale-row .who img { width: 16px; height: 16px; }
+.whale-head .whale-amt { height: auto; text-align: right; }
 .whale-row.on { background: var(--raised); }
 .whale-pick { grid-area: pick; appearance: auto; -webkit-appearance: checkbox; width: 18px; height: 18px; padding: 0; box-shadow: none; accent-color: var(--fg); cursor: pointer; }
-.whale-art { grid-area: art; position: relative; display: block; width: 56px; aspect-ratio: 76 / 95; background: var(--empty); border-radius: 3px; overflow: hidden; }
-.whale-name { grid-area: name; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.whale-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.whale-now { grid-area: now; display: flex; flex-direction: column; gap: 2px; text-align: right; }
-.whale-now strong { font-weight: 500; }
-.whale-bid { grid-area: bid; display: flex; flex-direction: column; gap: 4px; }
-.whale-amt { height: 36px; text-align: right; }
-.whale-min { text-align: right; }
+.whale-art { grid-area: art; position: relative; display: block; width: 28px; aspect-ratio: 76 / 95; background: var(--empty); border-radius: 2px; overflow: hidden; box-shadow: 0 0 0 1px var(--line); }
+.whale-name { grid-area: name; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.whale-creator { grid-area: creator; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.whale-members { grid-area: members; text-align: right; white-space: nowrap; }
+.whale-bids { grid-area: bids; text-align: right; white-space: nowrap; }
+.whale-by { grid-area: by; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.whale-now { grid-area: now; text-align: right; white-space: nowrap; font-weight: 500; }
+.whale-ends { grid-area: ends; text-align: right; white-space: nowrap; }
+.whale-amt { grid-area: bid; height: 32px; text-align: right; }
 .whale-row.low .whale-amt { box-shadow: inset 0 0 0 1.5px var(--err); }
-.whale-row.low .whale-min { color: var(--err); }
 .whale-bar { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; gap: 12px; padding: 12px 0; margin-top: 8px; background: var(--bg); border-top: 1px solid var(--line); }
 .whale-sum { font-weight: 500; white-space: nowrap; }
 .whale-why { flex: 1; color: var(--muted); }
 .whale-bar .btn { margin-left: auto; white-space: nowrap; }
 @media (max-width: 640px) {
-  .whale-row { grid-template-columns: 18px 48px minmax(0, 1fr) 112px; grid-template-areas: 'pick art name bid' 'pick art now bid'; }
-  .whale-art { width: 48px; }
-  .whale-now { text-align: left; }
+  .whale-row { grid-template-columns: 18px 24px minmax(0, 1fr) auto 84px; grid-template-areas: 'pick art name now bid' 'pick art ends ends bid'; row-gap: 0; }
+  .whale-head { display: none; }
+  .whale-art { width: 24px; }
+  .whale-by, .whale-bids, .whale-members, .whale-creator { display: none; }
+  .whale-ends { text-align: left; }
   .whale-bar { flex-wrap: wrap; }
   .whale-why { order: 3; flex-basis: 100%; }
 }

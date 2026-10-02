@@ -7,7 +7,7 @@ import { batchAbi } from '../abi';
 import { canBatch, pub, send, sendBatch, session } from '../chain';
 import { listBatches, type Listed, type Summary } from '../data';
 import { hydrate, who } from '../ens';
-import { clock, errText, esc, eth, ethNum, same, statementArt, toast } from '../ui';
+import { errText, esc, eth, ethNum, same, statementArt, toast } from '../ui';
 
 /// Biddable now: at auction, and its clock (if a first bid started it) still running.
 const biddable = (s: Summary) => s.state === 'Auction' && !(s.highBid && Date.now() / 1000 >= s.auctionEnd);
@@ -26,6 +26,34 @@ function weiOf(v: string): bigint | null {
 }
 
 let whaleRun = 0;
+/// Multibid's order, picked in the Auctions sort menu (lists.ts): the same orders as Live's.
+let whaleOrder = 'ending';
+let resort: (() => void) | null = null;
+export function whaleSort(k: string) {
+  if (k === whaleOrder) return;
+  whaleOrder = k;
+  resort?.();
+}
+const desc = (x: bigint, y: bigint) => (x === y ? 0 : x > y ? -1 : 1);
+/// ETH the way a statement prints it: three places, so the points line up down a column (the unit is in the header).
+const ledger = (wei: bigint, up = false) => {
+  const [i, d = ''] = ethNum(wei, 3, up).split('.');
+  return `${i}.${d.padEnd(3, '0')}`;
+};
+/// Time left, calm until it matters: hours and minutes, then minutes and seconds in the last hour.
+const left = (at: number) => {
+  const t = Math.max(0, Math.ceil(at - Date.now() / 1000));
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60);
+  return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}:${String(t % 60).padStart(2, '0')}`;
+};
+const byOrder = (k: string) => (a: Listed, b: Listed) => {
+  const x = a.s, y = b.s;
+  if (k === 'high') return desc(x.highBid, y.highBid) || x.auctionEnd - y.auctionEnd;
+  if (k === 'low') return desc(y.highBid || y.minBid, x.highBid || x.minBid) || x.auctionEnd - y.auctionEnd;
+  if (k === 'new') return y.assembledAt - x.assembledAt;
+  // Ending soon: running clocks, the soonest to end first; then those waiting for a first bid, newest first.
+  return Number(!x.highBid) - Number(!y.highBid) || (x.highBid ? x.auctionEnd - y.auctionEnd : y.assembledAt - x.assembledAt);
+};
 /// Draws into `host` (the Auctions page's tab body) and keeps itself current until `host` shows something else.
 export async function whale(host: HTMLElement) {
   const run = ++whaleRun;
@@ -39,25 +67,41 @@ export async function whale(host: HTMLElement) {
   // Whether this wallet bundles calls (EIP-5792): one confirmation for all, or one per bid. Null until asked.
   let bundles: boolean | null = null;
   let asked = '';
+  // Bids per auction, from the activity feed (a few seconds behind the chain).
+  let bidCount = new Map<string, number>();
 
   const read = async () => {
-    const all = await listBatches();
-    list = all.filter((b) => biddable(b.s)).sort((a, b) => Number(!a.s.highBid) - Number(!b.s.highBid) || (a.s.highBid ? a.s.auctionEnd - b.s.auctionEnd : b.s.assembledAt - a.s.assembledAt));
+    const [all, counts] = await Promise.all([
+      listBatches(),
+      fetch('/activity.json?bids').then((r) => r.json() as Promise<{ bids?: Record<string, number> }>).catch(() => ({}) as { bids?: Record<string, number> }),
+    ]);
+    if (counts.bids) bidCount = new Map(Object.entries(counts.bids));
+    list = all.filter((b) => biddable(b.s)).sort(byOrder(whaleOrder));
     for (const k of [...picked]) if (!list.some((b) => b.s.address.toLowerCase() === k)) picked.delete(k); // ended since
   };
 
   const row = (b: Listed) => {
     const s = b.s, k = s.address.toLowerCase();
     const lead = !!session.account && !!s.highBid && same(s.highBidder, session.account);
-    const now = s.highBid
-      ? `<strong>${eth(s.highBid)}</strong><span class="muted small">${lead ? '<span class="meta-win">You’re winning</span> · ' : ''}<span class="ends${s.auctionEnd - Date.now() / 1000 < LATE ? ' late' : ''}" data-ends="${s.auctionEnd}">${clock(s.auctionEnd)}</span></span>`
-      : `<strong>No bids</strong><span class="muted small">A first bid starts its 24 hours</span>`;
-    return `<label class="whale-row${picked.has(k) ? ' on' : ''}" data-union="${k}">
+    // One line each, under the column names: bids so far, the high bid and who holds it, its clock, and your bid,
+    // whose box shows the next bid until you type.
+    const n = Math.max(bidCount.get(k) ?? 0, s.highBid ? 1 : 0);
+    const members = new Set(b.depositors.map((d) => d.toLowerCase())).size;
+    const ends = s.highBid
+      ? `<span class="ends${s.auctionEnd - Date.now() / 1000 < LATE ? ' late' : ''}" data-ends="${s.auctionEnd}">${left(s.auctionEnd)}</span>`
+      : '24h';
+    const next = ledger(s.minBid, true);
+    return `<label class="whale-row${picked.has(k) ? ' on' : ''}${lead ? ' lead' : ''}" data-union="${k}">
       <input type="checkbox" class="whale-pick"${picked.has(k) ? ' checked' : ''} aria-label="Bid on ${esc(s.name || 'this Statement')}">
       <span class="whale-art statement-host">${statementArt(s.statementId)}</span>
-      <span class="whale-name"><strong>${esc(s.name || 'Untitled')}</strong><span class="muted small">${who(s.creator, 'sm', 'nested')}</span></span>
-      <span class="whale-now num">${now}</span>
-      <span class="whale-bid"><input type="text" inputmode="decimal" class="whale-amt num" value="${esc(amounts.get(k) ?? '')}" placeholder="${ethNum(s.minBid, 3, true)}" aria-label="Your bid in ETH"><span class="whale-min small muted num">Next bid ${ethNum(s.minBid, 3, true)}</span></span>
+      <strong class="whale-name">${esc(s.name || 'Untitled')}</strong>
+      <span class="whale-creator small">${who(s.creator, 'sm', 'nested')}</span>
+      <span class="whale-members muted small num">${members}</span>
+      <span class="whale-bids muted small num">${n}</span>
+      <strong class="whale-now num">${s.highBid ? ledger(s.highBid) : ''}</strong>
+      <span class="whale-by small">${!s.highBid ? '' : lead ? '<span class="meta-win">You</span>' : who(s.highBidder, 'sm', 'nested')}</span>
+      <span class="whale-ends muted small num">${ends}</span>
+      <input type="text" inputmode="decimal" class="whale-amt num" value="${esc(amounts.get(k) ?? '')}" placeholder="${next}" title="Next bid ${next}" aria-label="Your bid in ETH (next bid ${next})">
     </label>`;
   };
 
@@ -102,8 +146,8 @@ export async function whale(host: HTMLElement) {
     body.innerHTML = `
       <p class="whale-lede muted">Pick the auctions you want and what to bid on each. They go in together, and each has to be the new high bid.</p>
       <div class="whale-each"><label>Bid <input type="text" inputmode="decimal" id="whale-each" class="num" value="${esc(each)}" placeholder="1.0" aria-label="ETH on each"> ETH on each one you pick</label>
-        <button type="button" class="btn sm" id="whale-all">${picked.size === list.length ? 'Clear' : 'Pick all'}</button></div>
-      <div class="whale-list">${list.map(row).join('')}</div>
+        <span class="whale-acts"><button type="button" class="btn sm" id="whale-next">Next bid on each</button><button type="button" class="btn sm" id="whale-all">${picked.size === list.length ? 'Clear' : 'Pick all'}</button></span></div>
+      <div class="whale-list"><div class="whale-head small muted" aria-hidden="true"><span></span><span></span><span class="whale-name">Statement</span><span class="whale-creator">Creator</span><span class="whale-members">Members</span><span class="whale-bids">Bids</span><span class="whale-now">High bid (ETH)</span><span class="whale-by">Bidder</span><span class="whale-ends">Time left</span><span class="whale-amt">Your bid (ETH)</span></div>${list.map(row).join('')}</div>
       ${bar()}`;
     hydrate(body);
     for (const b of list) {
@@ -111,6 +155,13 @@ export async function whale(host: HTMLElement) {
       const w = weiOf(amounts.get(k) ?? '');
       if (picked.has(k) && w !== null && w < b.s.minBid) body.querySelector(`[data-union="${k}"]`)?.classList.add('low');
     }
+  };
+
+  // A new order from the sort menu: the same picks and amounts, redrawn in it.
+  resort = () => {
+    if (run !== whaleRun) return;
+    list.sort(byOrder(whaleOrder));
+    draw();
   };
 
   // Only the bar and the row's marks change while typing, so the field keeps its focus and caret.
@@ -186,6 +237,23 @@ export async function whale(host: HTMLElement) {
       for (const b of list) pick(b.s.address.toLowerCase(), on);
       return;
     }
+    // Each picked auction (all of them when none is) at its next bid: the least that leads.
+    if (t.id === 'whale-next') {
+      if (!picked.size) for (const b of list) picked.add(b.s.address.toLowerCase());
+      each = '';
+      const all = body.querySelector<HTMLInputElement>('#whale-each');
+      if (all) all.value = '';
+      for (const b of list) {
+        const k = b.s.address.toLowerCase();
+        if (!picked.has(k)) continue;
+        amounts.set(k, ledger(b.s.minBid, true));
+        const input = body.querySelector<HTMLInputElement>(`[data-union="${k}"] .whale-amt`);
+        if (input) input.value = amounts.get(k)!;
+        refresh(k);
+      }
+      refresh();
+      return;
+    }
     if (t.id === 'whale-go') await go();
   });
 
@@ -250,7 +318,7 @@ export async function whale(host: HTMLElement) {
     document.querySelectorAll<HTMLElement>('#whale-body [data-ends]').forEach((n) => {
       const at = Number(n.dataset.ends);
       if (now >= at) out = true;
-      n.textContent = clock(at);
+      n.textContent = left(at);
       n.classList.toggle('late', at - now < LATE);
     });
     if (out && !busy) void read().then(draw);

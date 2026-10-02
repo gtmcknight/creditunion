@@ -9,7 +9,7 @@ import { clock, eth, esc, openModal, pageHead, same, sheet, startsAt, statementA
 import { TRAIT_KINDS, parseTrait, type TraitValue } from '../../shared/trait';
 import { creditsOf, takes } from './trait';
 import { drawStill, primeInks, showStill, warmInks } from '../directions';
-import { whale } from './whale';
+import { whale, whaleSort } from './whale';
 import { DIRECTIONS, type Direction } from '../../shared/statement';
 
 /// Last deposit per union, from the activity feed (filled in after the first draw).
@@ -108,6 +108,10 @@ const AUCTION_SORTS = [
   ['high', 'Highest bid', 'live'],
   ['low', 'Lowest bid', 'live'],
   ['new', 'Newest', 'live'],
+  ['ending', 'Ending soon', 'multibid'],
+  ['high', 'Highest bid', 'multibid'],
+  ['low', 'Lowest bid', 'multibid'],
+  ['new', 'Newest', 'multibid'],
   ['recent', 'Recently sold', 'sold'],
   ['top', 'Highest price', 'sold'],
   ['bottom', 'Lowest price', 'sold'],
@@ -488,7 +492,15 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       // Multibid keeps itself current (its picks and amounts survive the reads), so it's drawn once.
       if (pick === 'multibid') {
         shownStage = pick;
-        app.querySelector<HTMLElement>('.sort-pick')?.classList.add('idle');
+        const order = auctionSort(pick);
+        app.querySelectorAll<HTMLElement>('.sort-menu [data-sort]').forEach((o) => {
+          o.hidden = o.dataset.stage !== pick;
+          o.setAttribute('aria-selected', String(o.dataset.stage === pick && o.dataset.sort === order));
+        });
+        const label = app.querySelector('.sort-label');
+        if (label) label.textContent = AUCTION_SORTS.find(([k, , st]) => k === order && st === pick)?.[1] ?? '';
+        app.querySelector<HTMLElement>('.sort-pick')?.classList.remove('idle');
+        whaleSort(order);
         if (!el.querySelector('#whale-body')) void whale(el);
         return;
       }
