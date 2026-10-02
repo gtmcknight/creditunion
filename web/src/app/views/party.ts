@@ -1,7 +1,7 @@
 import { parseAbi, parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi, unionFormatsAbi } from '../abi';
 import { canBatch, config, explorer, pub, send, sendBatch, session } from '../chain';
-import { ARRANGEMENTS, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, indexedBatch, indexedOne, keepPick, keptSpots, layoutSlot, me, notice, pickOf, placeOnLayout, readNotice, ratings, sinceTx, staleBatches, type Rated, burnsAt } from '../data';
+import { ARRANGEMENTS, spotsSaved, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, indexedBatch, indexedOne, keepPick, keptSpots, layoutSlot, me, notice, pickOf, placeOnLayout, readNotice, ratings, sinceTx, staleBatches, type Rated, burnsAt } from '../data';
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { ens, hydrate, identicon, pct, who } from '../ens';
 import { creditCard, examples, fillGhosts, planGhosts, registerDeposits, registerFilter } from '../ghosts';
@@ -403,15 +403,21 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       const takes = app.querySelector('.takes');
       if (takes) takes.innerHTML = '<dt>Rules</dt><dd>Only the Credits that draw its picture</dd>';
       if (config.sweeper) {
-        // Withdrawing through the site is off, since it would shift the picture (the contract still allows it); the
-        // only member can still leave, all at once.
+        // Withdrawing through the site would shift the picture, so it's off (the contract still allows it) until the
+        // burn contract has saved every Credit's spot: then a leave opens only the leaver's spots. The only member can
+        // always leave, all at once.
+        const tab = document.querySelector<HTMLElement>('[data-add="withdraw"]');
+        const leave = document.querySelector('.pane-note .leave-note');
         if (solo) soloOut();
         else {
-          document.querySelector<HTMLElement>('[data-add="withdraw"]')?.setAttribute('hidden', '');
+          tab?.setAttribute('hidden', '');
           document.querySelector<HTMLElement>('[data-pane="withdraw"]')?.setAttribute('hidden', '');
         }
-        const leave = document.querySelector('.pane-note .leave-note');
         if (leave) leave.textContent = solo ? 'You can leave while you’re the only member.' : 'Once in, a Credit stays: taking one out would shift the picture.';
+        if (!solo && (await spotsSaved(s.address)) && host.isConnected) {
+          tab?.removeAttribute('hidden');
+          if (leave) leave.textContent = 'Leave anytime until it locks: your spot opens and the rest of the picture stays put.';
+        }
       }
     }, () => {});
     const plan = planPicture(b, slots, placed, who, held).catch(() => null);

@@ -2047,11 +2047,11 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
     return null;
   }
   // eth_call only to our contracts: Credits, the factory, the Sweeper, UnionFormats, Credits' art contract, the
-  // factory's burn contract (a picture's spots), or a batch the factory made. Every target named before the first
-  // malformed call must pass, as when checked in order.
+  // factory's burn contract (a picture's spots), the Statements it mints into (a burned union's format), or a batch
+  // the factory made. Every target named before the first malformed call must pass, as when checked in order.
   if (others.size) {
-    const [art, adapter] = await Promise.all([artOf(env), assemblerOf(env)]);
-    const rest = [...others.keys()].filter((to) => to !== art && to !== adapter);
+    const [art, adapter, statements] = await Promise.all([artOf(env), assemblerOf(env), statementsOf(env)]);
+    const rest = [...others.keys()].filter((to) => to !== art && to !== adapter && to !== statements?.toLowerCase());
     const ok = await Promise.all(rest.map((to) => isBatch(env, url, to as Address)));
     if (ok.some((x) => !x)) return text('target not allowed', 403);
   }

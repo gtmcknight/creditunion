@@ -352,6 +352,22 @@ export async function keptSpots(union: Address): Promise<(bigint | null)[] | nul
   }
 }
 
+/// Whether the burn contract has saved every Credit's spot in a picture union as it stands now: then a leave opens only
+/// the leaver's spots and the rest of the picture stays put. The keeper saves them within minutes of any change.
+export async function spotsSaved(union: Address): Promise<boolean> {
+  await readNotice();
+  if (!activeAdapter) return false;
+  try {
+    const [order, kept] = await Promise.all([
+      pub.readContract({ address: activeAdapter, abi: adapterAbi, functionName: 'orderOf', args: [union] }),
+      pub.readContract({ address: activeAdapter, abi: adapterAbi, functionName: 'spotsOf', args: [union] }),
+    ]);
+    return order.every((id, i) => id === kept[i]);
+  } catch {
+    return false;
+  }
+}
+
 export async function minOpen() {
   return Number(await pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'minOpen' }));
 }
