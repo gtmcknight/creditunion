@@ -596,9 +596,13 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       if (hit) return hit;
     }
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    // Only the factory's own unions: any other contract could answer slots() with thousands of ids and turn one
+    // request into thousands of paid reads.
+    if (!(await isBatch(env, url, batch))) return text('not a batch', 404);
     try {
       const c = client(env);
       const [ids] = (await c.readContract({ address: batch, abi: batchAbi, functionName: 'slots' })) as readonly [readonly bigint[], readonly Address[]];
+      if (ids.length > 80) return text('not a batch', 404); // a union holds 80 at most
       const now = idsKey(ids);
       // The browser keeps an answer for good only under the URL that names its ids.
       const asked = v === now;
