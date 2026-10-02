@@ -42,13 +42,15 @@
   "observability": { "enabled": true },
   // Every minute: the market book (market.ts); every 5th, the keeper (keeper.ts), once `wrangler secret put KEEPER_KEY`.
   "triggers": { "crons": ["* * * * *"] },
-  // Per-IP rate limits (Workers Rate Limiting API). Keys are cf-connecting-ip. RL_RPC counts JSON-RPC calls, not requests.
+  // Per-IP rate limits (Workers Rate Limiting API). Keys are cf-connecting-ip. RL_RPC counts JSON-RPC calls, not requests;
+  // RL_FILL counts the listings /opensea/buyquote prices (two 40-Credit Printer buys a minute).
   "unsafe": {
     "bindings": [
       { "name": "RL_RPC", "type": "ratelimit", "namespace_id": "8001", "simple": { "limit": 1200, "period": 60 } },
       { "name": "RL_QUOTE", "type": "ratelimit", "namespace_id": "8002", "simple": { "limit": 6, "period": 60 } },
       { "name": "RL_MISC", "type": "ratelimit", "namespace_id": "8003", "simple": { "limit": 300, "period": 60 } },
-      { "name": "RL_ART", "type": "ratelimit", "namespace_id": "8004", "simple": { "limit": 3000, "period": 60 } }
+      { "name": "RL_ART", "type": "ratelimit", "namespace_id": "8004", "simple": { "limit": 3000, "period": 60 } },
+      { "name": "RL_FILL", "type": "ratelimit", "namespace_id": "8005", "simple": { "limit": 80, "period": 60 } }
     ]
   }
 }

@@ -127,10 +127,18 @@ function chooseSpots(from: 'mine' | 'buy', ids: Iterable<string>) {
   if (changed) art.dispatchEvent(new CustomEvent('ghosts', { bubbles: true }));
 }
 /// A Picture union's buy locks (worker/locks.ts): Colors someone is buying right now can't be bought by anyone else
-/// until their transaction lands, so no Credit lands a slot late. Null answers mean locks are off (testnets, local).
-async function locks(batch: string, body?: { op: 'acquire' | 'hold' | 'release'; id: string; colours?: number[] }) {
+/// until their transaction lands, so no Credit lands a slot late. A lock gives a minute to confirm in the wallet; then
+/// the transaction it sent holds it, said again every 20 s until it's released (every 5 s while the Worker hasn't seen
+/// the transaction yet). Null answers mean locks are off (testnets, local).
+type LockOp = { op: 'acquire'; id: string; account: string; colours: number[] } | { op: 'hold'; id: string; tx: string } | { op: 'release'; id: string };
+const holding = new Map<string, number>();
+const released = new Set<string>();
+async function locks(batch: string, body?: LockOp) {
+  if (body && body.op !== 'acquire') clearTimeout(holding.get(body.id));
+  if (body?.op === 'release') released.add(body.id);
   const r = await fetch(`/locks/${batch}`, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}).catch(() => null);
-  if (!r?.ok || r.status === 204) return null;
+  if (body?.op === 'hold' && (r?.status === 204 || r?.status === 202) && !released.has(body.id)) holding.set(body.id, setTimeout(() => void locks(batch, body), r.status === 202 ? 5_000 : 20_000));
+  if (!r?.ok || r.status === 204 || r.status === 202) return null;
   return r.json() as Promise<{ held?: number[]; ok?: boolean; busy?: number[]; until?: number }>;
 }
 /// Listings (or Credits) in the order the picture wants them: its recommended ones by slot, then the rest as they were.
@@ -1298,11 +1306,11 @@ async function drawPicker(
         let locked = false;
         if (plan) {
           const colours = [...new Set(ids.flatMap((id) => plan.colour.get(id.toString()) ?? []))];
-          const lk = await locks(s.address, { op: 'acquire', id: lockId, colours });
+          const lk = await locks(s.address, { op: 'acquire', id: lockId, account: session.account!, colours });
           if (lk && lk.ok === false) throw new Error(`Someone is buying ${(lk.busy ?? []).map((c) => slotName(0, c)).join(', ')} for this picture right now. Try again in a minute.`);
           locked = !!lk;
         }
-        const sent = (h: string) => (txNote(h), locked && void locks(s.address, { op: 'hold', id: lockId }));
+        const sent = (h: string) => (txNote(h), locked && void locks(s.address, { op: 'hold', id: lockId, tx: h }));
         try {
           const chunks = Array.from({ length: Math.ceil(ids.length / CHUNK) }, (_, i) => ids.slice(i * CHUNK, (i + 1) * CHUNK));
           const deposit = (chunk: bigint[]) => ({ address: config.factory, abi: depositAbi, functionName: 'deposit', args: [s.address, chunk] });
@@ -1331,7 +1339,8 @@ async function drawPicker(
           else if (way === 'batch')
             await sendBatch(
               [{ address: config.credits, abi: creditsAbi, functionName: 'setApprovalForAll', args: [config.factory, true] }, ...chunks.map(deposit)],
-              () => (toast('Submitted. Waiting for confirmation…', 'info'), locked && void locks(s.address, { op: 'hold', id: lockId })),
+              // A wallet's batch has no transaction hash until it lands, so nothing holds its lock past the minute.
+              () => toast('Submitted. Waiting for confirmation…', 'info'),
             );
           else for (const chunk of chunks) await send(deposit(chunk), sent);
           picks.clear();
@@ -1578,7 +1587,7 @@ async function bindBuy(
     await run(go, 'Buying…', async () => {
       if (order) {
         const colours = [...new Set(picked.map((l) => order!.colour.get(l.id)!))];
-        const lk = await locks(batch, { op: 'acquire', id: lockId, colours });
+        const lk = await locks(batch, { op: 'acquire', id: lockId, account: session.account!, colours });
         if (lk && lk.ok === false) {
           held = new Set([...held, ...(lk.busy ?? [])]);
           reshow();
@@ -1647,7 +1656,7 @@ async function bindBuy(
           : { address: config.sweeper!, abi: sweeperAbi, functionName: 'sweep', args: [batch, q.orders, least, fee], value },
         (h) => {
           txNote(h);
-          if (locked) void locks(batch, { op: 'hold', id: lockId }); // sent: keep the Colors while it's pending
+          if (locked) void locks(batch, { op: 'hold', id: lockId, tx: h }); // sent: keep the Colors while it's pending
         },
       );
       const n = quotedCount(q);

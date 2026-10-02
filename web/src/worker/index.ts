@@ -14,11 +14,11 @@
 /// Every response carries the security headers in `secure()` (headers.ts; the build copies them into _headers for
 /// what the asset layer serves on its own).
 import { DurableObject } from 'cloudflare:workers';
-import { createPublicClient, decodeFunctionData, fallback, hexToBytes, http, type Address, type Hex, parseAbiItem } from 'viem';
+import { BaseError, ContractFunctionRevertedError, createPublicClient, decodeFunctionData, fallback, hexToBytes, http, type Address, type Hex, parseAbiItem } from 'viem';
 import { mainnet } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { normalize } from 'viem/ens';
-import { batchAbi, creditsAbi, creditArtAbi, factoryAbi, unionFormatsAbi } from '../app/abi';
+import { batchAbi, creditsAbi, creditArtAbi, factoryAbi, sweeperAbi, unionFormatsAbi } from '../app/abi';
 import { setSpareKey, best, bestOrder, bestPage, events, quote, scan, type Cand, type Extra, type Listing } from './opensea';
 import type { Row } from './market';
 import { cacheStore, confirmListing, marketListings, type FwaListing } from './fwa';
@@ -64,6 +64,8 @@ interface Env {
   KEEPER_MAX_GWEI?: string;
   RL_RPC?: RateLimit;
   RL_QUOTE?: RateLimit;
+  /// Listings priced by /opensea/buyquote, one by one.
+  RL_FILL?: RateLimit;
   RL_MISC?: RateLimit;
   RL_ART?: RateLimit;
   /// Plans (/plan/<id>): a design's 80 Credits in slot order and who buys and deposits which. Unset: plans are off.
@@ -120,7 +122,10 @@ const rpcTransport = (env: Env) =>
 const inflight = new Map<string, Promise<Awaited<ReturnType<typeof scan>>>>();
 // No request batching here: viem's batch scheduler is shared across concurrent requests in one isolate, and a
 // promise resolved in another request's context is cancelled when that request ends (the Worker then "hangs").
-const client = (env: Env) => createPublicClient({ transport: rpcTransport(env) });
+// This client and the ENS ones don't follow CCIP-Read (ccipRead: false): a contract or a name a caller picks (a smart
+// wallet checking a signature, a name's resolver) could answer OffchainLookup and have the Worker fetch a URL of its
+// choosing. Names with onchain resolvers resolve as before; offchain ones (cb.id, base.eth) don't.
+const client = (env: Env) => createPublicClient({ transport: rpcTransport(env), ccipRead: false });
 const isDev = (url: URL) => url.hostname === 'localhost' || url.hostname === '127.0.0.1';
 
 /// What never changes (a Credit's art, its seed) or changes slowly (an ENS name, with `ttl`), kept once in KV for
@@ -699,17 +704,20 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     return new Response(null, { status: 201 });
   }
 
-  // A Picture union's buy locks (locks.ts): GET the Colors being bought; POST { op, id, colours } to acquire (60 s to
-  // confirm in the wallet), hold (2 min while the transaction is pending) or release them.
+  // A Picture union's buy locks (locks.ts): GET the Colors being bought. POST { op: 'acquire', id, account, colours }
+  // locks them for 60 s to confirm in the wallet; { op: 'hold', id, tx } keeps them 2 minutes more (never past
+  // locks.ts' CAP from the click) once tx is seen to be that account's buy or deposit into this union (lockTx: 202
+  // while the network hasn't shown it yet, ask again); { op: 'release', id } frees them.
   const lockPath = url.pathname.match(/^\/locks\/(0x[0-9a-fA-F]{40})$/);
   if (lockPath) {
     if (!env.LOCKS) return text('locks are off here', 501);
+    if ((req.method !== 'GET' && req.method !== 'POST') || !sameSite(req)) return text('forbidden', 403);
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
     const batch = lockPath[1].toLowerCase() as Address;
+    if (!(await isBatch(env, url, batch))) return text('not a batch', 404);
     const stub = env.LOCKS.get(env.LOCKS.idFromName(batch));
     if (req.method === 'GET') return Response.json({ held: await stub.held() }, { headers: { 'cache-control': 'no-store' } });
-    if (req.method !== 'POST' || !sameSite(req)) return text('forbidden', 403);
-    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
-    let b: { op?: unknown; id?: unknown; colours?: unknown };
+    let b: { op?: unknown; id?: unknown; colours?: unknown; account?: unknown; tx?: unknown };
     try {
       b = JSON.parse((await readBody(req, 2_000)) ?? '');
     } catch {
@@ -718,11 +726,28 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const id = String(b.id ?? '');
     if (!/^[A-Za-z0-9]{16,64}$/.test(id)) return text('bad request', 400);
     if (b.op === 'release') return (await stub.release(id), new Response(null, { status: 204 }));
-    if (b.op === 'hold') return (await stub.hold(id, 120_000), new Response(null, { status: 204 }));
+    if (b.op === 'hold') {
+      const tx = String(b.tx ?? '').toLowerCase();
+      if (!/^0x[0-9a-f]{64}$/.test(tx)) return text('bad request', 400);
+      const lock = await stub.lockOf(id);
+      if (!lock) return text('no such lock', 410);
+      if (lock.tx !== tx) {
+        // Up to two RPC calls, counted as /rpc counts them.
+        if (await limited(env.RL_RPC, req, 2)) return text('slow down', 429);
+        const seen = await lockTx(env, batch, lock.account, tx as Hex);
+        if (seen === 'unseen') return new Response(null, { status: 202 });
+        if (seen === 'bad') return text('not a buy or deposit into this union from that wallet', 403);
+      }
+      const held = await stub.hold(id, tx, 120_000);
+      return held === 'held' ? new Response(null, { status: 204 }) : held === 'taken' ? text('that transaction holds another lock', 409) : text('no such lock', 410);
+    }
     const colours = Array.isArray(b.colours) ? b.colours.map(Number) : [];
-    if (b.op !== 'acquire' || !colours.length || colours.length > 15 || colours.some((c) => !Number.isInteger(c) || c < 1 || c > 15)) return text('bad request', 400);
-    if (!(await isBatch(env, url, batch))) return text('not a batch', 404);
-    return Response.json(await stub.acquire(id, [...new Set(colours)], 60_000), { headers: { 'cache-control': 'no-store' } });
+    const account = String(b.account ?? '').toLowerCase();
+    if (b.op !== 'acquire' || !/^0x[0-9a-f]{40}$/.test(account) || !colours.length || colours.length > 15 || colours.some((c) => !Number.isInteger(c) || c < 1 || c > 15)) return text('bad request', 400);
+    const got = await stub.acquire(id, account, ipKey(req.headers.get('cf-connecting-ip') ?? 'anon'), [...new Set(colours)], 60_000);
+    // Out of lock time without transactions: no lock (the page buys without one).
+    if ('spent' in got) return text('slow down', 429);
+    return Response.json(got, { headers: { 'cache-control': 'no-store' } });
   }
 
   const planPath = url.pathname.match(/^\/plans(?:\/([A-Za-z0-9]{10})(\.json|\/union|\/swap)?)?$/);
@@ -909,11 +934,12 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       return Response.json({ error: safeError(e) }, { status: 502 });
     }
   }
-  // Buying one Statement: OpenSea's signed order for this buyer, as a Seaport call their wallet sends.
+  // Buying one Statement: OpenSea's signed order for this buyer, as a Seaport call their wallet sends. Each is an
+  // OpenSea call on our key, so it counts like a quote.
   if (url.pathname === '/market/statements/buy') {
     if (req.method !== 'POST' || !sameSite(req)) return text('forbidden', 403);
     if (!env.OPENSEA_API_KEY) return text('OpenSea is not configured', 501);
-    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    if (await limited(env.RL_QUOTE, req)) return text('slow down', 429);
     try {
       const raw = await readBody(req, 2_000);
       const b = JSON.parse(raw ?? '') as { hash?: unknown; protocol?: unknown; buyer?: unknown };
@@ -1065,6 +1091,20 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       });
     } catch {
       return text('bad request', 400);
+    }
+    // Each listing is a call upstream (OpenSea's signed fill; a chain read for FWA and CreditStrategy): counted one by one.
+    if (await limited(env.RL_FILL, req, ls.length)) return text('slow down', 429);
+    // An OpenSea listing is priced only when the market book has that very order for that Credit: our key signs fills
+    // for Credits on sale here, not for any order a caller names. A book that's behind (its loop stalled) can't say,
+    // so then they go as asked.
+    const asked = ls.filter((l) => l.source === 'opensea');
+    if (asked.length && env.MARKET) {
+      const got = await book(env).getMany(asked.map((l) => l.id)).catch(() => null);
+      if (got && Date.now() - got.updated < 2 * 60_000) {
+        const order = new Map(got.rows.filter((r) => r[2] === 'opensea').map((r) => [String(r[0]), String(r[3]).toLowerCase()]));
+        // A book row without its order (rare) can't be matched: that one goes as asked.
+        ls = ls.filter((l) => l.source !== 'opensea' || order.get(l.id) === '' || order.get(l.id) === l.hash!.toLowerCase());
+      }
     }
     try {
       return Response.json(await quoteListings(env, url, ls), { headers: { 'cache-control': 'no-store' } });
@@ -1325,7 +1365,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     if (hit) return hit;
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
     const rpc = env.ENS_RPC || (env.CHAIN_ID === '1' ? rpcUrl(env) : 'https://eth.drpc.org');
-    const c = createPublicClient({ chain: mainnet, transport: http(rpc, { timeout: 5_000 }) });
+    const c = createPublicClient({ chain: mainnet, transport: http(rpc, { timeout: 5_000 }), ccipRead: false });
     let who: string | null = null;
     try {
       who = await c.readContract({ address: MAINNET_CREDITS, abi: creditsAbi, functionName: 'ownerOf', args: [BigInt(owner[1])] });
@@ -1344,7 +1384,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     if (hit) return hit;
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
     const rpc = env.ENS_RPC || (env.CHAIN_ID === '1' ? rpcUrl(env) : 'https://eth.drpc.org');
-    const c = createPublicClient({ chain: mainnet, transport: http(rpc, { timeout: 5_000 }) });
+    const c = createPublicClient({ chain: mainnet, transport: http(rpc, { timeout: 5_000 }), ccipRead: false });
     try {
       const address = await c.getEnsAddress({ name: normalize(named[1]) });
       const res = Response.json({ address }, { headers: { 'cache-control': `public, max-age=${address ? 3600 : 300}` } });
@@ -1369,16 +1409,20 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
     const out: Record<string, { name: string | null; avatar: string | null }> = {};
     let ttl = 86400;
+    // Each lookup kept nowhere is a chain read, and counts against the limit on its own. Past the limit the rest are
+    // left out (the page shows those as addresses), and the answer isn't kept long.
+    let over = false;
+    const gate = async () => over || (over = await limited(env.RL_MISC, req));
     for (let i = 0; i < list.length; i += 10)
       await Promise.all(
         list.slice(i, i + 10).map(async (a) => {
-          const r = await ensOf(env, url, ctx, a);
+          const r = await ensOf(env, url, ctx, a, gate);
           if (!r) return;
           out[a] = { name: r.name, avatar: r.avatar };
           ttl = Math.min(ttl, r.ttl);
         }),
       );
-    return Response.json(out, { headers: { 'cache-control': `public, max-age=${ttl}` } });
+    return Response.json(out, { headers: { 'cache-control': `public, max-age=${over ? 60 : ttl}` } });
   }
 
   // /avatar/<ens name>: the name's avatar at 96 px (ENS serves the original, often megabytes, for a 20 px face).
@@ -1479,17 +1523,36 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const hit = await cache.match(key);
     if (hit) return hit;
     const svgHeaders = { 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox" };
-    const miss = (why: string, age: number) => new Response(why, { status: 404, headers: { ...svgHeaders, 'cache-control': `public, max-age=${age}` } });
+    const miss = (why: string, age: number) => new Response(why, { status: 404, headers: { ...svgHeaders, 'cache-control': age ? `public, max-age=${age}` : 'no-store' } });
     if (await limited(env.RL_ART, req)) return text('slow down', 429);
     const statements = await statementsOf(env);
     if (!statements) return miss('no Statements yet', 60);
+    // Statements are numbered from 1 to supply(), which counts every one made (burned ones too): past it there is
+    // nothing to read. The count is kept 15 s per isolate, and read again (at most every 2 s) for an id just past
+    // it, so a Statement made a moment ago shows at once.
+    const n = Number(stmt[1]);
+    let made = await statementCount(env, statements, 15_000);
+    if (made !== null && n > made) made = await statementCount(env, statements, 2_000);
+    if (n < 1 || (made !== null && n > made)) return miss('no such Statement', 0);
     const c = client(env);
-    const id = BigInt(stmt[1]);
-    const svg = await c
-      .readContract({ address: statements, abi: statementsAbi, functionName: 'statementSVG', args: [id] })
-      .catch(() => c.readContract({ address: statements, abi: statementsAbi, functionName: 'tokenURI', args: [id] }).then(imageOf))
-      .catch(() => null);
-    if (!svg || !svg.includes('<svg')) return miss('no such Statement', 60);
+    const id = BigInt(n);
+    let svg: string | null = null, answered = true;
+    try {
+      svg = await c.readContract({ address: statements, abi: statementsAbi, functionName: 'statementSVG', args: [id] });
+    } catch (e) {
+      try {
+        svg = imageOf(await c.readContract({ address: statements, abi: statementsAbi, functionName: 'tokenURI', args: [id] }));
+      } catch (e2) {
+        answered = refused(e) && refused(e2);
+      }
+    }
+    if (!svg || !svg.includes('<svg')) {
+      // The contract said no (a burned Statement): kept here 10 minutes. A read that failed isn't kept.
+      if (!answered) return new Response('Statement unavailable', { status: 502, headers: { ...svgHeaders, 'cache-control': 'no-store' } });
+      const res = miss('no such Statement', 600);
+      ctx.waitUntil(cache.put(key, res.clone()));
+      return res;
+    }
     const res = new Response(svg, { headers: { 'content-type': 'image/svg+xml', 'cache-control': 'public, max-age=600', ...svgHeaders } });
     ctx.waitUntil(cache.put(key, res.clone()));
     return res;
@@ -2699,7 +2762,7 @@ async function ensOf(env: Env, url: URL, ctx: ExecutionContext, addr: Address, g
   }
   if (gate && (await gate())) return null;
   const rpc = env.ENS_RPC || (env.CHAIN_ID === '1' ? rpcUrl(env) : 'https://eth.drpc.org');
-  const c = createPublicClient({ chain: mainnet, transport: http(rpc, { timeout: 5_000 }) });
+  const c = createPublicClient({ chain: mainnet, transport: http(rpc, { timeout: 5_000 }), ccipRead: false });
   let name: string | null = null;
   let ttl = 86400;
   let has = false;
@@ -2712,7 +2775,8 @@ async function ensOf(env: Env, url: URL, ctx: ExecutionContext, addr: Address, g
   }
   const avatar = name && has ? `https://metadata.ens.domains/mainnet/avatar/${encodeURIComponent(name)}` : null;
   const body = JSON.stringify({ name, avatar });
-  ctx.waitUntil(Promise.all([cache.put(key, new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttl}` } })), ttl > 60 ? keptPut(env, kvKey, body, ttl) : null]));
+  // Only names go to KV: an address without one (most, and any made up) is kept in this data center only.
+  ctx.waitUntil(Promise.all([cache.put(key, new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttl}` } })), name ? keptPut(env, kvKey, body, ttl) : null]));
   return { name, avatar, ttl };
 }
 
@@ -2720,11 +2784,24 @@ async function ensOf(env: Env, url: URL, ctx: ExecutionContext, addr: Address, g
 /// (describe) the way a batch does, and /art draws with it. Read once per isolate per Credits contract (the
 /// configured one, and mainnet's for previews); only a well-formed nonzero address is ever returned.
 const artAddrs = new Map<string, Promise<string | null>>();
-/// Jack's Statements, as far as the Worker reads it: the drawing of one Statement.
+/// Jack's Statements, as far as the Worker reads it: the drawing of one Statement, and how many have been made.
 const statementsAbi = [
   { type: 'function', name: 'statementSVG', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'string' }] },
   { type: 'function', name: 'tokenURI', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'string' }] },
+  { type: 'function', name: 'supply', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
 ] as const;
+/// How many Statements have been made (supply()), read at most once per `maxMs` per isolate; null when it can't be
+/// read (a contract without it), and then nothing is ruled out.
+let countKept: { at: number; of: Address; n: Promise<number | null> } | null = null;
+function statementCount(env: Env, statements: Address, maxMs: number): Promise<number | null> {
+  if (countKept && countKept.of === statements && Date.now() - countKept.at < maxMs) return countKept.n;
+  const n = client(env).readContract({ address: statements, abi: statementsAbi, functionName: 'supply' }).then(Number, () => null);
+  countKept = { at: Date.now(), of: statements, n };
+  return n;
+}
+/// Whether a read failed because the contract reverted with a reason (a custom error, say), not because it couldn't be
+/// reached.
+const refused = (e: unknown) => e instanceof BaseError && !!e.walk((x) => x instanceof ContractFunctionRevertedError && !!(x.raw || x.signature));
 /// The factory's burn contract (lowercase), or null until one is active. Read once a minute per isolate; once set it
 /// can never change.
 let assemblerKept: { at: number; addr: Promise<string | null> } | null = null;
@@ -2791,6 +2868,35 @@ function artOf(env: Env, credits: Address = env.CREDITS, c: ReturnType<typeof cl
     });
   }
   return at;
+}
+
+/// Blocks a landed transaction can hold a buy lock for: about the life of a lock (locks.ts CAP).
+const LOCK_BLOCKS = 50n;
+/// Whether `tx` can hold a buy lock on `batch` for `account`: sent by that account, buying into this union (the
+/// Sweeper's sweep or sweepAll), depositing into it (the factory's deposit) or sending a Credit straight in (Credits'
+/// safeTransferFrom), and pending or landed in the last LOCK_BLOCKS blocks. 'unseen': the network hasn't shown it yet
+/// (a private mempool shows it only once it lands).
+async function lockTx(env: Env, batch: Address, account: string, tx: Hex): Promise<'ok' | 'unseen' | 'bad'> {
+  const c = client(env);
+  const t = await c.getTransaction({ hash: tx }).catch(() => null);
+  if (!t) return 'unseen';
+  const to = t.to?.toLowerCase();
+  const into = (abi: readonly unknown[], fns: string[], arg: number) => {
+    try {
+      const call = decodeFunctionData({ abi: abi as typeof factoryAbi, data: t.input });
+      return fns.includes(call.functionName) && String((call.args as readonly unknown[])[arg]).toLowerCase() === batch;
+    } catch {
+      return false;
+    }
+  };
+  const ok =
+    t.from.toLowerCase() === account &&
+    ((to === env.SWEEPER.toLowerCase() && into(sweeperAbi, ['sweep', 'sweepAll'], 0)) ||
+      (to === env.FACTORY.toLowerCase() && into(factoryAbi, ['deposit'], 0)) ||
+      (to === env.CREDITS.toLowerCase() && into(creditsAbi, ['safeTransferFrom'], 1)));
+  if (!ok) return 'bad';
+  if (t.blockNumber !== null && (await c.getBlockNumber()) - t.blockNumber > LOCK_BLOCKS) return 'bad';
+  return 'ok';
 }
 
 /// Whether an address is one of our factory's batches. Positives are cached forever (a batch is one for good).
