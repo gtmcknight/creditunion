@@ -143,7 +143,7 @@ export async function unionsLink(app: HTMLElement, test: (b: Listed) => boolean,
 /// marketplace's own page. `start()` again (after `where` changes) redraws it. Needs .jb-buy, #sale-act, #trait-grid
 /// and #trait-more inside `app`.
 export type Where = { trait?: string; rules?: Record<string, number> };
-export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => Promise<{ ids: number[]; total: number }>) {
+export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => Promise<{ ids: number[]; total: number }>, line?: (id: number) => string) {
   const grid = app.querySelector<HTMLElement>('#trait-grid')!;
   const more = app.querySelector<HTMLButtonElement>('#trait-more')!;
   const heading = app.querySelector<HTMLElement>('.jb-buy');
@@ -162,7 +162,7 @@ export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => 
     }
   };
   const cell = (id: number) =>
-    creditCell(id, listed.sale.mine.has(String(id)) ? YOURS : listed.sale.byId.has(String(id)) ? priceTag(listed.sale.byId.get(String(id))!) : '');
+    creditCell(id, listed.sale.mine.has(String(id)) ? YOURS : listed.sale.byId.has(String(id)) ? priceTag(listed.sale.byId.get(String(id))!) : '', { line: line?.(id) });
   // A range (rules) can't be searched quickly (OpenSea can't filter it), so its Credits draw at once and the listed
   // ones join the head of the grid as the search finds them; the browser keeps the view still as they arrive.
   // A trait searches fast, so it pages its listed Credits first, then the rest.
@@ -182,7 +182,7 @@ export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => 
     if (heading) heading.hidden = !up;
     host.hidden = !up;
   };
-  const tile = (l: Listing) => creditCell(Number(l.id), priceTag(l));
+  const tile = (l: Listing) => creditCell(Number(l.id), priceTag(l), { line: line?.(Number(l.id)) });
   const place = () => {
     unskel();
     for (; placed < listed.items.length; placed++) {
@@ -315,8 +315,9 @@ const SKELS = 24;
 
 /// One Credit tile for every grid of Credits: its art (to its page), then its number and, when listed, its price.
 /// `title`: the art's tooltip (where it is, on a member's page).
-export const creditCell = (id: number, price = '', { title = '' } = {}) =>
-  `<div class="cc${price ? ' listed' : ''}" data-id="${id}"><a class="cc-art" href="/credit/${id}"${title ? ` title="${esc(title)}"` : price ? ' title="Tap to pick for a sweep"' : ''}><img src="${editionArt(id)}" alt="Credit #${id}" loading="lazy" decoding="async"></a><span class="cc-cap"><a class="num" href="/credit/${id}">#${id.toLocaleString('en-US')}</a>${price}</span></div>`;
+/// `line`: a third line under the price, the value the page is about ("Rating 797.03").
+export const creditCell = (id: number, price = '', { title = '', line = '' } = {}) =>
+  `<div class="cc${price ? ' listed' : ''}" data-id="${id}"><a class="cc-art" href="/credit/${id}"${title ? ` title="${esc(title)}"` : price ? ' title="Tap to pick for a sweep"' : ''}><img src="${editionArt(id)}" alt="Credit #${id}" loading="lazy" decoding="async"></a><span class="cc-cap"><a class="num" href="/credit/${id}">#${id.toLocaleString('en-US')}</a>${price}</span>${line ? `<span class="cc-line num">${line}</span>` : ''}</div>`;
 
 
 /// The two lists under a time window or range, as tabs: the open Credit Unions that take these Credits, and the

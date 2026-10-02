@@ -2,22 +2,22 @@
 /// Reads public/edition-traits.bin (one packed Uint32 per Credit; layout in scripts/edition.ts).
 
 let table: Promise<Uint32Array> | null = null;
-let scores: Promise<Uint16Array> | null = null;
+/// Rating rule tables (score ×10 by id − 1): scores.bin is the Ratings contract unions opened with first; scores-live.bin
+/// is LiveRatings (the Statements contract's scores, cut to tenths), for unions opened once the factory uses it.
+const scores = new Map<string, Promise<Uint16Array>>();
 
-export async function loadScores(assets: Fetcher, origin: string) {
-  if (!scores) {
-    scores = assets
-      .fetch(new Request(`${origin}/scores.bin`))
-      .then(async (r) => {
-        if (!r.ok) throw new Error('scores.bin missing');
-        return new Uint16Array(await r.arrayBuffer());
-      })
-      .catch((e) => {
-        scores = null;
-        throw e;
-      });
+export async function loadScores(assets: Fetcher, origin: string, live = false) {
+  const f = live ? 'scores-live.bin' : 'scores.bin';
+  let p = scores.get(f);
+  if (!p) {
+    p = assets.fetch(new Request(`${origin}/${f}`)).then(async (r) => {
+      if (!r.ok) throw new Error(`${f} missing`);
+      return new Uint16Array(await r.arrayBuffer());
+    });
+    scores.set(f, p);
+    p.catch(() => scores.delete(f));
   }
-  return scores;
+  return p;
 }
 
 export async function load(assets: Fetcher, origin: string) {
@@ -48,6 +48,7 @@ export type Rules = {
   idTo?: number;
   minScore?: number; // score ×10, 0 = any
   maxScore?: number;
+  live?: boolean; // check minScore/maxScore against LiveRatings' table (see loadScores)
   list?: number[]; // explicit ids, empty = any
   paidFrom?: number; // unix seconds, as Batch.Filter; 0 = unbounded
   paidTo?: number;
@@ -90,7 +91,7 @@ function loadTimes(assets: Fetcher, origin: string) {
 /// A test for one Credit against the rules, from the frozen edition (no chain reads).
 export async function predicate(assets: Fetcher, origin: string, r: Rules) {
   const t = await load(assets, origin);
-  const sc = r.minScore || r.maxScore ? await loadScores(assets, origin) : null;
+  const sc = r.minScore || r.maxScore ? await loadScores(assets, origin, r.live) : null;
   const list = r.list?.length ? new Set(r.list) : null;
   const paid = r.paidFrom || r.paidTo ? await loadTimes(assets, origin) : null;
   const bits = r.bitsFrom || r.bitsTo ? await loadBits(assets, origin) : null;

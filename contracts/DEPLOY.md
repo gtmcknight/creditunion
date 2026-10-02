@@ -70,3 +70,15 @@ Every transaction is in `broadcast/DeployMainnet.s.sol/1/run-latest.json`.
 - [x] `factory.ratings()` is the Ratings address above, `ratingsHistory()` has one entry
 - [x] `factory.assembler()` is zero
 - [ ] `web/wrangler.jsonc` points at these addresses and `/config.json` shows chainId 1
+
+## LiveRatings (Oct 2 2026)
+
+`LiveRatings` 0xe27fC60dcE0a9c33743581bfCD72F619DB3612a6, block 26105860, verified. It reads each Credit's score
+from the Statements contract's scorer (0x817A9cFfb4d6E7c206e745A4229001A472C1b7B7) when asked, ×10 rounded down;
+`count()` 122,154 like the table it replaces. Deployed with `script/DeployLiveRatings.s.sol`; fork test
+`test/LiveRatings.fork.t.sol`.
+
+- [x] `scoreOf(9)` 7970 (797.0310), `scoreOf(53739)` 7451; `scorer()` and `credits()` as above
+- [x] `proposeRatings(0xe27f…12a6)` simulates from the Safe (calldata `0xf9489bd7…e27fc60dce0a9c33743581bfcd72f619db3612a6`)
+- [ ] Safe proposes; 30 minutes later anyone calls `activateRatings()`; `factory.ratings()` reads it
+- [ ] Unions opened before keep 0x61Ca…371d for their rating rules; the site picks each union's table

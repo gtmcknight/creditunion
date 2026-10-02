@@ -2,7 +2,7 @@
 /// set what you bid on each (or one amount for all of them), and send them together. Where the wallet can bundle calls (EIP-5792) it's one step, all or nothing: if
 /// anyone outbids you on one before it lands, none go through. Other wallets get one bid after another, each checked
 /// against that auction's next bid right before it's sent. Every bid has to be the new high bid.
-import { parseEther, type Address } from 'viem';
+import { parseAbi, parseEther, type Address } from 'viem';
 import { batchAbi } from '../abi';
 import { canBatch, pub, send, sendBatch, session } from '../chain';
 import { listBatches, type Listed, type Summary } from '../data';
@@ -14,6 +14,7 @@ import { errText, esc, eth, ethNum, same, statementArt, timeLeft, toast } from '
 const biddable = (s: Summary) => s.state === 'Auction' && !(s.highBid && Date.now() / 1000 >= s.auctionEnd);
 
 const LATE = 15 * 60;
+const CREDIT_SCORE = parseAbi(['function creditScoreOf(uint256) view returns (uint256)']);
 
 /// An amount as typed, in wei; null when it isn't one.
 function weiOf(v: string): bigint | null {
@@ -29,8 +30,8 @@ function weiOf(v: string): bigint | null {
 let whaleRun = 0;
 /// The column the table is sorted by, from its headers: a click picks a column, a second flips it. Each column first
 /// sorts the way you'd read it: #1 and A first, the most members, bids and ETH first, the soonest to end first.
-type Col = 'name' | 'creator' | 'members' | 'bids' | 'now' | 'by' | 'ends';
-const FIRST: Record<Col, 1 | -1> = { name: 1, creator: 1, members: -1, bids: -1, now: -1, by: 1, ends: 1 };
+type Col = 'name' | 'creator' | 'members' | 'rating' | 'bids' | 'now' | 'by' | 'ends';
+const FIRST: Record<Col, 1 | -1> = { name: 1, creator: 1, members: -1, rating: -1, bids: -1, now: -1, by: 1, ends: 1 };
 let sortCol: Col = 'ends', sortDir: 1 | -1 = 1;
 try {
   const [c, d] = (localStorage.getItem('cu-multibid-sort') ?? '').split(':');
@@ -57,6 +58,16 @@ export async function whale(host: HTMLElement) {
   let asked = '';
   // Bids per auction, from the activity feed (a few seconds behind the chain).
   let bidCount = new Map<string, number>();
+  // Each Statement's Credit Rating as its own contract states it (creditScoreOf: ten-thousandths, whole points shown).
+  const ratingOf = new Map<string, number>();
+  const readRatings = async () => {
+    const want = list.filter((b) => !ratingOf.has(b.s.statementId.toString()));
+    if (!want.length) return;
+    const got = await Promise.all(
+      want.map((b) => pub.readContract({ address: b.s.statement, abi: CREDIT_SCORE, functionName: 'creditScoreOf', args: [b.s.statementId] }).catch(() => null)),
+    );
+    want.forEach((b, i) => got[i] != null && ratingOf.set(b.s.statementId.toString(), Number(got[i]! / 10_000n)));
+  };
 
   const read = async () => {
     const [all, counts] = await Promise.all([
@@ -65,6 +76,7 @@ export async function whale(host: HTMLElement) {
     ]);
     if (counts.bids) bidCount = new Map(Object.entries(counts.bids));
     list = all.filter((b) => biddable(b.s));
+    await readRatings().catch(() => {});
     await order();
     for (const k of [...picked]) if (!list.some((b) => b.s.address.toLowerCase() === k)) picked.delete(k); // ended since
   };
@@ -86,6 +98,7 @@ export async function whale(host: HTMLElement) {
       <a class="whale-name" href="/union/${s.address}">${esc(s.name || 'Untitled')} <span class="stmt-no num">#${s.statementId}</span></a>
       <span class="whale-creator small">${who(s.creator, 'sm', 'nested')}</span>
       <span class="whale-members muted small num">${members}</span>
+      <span class="whale-rating muted small num">${ratingOf.get(s.statementId.toString())?.toLocaleString() ?? ''}</span>
       <span class="whale-bids muted small num">${n}</span>
       <strong class="whale-now num">${s.highBid ? ledger(s.highBid) : ''}</strong>
       <span class="whale-by small">${!s.highBid ? '' : lead ? '<span class="meta-win">You</span>' : who(s.highBidder, 'sm', 'nested')}</span>
@@ -142,7 +155,7 @@ export async function whale(host: HTMLElement) {
       <p class="whale-lede muted">Pick the auctions you want and what to bid on each. They go in together, and each has to be the new high bid.</p>
       <div class="whale-each"><label>Bid <input type="text" inputmode="decimal" id="whale-each" class="num" value="${esc(each)}" placeholder="1.0" aria-label="ETH on each"> ETH on each one you pick</label>
         <span class="whale-acts"><button type="button" class="btn sm" id="whale-next">Next bid on each</button><button type="button" class="btn sm" id="whale-all">${picked.size === list.length ? 'Clear' : 'Pick all'}</button></span></div>
-      <div class="whale-list"><div class="whale-head small muted"><span></span><span></span>${head('name', 'Statement')}${head('creator', 'Creator')}${head('members', 'Members')}${head('bids', 'Bids')}${head('now', 'High bid (ETH)')}${head('by', 'Bidder')}${head('ends', 'Time left')}<span class="whale-amt">Your bid (ETH)</span></div>${list.map(row).join('')}</div>
+      <div class="whale-list"><div class="whale-head small muted"><span></span><span></span>${head('name', 'Statement')}${head('creator', 'Creator')}${head('members', 'Members')}${head('rating', 'Rating')}${head('bids', 'Bids')}${head('now', 'High bid (ETH)')}${head('by', 'Bidder')}${head('ends', 'Time left')}<span class="whale-amt">Your bid (ETH)</span></div>${list.map(row).join('')}</div>
       ${bar()}`;
     hydrate(body);
     for (const b of list) {
@@ -165,6 +178,7 @@ export async function whale(host: HTMLElement) {
       if (sortCol === 'name') return s.statementId;
       if (sortCol === 'creator') return names.get(s.creator.toLowerCase()) || null;
       if (sortCol === 'members') return new Set(b.depositors.map((d) => d.toLowerCase())).size;
+      if (sortCol === 'rating') return ratingOf.get(s.statementId.toString()) ?? null;
       if (sortCol === 'bids') return bidCount.get(s.address.toLowerCase()) ?? 0;
       if (sortCol === 'now') return s.highBid;
       if (sortCol === 'by') return (s.highBid && names.get(s.highBidder.toLowerCase())) || null;

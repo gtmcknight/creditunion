@@ -54,8 +54,9 @@ export type Rated = {
   /// The 21-byte seed as text (latin1), for drawing the Credit's ink.
   seed: string;
   paidAt: number;
-  score: number;
+  score: number; // the Statements contract's own score (what a Statement's Credit Rating adds up)
   rank: number;
+  rule: number; // score ×10 in the table rating rules are checked against (the Ratings contract)
   traits: { palette: string; activeBits: number; occupied: number; eights: number; registration: string };
   tails: number[];
 };
@@ -76,6 +77,14 @@ export async function ratings(ids: readonly bigint[]): Promise<{ n: number; vers
   }
   return { ...ratedOf!, ratings: Object.fromEntries(all.flatMap((id) => (rated.has(id) ? [[id, rated.get(id)!]] : []))) };
 }
+
+/// A set of Credits' Credit Rating as a Statement made of them states it: the scores in ten-thousandths, summed, then
+/// whole points (Statements metadata: score / 10,000).
+export const ratingTotal = (scores: Iterable<number>) => {
+  let t = 0;
+  for (const x of scores) t += Math.round(x * 10_000);
+  return Math.floor(t / 10_000);
+};
 
 /// Scores alone, for totals: a full rating carries its seed, traits and tails, ten times the bytes.
 const scored = new Map<string, number>();
@@ -382,6 +391,13 @@ export async function minOpen() {
 export async function protocolFeeBps() {
   return Number(await pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'protocolFeeBps' }));
 }
+
+/// Whether a Ratings table is LiveRatings (the Statements contract's scores) rather than the original (config.ratings).
+export const isLiveTable = (t: Address | null | undefined) => !!t && !!config.ratings && !/^0x0+$/.test(t) && t.toLowerCase() !== config.ratings.toLowerCase();
+/// A Credit's score ×10 as LiveRatings states it: tenths, rounded down.
+export const liveTenths = (r: Pick<Rated, 'score'>) => Math.floor(Math.round(r.score * 10_000) / 1000);
+/// The rating-rule table file for a Ratings table: public/scores-live.bin or public/scores.bin.
+export const rulesBin = (t: Address | null | undefined) => (isLiveTable(t) ? 'scores-live.bin' : 'scores.bin');
 
 /// The score table batches opened now use (zero address if none); create() reverts if it changed.
 export async function factoryRatings() {

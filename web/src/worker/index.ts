@@ -460,7 +460,11 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       many = Array.isArray(b.many);
       const each = many ? (b.many as Record<string, unknown>[]) : [b];
       if (!each.length || each.length > 50) throw 0;
-      asks = each.map((one) => ({ ...matchRules(one), key: JSON.stringify(one) }));
+      const live = await liveTable(env);
+      asks = each.map((one) => {
+        const m = matchRules(one);
+        return { ...m, rules: { ...m.rules, live }, key: JSON.stringify(one) + live };
+      });
     } catch {
       return text('bad request', 400);
     }
@@ -893,6 +897,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       } catch {
         return text('bad rules', 400);
       }
+      if (rules.minScore || rules.maxScore) rules.live = await liveTable(env);
     }
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
     // On mainnet, from the market book (every Credit for sale, kept current): no OpenSea call at all. The cursor is how
@@ -1478,7 +1483,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const rating = url.pathname === '/rating';
     const lo = rating ? Math.max(800, Math.min(8000, Math.round(rMin * 10))) : Math.max(0, Math.min(256, Math.round(rMin)));
     const hi = rating ? Math.max(800, Math.min(8000, Math.round(rMax * 10))) : Math.max(0, Math.min(256, Math.round(rMax)));
-    const rules = rating ? { minScore: lo, maxScore: hi } : { bitsFrom: lo, bitsTo: hi };
+    const rules = rating ? { minScore: lo, maxScore: hi, live: await liveTable(env) } : { bitsFrom: lo, bitsTo: hi };
     const show = (x: number) => (rating ? (x / 10).toFixed(1) : String(x));
     card = (await match(env.ASSETS, url.origin, rules, 1).then((m) => rangeCard(rating ? 'rating' : 'bits', m.count, show(lo), show(hi))).catch(() => null)) ?? card;
   }
@@ -1919,8 +1924,33 @@ const rulesOf = (f: Filter) => ({
   minScore: f.minScore, maxScore: f.maxScore, bitsFrom: f.bitsFrom, bitsTo: f.bitsTo,
 });
 
+/// Whether rating rules are checked against LiveRatings: for a union, the table it opened with (fixed for good); with
+/// none, the factory's table now (what a union opened now would use). The original table is env.RATINGS.
+const unionTables = new Map<string, Promise<boolean>>();
+let factoryTable: { at: number; p: Promise<boolean> } | null = null;
+async function liveTable(env: Env, union?: Address): Promise<boolean> {
+  const original = (env.RATINGS ?? '').toLowerCase();
+  const isLive = (a: unknown) => !!original && String(a).toLowerCase() !== original;
+  if (union) {
+    const k = union.toLowerCase();
+    let p = unionTables.get(k);
+    if (!p) {
+      p = client(env).readContract({ address: union, abi: [{ type: 'function', name: 'ratings', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] }], functionName: 'ratings' }).then(isLive);
+      unionTables.set(k, p);
+      p.catch(() => unionTables.delete(k));
+    }
+    return p.catch(() => false);
+  }
+  if (!factoryTable || Date.now() - factoryTable.at > 60_000) {
+    const p = client(env).readContract({ address: env.FACTORY as Address, abi: factoryAbi, functionName: 'ratings' }).then(isLive);
+    factoryTable = { at: Date.now(), p };
+    p.catch(() => (factoryTable = null));
+  }
+  return factoryTable.p.catch(() => false);
+}
+
 /// Every Credit the rules let in, in Credit order.
-async function admitted(env: Env, url: URL, rules: Record<string, number>): Promise<number[]> {
+async function admitted(env: Env, url: URL, rules: Rules): Promise<number[]> {
   const [t, ok] = await Promise.all([load(env.ASSETS, url.origin), predicate(env.ASSETS, url.origin, rules)]);
   const out: number[] = [];
   for (let id = 1; id <= t.length; id++) if (ok(id)) out.push(id);
@@ -1985,7 +2015,7 @@ async function linkCard(req: Request, env: Env, url: URL, ctx: ExecutionContext,
       if (x) u = { name: x.name, ids: await admitted(env, url, x.rules) };
     } else if (/^0x[0-9a-fA-F]{40}$/.test(key) && (await isBatch(env, url, key.toLowerCase() as Address))) {
       const p = await readParty(env, key as Address, url, ctx);
-      u = { name: p.name, ids: await admitted(env, url, rulesOf(p.filter)) };
+      u = { name: p.name, ids: await admitted(env, url, { ...rulesOf(p.filter), live: await liveTable(env, key as Address) }) };
     }
   } catch {
     u = null;
@@ -2487,7 +2517,7 @@ async function deepCandidates(env: Env, url: URL, ctx: ExecutionContext, batch: 
   if (!rule) {
     rule = (async () => {
       const s = (await client(env).readContract({ address: batch, abi: batchAbi, functionName: 'summary' })) as unknown as { filter: Filter; allowlistSize: bigint };
-      const fits = await predicate(env.ASSETS, url.origin, rulesOf(s.filter));
+      const fits = await predicate(env.ASSETS, url.origin, { ...rulesOf(s.filter), live: await liveTable(env, batch) });
       if (Number(s.allowlistSize) > 0) {
         const list = await allowlistOf(env, batch);
         if (!list) throw new Error('the union’s list can’t be read now');

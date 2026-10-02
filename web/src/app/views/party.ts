@@ -2,7 +2,7 @@ import { parseAbi, parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi, unionFormatsAbi } from '../abi';
 import { adapterAbi } from '../adapter-abi';
 import { canBatch, config, explorer, pub, send, sendBatch, session } from '../chain';
-import { ARRANGEMENTS, burnAdapter, getSummary, spotsSaved, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, indexedBatch, indexedOne, keepPick, keptSpots, layoutSlot, me, notice, pickOf, placeOnLayout, readNotice, ratings, sinceTx, staleBatches, type Rated, burnsAt } from '../data';
+import { ARRANGEMENTS, burnAdapter, ratingTotal, getSummary, spotsSaved, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, indexedBatch, indexedOne, keepPick, keptSpots, layoutSlot, me, notice, pickOf, placeOnLayout, readNotice, ratings, sinceTx, staleBatches, type Rated, burnsAt } from '../data';
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { ens, hydrate, identicon, pct, who } from '../ens';
 import { creditCard, examples, fillGhosts, planGhosts, registerDeposits, registerFilter } from '../ghosts';
@@ -1710,13 +1710,8 @@ async function loadRatings(
   txNote: (h: string) => void,
 ) {
   let rated: Record<string, Rated>;
-  let n = 0;
-  let version = '';
   try {
-    const r = await ratings(b.ids);
-    rated = r.ratings;
-    n = r.n;
-    version = r.version;
+    rated = (await ratings(b.ids)).ratings;
   } catch {
     document.getElementById('rating')?.replaceChildren('unavailable');
     return;
@@ -1726,9 +1721,8 @@ async function loadRatings(
   const scores = b.ids.map((id) => rated[id.toString()]?.score).filter((x): x is number => typeof x === 'number');
   if (scores.length) {
     // The Statement's own metadata carries a "Credit rating": the total over its 80. Show that total, so far.
-    const total = scores.reduce((a, x) => a + x, 0);
     el.classList.remove('muted');
-    el.innerHTML = `<span class="num">${Math.round(total).toLocaleString()}</span>${scores.length < 80 ? ` <span class="muted small num">from ${scores.length} ${scores.length === 1 ? 'Credit' : 'Credits'}</span>` : ''} <span class="muted">·</span> <a href="${RATING_URL}" target="_blank" rel="noopener" class="muted small" title="The total of Jack Butcher’s rating (v${version}, over all ${n.toLocaleString()} Credits) across this Credit Union’s Credits">v${version} ↗</a>`;
+    el.innerHTML = `<span class="num">${ratingTotal(scores).toLocaleString()}</span>${scores.length < 80 ? ` <span class="muted small num">from ${scores.length} ${scores.length === 1 ? 'Credit' : 'Credits'}</span>` : ''} <a href="${RATING_URL}" target="_blank" rel="noopener" class="muted small" title="Each Credit’s score as Jack Butcher’s Statements contract computes it, added up as a Statement’s Credit Rating">↗</a>`;
   }
   document.querySelectorAll<HTMLElement>('.batch-art .cell[data-id]').forEach((c) => {
     const r = rated[c.dataset.id!];

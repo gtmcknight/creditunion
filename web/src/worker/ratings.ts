@@ -1,11 +1,40 @@
-/// Official Credit ratings for a set of ids: Jack's formula (see shared/credits.ts) over the frozen mainnet
-/// edition in public/edition.bin. Seeds and payment times come from the configured Credits contract, so on a
-/// testnet the test Credits are rated against the real edition's distribution.
+/// Official Credit ratings for a set of ids. On mainnet the score is the Statements contract's own (its CreditScore,
+/// read once into public/credit-score.bin by scripts/credit-score.ts), the number every Statement's Credit Rating adds
+/// up. Traits come from shared/credits.ts over the frozen edition in public/edition.bin. `rule` is the score ×10 in the
+/// table a union's rating rule is checked against (public/scores.bin, the Ratings contract unions opened with so far).
+/// Seeds and payment times come from the configured Credits contract, so on a testnet the test Credits are rated
+/// against the real edition's distribution, by the published formula.
 import { decodeFunctionResult, encodeFunctionData, type Address } from 'viem';
 import { creditsAbi } from '../app/abi';
 import { rate, type Edition, type Rating } from '../shared/credits';
 
 let edition: Promise<Edition> | null = null;
+const MAINNET_CREDITS = '0x97630aa70ab14ed9883b41dafccbc11349723043';
+
+/// Jack's scores (ten-thousandths, by id − 1), each one's rank (1 + Credits scored strictly higher), and the rule table.
+let table: Promise<{ score: Uint32Array; rank: Uint32Array; rule: Uint16Array }> | null = null;
+async function loadTable(assets: Fetcher, origin: string) {
+  if (!table) {
+    table = (async () => {
+      const [a, b] = await Promise.all(['credit-score.bin', 'scores.bin'].map(async (f) => {
+        const r = await assets.fetch(new Request(`${origin}/${f}`));
+        if (!r.ok) throw new Error(`${f} missing`);
+        return r.arrayBuffer();
+      }));
+      const score = new Uint32Array(a);
+      const sorted = Uint32Array.from(score).sort();
+      const rank = new Uint32Array(score.length);
+      for (let i = 0; i < score.length; i++) {
+        let lo = 0, hi = sorted.length; // first index above score[i]
+        while (lo < hi) { const m = (lo + hi) >> 1; if (sorted[m] <= score[i]) lo = m + 1; else hi = m; }
+        rank[i] = sorted.length - lo + 1;
+      }
+      return { score, rank, rule: new Uint16Array(b) };
+    })();
+    table.catch(() => (table = null));
+  }
+  return table;
+}
 
 async function loadEdition(assets: Fetcher, origin: string): Promise<Edition> {
   if (!edition) {
@@ -25,7 +54,7 @@ async function loadEdition(assets: Fetcher, origin: string): Promise<Edition> {
   return edition;
 }
 
-export type Rated = Rating & { id: string; seed: string; paidAt: number };
+export type Rated = Rating & { id: string; seed: string; paidAt: number; rule: number };
 
 /// One JSON-RPC batch per 100 calls: plain fetch, no shared scheduler (see index.ts on why). Each batch tries the RPCs
 /// in order: a rate-limited, failing or slow one hands the batch to the next.
@@ -116,6 +145,11 @@ export async function ratings(o: {
     await Promise.all(unread.filter((id) => !fresh.has(id.toString()) && !failed.has(id.toString())).map((id) => cache.put(key(id), Response.json(null, { headers: { 'cache-control': 'public, max-age=60' } }))));
   }
   const out: Record<string, Rated> = {};
-  for (const [id, [seed, paidAt]] of known) out[id] = { id, seed, paidAt, ...rate(seed, paidAt, ed) };
-  return { n: ed.n, version: '3.4.0', ratings: out };
+  const t = o.credits.toLowerCase() === MAINNET_CREDITS ? await loadTable(o.assets, o.origin) : null;
+  for (const [id, [seed, paidAt]] of known) {
+    const r = rate(seed, paidAt, ed);
+    const i = Number(id) - 1;
+    out[id] = t ? { id, seed, paidAt, ...r, score: t.score[i] / 10_000, rank: t.rank[i], rule: t.rule[i] } : { id, seed, paidAt, ...r, rule: Math.round(r.score * 10) };
+  }
+  return { n: ed.n, version: t ? 'onchain' : '3.4.0', ratings: out };
 }

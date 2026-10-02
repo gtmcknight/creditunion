@@ -5,7 +5,7 @@ import { creditsAbi, factoryAbi, unionFormatsAbi } from '../abi';
 import { compose, DIRECTIONS, paint as paintMarks, PAGE, type Direction } from '../../shared/statement';
 import { canBatch, config, send, sendBatch, session } from '../chain';
 import { INK, maskInks, maskLabel } from '../traits';
-import { earlyWeight, placeOnLayout, SPLITS, creatorFeeBps, factoryRatings, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Listed, type Rated, type Summary } from '../data';
+import { earlyWeight, placeOnLayout, SPLITS, creatorFeeBps, factoryRatings, isLiveTable, liveTenths, rulesBin, isApproved, minOpen, myCredits, protocolFeeBps, ratings, type Listed, type Rated, type Summary } from '../data';
 import { paletteBit, TRAITS } from '../traits';
 import { $$, art, errText, esc, fromTimeText, openModal, sameZoneDay, sheet, toast, toTimeText, typedToMinute, mintEdgeNote, zoned, zoneName, zoneToggle } from '../ui';
 import { LAYOUT_TRAITS, keyOf, ruleFor, slotMark, slotName, type LayoutTrait } from '../../shared/layout';
@@ -521,8 +521,9 @@ export async function create(app: HTMLElement) {
     if (rules.list.length && !rules.list.includes(Number(id))) return false;
     if (rules.idFrom && Number(id) < rules.idFrom) return false;
     if (rules.idTo && Number(id) > rules.idTo) return false;
-    if (rules.minScore && (!r || Math.round(r.score * 10) < rules.minScore)) return false;
-    if (rules.maxScore && (!r || Math.round(r.score * 10) > rules.maxScore)) return false;
+    const sc = r ? (isLiveTable(table) ? liveTenths(r) : r.rule) : 0;
+    if (rules.minScore && (!r || sc < rules.minScore)) return false;
+    if (rules.maxScore && (!r || sc > rules.maxScore)) return false;
     if (rules.bitsFrom && (!r || r.traits.activeBits < rules.bitsFrom)) return false;
     if (rules.bitsTo && (!r || r.traits.activeBits > rules.bitsTo)) return false;
     if (!r) return !pal() && !rules.prints && !rules.weights && !rules.eights && rules.minuteFrom < 0 && rules.minuteTo < 0;
@@ -1254,7 +1255,8 @@ export async function create(app: HTMLElement) {
   const scoreHist = document.getElementById('score-hist')!;
   const scoreBins = new Array(72).fill(0);
   let scorePeak = 1;
-  bin('scores.bin')
+  factoryRead
+    .then(([, , , t]) => bin(rulesBin(t)))
     .then((buf) => {
       for (const s of new Uint16Array(buf)) if (s) scoreBins[Math.min(71, Math.floor((s / 10 - 80) / 10))]++;
       scorePeak = Math.max(1, ...scoreBins);

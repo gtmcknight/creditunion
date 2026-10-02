@@ -137,8 +137,14 @@ export function errText(e: unknown): string {
   if (os) return +os[1] === 429 ? 'OpenSea is busy right now. Try again in a minute.' : +os[1] >= 500 ? 'OpenSea isn’t answering right now. Try again in a minute.' : 'OpenSea couldn’t fill this right now. Refresh and try again.';
   // The node's word for a sender who can't cover value plus gas.
   if (/OutOfFunds|insufficient funds|Transaction creation failed/i.test(`${m} ${err.message ?? ''}`)) return 'Not enough ETH in your wallet to cover this and gas.';
-  // A revert with no reason usually means the wallet ran it somewhere else (wrong network, stale page).
-  if (/reverted with the following reason:\s*$/.test(m.split('\n').slice(0, 2).join(' ').trim())) return `The network rejected it without a reason. Check your wallet is on ${chain.name}, refresh, and try again.`;
+  // A revert whose reason is on the next line (a wallet's own simulation says why there): show that reason. With none,
+  // the wallet or node couldn't run it (wrong network, a stale page, a busy node): say to try again.
+  const why = /reverted with the following reason:\s*([\s\S]*?)(?:\n\s*\n|Contract Call:|$)/.exec(m);
+  if (why) {
+    const r = why[1].trim().split('\n')[0].trim();
+    return r && !/^execution reverted:?$/i.test(r) ? `It would fail: ${r}` : `Couldn’t check this transaction. Make sure your wallet is on ${chain.name}, refresh, and try again.`;
+  }
+  if (/^The contract function "\w+" reverted\.?$/.test(m.split('\n')[0].trim())) return `Couldn’t check this transaction. Make sure your wallet is on ${chain.name}, refresh, and try again.`;
   return m.split('\n')[0];
 }
 

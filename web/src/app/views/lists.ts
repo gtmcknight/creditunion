@@ -1,5 +1,5 @@
 import { config, session } from '../chain';
-import { listBatches, notice, readNotice, scores, type Listed, type Summary, hasLayout, layoutSlot, placeOnLayout } from '../data';
+import { listBatches, notice, readNotice, ratingTotal, scores, type Listed, type Summary, hasLayout, layoutSlot, placeOnLayout } from '../data';
 import { placedKeys } from '../slots';
 import { hydrate, who } from '../ens';
 import { fitByBatch } from '../fit';
@@ -161,7 +161,7 @@ async function totalCards(list: Listed[]) {
   const todo = list.filter((b) => totalOf(b) === undefined);
   if (!todo.length) return false;
   const got = await scores(todo.flatMap((b) => b.ids));
-  for (const b of todo) totals.set(placeKey(b), Math.round(b.ids.reduce((a, id) => a + (got.get(id.toString()) ?? 0), 0)));
+  for (const b of todo) totals.set(placeKey(b), ratingTotal(b.ids.map((id) => got.get(id.toString()) ?? 0)));
   return true;
 }
 

@@ -31,6 +31,7 @@ type Spec = {
   rules: (a: number, b: number) => Record<string, number>; // the window as edition rules, for its listings
   unionsQuery: (a: number, b: number) => string; // /unions?… for the Credit Unions that take it
   buy: (a: number, b: number) => string; // the Buy heading
+  line: (id: number) => string; // the third line under each Credit: its value on this page
 };
 
 async function scalePage(app: HTMLElement, s: Spec) {
@@ -112,7 +113,7 @@ async function scalePage(app: HTMLElement, s: Spec) {
   unions.catch(() => {});
   // The Credits in the window: listed ones first, cheapest first, then the rest (highest first for Rating).
   let ids: Uint32Array = new Uint32Array(0);
-  const grid = buyGrid(app, {}, async (page) => ({ ids: Array.from(ids.subarray(page * PAGE, (page + 1) * PAGE)), total: ids.length }));
+  const grid = buyGrid(app, {}, async (page) => ({ ids: Array.from(ids.subarray(page * PAGE, (page + 1) * PAGE)), total: ids.length }), s.line);
   const settle = () => {
     if (!app.isConnected) return;
     history.replaceState(null, '', `/${s.kind}?min=${s.show(a)}&max=${s.show(b)}`);
@@ -153,32 +154,33 @@ const failed = (app: HTMLElement, title: string) => {
 };
 
 /// Distinct ratings in the edition, low to high: the exact score (for display, as Credit pages show it), how many
-/// Credits share it, and its rank. From public/edition.bin, as worker/ratings.ts reads it.
+/// Credits share it, and its rank. From public/credit-score.bin (the Statements contract's scores), as
+/// worker/ratings.ts reads it; `unit` is its tenths above 80.0, rounded down.
 type Levels = { score: Float64Array; cnt: Uint32Array; rank: Uint32Array; unit: Uint16Array };
 function levelsOf(buf: ArrayBuffer): Levels {
-  const len = new DataView(buf).getUint32(0, true);
-  const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, len))) as { n: number };
-  const k = (buf.byteLength - 4 - len) / 12;
-  const below = new Uint32Array(buf.slice(4 + len + k * 8));
-  const N = meta.n;
+  const all = new Uint32Array(buf).slice().sort();
+  const N = all.length;
+  const at: number[] = [];
+  for (let i = 0; i < N; i++) if (i === 0 || all[i] !== all[i - 1]) at.push(i);
+  const k = at.length;
   const score = new Float64Array(k), cnt = new Uint32Array(k), rank = new Uint32Array(k), unit = new Uint16Array(k);
-  for (let i = 0; i < k; i++) {
-    cnt[i] = (i + 1 < k ? below[i + 1] : N) - below[i];
-    score[i] = N === 1 ? 800 : 80 + (720 * below[i]) / (N - 1); // shared/credits.ts scoreOf
-    rank[i] = N - below[i] - cnt[i] + 1;
-    unit[i] = Math.round(score[i] * 10) - 800;
+  for (let j = 0; j < k; j++) {
+    cnt[j] = (j + 1 < k ? at[j + 1] : N) - at[j];
+    score[j] = all[at[j]] / 10_000;
+    rank[j] = N - at[j] - cnt[j] + 1;
+    unit[j] = Math.floor(all[at[j]] / 1000) - 800;
   }
   return { score, cnt, rank, unit };
 }
 const fmtScore = (x: number) => (Math.floor(x * 100) / 100).toFixed(2); // as Credit pages show it
 
-/// /rating?min=&max=: Jack's rating, 80 to 800. Units are tenths of a point, the contract's Rating rule
-/// (round(score × 10)), so the window is exactly what a Credit Union's rule would take.
+/// /rating?min=&max=: Jack's rating, 80 to 800, as the Statements contract scores it. Units are tenths of a point,
+/// rounded down, as LiveRatings hands them to a Credit Union's Rating rule.
 export async function ratingPage(app: HTMLElement) {
   app.innerHTML = `<section class="trait-page time-page jb">${creditsHead('rating')}<p class="muted">Loading…</p></section>`;
   let raw: ArrayBuffer, ed: ArrayBuffer;
   try {
-    [raw, ed] = await Promise.all([bin('scores.bin'), bin('edition.bin')]);
+    [raw, ed] = await Promise.all([bin('scores-live.bin'), bin('credit-score.bin')]);
   } catch {
     return failed(app, 'Rating');
   }
@@ -186,6 +188,7 @@ export async function ratingPage(app: HTMLElement) {
   const tenths = new Uint16Array(raw);
   const val = Uint16Array.from(tenths, (t) => Math.max(0, t - 800));
   const L = levelsOf(ed);
+  const exact = new Uint32Array(ed);
   const M = 7201; // 80.0 … 800.0
   const top = (k: number): [number, number] => {
     const sorted = Uint16Array.from(val).sort();
@@ -230,6 +233,7 @@ export async function ratingPage(app: HTMLElement) {
     rules: (a, b) => ({ minScore: a + 800, maxScore: b + 800 }),
     buy: (a, b) => `Buy Credits rated ${((a + 800) / 10).toFixed(1)} to ${((b + 800) / 10).toFixed(1)}`,
     unionsQuery: (a, b) => `minScore=${a + 800}&maxScore=${b + 800}`,
+    line: (id) => (exact[id - 1] ? `Rating ${fmtScore(exact[id - 1] / 10_000)}` : ''),
   });
 }
 
@@ -271,6 +275,7 @@ export async function bitsPage(app: HTMLElement) {
     ],
     pick0: 'fewest',
     href: (a, b) => `/create?minBits=${a + lo}&maxBits=${b + lo}`,
+    line: (id) => `Bits ${val[id - 1] + lo}`,
     note: 'Any without a Bits rule, or with one that overlaps this range.',
     overlaps: ({ s: { filter: f } }, a, b) => {
       const from = f.bitsFrom || 0, to = f.bitsTo || 0;

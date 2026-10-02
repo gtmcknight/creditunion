@@ -44,7 +44,7 @@ export const weightOf = (r: Rated) => {
   return 'extreme';
 };
 
-/// Everything except the allowlist, which needs the chain.
+/// Everything except the allowlist and a rating rule, which need the chain.
 export function fitsRules(s: Summary, id: bigint, r: Rated | undefined): boolean {
   const f = s.filter;
   if (f.idFrom && id < f.idFrom) return false;
@@ -60,9 +60,7 @@ export function fitsRules(s: Summary, id: bigint, r: Rated | undefined): boolean
   if (f.prints && !(f.prints & (1 << TRAITS.print.indexOf(r.traits.registration as (typeof TRAITS.print)[number])))) return false;
   if (f.weights && !(f.weights & (1 << TRAITS.weight.indexOf(weightOf(r) as (typeof TRAITS.weight)[number])))) return false;
   if (f.eights && !(f.eights & (1 << r.traits.eights))) return false;
-  const sc = Math.round(r.score * 10);
-  if (f.minScore && sc < f.minScore) return false;
-  if (f.maxScore && sc > f.maxScore) return false;
+  // A rating rule is checked against the table the union opened with, which only the union knows: fitIds asks it.
   return true;
 }
 
@@ -81,7 +79,7 @@ export async function fitIds(list: Listed[], owned: bigint[], traits: Map<string
     list.map(async ({ s }) => {
       if (s.state !== 'Open') return [];
       let fit = owned.filter((id) => fitsRules(s, id, traits.get(id.toString())));
-      if (fit.length && s.allowlistSize) fit = await eligible(s.address, fit).catch(() => []);
+      if (fit.length && (s.allowlistSize || s.filter.minScore || s.filter.maxScore)) fit = await eligible(s.address, fit).catch(() => []);
       // Layout batches have slots per palette; the batch says which of these would actually land, as a bundle.
       if (fit.length && hasLayout(s.filter)) {
         try {
