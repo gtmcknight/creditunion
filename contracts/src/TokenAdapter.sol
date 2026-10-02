@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC721Metadata} from "@openzeppelin/contracts/token/ERC721/extensions/IERC721Metadata.sol";
+import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {Batch} from "./Batch.sol";
 import {IAssembler} from "./interfaces/IAssembler.sol";
 import {ICredits} from "./interfaces/ICredits.sol";
@@ -35,7 +36,7 @@ interface ITokenUnions {
 ///         The burn only converts and books the amount (it already runs near the 16.78M gas cap). Paying out is a
 ///         second call anyone can make, `distribute`; a member whose transfer fails pulls with `claim`.
 ///         No owner, no admin, no upgrades.
-contract TokenAdapter is IAssembler, ERC721 {
+contract TokenAdapter is IAssembler, IERC721Receiver, ERC721 {
     uint256 public constant SIZE = 80;
     uint8 public constant CONSOLIDATED = 1;
 
@@ -81,6 +82,7 @@ contract TokenAdapter is IAssembler, ERC721 {
     error NotConverted();
     error NothingToClaim();
     error PaymentFailed();
+    error NotAStatement();
 
     constructor(ICredits credits_, IStatements statements_, ITokenUnions factory_, UnionFormats formats_, IStatementVault vault_)
         ERC721("Converted Statement", "CONVERTED")
@@ -212,13 +214,26 @@ contract TokenAdapter is IAssembler, ERC721 {
         if (c.amount == 0) revert NotConverted();
         if (!c.protocolPaid) c.protocolPaid = _pay(union, factory.feeRecipient(), c.protocolFee);
         if (!c.creatorPaid) c.creatorPaid = _pay(union, Batch(union).creator(), c.creatorFee);
-        (, address[] memory members) = Batch(union).slots();
-        for (uint256 i; i < members.length; ++i) {
-            address m = members[i];
-            if (claimed[union][m]) continue; // already paid (a member with several Credits shows up once each)
-            uint256 amount = claimable(union, m);
+        // One pass over the 80: each member's rating added up, then one payment each.
+        Rating storage r = _rating[union];
+        (, address[] memory who) = Batch(union).slots();
+        uint256[5] memory packed = r.packed;
+        bool flat = r.total == 0;
+        uint256 total = flat ? who.length : r.total;
+        address[] memory members = new address[](who.length);
+        uint256[] memory put = new uint256[](who.length);
+        uint256 n;
+        for (uint256 i; i < who.length && i < SIZE; ++i) {
+            uint256 j;
+            while (j < n && members[j] != who[i]) ++j;
+            if (j == n) members[n++] = who[i];
+            put[j] += flat ? 1 : (packed[i >> 4] >> (16 * (i & 15))) & 0xffff;
+        }
+        for (uint256 j; j < n; ++j) {
+            address m = members[j];
+            if (claimed[union][m]) continue;
             claimed[union][m] = true;
-            if (!_pay(union, m, amount)) claimed[union][m] = false;
+            if (!_pay(union, m, c.net * put[j] / total)) claimed[union][m] = false;
         }
     }
 
@@ -241,6 +256,13 @@ contract TokenAdapter is IAssembler, ERC721 {
     }
 
     // ---------------------------------------------------------------- receipt
+
+    /// @dev The Statements contract checks its receiver when it mints a burn's Statement here. Everything else is
+    ///      refused, so a Credit or stray NFT sent with safeTransferFrom bounces instead of getting stuck.
+    function onERC721Received(address, address, uint256, bytes calldata) external view returns (bytes4) {
+        if (msg.sender != address(statements)) revert NotAStatement();
+        return this.onERC721Received.selector;
+    }
 
     /// @notice The receipt draws as the Statement it stands for (now in the vault).
     function tokenURI(uint256 id) public view override returns (string memory) {
