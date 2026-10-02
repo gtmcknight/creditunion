@@ -181,9 +181,20 @@ export function listBatches(): Promise<Listed[]> {
   const p = readBatches(fresh);
   fresh = false;
   const entry: NonNullable<typeof listed> = (listed = { at: Date.now(), p });
-  p.then((v) => (entry.value = v)).catch(() => listed === entry && (listed = null)); // a failed read is retried next time, not remembered
+  p.then((v) => {
+    entry.value = v;
+    for (const f of batchesRead) try { f(v); } catch {}
+  }).catch(() => listed === entry && (listed = null)); // a failed read is retried next time, not remembered
   return p;
 }
+
+/// Auctions open for bids: at auction, the clock not run out (the Worker counts the same for the page, liveCount).
+export const liveAuctions = (all: readonly Listed[], now = Date.now() / 1000) => all.filter(({ s }) => s.state === 'Auction' && !(s.highBid > 0n && now >= s.auctionEnd)).length;
+/// The list as a page here last read it, while that's fresh, for what can be counted from it without reading it again.
+export const recentBatches = (): Listed[] | null => (listed && Date.now() - listed.at < LIST_MS ? (listed.value ?? null) : null);
+/// Told each time a page here reads the list.
+const batchesRead = new Set<(all: Listed[]) => void>();
+export const onBatches = (f: (all: Listed[]) => void) => batchesRead.add(f);
 
 /// One Credit Union as the index had it when a page read it in the last minute (a list page, say), with how old
 /// that read is; null when there's none. Being in the index is being one of our factory's. Forgotten, like the
@@ -334,11 +345,17 @@ export function readNotice(): Promise<Notice> {
   if (noticeKept && Date.now() - noticeKept.t < 60_000) return noticeKept.read;
   const get = (functionName: 'assembler' | 'pendingAssembler' | 'pendingUntil') => pub.readContract({ address: config.factory, abi: factoryAbi, functionName });
   const zero = '0x0000000000000000000000000000000000000000';
-  const read = Promise.all([get('assembler'), get('pendingAssembler'), get('pendingUntil')]).then(
+  // As the page came (the Worker's read): once the burn contract is on it never changes, so it's never read again;
+  // before that, the page's copy serves its first minute.
+  const b = !noticeKept ? config.burn : undefined;
+  const given = b && Promise.resolve([b.assembler ?? zero, b.pending ?? zero, BigInt(b.until)] as const);
+  const read = (given ?? Promise.all([get('assembler'), get('pendingAssembler'), get('pendingUntil')])).then(
     ([active, next, until]) => ((burningOn = active !== zero), (activeAdapter = burningOn ? (active as Address) : null), (notice = active === zero && next !== zero ? { at: Number(until), adapter: next as Address } : null)),
     () => notice,
   );
-  noticeKept = { t: Date.now(), read };
+  const entry = { t: Date.now(), read };
+  noticeKept = entry;
+  void read.then(() => burningOn && (entry.t = Infinity)); // on for good (BatchFactory: AssemblerFixed)
   return read;
 }
 /// The earliest burning can open: the Statement contract goes live at 8:00 PM ET on Oct 1. Ours follows after checks

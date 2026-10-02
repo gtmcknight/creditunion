@@ -25,6 +25,15 @@ export type Config = {
   formats?: Address | null;
   /// Jack's Statements contract (mainnet), for /statement pages.
   statements?: Address | null;
+  /// Read by the Worker and written into the page (absent when it had no read yet): burning's state (the factory's
+  /// burn contract once on, or the one proposed and when it can turn on), the Sweeper's fee in bps, how many auctions
+  /// were live and how many full unions were counting down to their hour to convert or in it, when it last read them
+  /// (factsAt, ms).
+  burn?: { assembler: Address | null; pending: Address | null; until: number };
+  sweeperFee?: number;
+  liveAuctions?: number;
+  burnable?: number;
+  factsAt?: number;
 };
 
 const CHAINS: Record<number, Chain> = { 1: mainnet, 11155111: sepolia, 31337: foundry };

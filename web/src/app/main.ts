@@ -19,10 +19,13 @@ import { timePage } from './views/time';
 import { bitsPage, ratingPage } from './views/scale';
 import { dayAndTime, esc, errText, openModal, timeLeft, toast } from './ui';
 import { watchOutbid } from './outbid';
-import { BURNING_FROM, burningOn, burnsAt, indexedBatch, listBatches, me, readNotice, type Listed } from './data';
+import { BURNING_FROM, burningOn, burnsAt, indexedBatch, listBatches, liveAuctions, me, onBatches, readNotice, recentBatches, type Listed } from './data';
 
 const app = document.getElementById('app')!;
 let seq = 0;
+const loadedAt = Date.now();
+// Any page's read of the union list brings the nav's count up to date.
+onBatches((all) => void drawAuctions(pagePath()[0], all));
 
 /// Real paths: / (how it works and live activity), /docs, /unions, /auctions, /credits, /create, /union/0x…, /credit/123, /mint, /me,
 /// trait pages /palette/CMYK, /eights/3, /print/slip, /weight/sparse, and /time?from=&to=, /rating, /bits. Pages keep their old
@@ -165,18 +168,21 @@ async function drawNotice() {
 
 /// Live auctions, for people who live on Unions: counted beside Auctions in the nav, and once burning is on, the bar
 /// above the header says so on every page but Auctions itself.
-async function drawAuctions(page: string) {
-  const all = await listBatches().catch(() => null);
-  if (!all) return;
-  const now = Date.now() / 1000;
-  const live = all.filter(({ s }) => s.state === 'Auction' && !(s.highBid > 0n && now >= s.auctionEnd)).length;
+async function drawAuctions(page: string, list: Listed[] | null = recentBatches()) {
+  // Counted from the union list when a page here just read it; else as the page came (the Worker's count, under two
+  // minutes old, early in the visit). The list is read for it otherwise, and whenever a full union may be in its hour
+  // to convert (config.burnable): the bar below names that union.
+  const given = config.liveAuctions !== undefined && !config.burnable && Date.now() - (config.factsAt ?? 0) < 2 * 60_000 && Date.now() - loadedAt < 2 * 60_000;
+  const all = list ?? (given ? null : await listBatches().catch(() => null));
+  const live = all ? liveAuctions(all) : config.liveAuctions;
+  if (live === undefined) return;
   const a = document.querySelector<HTMLAnchorElement>('.main-nav [data-nav="auctions"]');
   if (a) a.innerHTML = live ? `Auctions <span class="nav-count num" aria-label="${live} live">${live}</span>` : 'Auctions';
   await readNotice();
   const el = document.getElementById('notice');
   if (!el || !burningOn || (el.innerHTML && !el.classList.contains('auctions-bar'))) return;
   el.classList.add('auctions-bar');
-  if (burnBar(el, all, page)) return;
+  if (burnBar(el, all ?? [], page)) return; // no list: the page's facts say no union is near its hour to convert
   el.innerHTML = `<span><strong>${live === 1 ? '1 Statement is' : `${live} Statements are`} up for auction.</strong> <a href="/auctions">See auctions</a></span>`;
   el.hidden = !live || page === 'auctions';
 }

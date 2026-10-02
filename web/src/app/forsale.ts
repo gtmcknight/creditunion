@@ -66,9 +66,11 @@ const canBuy = (preview?: boolean) => !preview && !!config.sweeper;
 const DEFAULT_FEE_BPS = 200n;
 let feeBps: Promise<bigint> | null = null;
 export const sweepFee = () =>
-  (feeBps ??= config.sweeper
-    ? (pub.readContract({ address: config.sweeper, abi: sweeperAbi, functionName: 'feeBps' }) as Promise<bigint>).catch(() => DEFAULT_FEE_BPS)
-    : Promise.resolve(DEFAULT_FEE_BPS));
+  (feeBps ??= !config.sweeper
+    ? Promise.resolve(DEFAULT_FEE_BPS)
+    : config.sweeperFee !== undefined
+      ? Promise.resolve(BigInt(config.sweeperFee)) // as the page came: the buy reads it again before it sends
+      : (pub.readContract({ address: config.sweeper, abi: sweeperAbi, functionName: 'feeBps' }) as Promise<bigint>).catch(() => DEFAULT_FEE_BPS));
 
 /// Buys in flight on this page (a price being checked, or the wallet open): live views hold still till they're done.
 export const buying = { n: 0 };

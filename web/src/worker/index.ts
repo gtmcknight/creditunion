@@ -1638,7 +1638,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const shell = await env.ASSETS.fetch(new Request(new URL('/', url), req));
     // The Printer is unlisted: nothing links to it, and search engines leave it out.
     const unlisted = /^\/printer(\/|$)/.test(url.pathname) ? '\n  <meta name="robots" content="noindex, nofollow">' : '';
-    if (shell.ok && (shell.headers.get('content-type') ?? '').includes('text/html')) return withCard(shell, card, url, bootHead(env, url) + unlisted);
+    if (shell.ok && (shell.headers.get('content-type') ?? '').includes('text/html')) return withCard(shell, card, url, bootHead(env, url, await pageFacts(env, url, ctx)) + unlisted);
     return shell;
   }
 
@@ -1648,10 +1648,94 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
 /// Pages that read the union list: it starts loading alongside the scripts instead of after them.
 const LISTS = /^\/(unions|parties|auctions|me|member|credit|credits|palette|eights|print|weight|time|rating|bits|og|create)(\/|$)/;
 /// Into every page's head: the app's config, so the first draw doesn't wait on /config.json, and on pages that
-/// list Credit Unions a preload of the union index.
-function bootHead(env: Env, url: URL) {
-  const config = `<script type="application/json" id="config">${JSON.stringify(publicConfig(env)).replace(/</g, '\\u003c')}</script>`;
+/// list Credit Unions a preload of the union index. `facts` (pageFacts) ride along when there's a read of them.
+function bootHead(env: Env, url: URL, facts?: Facts | null) {
+  const config = `<script type="application/json" id="config">${JSON.stringify({ ...publicConfig(env), ...facts }).replace(/</g, '\\u003c')}</script>`;
   return LISTS.test(url.pathname) ? `${config}\n  <link rel="preload" href="/unions.json" as="fetch" crossorigin="anonymous">` : config;
+}
+
+/// What every page shows of the chain that seldom changes, written into the page with its config so no visit reads it
+/// itself: burning's state (the factory's burn contract, fixed for good once set, or the one proposed and when it can
+/// turn on), the Sweeper's fee, and how many auctions are live (the nav's count), with when that was read (factsAt).
+/// Read behind the response once a copy is FACTS_MS old; a copy up to FACTS_KEEP old is still handed out (this
+/// isolate's, else the colo's), so a page never waits on the chain for it. With none (a new isolate in a quiet data
+/// center), a page goes without, and the app reads what it needs itself, as before.
+type Facts = { burn?: { assembler: Address | null; pending: Address | null; until: number }; sweeperFee?: number; liveAuctions?: number; burnable?: number; factsAt?: number };
+const FACTS_MS = 15_000;
+const FACTS_KEEP = 10 * 60_000;
+let factsMemo: { got: number; v: Facts } | null = null;
+let factsRead: Promise<void> | null = null;
+async function pageFacts(env: Env, url: URL, ctx: ExecutionContext): Promise<Facts | null> {
+  if (factsMemo && Date.now() - factsMemo.got < FACTS_MS) return factsMemo.v;
+  const key = new Request(`${url.origin}/page-facts/v2`);
+  if (!factsRead) {
+    factsRead = readFacts(env, url, ctx)
+      .then((v) => {
+        factsMemo = { got: Date.now(), v };
+        return caches.default.put(key, Response.json(v, { headers: { 'cache-control': `public, max-age=${FACTS_KEEP / 1000}` } }));
+      })
+      .catch((e) => console.warn('[facts]', safeError(e)))
+      .finally(() => (factsRead = null));
+    ctx.waitUntil(factsRead);
+  }
+  if (factsMemo && Date.now() - factsMemo.got < FACTS_KEEP) return factsMemo.v;
+  const hit = await caches.default.match(key);
+  return hit ? hit.json<Facts>().catch(() => null) : null;
+}
+async function readFacts(env: Env, url: URL, ctx: ExecutionContext): Promise<Facts> {
+  const factsAt = Date.now();
+  const [burn, sweeperFee, counts] = await Promise.all([
+    burnState(env).catch(() => undefined),
+    sweeperFeeOf(env).catch(() => undefined),
+    unionIndex(env, url, ctx).then(countsOf).catch(() => undefined),
+  ]);
+  return { ...(burn ? { burn } : {}), ...(sweeperFee !== undefined ? { sweeperFee } : {}), ...(counts ? { ...counts, factsAt } : {}) };
+}
+/// From the index, counted once per read of it: auctions open for bids (Batch.State.Auction, the clock not run out),
+/// and full unions counting down to their hour to convert or in it (Phase Countdown or Burnable), which the site bar
+/// names: a page with any reads the union list for that bar.
+function countsOf(v: Index): { liveAuctions: number; burnable: number } {
+  if (!v.counts) {
+    const n = (x: unknown) => Number(x && typeof x === 'object' ? (x as { $n: string }).$n : x);
+    const now = Date.now() / 1000;
+    const { unions } = JSON.parse(v.body) as { unions: { summary: { state: unknown; phase: unknown; highBid: unknown; auctionEnd: unknown } }[] };
+    v.counts = {
+      liveAuctions: unions.filter(({ summary: s }) => n(s.state) === 3 && !(n(s.highBid) > 0 && now >= n(s.auctionEnd))).length,
+      burnable: unions.filter(({ summary: s }) => n(s.state) === 1 && (n(s.phase) === 2 || n(s.phase) === 3)).length,
+    };
+  }
+  return v.counts;
+}
+/// The burn contract once it's on (it can never change after), else what's proposed: read once a minute until then.
+let burnKept: { at: number; v: Promise<NonNullable<Facts['burn']>> } | null = null;
+function burnState(env: Env): Promise<NonNullable<Facts['burn']>> {
+  if (burnKept && Date.now() - burnKept.at < 60_000) return burnKept.v;
+  const c = client(env);
+  const read = (functionName: 'assembler' | 'pendingAssembler' | 'pendingUntil') => c.readContract({ address: env.FACTORY as Address, abi: factoryAbi, functionName });
+  const zero = (a: unknown) => /^0x0{40}$/i.test(String(a));
+  // A failed read throws (the page then goes without), never reads as "not on".
+  const v = read('assembler').then(async (assembler) => {
+    if (!zero(assembler)) return { assembler: assembler as Address, pending: null, until: 0 };
+    const [pending, until] = await Promise.all([read('pendingAssembler'), read('pendingUntil')]);
+    return { assembler: null, pending: zero(pending) ? null : (pending as Address), until: Number(until) };
+  });
+  const entry = { at: Date.now(), v };
+  burnKept = entry;
+  v.then((b) => b.assembler && (entry.at = Infinity), () => burnKept === entry && (burnKept = null));
+  return v;
+}
+/// The Sweeper's fee on each buy, a few minutes old at most (the buy reads it again before it sends).
+let feeKept: { at: number; v: Promise<number> } | null = null;
+function sweeperFeeOf(env: Env): Promise<number | undefined> {
+  if (!publicConfig(env).sweeper) return Promise.resolve(undefined);
+  if (feeKept && Date.now() - feeKept.at < 5 * 60_000) return feeKept.v;
+  const v = client(env)
+    .readContract({ address: env.SWEEPER, abi: sweeperAbi, functionName: 'feeBps' })
+    .then(Number);
+  const entry = { at: Date.now(), v };
+  feeKept = entry;
+  v.catch(() => feeKept === entry && (feeKept = null));
+  return v;
 }
 
 /// What a Credit's card shows, from the edition's packed traits and score table.
@@ -1694,7 +1778,7 @@ async function readParty(env: Env, batch: Address, url?: URL, ctx?: ExecutionCon
 /// ChainBook for the whole site. This isolate keeps it INDEX_MS, then the colo cache, then the ChainBook; `fresh`
 /// (after the reader's own transaction) asks the ChainBook for a read made after this call. Without the ChainBook
 /// (or with it unreachable), this data center reads the chain itself and keeps that 10 s, as before.
-type Index = { at: number; body: string; one?: Map<string, string> };
+type Index = { at: number; body: string; one?: Map<string, string>; counts?: { liveAuctions: number; burnable: number } };
 let indexMemo: { got: number; v: Index } | null = null;
 let indexRead: Promise<Index> | null = null;
 async function unionIndex(env: Env, url: URL, ctx: ExecutionContext, fresh = false): Promise<Index> {
@@ -2826,7 +2910,9 @@ function assemblerOf(env: Env): Promise<string | null> {
     .readContract({ address: env.FACTORY as Address, abi: factoryAbi, functionName: 'assembler' })
     .then((a) => (/^0x0{40}$/i.test(a as string) ? null : (a as string).toLowerCase()))
     .catch(() => null);
-  assemblerKept = { at: Date.now(), addr };
+  const entry = { at: Date.now(), addr };
+  assemblerKept = entry;
+  void addr.then((a) => a && (entry.at = Infinity)); // once set it's fixed for good (BatchFactory: AssemblerFixed)
   return addr;
 }
 
