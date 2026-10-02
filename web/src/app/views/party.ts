@@ -521,7 +521,7 @@ function watchLive(app: HTMLElement, address: Address, b: Ctx, rerender: () => v
         if (topped && n.s.state === 'Auction') {
           bidAgain.add(address.toLowerCase());
           markOutbidSeen(address, n.s.highBid);
-          toast(`You’ve been outbid: the high bid is now ${eth(n.s.highBid)}. ${minEth(n.s.minBid)} ETH takes it back.`, 'err', 8000);
+          toast(`You’ve been outbid: the high bid is now ${eth(n.s.highBid)}. ${minEth(n.s.minBid)} ETH takes it back.`, 'info', 8000);
         }
         await party(app, address, rerender, n, n.s.state === b.s.state && !topped ? m : undefined);
       }

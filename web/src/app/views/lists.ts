@@ -9,6 +9,7 @@ import { clock, eth, esc, openModal, pageHead, same, sheet, startsAt, statementA
 import { TRAIT_KINDS, parseTrait, type TraitValue } from '../../shared/trait';
 import { creditsOf, takes } from './trait';
 import { drawStill, primeInks, showStill, warmInks } from '../directions';
+import { outbidNow } from '../outbid';
 import { whale } from './whale';
 import { DIRECTIONS, type Direction } from '../../shared/statement';
 
@@ -590,7 +591,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         if (me && same(b.s.highBidder, me)) outbid.delete(key);
         else if (me && same(before.highBidder, me) && !outbid.has(key)) {
           outbid.add(key);
-          toast(`Outbid on ${b.s.name || 'a Statement'}: ${eth(b.s.highBid)}`);
+          outbidNow(b); // the site's one outbid alert (linked, told once)
         }
       }
       draw();

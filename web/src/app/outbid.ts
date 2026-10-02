@@ -109,10 +109,16 @@ function say(list: Listed[]) {
     one
       ? `Outbid on <a href="/union/${one.s.address}">${esc(title(one))}</a>: ${eth(one.s.highBid)} now.`
       : `Outbid on ${list.length} auctions. <a href="/auctions/multibid">Bid again</a>`,
-    'err',
+    'info', // news, not an error: red is for what failed
     12_000,
     true,
   );
+}
+
+/// A page that saw the bid land itself (the Auctions page reads every 10 seconds): the one alert, told once.
+export function outbidNow(b: Listed) {
+  markOutbidSeen(b.s.address, b.s.highBid);
+  tell([b]);
 }
 
 document.addEventListener('visibilitychange', () => {
