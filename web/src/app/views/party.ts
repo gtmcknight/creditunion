@@ -165,8 +165,9 @@ let draws = 0;
 /// The live-refresh timer for the Credit Union on screen (one at a time).
 let live: ReturnType<typeof setInterval> | null = null;
 const LIVE_MS = 8_000; // under a block: the index it reads is kept for everyone, so a poll costs no chain read
-/// An auction's page reads the chain itself, a third of a block apart: being outbid is a race.
-const AUCTION_MS = 4_000;
+/// An auction's page looks more often, a quarter of a block apart: being outbid is a race. It reads the same index
+/// (the site reads every union once a block), so watching costs no chain read; a bid checks the chain itself.
+const AUCTION_MS = 3_000;
 /// A bid that lost the race to someone else's: the page redraws with the new minimum filled in (`bidAgain`).
 class Outbid extends Error {}
 const bidAgain = new Set<string>();
@@ -503,7 +504,7 @@ function watchLive(app: HTMLElement, address: Address, b: Ctx, rerender: () => v
     }
     if (document.hidden || busy || document.querySelector('dialog[open]')) return;
     try {
-      const one = sinceTx() < TX_MS || b.s.state === 'Auction' ? null : await indexedOne(address);
+      const one = sinceTx() < TX_MS ? null : await indexedOne(address);
       if (one && one.at < at) return; // an older read than the page's
       const n: Ctx & { at?: number } = one ?? (b.s.state === 'Auction' ? { ...b, s: await getSummary(address) } : await getBatch(address));
       if (n.s.state === 'Full') await readNotice();
