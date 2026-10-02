@@ -41,13 +41,18 @@ export function markOutbidSeen(union: string, highBid: bigint) {
   write(SEEN, seen);
 }
 
-/// Unions this wallet has bid on, from the activity feed (a few seconds behind the chain).
-async function bidOn(me: Address): Promise<Set<string>> {
+/// Unions this wallet has bid on and when it last did, from the activity feed (a few seconds behind the chain).
+async function bidOn(me: Address): Promise<Map<string, number>> {
+  type Row = { kind: string; union?: string; time?: number };
   const r = await fetch(`/activity.json?member=${me}&limit=1000`)
-    .then((x) => x.json() as Promise<{ items?: { kind: string; union?: string }[] }>)
-    .catch(() => ({ items: [] as { kind: string; union?: string }[] }));
-  return new Set((r.items ?? []).filter((x) => x.kind === 'bid' && x.union).map((x) => x.union!.toLowerCase()));
+    .then((x) => x.json() as Promise<{ items?: Row[] }>)
+    .catch(() => ({ items: [] as Row[] }));
+  const last = new Map<string, number>();
+  for (const x of r.items ?? []) if (x.kind === 'bid' && x.union) last.set(x.union.toLowerCase(), Math.max(last.get(x.union.toLowerCase()) ?? 0, x.time ?? 0));
+  return last;
 }
+/// After your own bid the feed can show it a few seconds before the union list does: no "outbid" until both caught up.
+const GRACE = 90;
 
 export async function checkOutbid() {
   const me = watched();
@@ -60,6 +65,7 @@ export async function checkOutbid() {
   for (const b of all) {
     const k = b.s.address.toLowerCase();
     if (!mine.has(k)) continue;
+    if (now - (mine.get(k) ?? 0) < GRACE) continue; // your own bid, still being indexed
     const live = b.s.state === 'Auction' && !(b.s.highBid > 0n && now >= b.s.auctionEnd);
     if (!live || same(b.s.highBidder, me)) {
       delete seen[k]; // leading again, or over: a later outbid is news
