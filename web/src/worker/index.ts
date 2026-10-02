@@ -48,6 +48,7 @@ interface Env {
   FACTORY: Address;
   SWEEPER: Address;
   RATINGS?: Address;
+  STATEMENTS?: string;
   OPENSEA_SLUG: string;
   OPENSEA_API_KEY?: string;
   OPENSEA_API_KEY_2?: string; // tried when the first is rate limited
@@ -345,6 +346,7 @@ const publicConfig = (env: Env) => ({
   ratings: env.RATINGS && !/^0x0+$/.test(env.RATINGS) ? env.RATINGS : null,
   fwaMarket: addrOrNull(env.FWA_MARKET),
   formats: addrOrNull(env.FORMATS),
+  statements: addrOrNull(env.STATEMENTS),
 });
 
 /// /edition/match answers kept per isolate: the edition never changes within a deploy, and every visitor of /unions

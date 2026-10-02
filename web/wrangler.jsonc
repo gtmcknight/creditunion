@@ -15,6 +15,7 @@
     "FACTORY": "0xcb06f9076e5fbF3cB052086b1EE7C0F3836aa051",
     "SWEEPER": "0x7b93309A12e05944Ab821470615983A4A2AC9799",
     "RATINGS": "0x61Ca63cDE107CE7e32785c0d89904fE58f9d371d",
+    "STATEMENTS": "0x75Edd94b7e49b3bD5C8047b91F165A5e265a069b",
     "OPENSEA_SLUG": "credits",
     "FALLBACK_RPC": "https://ethereum-rpc.publicnode.com",
     // FWA (fwa.fun), mainnet only: its marketplace is a second Buy Credits source.

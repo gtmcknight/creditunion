@@ -52,7 +52,7 @@ export function go(path: string) {
 }
 
 /// The Credits explorer: its landing, the trait indexes and pages, the range pages.
-const EXPLORER = new Set(['credits', 'statements', 'palette', 'eights', 'print', 'weight', 'time', 'rating', 'bits']);
+const EXPLORER = new Set(['credits', 'statements', 'statement', 'palette', 'eights', 'print', 'weight', 'time', 'rating', 'bits']);
 
 let lastPath = '';
 let lastPage = '';
@@ -110,6 +110,7 @@ async function route() {
     else if (page === 'rating') await ratingPage(app);
     else if (page === 'bits') await bitsPage(app);
     else if (page === 'statements') await (await import('./views/statements')).statementsMarket(app, route);
+    else if (page === 'statement') await (await import('./views/statement')).statement(app, arg ?? '', route);
     else if (page === 'credits' || page === 'palette' || page === 'eights' || page === 'print' || page === 'weight') await traitPage(app, page, arg ?? '');
     else if (page === 'party' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await party(app, arg as Address, route);
     else if (page === 'parties' || page === 'auctions') await lists(app, page);

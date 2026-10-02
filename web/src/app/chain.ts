@@ -23,6 +23,8 @@ export type Config = {
   fwaMarket?: Address | null;
   /// UnionFormats: where a union's creator picks its Statement format.
   formats?: Address | null;
+  /// Jack's Statements contract (mainnet), for /statement pages.
+  statements?: Address | null;
 };
 
 const CHAINS: Record<number, Chain> = { 1: mainnet, 11155111: sepolia, 31337: foundry };

@@ -9287,11 +9287,12 @@ dialog.share .share-swatches button {
 /* The bar keeps the word on phones (its own size beats the 600px rule that shrinks it to an arrow): no second arrow. */
 @media (max-width: 600px) { .tick-bar .tick-all::after { content: none; } }
 .tick-bar .tick-line { gap: 5px; } .tick-bar .tick-when { margin-left: 4px; }
-/* The ticker's last two actions side by side, a line between; one on phones. */
-.tick-item { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 0 1 auto; }
+/* The ticker's last three actions at full length, a line between; what doesn't fit runs under a fade into
+   Activity →, so nothing is cut to a word. */
+.tick-item { display: flex; align-items: center; gap: 5px; flex: none; }
 .tick-item + .tick-item { margin-left: 12px; padding-left: 16px; border-left: 1px solid var(--line); }
-.tick-item:nth-child(n + 3) { display: none; } /* three only squeeze each to a word */
-@media (max-width: 760px) { .tick-item:nth-child(n + 2) { display: none; } }
+.tick-bar .tick-all { position: relative; z-index: 1; padding-left: 8px; background: var(--bg); }
+.tick-bar .tick-all::before { content: ''; position: absolute; top: 0; bottom: 0; right: 100%; width: 64px; background: linear-gradient(to right, transparent, var(--bg)); pointer-events: none; }
 
 /* The create page with Picture chosen: the picture makes its own rules (its Colors, slot by slot), so the other rules
    fold away; Colors stays, to keep an ink out of it. */
@@ -9431,3 +9432,8 @@ a.whale-name:hover { text-decoration: underline; text-underline-offset: 3px; }
 .st-name { color: var(--fg); text-decoration: none; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st-name:hover { text-decoration: underline; text-underline-offset: 3px; }
 .st-buy { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+/* A Statement's page: its drawing in the 4:5 frame; the Credits it was made from under it, eight across like the sheet. */
+.st-page-art { position: relative; aspect-ratio: 76 / 95; background: var(--empty); box-shadow: 0 0 0 1px var(--line); overflow: hidden; }
+.st-page-art .statement-art { position: absolute; inset: 0; width: 100%; height: 100%; }
+.st-buy-page { margin-top: 16px; font-size: 20px; }
+.st-from { margin-top: 40px; }

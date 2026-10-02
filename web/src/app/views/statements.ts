@@ -8,7 +8,7 @@ import { bindSort, errText, esc, eth, same, sortMenu, statementArt, toast } from
 import { DIRECTIONS } from '../../shared/statement';
 import { creditsHead } from './trait';
 
-type ForSale = { id: string; price: string; hash: string; protocol: string; seller: string; rating: number | null; format: number | null };
+export type ForSale = { id: string; price: string; hash: string; protocol: string; seller: string; rating: number | null; format: number | null };
 const ORDERS = [['cheap', 'Lowest price'], ['dear', 'Highest price'], ['rating', 'Top rated'], ['value', 'Most rating per ETH']] as const;
 type Order = (typeof ORDERS)[number][0];
 
@@ -51,11 +51,11 @@ export async function statementsMarket(app: HTMLElement, rerender: () => void) {
   const card = (x: ForSale) => {
     const u = unions.get(x.id);
     const mine = !!session.account && same(x.seller as Address, session.account);
-    const href = u ? `/union/${u.address}` : `https://opensea.io/item/ethereum/0x75edd94b7e49b3bd5c8047b91f165a5e265a069b/${x.id}`;
+    const href = `/statement/${x.id}`;
     return `<div class="st-card" data-id="${x.id}">
-      <a class="st-art statement-host" href="${href}"${u ? '' : ' target="_blank" rel="noopener"'}>${statementArt(BigInt(x.id))}</a>
+      <a class="st-art statement-host" href="${href}">${statementArt(BigInt(x.id))}</a>
       <div class="st-meta">
-        <a class="st-name" href="${href}"${u ? '' : ' target="_blank" rel="noopener"'}>${esc(u?.name ?? 'Statement')} <span class="stmt-no num">#${x.id}</span></a>
+        <a class="st-name" href="${href}">${esc(u?.name ?? 'Statement')} <span class="stmt-no num">#${x.id}</span></a>
         <span class="st-line muted small num">${x.rating != null ? `Rating ${x.rating.toLocaleString()}` : ''}${x.format != null && DIRECTIONS[x.format] ? ` · ${DIRECTIONS[x.format]}` : ''}</span>
         <div class="st-buy"><strong class="num">${eth(BigInt(x.price))}</strong>${mine ? '<span class="muted small">Yours</span>' : session.account ? `<button type="button" class="btn sm primary" data-buy="${x.id}">Buy</button>` : '<button type="button" class="btn sm" data-connect>Connect to buy</button>'}</div>
       </div>
@@ -81,37 +81,40 @@ export async function statementsMarket(app: HTMLElement, rerender: () => void) {
     app.querySelectorAll<HTMLButtonElement>('[data-buy]').forEach((b) => b.addEventListener('click', () => void buy(b)));
   };
 
-  // Click once to see the price on the button, again to buy: a Statement is dear, so the second click is the decision.
-  const buy = async (btn: HTMLButtonElement) => {
+  const buy = (btn: HTMLButtonElement) => {
     const x = items.find((i) => i.id === btn.dataset.buy);
-    if (!x || !session.wallet || !session.account) return;
-    if (!btn.dataset.armed) {
-      btn.dataset.armed = '1';
-      btn.textContent = `Buy for ${eth(BigInt(x.price))}`;
-      return;
-    }
-    btn.disabled = true;
-    btn.textContent = 'Buying…';
-    try {
-      await ensureChain();
-      const r = await fetch('/market/statements/buy', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ hash: x.hash, protocol: x.protocol, buyer: session.account }) });
-      const tx = (await r.json()) as { to?: Address; data?: Hex; value?: string; error?: string };
-      if (!r.ok || !tx.to || !tx.data || !tx.value) throw new Error(tx.error ?? 'That listing can’t be bought right now.');
-      // Run it first: a listing gone stale fails here, not in the wallet.
-      await pub.call({ account: session.account, to: tx.to, data: tx.data, value: BigInt(tx.value) });
-      const hash = await session.wallet.sendTransaction({ account: session.account, chain, to: tx.to, data: tx.data, value: BigInt(tx.value) });
-      toast('Submitted. Waiting for confirmation…', 'info');
-      const receipt = await pub.waitForTransactionReceipt({ hash });
-      if (receipt.status !== 'success') throw new Error('The purchase reverted.');
-      toast(`Statement #${x.id} is yours.`, 'ok');
-      items = items.filter((i) => i.id !== x.id);
-      rerender();
-    } catch (e) {
-      toast(errText(e), 'err', 8000);
-      btn.disabled = false;
-      delete btn.dataset.armed;
-      btn.textContent = 'Buy';
-    }
+    if (x) void buyListed(btn, x, () => ((items = items.filter((i) => i.id !== x.id)), rerender()));
   };
   draw();
+}
+
+/// Click once to see the price on the button, again to buy: a Statement is dear, so the second click is the decision.
+/// OpenSea's signed order for this wallet, run first (a stale listing fails here, not in the wallet), then sent.
+export async function buyListed(btn: HTMLButtonElement, x: ForSale, done: () => void) {
+  if (!session.wallet || !session.account) return;
+  if (!btn.dataset.armed) {
+    btn.dataset.armed = '1';
+    btn.textContent = `Buy for ${eth(BigInt(x.price))}`;
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Buying…';
+  try {
+    await ensureChain();
+    const r = await fetch('/market/statements/buy', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ hash: x.hash, protocol: x.protocol, buyer: session.account }) });
+    const tx = (await r.json()) as { to?: Address; data?: Hex; value?: string; error?: string };
+    if (!r.ok || !tx.to || !tx.data || !tx.value) throw new Error(tx.error ?? 'That listing can’t be bought right now.');
+    await pub.call({ account: session.account, to: tx.to, data: tx.data, value: BigInt(tx.value) });
+    const hash = await session.wallet.sendTransaction({ account: session.account, chain, to: tx.to, data: tx.data, value: BigInt(tx.value) });
+    toast('Submitted. Waiting for confirmation…', 'info');
+    const receipt = await pub.waitForTransactionReceipt({ hash });
+    if (receipt.status !== 'success') throw new Error('The purchase reverted.');
+    toast(`Statement #${x.id} is yours.`, 'ok');
+    done();
+  } catch (e) {
+    toast(errText(e), 'err', 8000);
+    btn.disabled = false;
+    delete btn.dataset.armed;
+    btn.textContent = 'Buy';
+  }
 }
