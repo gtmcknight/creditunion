@@ -255,6 +255,7 @@ export default {
         maxGwei: Number(env.KEEPER_MAX_GWEI) || 20,
         transport: rpcTransport(env),
         unions: () => unionList(env) as Promise<Kept[]>,
+        payouts: new Date(_event.scheduledTime).getUTCMinutes() === 0, // failed payouts: on the hour
       }).catch((e) => console.error('[keeper] run failed', safeError(e))),
     );
   },

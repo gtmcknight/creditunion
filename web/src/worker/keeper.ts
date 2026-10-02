@@ -3,7 +3,8 @@
 /// first, each only if it would land:
 ///   1. factory.activateAssembler(), once the 30-minute notice has run;
 ///   2. settle() on an auction that has ended;
-///   3. claim(member) for a member whose payout failed at settle (anyone may send it for them), for three days;
+///   3. claim(member) for a member whose payout failed at settle (anyone may send it for them), for three days,
+///      looked for once an hour in one multicall over every member of those unions;
 ///   4. record(union) on the adapter for a full picture (80 of 80, until the burn) whose spots aren't saved as they
 ///      stand, so a leave from outside the site can't slide them before the burn. While a picture fills, whoever
 ///      leaves saves its spots first, on the site (contracts/ADAPTER.md).
@@ -31,7 +32,7 @@ const PER_RUN = 5;
 
 type Job = { what: string; address: Address; abi: typeof batchAbi | typeof factoryAbi | typeof adapterAbi; functionName: string; args?: readonly unknown[] };
 
-export async function keep(o: { key: string; chainId: number; factory: Address; maxGwei: number; transport: Transport; unions: () => Promise<Kept[]> }) {
+export async function keep(o: { key: string; chainId: number; factory: Address; maxGwei: number; transport: Transport; unions: () => Promise<Kept[]>; payouts: boolean }) {
   if (!/^0x[0-9a-fA-F]{64}$/.test(o.key)) return console.error('[keeper] KEEPER_KEY is not a private key');
   const chain = o.chainId === 1 ? mainnet : o.chainId === 11_155_111 ? sepolia : { ...mainnet, id: o.chainId };
   const account = privateKeyToAccount(o.key as Hex);
@@ -57,11 +58,24 @@ export async function keep(o: { key: string; chainId: number; factory: Address; 
   const unions = await o.unions();
   for (const u of unions)
     if (u.summary.state === AUCTION && u.summary.highBid > 0n && now >= u.summary.auctionEnd) jobs.push({ what: `settle ${u.address}`, address: u.address, abi: batchAbi, functionName: 'settle' });
-  for (const u of unions) {
-    if (u.summary.state !== SETTLED || now >= u.summary.auctionEnd + PAY_FOR) continue;
-    const members = [...new Set(u.depositors.map((d) => d.toLowerCase() as Address))];
-    const owed = await Promise.all(members.map((m) => c.readContract({ address: u.address, abi: batchAbi, functionName: 'claimable', args: [m] }).catch(() => 0n)));
-    members.forEach((m, i) => owed[i] > 0n && jobs.push({ what: `pay ${m} from ${u.address}`, address: u.address, abi: batchAbi, functionName: 'claim', args: [m] }));
+  // Failed payouts are rare (settle pays everyone it can), so they're looked for hourly, every member in one read:
+  // one call each, every five minutes, was ~150 calls a minute across a night's auctions for three days.
+  if (o.payouts) {
+    const owedBy = unions
+      .filter((u) => u.summary.state === SETTLED && now < u.summary.auctionEnd + PAY_FOR)
+      .flatMap((u) => [...new Set(u.depositors.map((d) => d.toLowerCase() as Address))].map((m) => ({ union: u.address, m })));
+    for (let i = 0; i < owedBy.length; i += 1000) {
+      const part = owedBy.slice(i, i + 1000);
+      const res = await c.multicall({
+        contracts: part.map((p) => ({ address: p.union, abi: batchAbi, functionName: 'claimable', args: [p.m] }) as const),
+        allowFailure: true,
+        batchSize: 16_384,
+      });
+      part.forEach((p, k) => {
+        const r = res[k];
+        if (r.status === 'success' && r.result > 0n) jobs.push({ what: `pay ${p.m} from ${p.union}`, address: p.union, abi: batchAbi, functionName: 'claim', args: [p.m] });
+      });
+    }
   }
   // Spots, once per fill: full unions only (Full, or Expired: still 80 of 80). orderOf reverts for anything but a picture.
   const adapter = (active !== ZERO ? active : next) as Address;
