@@ -6,7 +6,7 @@ import { ARRANGEMENTS, burnAdapter, ratingTotal, getSummary, spotsSaved, type Ph
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { ens, hydrate, identicon, pct, who } from '../ens';
 import { creditCard, examples, fillGhosts, planGhosts, registerDeposits, registerFilter } from '../ghosts';
-import { gapOf, Guide, planOf, unpackPicture, type Plan, type Stored, OWN_GOOD, runOf } from '../picture';
+import { gapOf, Guide, inOrder, landing, planOf, unpackPicture, type Plan, type Stored, OWN_GOOD, runOf } from '../picture';
 import { Room, books, keysOf, noRoomReason, placedKeys, type Books } from '../slots';
 import { MAX_SWEEP, buying, checkQuote, listedById, connectToBuy, live as keepLive, minEth, priceTag, relist, sweepControls, sweepRow, type Listed, type Quote, type Sale, type Source } from '../forsale';
 import { creditCell, creditSkel } from './trait';
@@ -109,7 +109,7 @@ async function planPicture(b: Ctx, slots: number[], placed: (bigint | null)[] | 
   const rec = guide.fillYoursFirst(slots, placed ? placed.map((x) => (x === null ? null : Number(x))) : slots.map(() => null), gone);
   planGhosts(b.s.address, rec.map((c) => c?.id ?? null));
   livePlanned.add(b.s.address.toLowerCase());
-  return planOf(rec, slots, placed);
+  return planOf(rec, slots, placed, guide.twins(slots));
 }
 /// A picture union: the Credits picked to deposit or buy show at full ink in their spots on the sheet, so each shows
 /// where it goes before it's in. `from`: which pick changed (the Deposit tab's or the Buy tab's; both stay lit).
@@ -135,7 +135,7 @@ async function locks(batch: string, body?: { op: 'acquire' | 'hold' | 'release';
 }
 /// Listings (or Credits) in the order the picture wants them: its recommended ones by slot, then the rest as they were.
 const byPlan = <T extends { id: string }>(list: T[], plan: Plan | null | undefined) =>
-  !plan ? list : [...list.filter((l) => plan.slot.has(l.id)).sort((x, y) => plan.slot.get(x.id)! - plan.slot.get(y.id)!), ...list.filter((l) => !plan.slot.has(l.id))];
+  !plan ? list : [...inOrder(plan, list.filter((l) => plan.slot.has(l.id)).map((l) => l.id)).map((id) => list.find((l) => l.id === id)!), ...list.filter((l) => !plan.slot.has(l.id))];
 /// A Credit to preselect once its picker draws (the ?pick= link).
 let pickAsk: { at: string; id: string } | null = null;
 /// Which Add Credits tab is open, per Credit Union, so a live refresh doesn't flip it back.
@@ -1369,7 +1369,7 @@ async function drawPicker(
     const id = btn.dataset.id!;
     // A picture union: yours of one Colors go in from its first open slot, so picking one picks those ahead of it,
     // and dropping one drops those behind it.
-    const along = plan ? runOf(plan, id, plan.mine) : null;
+    const along = plan ? runOf(plan, id, plan.mine, picks) : null;
     if (picks.has(id)) [id, ...(along?.behind ?? [])].forEach((x) => picks.delete(x));
     else [id, ...(along?.ahead ?? [])].forEach((x) => picks.add(x));
     sync();
@@ -1533,7 +1533,7 @@ async function bindBuy(
   // A picture's Credits of one Colors go in from its first open slot: picking one brings those ahead of it.
   const along = (id: string, picking: boolean) => {
     if (!order) return [];
-    const r = runOf(order, id, new Set(sale.ls.map((l) => l.id)));
+    const r = runOf(order, id, new Set(sale.ls.map((l) => l.id)), chosen().map((l) => l.id));
     return picking ? r.ahead : r.behind;
   };
   const ctl = sweepControls(host, sale, grid, { button: false, cap: 80 - b.s.count, onPick: () => (label(), order && chooseSpots('buy', chosen().map((l) => l.id))), along });
@@ -1606,7 +1606,8 @@ async function bindBuy(
       }
       // A picture union: OpenSea's Credits deposit in the order sent, so send them in slot order.
       if (order) {
-        const at = (i: number) => order!.slot.get(q.ids[i]) ?? 99;
+        const land = landing(order, [...picked.map((l) => l.id)]);
+        const at = (i: number) => land.get(q.ids[i]) ?? 99;
         const idx = q.ids.map((_, i) => i).sort((x, y) => at(x) - at(y));
         [q.orders, q.ids, q.prices] = [idx.map((i) => q.orders[i]), idx.map((i) => q.ids[i]), idx.map((i) => q.prices[i])];
       }

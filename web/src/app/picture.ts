@@ -277,7 +277,16 @@ export class Guide {
     private detail: number[],
     /// How far yours may draw a spot worse than the best for sale (`own`, in cost units).
     private slack: number,
+    private px: Uint8ClampedArray,
   ) {}
+
+  /// Each slot → the first slot of its Colors whose patch looks the same (itself when none), so Credits planned for
+  /// either draw both: a plain background's spots take its Credits in any order.
+  twins(layout: readonly number[]): number[] {
+    const out: number[] = [];
+    for (let s = 0; s < 80; s++) out.push(!layout[s] ? s : ([...Array(s).keys()].find((r) => layout[r] === layout[s] && out[r] === r && alike(this.px, r, s)) ?? s));
+    return out;
+  }
 
   /// `wallets`: whose Credits count as theirs (the viewer's). `held`: the first wallet's Credits that can go in, when
   /// the page knows better than a chain read, and `colours` their Colors as the contract reads them. `detail`: how
@@ -288,7 +297,7 @@ export class Guide {
     const { cands: all, wall, base: b } = await candidates(o.wallets ?? [], new Set(), o.held);
     const cands = all.filter((c) => c.owner >= 0 || c.price <= MAX_PRICE);
     const cost = await costs(px, cands, wall, { features: o.detail ?? DETAIL, maxPrice: MAX_PRICE, own: o.own ?? 1, look: o.look }, o.progress);
-    return new Guide(cands, cost, Uint8Array.from(cands, (c) => (c.owner === 0 && o.colours?.(BigInt(c.id))) || paletteOf(b, c.id)), detailOf(px), (o.own ?? 1) * OWN_COST);
+    return new Guide(cands, cost, Uint8Array.from(cands, (c) => (c.owner === 0 && o.colours?.(BigInt(c.id))) || paletteOf(b, c.id)), detailOf(px), (o.own ?? 1) * OWN_COST, px);
   }
 
   /// A sheet for the picture: the best Credit for each slot, the most detailed slots choosing first, and its Colors
@@ -372,65 +381,126 @@ export class Guide {
 }
 
 /// What can go in next, from a `fill`: each Colors' open slots fill in slot order as Credits of it go in, so only
-/// the start of each Colors' run can go in now.
+/// Credits that draw the start of each Colors' run can go in now. Spots whose patches look the same (`twin`, as
+/// Guide.twins: a plain background) take any of the Credits planned for them, in any order, so only spots unlike their
+/// neighbours hold a Credit to its place.
 ///   slot    every recommended Credit → its slot
-///   mine    the wallet's own (owner 0) that are next in their Colors: deposit these, in slot order
-///   buy     listings with only listings ahead of them in their Colors: bought together, they land in order
+///   mine    the wallet's own (owner 0) that can go in now: deposit these, in the order `landing` gives
+///   buy     listings that can go in now with only listings ahead of them: bought together, they land in order
 ///   colour  every recommended Credit → its slot's Colors
-export type Plan = { slot: Map<string, number>; mine: Set<string>; buy: Set<string>; colour: Map<string, number> };
-export function planOf(rec: readonly (Candidate | null)[], layout: readonly number[], placed?: readonly (bigint | number | null)[]): Plan {
-  const plan: Plan = { slot: new Map(), mine: new Set(), buy: new Set(), colour: new Map() };
-  const mineOpen = new Set<number>(), buyOpen = new Set<number>(); // Colors whose run is still yours / still listings
-  const seen = new Set<number>();
+///   twin    each slot → the first slot of its Colors that looks the same (itself when none)
+///   open    each Colors → its open slots, in the order they fill
+export type Plan = { slot: Map<string, number>; mine: Set<string>; buy: Set<string>; colour: Map<string, number>; twin: number[]; open: Map<number, number[]> };
+export function planOf(rec: readonly (Candidate | null)[], layout: readonly number[], placed?: readonly (bigint | number | null)[], twin: readonly number[] = layout.map((_, i) => i)): Plan {
+  const plan: Plan = { slot: new Map(), mine: new Set(), buy: new Set(), colour: new Map(), twin: [...twin], open: new Map() };
   for (let i = 0; i < 80; i++) {
     const c = rec[i], m = layout[i];
     if (placed?.[i] != null || !m) continue;
-    const first = !seen.has(m);
-    seen.add(m);
-    if (!c) {
-      mineOpen.delete(m);
-      buyOpen.delete(m);
-      continue;
-    }
-    const id = String(c.id);
-    plan.slot.set(id, i);
-    plan.colour.set(id, m);
-    if (c.owner === 0) {
-      if (first) mineOpen.add(m);
-      if (mineOpen.has(m)) plan.mine.add(id);
-      buyOpen.delete(m);
-    } else {
-      if (first) buyOpen.add(m);
-      if (buyOpen.has(m)) plan.buy.add(id);
-      mineOpen.delete(m);
-    }
+    plan.open.set(m, [...(plan.open.get(m) ?? []), i]);
+    if (!c) continue;
+    plan.slot.set(String(c.id), i);
+    plan.colour.set(String(c.id), m);
   }
+  const ids = [...plan.slot.keys()];
+  for (const id of landing(plan, ids.filter((id) => rec[plan.slot.get(id)!]!.owner === 0)).keys()) plan.mine.add(id);
+  // A Colors yours start goes to yours: a buy meanwhile would land in the spots after the plan's, not the ones it drew.
+  const yours = new Set([...plan.mine].map((id) => plan.colour.get(id)));
+  for (const id of landing(plan, ids.filter((id) => rec[plan.slot.get(id)!]!.owner !== 0 && !yours.has(plan.colour.get(id)))).keys()) plan.buy.add(id);
   return plan;
 }
 
-/// The Credits of `among` in the same Colors as `id`: those planned ahead of it (they must go in with it, else it lands
-/// in their slot) and those behind it (they can't go in without it).
-export function runOf(plan: Plan, id: string, among: ReadonlySet<string>): { ahead: string[]; behind: string[] } {
-  const at = plan.slot.get(id), c = plan.colour.get(id), ahead: string[] = [], behind: string[] = [];
-  if (at === undefined) return { ahead, behind };
-  for (const o of among) {
-    const t = plan.slot.get(o);
-    if (o === id || t === undefined || plan.colour.get(o) !== c) continue;
-    (t < at ? ahead : behind).push(o);
+/// Where `ids` land when they go in together: each Colors' open spots fill one after another, each with a Credit
+/// planned for a spot that looks the same (the one planned for it when that's among them). Ids that can't land, because
+/// a spot ahead of them has none of its look among `ids`, are left out. `stuck`: each Colors' first spot left unfilled
+/// while some of `ids` of that Colors still wait.
+export function landing(plan: Plan, ids: Iterable<string>, stuck?: Map<number, number>): Map<string, number> {
+  const out = new Map<string, number>(), waiting = new Map<number, Map<number, string[]>>(); // Colors → look → ids
+  for (const id of new Set(ids)) {
+    const at = plan.slot.get(id), m = plan.colour.get(id);
+    if (at === undefined || m === undefined) continue;
+    const looks = waiting.get(m) ?? new Map<number, string[]>(), g = plan.twin[at];
+    waiting.set(m, looks.set(g, [...(looks.get(g) ?? []), id]));
+  }
+  for (const [m, looks] of waiting) {
+    let left = [...looks.values()].reduce((n, x) => n + x.length, 0);
+    for (const t of plan.open.get(m) ?? []) {
+      if (!left) break;
+      const pool = looks.get(plan.twin[t]) ?? [];
+      if (!pool.length) {
+        stuck?.set(m, t);
+        break;
+      }
+      const own = pool.findIndex((id) => plan.slot.get(id) === t);
+      out.set(pool.splice(own < 0 ? 0 : own, 1)[0], t);
+      left--;
+    }
+  }
+  return out;
+}
+
+/// `ids` in the order they go in, so each lands in a spot it draws (those that can't land last, by their planned spot).
+export function inOrder(plan: Plan, ids: Iterable<string>): string[] {
+  const all = [...ids], at = landing(plan, all), key = (id: string) => at.get(id) ?? 100 + (plan.slot.get(id) ?? 99);
+  return all.sort((a, b) => key(a) - key(b));
+}
+
+/// What a tap on `id` brings along, with `picked` already picked: `ahead`, the Credits of `among` it needs to land in
+/// a spot it draws (one for each spot of another look before the first of its own), and `behind`, the picked ones
+/// that no longer land without it.
+export function runOf(plan: Plan, id: string, among: ReadonlySet<string>, picked: Iterable<string> = []): { ahead: string[]; behind: string[] } {
+  const have = new Set(picked), ahead: string[] = [], m = plan.colour.get(id);
+  have.delete(id);
+  const lands = landing(plan, have);
+  const behind = [...have].filter((x) => plan.colour.get(x) === m && !lands.has(x));
+  if (m === undefined) return { ahead, behind };
+  const going = new Set([...have, id]);
+  for (;;) {
+    const stuck = new Map<number, number>();
+    if (landing(plan, going, stuck).has(id) || !stuck.has(m)) break;
+    const next = gapAt(plan, stuck.get(m)!, going, among);
+    if (!next) break;
+    going.add(next);
+    ahead.push(next);
   }
   return { ahead, behind };
 }
 
-/// A Credit that must come along with `ids`: one the picture puts ahead of one of them in the same Colors (else
-/// they'd land a slot early). Null when `ids` start each of their Colors' runs.
+/// A Credit that must come along with `ids`: one for a spot ahead of some of them in their Colors that none of `ids`
+/// draws (else they'd land in spots they don't draw). Null when they all land.
 export function gapOf(plan: Plan, ids: Iterable<string>): string | null {
-  const have = new Set(ids);
-  for (const id of have) {
-    const at = plan.slot.get(id), c = plan.colour.get(id);
-    if (at === undefined) continue;
-    for (const [o, t] of plan.slot) if (t < at && !have.has(o) && plan.colour.get(o) === c && (plan.mine.has(o) || plan.buy.has(o))) return o;
+  const have = new Set(ids), stuck = new Map<number, number>();
+  landing(plan, have, stuck);
+  for (const t of stuck.values()) {
+    const next = gapAt(plan, t, have, new Set([...plan.mine, ...plan.buy]));
+    if (next) return next;
   }
   return null;
+}
+
+/// A Credit of `among`, not in `have`, planned for a spot that looks like `t` (the one planned for `t` first).
+function gapAt(plan: Plan, t: number, have: ReadonlySet<string>, among: ReadonlySet<string>): string | null {
+  let best: string | null = null;
+  for (const o of among) {
+    const at = plan.slot.get(o);
+    if (at === undefined || have.has(o) || plan.twin[at] !== plan.twin[t]) continue;
+    if (at === t) return o;
+    if (best === null || at < plan.slot.get(best)!) best = o;
+  }
+  return best;
+}
+
+/// Most two patches may differ, in mean colour difference per pixel (0 to 255), and still count as the same spot:
+/// JPEG noise on a plain ground, not a soft edge.
+const TWIN = 6;
+/// Whether slots `a` and `b` show the same patch of the picture.
+function alike(px: Uint8ClampedArray, a: number, b: number) {
+  const at = (t: number, c: number) => ((Math.floor(t / 8) * 8 + (c >> 3)) * 64 + (t % 8) * 8 + (c & 7)) * 4;
+  let d = 0;
+  for (let c = 0; c < 64; c++) {
+    const i = at(a, c), j = at(b, c);
+    d += Math.max(Math.abs(px[i] - px[j]), Math.abs(px[i + 1] - px[j + 1]), Math.abs(px[i + 2] - px[j + 2]));
+  }
+  return d / 64 <= TWIN;
 }
 
 /// How much detail each slot's patch has (its lightness spread): detailed slots pick first.

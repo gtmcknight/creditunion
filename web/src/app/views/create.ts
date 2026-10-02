@@ -18,7 +18,7 @@ import { Room, booksOf, noRoomReason } from '../slots';
 import { bin } from '../bins';
 import { TRAIT_KINDS, eightsName, parseTrait } from '../../shared/trait';
 import { WAVE_SHAPES, inkFor, mazeIndex, planMaze, waveColors, type Maze, type MazeIndex, type Pool, type WaveShape } from '../../shared/lab';
-import { DETAIL, gapOf, Guide, framer, packPicture, planOf, type Framer, type Plan, OWN_GOOD, runOf, type Look } from '../picture';
+import { DETAIL, gapOf, Guide, framer, inOrder, landing, packPicture, planOf, type Framer, type Plan, OWN_GOOD, runOf, type Look } from '../picture';
 
 const CHUNK = 40;
 /// The layouts a new party can pick, by the contract's burn-order number (1 Mint time and 3 Creator's order are retired).
@@ -235,7 +235,7 @@ export async function create(app: HTMLElement) {
   let maze: Maze | null = null; // the Maze layout's 80, once planned
   const mazeOn = () => app.querySelector<HTMLInputElement>('input[name=arr]:checked')?.value === String(MAZE);
   const picturing = () => !!picPlan && layout.some(Boolean) && app.querySelector<HTMLInputElement>('input[name=arr]:checked')?.value === String(PICTURE);
-  const bySlot = (ids: string[]) => (picPlan ? [...ids].sort((a, b) => (picPlan!.slot.get(a) ?? 99) - (picPlan!.slot.get(b) ?? 99)) : ids);
+  const bySlot = (ids: string[]) => (picPlan ? inOrder(picPlan, ids) : ids);
   const layout: number[] = new Array(80).fill(0); // slot values of the painted trait, 0 = any
   let panesReady = false; // the rule tabs exist (refresh() redraws them once they do)
   let layoutTrait: LayoutTrait = 0; // which trait the sheet is painted with (shared/layout.ts)
@@ -482,7 +482,7 @@ export async function create(app: HTMLElement) {
       const sold = want.filter((id) => !ls.some((l) => l.id === id));
       if (!sold.length) break;
       sold.forEach((id) => picGone.add(Number(id)));
-      picPlan = planOf(guide!.fillYoursFirst(layout, layout.map(() => null), picGone), layout);
+      picPlan = planOf(guide!.fillYoursFirst(layout, layout.map(() => null), picGone), layout, undefined, guide!.twins(layout));
     }
     ls = bySlot(ls.map((l) => l.id)).map((id) => ls.find((l) => l.id === id)!);
     drawPreview(owned.filter(qualifies));
@@ -494,7 +494,7 @@ export async function create(app: HTMLElement) {
     const sale: Sale = { ls, all: [...ls], byId: new Map(ls.map((l) => [l.id, l])), mine: new Set(), preview: false };
     // A Colors' Credits go in from its first open slot (yours first): picking one brings those ahead of it.
     const along = (id: string, picking: boolean) => {
-      const r = runOf(picPlan!, id, new Set(ls.map((l) => l.id)));
+      const r = runOf(picPlan!, id, new Set(ls.map((l) => l.id)), [...picks, ...(buyer?.chosen().map((l) => l.id) ?? [])]);
       return picking ? r.ahead : r.behind;
     };
     buyer = sweepControls(el.querySelector<HTMLElement>('#cb-act')!, sale, el.querySelector<HTMLElement>('#cb-grid')!, { button: false, onPick: () => refresh(), along });
@@ -793,9 +793,9 @@ export async function create(app: HTMLElement) {
   /// they'll land in, and in every other slot the Credit that draws it best.
   function pictureSlots(fit: bigint[]) {
     const order = [...picks].filter((id) => fit.some((f) => f.toString() === id)).map(BigInt);
-    const placed = placeOnLayout(layout, order, (id) => keyOfMine(id.toString()));
     const toBuy = buying().map((l) => l.id).filter((id) => picPlan?.slot.has(id));
-    for (const id of toBuy) placed[picPlan!.slot.get(id)!] ??= BigInt(id);
+    // All of them go in together in that order (bought ones too), each to its Colors' next open slot.
+    const placed = placeOnLayout(layout, bySlot([...order.map(String), ...toBuy]).map(BigInt), (id) => picPlan?.colour.get(id.toString()) ?? keyOfMine(id.toString()));
     const rec = guide!.fillYoursFirst(layout, placed.map((x) => (x === null ? null : Number(x))), picGone);
     return { order, placed, toBuy, rec, ids: placed.map((x, i) => (x !== null ? Number(x) : (rec[i]?.id ?? null))) };
   }
@@ -1393,7 +1393,7 @@ export async function create(app: HTMLElement) {
     const id = b.dataset.id!;
     // A picture: yours of one Colors go in from its first slot, so one brings those ahead of it, and leaving one out
     // leaves out those behind it.
-    const along = picturing() ? runOf(picPlan!, id, picPlan!.mine) : null;
+    const along = picturing() ? runOf(picPlan!, id, picPlan!.mine, [...picks, ...buying().map((l) => l.id)]) : null;
     if (picks.has(id)) [id, ...(along?.behind ?? [])].forEach((x) => picks.delete(x));
     else [id, ...(along?.ahead ?? [])].forEach((x) => picks.add(x));
     refresh();
@@ -1693,7 +1693,7 @@ export async function create(app: HTMLElement) {
     });
     // Yours that the picture puts first in their Colors' slots go in now, in slot order.
     const rec = g.fillYoursFirst(layout, layout.map(() => null), picGone);
-    picPlan = planOf(rec, layout);
+    picPlan = planOf(rec, layout, undefined, g.twins(layout));
     // What draws all 80: how many of yours, and how many for sale.
     const ours = rec.filter((c) => c && c.owner >= 0).length;
     status.textContent = `${ours ? `${ours} of yours and ${80 - ours} for sale draw it.` : 'Credits for sale draw it.'}`;
@@ -1828,7 +1828,7 @@ export async function create(app: HTMLElement) {
       // A picture's first Credits: all or none, so none lands a slot early; a sold one gives its slot to the next best.
       const got = await sweepToWallet(toBuy, go, undefined, picturing() ? { onSold: (ids) => {
         ids.forEach((id) => picGone.add(Number(id)));
-        picPlan = planOf(guide!.fillYoursFirst(layout, layout.map(() => null), picGone), layout);
+        picPlan = planOf(guide!.fillYoursFirst(layout, layout.map(() => null), picGone), layout, undefined, guide!.twins(layout));
         buyFor = '';
       } } : undefined);
       if (!got?.length) {
