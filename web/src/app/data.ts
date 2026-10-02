@@ -353,8 +353,14 @@ export async function keptSpots(union: Address): Promise<(bigint | null)[] | nul
   }
 }
 
+/// The burn contract, once it's on (null before).
+export async function burnAdapter(): Promise<Address | null> {
+  await readNotice();
+  return activeAdapter;
+}
+
 /// Whether the burn contract has saved every Credit's spot in a picture union as it stands now: then a leave opens only
-/// the leaver's spots and the rest of the picture stays put. The keeper saves them within minutes of any change.
+/// the leaver's spots and the rest of the picture stays put. Whoever leaves saves them first when they aren't.
 export async function spotsSaved(union: Address): Promise<boolean> {
   await readNotice();
   if (!activeAdapter) return false;

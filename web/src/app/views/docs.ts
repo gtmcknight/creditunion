@@ -111,7 +111,7 @@ const sections = (): Section[] => [
       <li><b>Auction and split.</b> The Statement is auctioned onchain. There is no reserve. The auction runs 24 hours from the first bid, and a bid in the last 15 minutes resets the clock to 15 minutes. When the auction ends, the winner receives the Statement and every member is paid.</li>
     </ol>
     <h3 id="burning">When burning opens</h3>
-    <p>Jack’s Statement contract goes live on October 1. Our burn contract follows with a 30 minute public notice onchain, and then every full Union starts its countdown. Until then, Unions fill but never lock, so members can leave at any time. Picture Unions are the exception: they do not allow withdrawals.</p>
+    <p>Jack’s Statement contract goes live on October 1. Our burn contract follows with a 30 minute public notice onchain, and then every full Union starts its countdown. Until then, Unions fill but never lock, so members can leave at any time.</p>
     <p>A Union has no deadline. It stays open until it fills and burns. If an hour passes without a burn, the Union unlocks and the cycle can repeat as many times as needed.</p>`,
   },
   {
@@ -129,7 +129,7 @@ const sections = (): Section[] => [
       .map(([v, name, how, join]) => `<div class="doc-type">${arrIcon(v)}<div><b>${name}</b><p>${how}</p><span class="doc-join">${join}</span></div></div>`)
       .join('')}</div>
     <h3>How Picture Unions fill</h3>
-    <p>Every open spot in the picture has a Credit planned for it, from the listings and from your own. One of yours goes in when it draws its spot about as well as the best for sale. Pick them in any order: Credits of the same Colors fill their spots one after another, so picking one brings along any planned ahead of it. If a planned Credit sells elsewhere first, the site plans the next best for its spot. Picture Unions do not allow withdrawals, because taking a Credit out would shift the picture; the only member can still leave.</p>
+    <p>Every open spot in the picture has a Credit planned for it, from the listings and from your own. One of yours goes in when it draws its spot about as well as the best for sale. Pick them in any order: Credits of the same Colors fill their spots one after another, so picking one brings along any planned ahead of it. If a planned Credit sells elsewhere first, the site plans the next best for its spot. Leaving a Picture Union opens only your spots: the rest of the picture stays put. If the spots are not saved yet, your leave saves them first.</p>
     <h3>Limiting who can join</h3>
     <p>A Union only accepts Credits that follow the rules its creator sets. For Joined, Number and Painted Unions, those rules can cover Colors, Eights, Print, Weight, Plates, Bits, rating, payment time, a number range, or a list of up to 200 Credits. A Union with no rules accepts every Credit.</p>`,
   },
@@ -143,7 +143,7 @@ const sections = (): Section[] => [
     <h3>Starting a Union</h3>
     <p>Start with at least one Credit. It can be one you already own, or one you buy as you start the Union. A Picture Union starts with yours that draw it closely, the Credits you buy for it, or both.</p>
     <h3>Leaving</h3>
-    <p>Withdraw your Credits anytime before the Union locks. Picture Unions do not allow withdrawals, except while you’re the only member.</p>`,
+    <p>Withdraw your Credits anytime before the Union locks.</p>`,
   },
   {
     id: 'auctions',

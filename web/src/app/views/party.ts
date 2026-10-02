@@ -1,7 +1,8 @@
 import { parseAbi, parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi, unionFormatsAbi } from '../abi';
+import { adapterAbi } from '../adapter-abi';
 import { canBatch, config, explorer, pub, send, sendBatch, session } from '../chain';
-import { ARRANGEMENTS, getSummary, spotsSaved, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, indexedBatch, indexedOne, keepPick, keptSpots, layoutSlot, me, notice, pickOf, placeOnLayout, readNotice, ratings, sinceTx, staleBatches, type Rated, burnsAt } from '../data';
+import { ARRANGEMENTS, burnAdapter, getSummary, spotsSaved, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, indexedBatch, indexedOne, keepPick, keptSpots, layoutSlot, me, notice, pickOf, placeOnLayout, readNotice, ratings, sinceTx, staleBatches, type Rated, burnsAt } from '../data';
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { ens, hydrate, identicon, pct, who } from '../ens';
 import { creditCard, examples, fillGhosts, planGhosts, registerDeposits, registerFilter } from '../ghosts';
@@ -301,23 +302,23 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
         <div><dt>Members</dt><dd>${
           depositors
             ? `<button type="button" class="link members-btn" id="depositors-btn"><span class="faces" aria-hidden="true">${faces}</span>${
-              youIn ? (depositors === 1 ? 'You joined' : `You and ${depositors - 1} ${depositors === 2 ? 'other' : 'others'} joined`) : `${depositors} ${depositors === 1 ? 'person' : 'people'} joined`
+              youIn ? (depositors === 1 ? 'You joined' : `You and ${depositors - 1} ${depositors === 2 ? 'other' : 'others'} joined`) : `${depositors} joined`
             }</button>`
             : '<span>None yet</span>'
-        }</dd></div>
+        } <span class="muted">· ${s.split === 1 ? 'early bird' : 'split equally'}</span></dd></div>
         ${s.state === 'Open' || s.state === 'Full' || s.state === 'Expired' ? `<div><dt>Credits</dt><dd>${s.count} <span class="muted">of 80 in</span>${
             s.state === 'Open' && s.count < 80 ? ` <span class="muted">·</span> <span class="hover-show" data-hover-show="finished">see it finished</span>` : ''
           }${myIds.size ? ` <span class="muted">·</span> <span class="hover-show" data-hover-show="yours">${myIds.size} ${myIds.size === 1 ? 'is' : 'are'} yours</span>` : ''}</dd></div>` : ''}
-        <div><dt>Payout</dt><dd>${s.split === 1 ? `Early bird <span class="muted">· 1st ${sharePct(earlyShare(0))} → 80th ${sharePct(earlyShare(79))}</span>` : `Equal <span class="muted">· ${sharePct(1 / 80)} per Credit</span>`}</dd></div>
+        ${s.count ? fact('Rating', `<span id="rating" class="muted">…</span>`) : ''}
         <div class="takes"><dt>Rules</dt><dd>${rules.length ? rules.map(rule).join('') : 'Any Credit'}</dd></div>
       </dl>
       <details class="kv-more">
         <summary><span class="when-closed">More details</span><span class="when-open">Fewer details</span></summary>
         <dl class="kv">
           ${fact('Layout', `<span class="layout-name">${ARRANGEMENTS[s.arrangement] ?? 'Order joined'}</span>`)}
-          ${s.count ? fact('Rating', `<span id="rating" class="muted">…</span>`) : ''}
           ${s.reserve && (s.state === 'Open' || s.state === 'Full' || (s.state === 'Auction' && s.minBid === s.reserve && !s.highBid)) ? fact('Reserve', `${minEth(s.reserve)} ETH`) : ''}
           ${fact('Split', split(s))}
+          ${s.split === 1 ? fact('Early bird', `1st ${sharePct(earlyShare(0))} <span class="muted">→</span> 80th ${sharePct(earlyShare(79))}`) : ''}
           ${fact('Contract', link(s.address))}
         </dl>
       </details>
@@ -350,8 +351,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   if (!burned && picture && !pickedDirection(s.address)) showDirection(app.querySelector<HTMLElement>('.batch-art .dirs'), opensIn(s.address, 'Consolidated'));
   if (!burned) void burnFormat(app, s, picture);
   else void realFormat(app, s);
-  // A Picture union once it's full (until the burn): still a picture, drawn in Consolidated, and still no
-  // withdrawing through the site, since a Credit taken out would shift it.
+  // A Picture union once it's full (until the burn): still a picture, drawn in Consolidated.
   if ((s.state === 'Full' || s.state === 'Expired') && slots && !Number(s.filter.layoutTrait ?? 0)) {
     const host = app.querySelector<HTMLElement>('.batch-art');
     void fetch(`/pictures/${s.address}`).then(async (r) => {
@@ -364,14 +364,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       const takes = app.querySelector('.takes');
       if (takes) takes.innerHTML = '<dt>Rules</dt><dd>Only the Credits that draw its picture</dd>';
       if (!pickedDirection(s.address)) showDirection(host.querySelector<HTMLElement>('.dirs'), opensIn(s.address, 'Consolidated'));
-      if (config.sweeper && solo) soloOut();
-      else if (config.sweeper) {
-        app.querySelector('#withdraw')?.setAttribute('hidden', '');
-        app.querySelector('#w-clear')?.setAttribute('hidden', '');
-        app.querySelectorAll<HTMLElement>('.batch-side p').forEach((p) => {
-          if (p.textContent?.includes('Withdraw your Credits, or restart')) p.textContent = p.textContent.replace('Withdraw your Credits, or restart the countdown.', 'Anyone can restart the countdown.');
-        });
-      }
+      if (solo) soloOut();
     }, () => {});
   }
   // A Picture union: its open slots show the Credits that draw it best, and Buy and Deposit lead with them.
@@ -408,23 +401,10 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       // Who can join: a picture union takes exactly the Credits that draw it, so the Colors chips say nothing useful.
       const takes = app.querySelector('.takes');
       if (takes) takes.innerHTML = '<dt>Rules</dt><dd>Only the Credits that draw its picture</dd>';
-      if (config.sweeper) {
-        // Withdrawing through the site would shift the picture, so it's off (the contract still allows it) until the
-        // burn contract has saved every Credit's spot: then a leave opens only the leaver's spots. The only member can
-        // always leave, all at once.
-        const tab = document.querySelector<HTMLElement>('[data-add="withdraw"]');
-        const leave = document.querySelector('.pane-note .leave-note');
-        if (solo) soloOut();
-        else {
-          tab?.setAttribute('hidden', '');
-          document.querySelector<HTMLElement>('[data-pane="withdraw"]')?.setAttribute('hidden', '');
-        }
-        if (leave) leave.textContent = solo ? 'You can leave while you’re the only member.' : 'Once in, a Credit stays: taking one out would shift the picture.';
-        if (!solo && (await spotsSaved(s.address)) && host.isConnected) {
-          tab?.removeAttribute('hidden');
-          if (leave) leave.textContent = 'Leave anytime until it locks: your spot opens and the rest of the picture stays put.';
-        }
-      }
+      // The only member can always leave, all at once; anyone else's leave opens only their spots (see unsavedSpots).
+      const leave = document.querySelector('.pane-note .leave-note');
+      if (solo) soloOut();
+      if (leave) leave.textContent = solo ? 'You can leave while you’re the only member.' : 'Leave anytime until it locks: your spot opens and the rest of the picture stays put.';
     }, () => {});
     const plan = planPicture(b, slots, placed, who, held).catch(() => null);
     plansOf.set(s.address.toLowerCase(), plan);
@@ -760,7 +740,19 @@ async function rankFaces(root: ParentNode) {
 
 const plural = (n: number) => `${n} Credit${n === 1 ? '' : 's'}`;
 /// The withdraw button: all of yours when none are picked ("Withdraw your Credit" when it's one), else the picked.
-const withdrawLabel = (picked: number, all: number) => (picked ? `Withdraw ${plural(picked)}` : all === 1 ? 'Withdraw your Credit' : `Withdraw all ${plural(all)}`);
+const withdrawLabel = (picked: number, all: number, save = false) =>
+  save ? 'Save spots and withdraw' : picked ? `Withdraw ${plural(picked)}` : all === 1 ? 'Withdraw your Credit' : `Withdraw all ${plural(all)}`;
+/// Picture unions whose spots weren't all saved when the page read them: their leave saves them first.
+const unsaved = new Set<string>();
+/// The burn contract, when a leave from this union must save its spots first: a picture (by the contract's own
+/// reckoning: orderOf answers), more than one member, and spots not saved as they stand. A leave then opens only the
+/// leaver's spots; unsaved, Credits that joined since the last save would slide into them.
+async function needsSave(union: Address, b: Ctx): Promise<Address | null> {
+  if (new Set(b.depositors.map((d) => d.toLowerCase())).size < 2) return null;
+  const adapter = await burnAdapter();
+  if (!adapter || !(await keptSpots(union)) || (await spotsSaved(union))) return null;
+  return adapter;
+}
 
 /// `pending`: a wallet is connected but its side isn't read yet: say so rather than offer to connect it.
 function panel(b: Ctx, m: Mine, myIds: Set<string>, pending = false) {
@@ -797,7 +789,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>, pending = false) {
       </div>
       <div data-pane="buy"${start === 'buy' ? '' : ' hidden'}>${buyPane(!!m)}</div>
       ${myIds.size ? `<div data-pane="withdraw"${start === 'withdraw' ? '' : ' hidden'}>${withdraw()}</div>` : ''}
-      <p class="muted small pane-note"><span id="buy-line">Finding the cheapest listings that fit… </span><span class="buy-how">One transaction buys your picks and deposits them in your name. </span><span class="leave-note">${!isPictureUnion.has(s.address.toLowerCase()) || !config.sweeper ? 'Leave anytime until it locks.' : myIds.size && new Set(b.depositors.map((d) => d.toLowerCase())).size === 1 ? 'You can leave while you’re the only member.' : 'Once in, a Credit stays: taking one out would shift the picture.'}</span> Unofficial, use at your own risk. <a href="/docs" target="_blank" rel="noopener">How it works</a></p>
+      <p class="muted small pane-note"><span id="buy-line">Finding the cheapest listings that fit… </span><span class="buy-how">One transaction buys your picks and deposits them in your name. </span><span class="leave-note">${!isPictureUnion.has(s.address.toLowerCase()) || !config.sweeper ? 'Leave anytime until it locks.' : myIds.size && new Set(b.depositors.map((d) => d.toLowerCase())).size === 1 ? 'You can leave while you’re the only member.' : 'Leave anytime until it locks: your spot opens and the rest of the picture stays put.'}</span> Unofficial, use at your own risk. <a href="/docs" target="_blank" rel="noopener">How it works</a></p>
     </div>`;
   }
 
@@ -927,7 +919,7 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
   const wDraw = () => {
     wPicker?.querySelectorAll<HTMLElement>('.pick').forEach((p) => p.setAttribute('aria-pressed', String(wPicks.has(p.dataset.id!))));
     const btn = document.getElementById('withdraw');
-    if (btn && !btn.dataset.busy) btn.textContent = withdrawLabel(wPicks.size, myIds.size);
+    if (btn && !btn.dataset.busy) btn.textContent = withdrawLabel(wPicks.size, myIds.size, unsaved.has(s.address.toLowerCase()));
     const clr = document.getElementById('w-clear');
     if (clr) clr.hidden = !wPicks.size;
   };
@@ -942,22 +934,42 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
     });
     document.getElementById('w-clear')?.addEventListener('click', () => { wPicks.clear(); wDraw(); });
   }
+  if (myIds.size && (s.state === 'Open' || s.state === 'Full' || s.state === 'Expired'))
+    void needsSave(s.address, b).then((a) => {
+      if (!a) return;
+      unsaved.add(s.address.toLowerCase());
+      const btn = document.getElementById('withdraw');
+      if (btn && !btn.dataset.busy) btn.textContent = withdrawLabel(wPicks.size, myIds.size, true);
+    });
   document.getElementById('withdraw')?.addEventListener('click', (e) => {
     const btn = e.currentTarget as HTMLElement;
-    const picture = isPictureUnion.has(s.address.toLowerCase());
-    // The only member of a picture union leaves with everything, so nothing shifts and there's nothing to warn about.
-    const soloPicture = picture && new Set(b.depositors.map((d) => d.toLowerCase())).size === 1;
-    // A picture union: a Credit taken out moves every later one of its Colors up a slot. Say so once, then go.
-    if (picture && !soloPicture && !btn.dataset.warned) {
-      btn.dataset.warned = '1';
-      btn.textContent = 'Withdraw anyway';
-      btn.insertAdjacentHTML('beforebegin', '<p class="small withdraw-warn">Taking a Credit out moves every later Credit of its color up a slot, so part of the picture shifts for good.</p>');
-      return;
-    }
+    const soloPicture = isPictureUnion.has(s.address.toLowerCase()) && new Set(b.depositors.map((d) => d.toLowerCase())).size === 1;
     return run(btn, 'Withdrawing…', async () => {
       const ids = [...(wPicks.size && !soloPicture ? wPicks : myIds)].map(BigInt);
-      for (let i = 0; i < ids.length; i += CHUNK)
-        await send({ address: s.address, abi: batchAbi, functionName: 'withdraw', args: [ids.slice(i, i + CHUNK)] }, txNote);
+      const leaves = [];
+      for (let i = 0; i < ids.length; i += CHUNK) leaves.push({ address: s.address, abi: batchAbi, functionName: 'withdraw', args: [ids.slice(i, i + CHUNK)] } as const);
+      // A picture's spots must be saved before a leave, or every later Credit of the leaver's Colors slides up a spot.
+      // A wallet that batches saves and leaves in one transaction, so nobody can join in between. Otherwise save, then
+      // check again just before leaving (someone may have joined meanwhile), which narrows that gap to about a block.
+      const adapter = await needsSave(s.address, b);
+      if (adapter) {
+        const save = { address: adapter, abi: adapterAbi, functionName: 'record', args: [s.address] } as const;
+        if (await canBatch()) {
+          // A wallet that says it batches but then won't (as opposed to you cancelling, or a batch it sent) falls back
+          // to one transaction at a time below.
+          let sent = false;
+          try {
+            await sendBatch([save, ...leaves], () => (sent = true));
+            unsaved.delete(s.address.toLowerCase());
+            return;
+          } catch (err) {
+            if (sent || /rejected|denied/i.test(String((err as Error)?.message ?? err))) throw err;
+          }
+        }
+        for (let tries = 0; tries < 3 && !(await spotsSaved(s.address)); tries++) await send(save, txNote);
+      }
+      unsaved.delete(s.address.toLowerCase());
+      for (const call of leaves) await send(call, txNote);
     }, 'Credits returned to your wallet.');
   });
 

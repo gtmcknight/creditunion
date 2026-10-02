@@ -4,8 +4,9 @@
 ///   1. factory.activateAssembler(), once the 30-minute notice has run;
 ///   2. settle() on an auction that has ended;
 ///   3. claim(member) for a member whose payout failed at settle (anyone may send it for them), for three days;
-///   4. record(union) on the adapter for a picture whose Credits moved since its spots were last written, so a leave
-///      opens only the leaver's spot (contracts/ADAPTER.md). From the adapter's proposal on.
+///   4. record(union) on the adapter for a full picture (80 of 80, until the burn) whose spots aren't saved as they
+///      stand, so a leave from outside the site can't slide them before the burn. While a picture fills, whoever
+///      leaves saves its spots first, on the site (contracts/ADAPTER.md).
 /// Every call is simulated first; nothing is sent while the keeper's last transactions are pending, or while
 /// gas is over its cap. The key (secret KEEPER_KEY) holds no role in any contract: all it can lose is its gas money.
 /// Without it, the keeper does nothing.
@@ -23,7 +24,7 @@ export type Kept = {
 };
 
 const ZERO = '0x0000000000000000000000000000000000000000';
-const AUCTION = 3, SETTLED = 4; // Batch.State
+const FULL = 1, EXPIRED = 2, AUCTION = 3, SETTLED = 4; // Batch.State
 const PAY_FOR = 3n * 86_400n; // how long after an auction ends a failed payout is retried
 /// Up to this many a run, 5 minutes apart.
 const PER_RUN = 5;
@@ -62,9 +63,9 @@ export async function keep(o: { key: string; chainId: number; factory: Address; 
     const owed = await Promise.all(members.map((m) => c.readContract({ address: u.address, abi: batchAbi, functionName: 'claimable', args: [m] }).catch(() => 0n)));
     members.forEach((m, i) => owed[i] > 0n && jobs.push({ what: `pay ${m} from ${u.address}`, address: u.address, abi: batchAbi, functionName: 'claim', args: [m] }));
   }
-  // Spots, for unions that can still change hands. orderOf reverts for anything but a picture.
+  // Spots, once per fill: full unions only (Full, or Expired: still 80 of 80). orderOf reverts for anything but a picture.
   const adapter = (active !== ZERO ? active : next) as Address;
-  const live = adapter === ZERO ? [] : unions.filter((u) => u.summary.state < AUCTION);
+  const live = adapter === ZERO ? [] : unions.filter((u) => u.summary.state === FULL || u.summary.state === EXPIRED);
   for (let i = 0; i < live.length; i += 20) {
     const part = live.slice(i, i + 20);
     const res = await c.multicall({

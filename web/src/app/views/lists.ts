@@ -110,9 +110,11 @@ const AUCTION_SORTS = [
   ['low', 'Lowest bid', 'live'],
   ['new', 'Newest', 'live'],
   ['number', 'Statement number', 'live'],
+  ['rating', 'Top rated', 'live'],
   ['recent', 'Recently sold', 'sold'],
   ['top', 'Highest price', 'sold'],
   ['bottom', 'Lowest price', 'sold'],
+  ['rating', 'Top rated', 'sold'],
   ['number', 'Statement number', 'sold'],
 ] as const;
 type AuctionSort = (typeof AUCTION_SORTS)[number][0];
@@ -144,6 +146,8 @@ function sortAuctions(items: Listed[], k: AuctionSort) {
         return desc(y.highBid, x.highBid) || ended(y) - ended(x);
       case 'recent':
         return ended(y) - ended(x);
+      case 'rating':
+        return (totalOf(b) ?? -1) - (totalOf(a) ?? -1) || x.auctionEnd - y.auctionEnd;
       default:
         return y.assembledAt - x.assembledAt;
     }
@@ -411,7 +415,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     let showEmpty = false; // All tabs its empty (0/80) unions behind a button: they're mostly abandoned
     let shownStage: Stage = 'live'; // the auctions tab showing, whose order the menu sets
     const grid = (items: Listed[]) => {
-      const rated = tab === 'parties' && sortFor(view) === 'rating';
+      const rated = tab === 'parties' ? sortFor(view) === 'rating' : shownStage !== 'upcoming' && auctionSort(shownStage) === 'rating';
       return `<div class="grid">${items.map((b) => card(b, fit.get(b.s.address), 'yours', rated ? totalOf(b) : undefined)).join('')}</div>`;
     };
     let totaling = false;
@@ -503,6 +507,13 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       const order = auctionSort(pick);
       const shown = sortAuctions([...staged.find(([k]) => k === pick)![1]], order);
       shownStage = pick;
+      if (order === 'rating' && !totaling && shown.some((b) => totalOf(b) === undefined)) {
+        totaling = true;
+        totalCards(shown)
+          .then((got) => got && document.getElementById('batches') === el && draw())
+          .catch(() => {})
+          .finally(() => (totaling = false));
+      }
       app.querySelectorAll<HTMLElement>('.sort-menu [data-sort]').forEach((o) => {
         o.hidden = o.dataset.stage !== pick;
         o.setAttribute('aria-selected', String(o.dataset.stage === pick && o.dataset.sort === order));
