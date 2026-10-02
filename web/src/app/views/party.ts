@@ -1,7 +1,7 @@
 import { parseAbi, parseEther, type Address } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi, unionFormatsAbi } from '../abi';
 import { canBatch, config, explorer, pub, send, sendBatch, session } from '../chain';
-import { ARRANGEMENTS, spotsSaved, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, indexedBatch, indexedOne, keepPick, keptSpots, layoutSlot, me, notice, pickOf, placeOnLayout, readNotice, ratings, sinceTx, staleBatches, type Rated, burnsAt } from '../data';
+import { ARRANGEMENTS, getSummary, spotsSaved, type PhaseName, earlyShare, earlyWeight, sharePct, eligible, getBatch, hasLayout, indexedBatch, indexedOne, keepPick, keptSpots, layoutSlot, me, notice, pickOf, placeOnLayout, readNotice, ratings, sinceTx, staleBatches, type Rated, burnsAt } from '../data';
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { ens, hydrate, identicon, pct, who } from '../ens';
 import { creditCard, examples, fillGhosts, planGhosts, registerDeposits, registerFilter } from '../ghosts';
@@ -148,6 +148,11 @@ let draws = 0;
 /// The live-refresh timer for the Credit Union on screen (one at a time).
 let live: ReturnType<typeof setInterval> | null = null;
 const LIVE_MS = 8_000; // under a block: the index it reads is kept for everyone, so a poll costs no chain read
+/// An auction's page reads the chain itself, a third of a block apart: being outbid is a race.
+const AUCTION_MS = 4_000;
+/// A bid that lost the race to someone else's: the page redraws with the new minimum filled in (`bidAgain`).
+class Outbid extends Error {}
+const bidAgain = new Set<string>();
 /// How long after this wallet's own transaction the page reads the chain rather than the index.
 const TX_MS = 30_000;
 
@@ -499,9 +504,9 @@ function watchLive(app: HTMLElement, address: Address, b: Ctx, rerender: () => v
     }
     if (document.hidden || busy || document.querySelector('dialog[open]')) return;
     try {
-      const one = sinceTx() < TX_MS ? null : await indexedOne(address);
+      const one = sinceTx() < TX_MS || b.s.state === 'Auction' ? null : await indexedOne(address);
       if (one && one.at < at) return; // an older read than the page's
-      const n: Ctx & { at?: number } = one ?? (await getBatch(address));
+      const n: Ctx & { at?: number } = one ?? (b.s.state === 'Auction' ? { ...b, s: await getSummary(address) } : await getBatch(address));
       if (n.s.state === 'Full') await readNotice();
       if (location.pathname !== path || busy) return;
       if (mark(n) !== was) {
@@ -512,11 +517,15 @@ function watchLive(app: HTMLElement, address: Address, b: Ctx, rerender: () => v
         // when the union moves to another state (a settle makes a payout claimable) or your bid was just topped.
         const you = session.account;
         const topped = !!you && same(b.s.highBidder, you) && !same(n.s.highBidder, you);
+        if (topped && n.s.state === 'Auction') {
+          bidAgain.add(address.toLowerCase());
+          toast(`You’ve been outbid: the high bid is now ${eth(n.s.highBid)}. ${minEth(n.s.minBid)} ETH takes it back.`, 'err', 8000);
+        }
         await party(app, address, rerender, n, n.s.state === b.s.state && !topped ? m : undefined);
       }
     } catch {}
   };
-  live = setInterval(look, LIVE_MS);
+  live = setInterval(look, b.s.state === 'Auction' ? AUCTION_MS : LIVE_MS);
   if (now) void look();
 }
 
@@ -847,6 +856,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>, pending = false) {
   }
 
   const hasMin = s.highBid > 0n || s.minBid > 1n;
+  const again = bidAgain.delete(s.address.toLowerCase()) && hasMin ? ` value="${minEth(s.minBid)}"` : '';
   // What settling now would pay you, as Batch.settle splits it: the bid less the protocol and creator fees, over
   // 80 shares (Equal) or 12,640 units (Early bird, where your positions weigh 237 - 2i units each).
   const early = s.split === 1;
@@ -862,7 +872,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>, pending = false) {
       ended
         ? `<div class="stack"><button class="btn primary block" id="settle">Settle auction</button><p class="small muted center">Sends the Statement to the winner and pays every member.</p></div>`
         : m
-          ? `<form class="bid-form" id="bid-form"><label class="field"><input id="bid" inputmode="decimal" autocomplete="off" placeholder="${hasMin ? minEth(s.minBid) : '0.1'}" aria-label="Bid in ETH"><span>ETH</span></label><button class="btn primary">Bid</button></form>
+          ? `<form class="bid-form" id="bid-form"><label class="field"><input id="bid" inputmode="decimal" autocomplete="off" placeholder="${hasMin ? minEth(s.minBid) : '0.1'}"${again} aria-label="Bid in ETH"><span>ETH</span></label><button class="btn primary">Bid</button></form>
              <p class="small muted">${hasMin ? `Min ${minEth(s.minBid)}. ` : ''}Outbid ETH returns instantly. Credit Union is unofficial and experimental, so use it at your own risk.</p>`
           : connect
     }
@@ -897,7 +907,8 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
       rerender();
     } catch (e) {
       busy--;
-      toast(errText(e), 'err', 8000);
+      toast(e instanceof Outbid ? e.message : errText(e), 'err', 8000);
+      if (e instanceof Outbid) return rerender();
       if (btn) {
         btn.removeAttribute('disabled');
         btn.textContent = btn.dataset.label ?? '';
@@ -1020,9 +1031,24 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
       return toast('Enter an amount in ETH.', 'err');
     }
     if (value <= 0n) return toast('Enter an amount in ETH.', 'err');
-    run((e.currentTarget as HTMLElement).querySelector('button'), 'Bidding…', () =>
-      send({ address: s.address, abi: batchAbi, functionName: 'bid', value }, txNote),
-    'You’re the high bidder.');
+    // Someone may have bid since the page last read the chain: check before the wallet opens, and again if the bid
+    // fails, so a lost race says so and the box comes back with the new minimum.
+    const check = async () => {
+      const now = await getBatch(s.address).catch(() => null);
+      if (!now || now.s.state !== 'Auction' || value >= now.s.minBid) return;
+      if (now.s.highBid === s.highBid) throw new Error(`The minimum bid is ${minEth(now.s.minBid)} ETH.`);
+      bidAgain.add(s.address.toLowerCase());
+      throw new Outbid(`Someone bid ${eth(now.s.highBid)} first. The minimum is now ${minEth(now.s.minBid)} ETH.`);
+    };
+    run((e.currentTarget as HTMLElement).querySelector('button'), 'Bidding…', async () => {
+      await check();
+      try {
+        await send({ address: s.address, abi: batchAbi, functionName: 'bid', value }, txNote);
+      } catch (err) {
+        await check();
+        throw err;
+      }
+    }, 'You’re the high bidder.');
   });
 
   mountDirections();
