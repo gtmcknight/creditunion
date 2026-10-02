@@ -37,6 +37,7 @@ import { fromJson, toJson } from '../shared/json';
 import { idsKey } from '../shared/ids';
 import { keep, type Kept } from './keeper';
 import { pictureMessage, pictureRecord } from '../shared/picture-save';
+import { gzip, pictureRows, rowsOf, wallOf } from './slice';
 
 interface RateLimit {
   limit(o: { key: string }): Promise<{ success: boolean }>;
@@ -159,6 +160,17 @@ async function keptPng(env: Env, key: string): Promise<ArrayBuffer | null> {
 
 /// Responses whose body is already compressed (serveBin): passed on as they are, not encoded again.
 const precompressed = new WeakSet<Response>();
+/// A gzipped body (slice.ts) as the client takes it: as it is, or unzipped for a client that doesn't take gzip and on
+/// localhost (the dev server can't pass a precompressed body on). Cloudflare leaves application/octet-stream alone.
+function gzipped(req: Request, url: URL, body: ArrayBuffer, cache: string): Response {
+  const headers = { 'content-type': 'application/octet-stream', 'cache-control': cache, vary: 'accept-encoding' };
+  if (isDev(url) || !/\bgzip\b/.test(req.headers.get('accept-encoding') ?? '')) return new Response(new Blob([body]).stream().pipeThrough(new DecompressionStream('gzip')), { headers });
+  const res = new Response(body, { headers: { ...headers, 'content-encoding': 'gzip' }, encodeBody: 'manual' });
+  precompressed.add(res);
+  return res;
+}
+/// The most a listing may cost to be drawn into a picture union's plan (picture.ts MAX_PRICE).
+const PICTURE_MAX_WEI = 80_000_000_000_000_000n;
 
 function secure(res: Response, url: URL) {
   const h = new Headers(res.headers);
@@ -536,6 +548,48 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       return res;
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502 });
+    }
+  }
+
+  // A Picture union's market, cut for its page (slice.ts): the listings at or under PICTURE_MAX_WEI that could draw
+  // the Colors in ?pal= (bit c for Colors c), each with its print. Built from the market book as /market.json is, and
+  // kept as long at the edge (30 s), so a listing that sells leaves it as soon as it leaves /market.json.
+  if (url.pathname === '/market/picture') {
+    if (req.method !== 'GET' || !sameSite(req)) return text('forbidden', 403);
+    const pal = Number(url.searchParams.get('pal'));
+    if (!Number.isInteger(pal) || pal < 2 || pal > 0xfffe || pal & 1) return text('bad request', 400);
+    const key = new Request(`${url.origin}/market/picture-cache/v1/${pal}`);
+    const hit = await caches.default.match(key);
+    if (hit) return gzipped(req, url, await hit.arrayBuffer(), 'public, max-age=30');
+    if (await limited(env.RL_MISC, req, 5)) return text('slow down', 429);
+    if (!env.MARKET) return text('no market book here', 503);
+    try {
+      const [bk, traits, wall] = await Promise.all([marketBook(env, url, ctx), load(env.ASSETS, url.origin), wallOf(env.ASSETS, url.origin)]);
+      const body = await gzip(rowsOf(pictureRows(bk.rows, traits, pal, PICTURE_MAX_WEI), wall, traits));
+      ctx.waitUntil(caches.default.put(key, new Response(body, { headers: { 'cache-control': 'public, max-age=30' } })));
+      return gzipped(req, url, body, 'public, max-age=30');
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
+  }
+  // Some Credits' prints and traits (slice.ts), for a Picture union's page: the viewer's own. The edition never changes,
+  // so an answer is kept for good at the edge, and by the browser under the edition's version (?v=).
+  if (url.pathname === '/edition/rows') {
+    if (req.method !== 'GET' || !sameSite(req)) return text('forbidden', 403);
+    const ids = [...new Set((url.searchParams.get('ids') ?? '').split(',').map(Number))].sort((a, b) => a - b);
+    if (!ids.length || ids.length > 500 || ids.some((id) => !inSupply(id))) return text('bad request', 400);
+    const keep = url.searchParams.has('v') ? 'public, max-age=31536000, immutable' : 'public, max-age=300';
+    const key = new Request(`${url.origin}/edition/rows-cache/v1/${ids.join('.')}`);
+    const hit = await caches.default.match(key);
+    if (hit) return gzipped(req, url, await hit.arrayBuffer(), keep);
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    try {
+      const [traits, wall] = await Promise.all([load(env.ASSETS, url.origin), wallOf(env.ASSETS, url.origin)]);
+      const body = await gzip(rowsOf(ids.map((id) => ({ id, gwei: 0 })), wall, traits));
+      ctx.waitUntil(caches.default.put(key, new Response(body, { headers: { 'cache-control': 'public, max-age=31536000, immutable' } })));
+      return gzipped(req, url, body, keep);
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
     }
   }
 

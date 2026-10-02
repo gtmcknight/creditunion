@@ -2,7 +2,7 @@
 /// zoom. The Printer matches exact Credits to it; a Picture union paints its sheet from the Credits that draw it and
 /// keeps recommending the best Credit for each open slot (Guide).
 import type { Address } from 'viem';
-import { bin } from './bins';
+import { bin, binsVersion } from './bins';
 import { myCredits } from './data';
 import { costs, type Candidate, type Look } from './printer-match';
 
@@ -240,11 +240,44 @@ export function loadBase() {
 /// A Credit's Colors value (CMYK mask).
 export const paletteOf = (b: Base, id: number) => b.traits[id - 1] & 15;
 
+/// What a Picture union's page reads instead (Guide only weighs a wallet's own Credits and listings at or under
+/// MAX_PRICE, and a union's plan only those of its Colors): the Worker's cut of the market for these Colors, and the
+/// viewer's own Credits, each with its print and traits (worker/slice.ts), a few hundred KB rather than 2.9 MB. The
+/// whole files when the cut can't be read.
+export function sliceBase(colours: Iterable<number>, own: readonly bigint[]): Promise<Base> {
+  const mask = [...colours].reduce((m, c) => (c > 0 && c < 16 ? m | (1 << c) : m), 0);
+  const get = (path: string) => fetch(path).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`${path.split('?')[0]} ${r.status}`))));
+  const mine = [...new Set(own.map(Number))];
+  return Promise.all([
+    get(`/market/picture?pal=${mask}`),
+    ...Array.from({ length: Math.ceil(mine.length / 500) }, (_, i) => get(`/edition/rows?ids=${mine.slice(i * 500, i * 500 + 500).join(',')}&v=${binsVersion}`)),
+  ])
+    .then(([market, ...rows]) => {
+      const n = new DataView(market).getUint32(0, true);
+      const wall = new Uint8Array(n * 32), traits = new Uint32Array(n), prices = new Map<number, number>();
+      for (const buf of [market, ...rows]) {
+        const v = new DataView(buf), k = v.getUint32(4, true), b = new Uint8Array(buf);
+        for (let i = 0; i < k; i++) {
+          const id = v.getUint32(8 + i * 4, true), gwei = v.getUint32(8 + k * 4 + i * 4, true);
+          traits[id - 1] = b[8 + k * 8 + i];
+          wall.set(b.subarray(8 + k * 9 + i * 32, 8 + k * 9 + i * 32 + 32), (id - 1) * 32);
+          if (buf === market) prices.set(id, gwei / 1e9);
+        }
+      }
+      // A Credit outside the cut has no traits here (0): not one to weigh.
+      return { wall, traits, registered: (id: number) => !!traits[id - 1] && ((traits[id - 1] >> 4) & 7) === 0, market: prices };
+    })
+    .catch((e) => {
+      console.warn('[picture] the cut of the market', e);
+      return loadBase();
+    });
+}
+
 /// Candidates: the wallets' own registered Credits (free), then every registered listing nobody here owns, except
 /// `skip` (Credits already in the union).
 /// `held`: the first wallet's Credits as the page already knows them (read from chain when not given).
-export async function candidates(wallets: Address[], skip: ReadonlySet<number> = new Set(), held?: readonly bigint[]) {
-  const b = await loadBase();
+export async function candidates(wallets: Address[], skip: ReadonlySet<number> = new Set(), held?: readonly bigint[], base?: Promise<Base>) {
+  const b = await (base ?? loadBase());
   const owned = await Promise.all(wallets.map((a, w) => (w === 0 && held ? Promise.resolve(held) : myCredits(a).catch(() => [] as readonly bigint[]))));
   const cands: Candidate[] = [];
   const mine = new Set<number>();
@@ -293,8 +326,9 @@ export class Guide {
   /// much to favour Credits that keep edges (eyes, mouths), 0 to 4, as the Printer's Detail. `own`: how much a Credit
   /// the wallet holds is favoured over a listing, in typical patch errors (1, the Printer's "use ours"; less where only
   /// a close match of yours should win). `look`: the format it's matched in (Consolidated unless the picture says so).
-  static async of(px: Uint8ClampedArray, o: { wallets?: Address[]; held?: readonly bigint[]; colours?: (id: bigint) => number; detail?: number; progress?: (f: number) => void; own?: number; look?: Look } = {}) {
-    const { cands: all, wall, base: b } = await candidates(o.wallets ?? [], new Set(), o.held);
+  /// `base`: what to weigh, when not the whole edition and market (sliceBase).
+  static async of(px: Uint8ClampedArray, o: { wallets?: Address[]; held?: readonly bigint[]; colours?: (id: bigint) => number; detail?: number; progress?: (f: number) => void; own?: number; look?: Look; base?: Promise<Base> } = {}) {
+    const { cands: all, wall, base: b } = await candidates(o.wallets ?? [], new Set(), o.held, o.base);
     const cands = all.filter((c) => c.owner >= 0 || c.price <= MAX_PRICE);
     const cost = await costs(px, cands, wall, { features: o.detail ?? DETAIL, maxPrice: MAX_PRICE, own: o.own ?? 1, look: o.look }, o.progress);
     return new Guide(cands, cost, Uint8Array.from(cands, (c) => (c.owner === 0 && o.colours?.(BigInt(c.id))) || paletteOf(b, c.id)), detailOf(px), (o.own ?? 1) * OWN_COST, px);

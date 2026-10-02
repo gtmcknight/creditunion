@@ -6,7 +6,7 @@ import { ARRANGEMENTS, burnAdapter, ratingTotal, getSummary, spotsSaved, type Ph
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { ens, hydrate, identicon, pct, who } from '../ens';
 import { creditCard, examples, fillGhosts, planGhosts, registerDeposits, registerFilter } from '../ghosts';
-import { gapOf, Guide, inOrder, landing, planOf, unpackPicture, type Plan, type Stored, OWN_GOOD, runOf } from '../picture';
+import { gapOf, Guide, inOrder, landing, planOf, sliceBase, unpackPicture, type Plan, type Stored, OWN_GOOD, runOf } from '../picture';
 import { Room, books, keysOf, noRoomReason, placedKeys, type Books } from '../slots';
 import { MAX_SWEEP, buying, checkQuote, listedById, connectToBuy, live as keepLive, minEth, priceTag, relist, sweepControls, sweepRow, type Listed, type Quote, type Sale, type Source } from '../forsale';
 import { creditCell, creditSkel } from './trait';
@@ -105,7 +105,9 @@ async function planPicture(b: Ctx, slots: number[], placed: (bigint | null)[] | 
         if (!d) return null;
         const keys = held.length ? await keysOf(0, held).catch(() => new Map<string, number>()) : new Map<string, number>();
         if (d.look) looks.set(b.s.address.toLowerCase(), d.look);
-        return Guide.of(unpackPicture(d.px), { wallets: account ? [account] : [], held: account ? held : undefined, colours: (id) => keys.get(id.toString()) ?? 0, detail: d.detail, own: config.sweeper ? OWN_GOOD : 1, look: d.look }); // testnets can't buy: there yours lead
+        // Only the listings of its Colors at the plan's price, and yours, not the whole edition and market (sliceBase).
+        const base = sliceBase(slots, account ? held : []);
+        return Guide.of(unpackPicture(d.px), { wallets: account ? [account] : [], held: account ? held : undefined, colours: (id) => keys.get(id.toString()) ?? 0, detail: d.detail, own: config.sweeper ? OWN_GOOD : 1, look: d.look, base }); // testnets can't buy: there yours lead
       });
     guides.set(key, g);
     g.catch(() => guides.delete(key));
