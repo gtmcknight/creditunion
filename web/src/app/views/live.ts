@@ -1,4 +1,5 @@
 import type { Address, Hex } from 'viem';
+import { onReturn } from '../visible';
 import { explorer, session } from '../chain';
 import { hydrate, who } from '../ens';
 import { art, esc, eth, pageHead, same } from '../ui';
@@ -241,6 +242,7 @@ export async function live(app: HTMLElement) {
     if (!list.isConnected) return clearInterval(timer);
     if (document.visibilityState === 'visible') void load(false);
   }, POLL);
+  onReturn(() => load(false), () => list.isConnected);
 }
 
 /// Leaderboard: who has the most Credits in Credit Unions right now, across every union (from the union index:
@@ -317,6 +319,7 @@ export async function activityTicker(el: HTMLElement) {
     void load(true);
     line.querySelectorAll('.tick-when').forEach((w, i) => times[i] && (w.textContent = ago(times[i])));
   }, POLL);
+  onReturn(() => !el.closest('[hidden]') && load(true), () => el.isConnected);
 }
 
 /// When each union last took a Credit (a deposit or a buy into it), unix seconds by lowercased address: the

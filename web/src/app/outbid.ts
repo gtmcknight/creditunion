@@ -3,13 +3,22 @@
 /// (waiting for your return if the tab is in the background), "(Outbid)" in the tab's title meanwhile, and a system
 /// notification there if you turned them on after a bid.
 import type { Address } from 'viem';
-import { session } from './chain';
-import { listBatches, type Listed } from './data';
+import { onTx, session } from './chain';
+import { indexedOne, listBatches, recentBatches, type Listed } from './data';
 import { esc, eth, same, toast } from './ui';
 
 const SEEN = 'cu-outbid-seen'; // union → the high bid you were told about
 const LAST = 'cu-last-account';
 const POLL = 30_000;
+/// In a background tab it still tells you (the title, a system notification), but looks less often.
+const HIDDEN_POLL = 3 * 60_000;
+/// How long this wallet's bids, as the feed has them, are kept before they're read again (and after its own bid).
+const BIDS_MS = 2 * 60_000;
+/// An auction ends 24 hours after its first bid (a late bid adds 15 minutes): a bid older than this was on one that's
+/// over, so its union isn't read.
+const RECENT = 3 * 86_400;
+/// A few unions are read one by one from the index (a few KB each); more, the whole list in one read.
+const ONE_BY_ONE = 6;
 
 const read = <T>(k: string, d: T): T => {
   try {
@@ -41,25 +50,57 @@ export function markOutbidSeen(union: string, highBid: bigint) {
   write(SEEN, seen);
 }
 
-/// Unions this wallet has bid on and when it last did, from the activity feed (a few seconds behind the chain).
-async function bidOn(me: Address): Promise<Map<string, number>> {
+/// Unions this wallet has bid on and when it last did, from the activity feed (a few seconds behind the chain). Kept
+/// BIDS_MS, and read again after a transaction of ours.
+let bids: { who: string; at: number; p: Promise<Map<string, number>> } | null = null;
+onTx(() => (bids = null));
+function bidOn(me: Address): Promise<Map<string, number>> {
+  if (bids && bids.who === me.toLowerCase() && Date.now() - bids.at < BIDS_MS) return bids.p;
   type Row = { kind: string; union?: string; time?: number };
-  const r = await fetch(`/activity.json?member=${me}&limit=1000`)
+  const p = fetch(`/activity.json?member=${me}&limit=1000`)
     .then((x) => x.json() as Promise<{ items?: Row[] }>)
-    .catch(() => ({ items: [] as Row[] }));
-  const last = new Map<string, number>();
-  for (const x of r.items ?? []) if (x.kind === 'bid' && x.union) last.set(x.union.toLowerCase(), Math.max(last.get(x.union.toLowerCase()) ?? 0, x.time ?? 0));
-  return last;
+    .then((r) => {
+      const last = new Map<string, number>();
+      for (const x of r.items ?? []) if (x.kind === 'bid' && x.union) last.set(x.union.toLowerCase(), Math.max(last.get(x.union.toLowerCase()) ?? 0, x.time ?? 0));
+      return last;
+    });
+  const entry: NonNullable<typeof bids> = {
+    who: me.toLowerCase(),
+    at: Date.now(),
+    p: p.catch(() => {
+      if (bids === entry) bids = null; // a failed read is read again next time
+      return new Map<string, number>();
+    }),
+  };
+  bids = entry;
+  return entry.p;
+}
+/// These unions as the site's index has them: from the list a page here just read, else each from the index, else
+/// (many of them) the whole list.
+async function unionsNow(addrs: string[]): Promise<Listed[]> {
+  const want = new Set(addrs);
+  const pick = (all: Listed[]) => all.filter((b) => want.has(b.s.address.toLowerCase()));
+  const known = recentBatches();
+  if (known) return pick(known);
+  if (addrs.length > ONE_BY_ONE) return pick(await listBatches().catch(() => [] as Listed[]));
+  return (await Promise.all(addrs.map((a) => indexedOne(a as Address)))).filter((b): b is NonNullable<typeof b> => !!b);
 }
 /// After your own bid the feed can show it a few seconds before the union list does: no "outbid" until both caught up.
 const GRACE = 90;
 
+/// The last look, so two asks in the same moment (a wallet reconnecting as the page opens) make one.
+let looked = { who: '', at: 0 };
 export async function checkOutbid() {
   const me = watched();
   if (!me) return;
-  const [mine, all] = await Promise.all([bidOn(me), listBatches().catch(() => [] as Listed[])]);
-  if (!mine.size) return;
+  if (looked.who === me.toLowerCase() && Date.now() - looked.at < 5_000) return;
+  looked = { who: me.toLowerCase(), at: Date.now() };
+  const mine = await bidOn(me);
   const now = Date.now() / 1000;
+  // Only unions bid on lately can be live auctions: a wallet that hasn't bid reads nothing more.
+  const recent = [...mine].filter(([, t]) => now - t < RECENT).map(([k]) => k);
+  if (!recent.length) return;
+  const all = await unionsNow(recent);
   const seen = read<Record<string, string>>(SEEN, {});
   const fresh: Listed[] = [];
   for (const b of all) {
@@ -135,10 +176,20 @@ export function offerAlerts() {
 }
 
 let polling = false;
-/// Checks soon after the page opens (a visit's "since last time"), then every 30 seconds, background tabs included.
+let timer: ReturnType<typeof setTimeout> | undefined;
+const next = () => {
+  clearTimeout(timer);
+  timer = setTimeout(() => (void checkOutbid(), next()), document.hidden ? HIDDEN_POLL : POLL);
+};
+/// Checks soon after the page opens (a visit's "since last time"), then every 30 seconds while the tab is in front,
+/// every few minutes behind, and at once on coming back to it.
 export function watchOutbid() {
   if (polling) return void checkOutbid();
   polling = true;
   setTimeout(() => void checkOutbid(), 2_000);
-  setInterval(() => void checkOutbid(), POLL);
+  next();
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && Date.now() - looked.at > POLL) void checkOutbid();
+    next();
+  });
 }

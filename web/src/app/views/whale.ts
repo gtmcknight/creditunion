@@ -8,6 +8,7 @@ import { canBatch, pub, send, sendBatch, session } from '../chain';
 import { listBatches, type Listed, type Summary } from '../data';
 import { ens, hydrate, who } from '../ens';
 import { offerAlerts } from '../outbid';
+import { onReturn } from '../visible';
 import { errText, esc, eth, ethNum, same, statementArt, timeLeft, toast } from '../ui';
 
 /// Biddable now: at auction, and its clock (if a first bid started it) still running.
@@ -366,7 +367,7 @@ export async function whale(host: HTMLElement) {
     });
     if (out && !busy) void read().then(draw);
   }, 1000);
-  const poll = setInterval(async () => {
+  const reread = async () => {
     if (run !== whaleRun || !document.getElementById('whale-body')) return clearInterval(poll);
     if (busy || document.visibilityState !== 'visible') return;
     // Typing in a field: leave the page alone until it's done.
@@ -374,6 +375,8 @@ export async function whale(host: HTMLElement) {
     const before = list.map((b) => `${b.s.address}:${b.s.highBid}`).join('|');
     await read().catch(() => {});
     if (list.map((b) => `${b.s.address}:${b.s.highBid}`).join('|') !== before) draw();
-  }, 10_000);
+  };
+  const poll = setInterval(reread, 10_000);
+  onReturn(reread, () => run === whaleRun && !!document.getElementById('whale-body'));
 }
 

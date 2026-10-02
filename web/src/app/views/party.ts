@@ -13,6 +13,7 @@ import { creditCell, creditSkel } from './trait';
 import { shareButton } from '../share';
 import { directionCanvas, directions, mountDirections, pickedDirection, primeInks, sheetInks, showDirection, viewerPicked, warmInks } from '../directions';
 import { markOutbidSeen, offerAlerts } from '../outbid';
+import { onReturn } from '../visible';
 import { activityFold, ago } from './live';
 import { $$, art, clock, errText, dayAndTime, esc, eth, localTime, openModal, same, setRange, sheet, short, startsAt, statementArt, timeLeft, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
@@ -496,13 +497,15 @@ function watchLive(app: HTMLElement, address: Address, b: Ctx, rerender: () => v
   const mark = ({ s, ids, depositors }: Ctx) => `${stamp(s.state, s.count, s.highBid)}:${s.lockAt}:${s.state}:${ids.join()}:${depositors.join().toLowerCase()}:${notice?.at ?? ''}`;
   const was = mark(b);
   const path = location.pathname;
+  let looking = false; // one look at a time: a tick and a return to the tab can land together
   const look = async () => {
     if (location.pathname !== path || !app.isConnected) {
       clearInterval(live!);
       live = null;
       return;
     }
-    if (document.hidden || busy || document.querySelector('dialog[open]')) return;
+    if (looking || document.hidden || busy || document.querySelector('dialog[open]')) return;
+    looking = true;
     try {
       const one = sinceTx() < TX_MS ? null : await indexedOne(address);
       if (one && one.at < at) return; // an older read than the page's
@@ -524,9 +527,13 @@ function watchLive(app: HTMLElement, address: Address, b: Ctx, rerender: () => v
         }
         await party(app, address, rerender, n, n.s.state === b.s.state && !topped ? m : undefined);
       }
-    } catch {}
+    } catch {
+    } finally {
+      looking = false;
+    }
   };
-  live = setInterval(look, b.s.state === 'Auction' ? AUCTION_MS : LIVE_MS);
+  const timer = (live = setInterval(look, b.s.state === 'Auction' ? AUCTION_MS : LIVE_MS));
+  onReturn(look, () => live === timer);
   if (now) void look();
 }
 

@@ -10,6 +10,7 @@ import { TRAIT_KINDS, parseTrait, type TraitValue } from '../../shared/trait';
 import { creditsOf, takes } from './trait';
 import { drawStill, primeInks, showStill, warmInks } from '../directions';
 import { outbidNow } from '../outbid';
+import { onReturn } from '../visible';
 import { whale } from './whale';
 import { DIRECTIONS, type Direction } from '../../shared/statement';
 
@@ -582,7 +583,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     // Burn day's notice is part of it: cards of full unions say when burning starts.
     const sig = (xs: Listed[]) => `${notice?.at ?? ''}|` + xs.map((b) => `${b.s.address}:${b.ids.length}:${b.s.state}:${b.s.phase}:${b.s.highBid}`).join('|');
     let seen = sig(all);
-    const poll = setInterval(async () => {
+    const refresh = async () => {
       if (document.getElementById('batches') !== el) return clearInterval(poll);
       if (document.visibilityState !== 'visible') return;
       const [next] = await Promise.all([listBatches().catch(() => null), readNotice()]);
@@ -615,7 +616,9 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       }
       draw();
       for (const a of bumped) el.querySelector(`a.card[href="/union/${a}"]`)?.classList.add('bumped');
-    }, tab === 'auctions' ? 10_000 : 20_000);
+    };
+    const poll = setInterval(refresh, tab === 'auctions' ? 10_000 : 20_000);
+    onReturn(refresh, () => document.getElementById('batches') === el);
     Promise.all([placeCards(list), pictureCards(list)]).then((got) => {
       if (got.some(Boolean) && document.getElementById('batches') === el) draw();
     });
