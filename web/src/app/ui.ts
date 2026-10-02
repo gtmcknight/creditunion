@@ -40,6 +40,12 @@ export function until(ts: number) {
 }
 
 /// "4:12" to a timestamp; hours when it's that far out.
+/// An auction's time left: hours and minutes, just minutes in the last hour, and seconds ticking only in the last five.
+export function timeLeft(ts: number) {
+  const t = Math.max(0, Math.ceil(ts - Date.now() / 1000));
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60);
+  return h ? `${h}h ${String(m).padStart(2, '0')}m` : t >= 300 ? `${m}m` : `${m}:${String(t % 60).padStart(2, '0')}`;
+}
 export function clock(ts: number) {
   const left = Math.max(0, Math.ceil(ts - Date.now() / 1000));
   const h = Math.floor(left / 3600), m = Math.floor((left % 3600) / 60), sec = String(left % 60).padStart(2, '0');

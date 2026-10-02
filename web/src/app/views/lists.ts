@@ -5,11 +5,11 @@ import { hydrate, who } from '../ens';
 import { fitByBatch } from '../fit';
 import { editionArt, examples, fillGhosts, hasPlan, planGhosts, registerDeposits, registerFilter } from '../ghosts';
 import type { Address } from 'viem';
-import { clock, eth, esc, openModal, pageHead, same, sheet, startsAt, statementArt, toast, until } from '../ui';
+import { clock, eth, esc, openModal, pageHead, same, sheet, startsAt, statementArt, timeLeft, toast, until } from '../ui';
 import { TRAIT_KINDS, parseTrait, type TraitValue } from '../../shared/trait';
 import { creditsOf, takes } from './trait';
 import { drawStill, primeInks, showStill, warmInks } from '../directions';
-import { whale, whaleSort } from './whale';
+import { whale } from './whale';
 import { DIRECTIONS, type Direction } from '../../shared/statement';
 
 /// Last deposit per union, from the activity feed (filled in after the first draw).
@@ -41,7 +41,7 @@ export function fullStatus(s: Summary) {
 /// A clock the auctions page ticks every second (`data-ends`): red inside the last 15 minutes, when a bid extends an
 /// auction to 15 minutes from then.
 const LATE = 15 * 60;
-const ends = (at: number) => `<span class="ends${at - Date.now() / 1000 < LATE ? ' late' : ''}" data-ends="${at}">${clock(at)}</span>`;
+const ends = (at: number) => `<span class="ends${at - Date.now() / 1000 < LATE ? ' late' : ''}" data-ends="${at}">${timeLeft(at)}</span>`;
 
 /// A card's line for a union at auction: the bid and its clock, or what opens it, or the winning bid once time's up.
 function auctionLine(s: Summary) {
@@ -108,13 +108,11 @@ const AUCTION_SORTS = [
   ['high', 'Highest bid', 'live'],
   ['low', 'Lowest bid', 'live'],
   ['new', 'Newest', 'live'],
-  ['ending', 'Ending soon', 'multibid'],
-  ['high', 'Highest bid', 'multibid'],
-  ['low', 'Lowest bid', 'multibid'],
-  ['new', 'Newest', 'multibid'],
+  ['number', 'Statement number', 'live'],
   ['recent', 'Recently sold', 'sold'],
   ['top', 'Highest price', 'sold'],
   ['bottom', 'Lowest price', 'sold'],
+  ['number', 'Statement number', 'sold'],
 ] as const;
 type AuctionSort = (typeof AUCTION_SORTS)[number][0];
 function auctionSort(stage: string): AuctionSort {
@@ -134,6 +132,8 @@ function sortAuctions(items: Listed[], k: AuctionSort) {
     switch (k) {
       case 'ending': // running clocks first, the soonest to end first; then those still waiting for a first bid
         return Number(!x.highBid) - Number(!y.highBid) || (x.highBid ? x.auctionEnd - y.auctionEnd : y.assembledAt - x.assembledAt);
+      case 'number': // #1 first
+        return x.statementId < y.statementId ? -1 : x.statementId > y.statementId ? 1 : 0;
       case 'high':
       case 'top':
         return desc(x.highBid, y.highBid) || x.auctionEnd - y.auctionEnd;
@@ -491,17 +491,10 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       const pick = stage ?? (staged.find(([k, items]) => k === 'live' && items.length) ?? staged.find(([k, items]) => k !== 'multibid' && items.length) ?? staged[0])[0];
       app.querySelectorAll<HTMLElement>('[data-stage-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.stageTab === pick)));
       // Multibid keeps itself current (its picks and amounts survive the reads), so it's drawn once.
+      // Multibid sorts from its own column names, so the menu steps aside (keeping its place, so the tabs don't move).
       if (pick === 'multibid') {
         shownStage = pick;
-        const order = auctionSort(pick);
-        app.querySelectorAll<HTMLElement>('.sort-menu [data-sort]').forEach((o) => {
-          o.hidden = o.dataset.stage !== pick;
-          o.setAttribute('aria-selected', String(o.dataset.stage === pick && o.dataset.sort === order));
-        });
-        const label = app.querySelector('.sort-label');
-        if (label) label.textContent = AUCTION_SORTS.find(([k, , st]) => k === order && st === pick)?.[1] ?? '';
-        app.querySelector<HTMLElement>('.sort-pick')?.classList.remove('idle');
-        whaleSort(order);
+        app.querySelector<HTMLElement>('.sort-pick')?.classList.add('idle');
         if (!el.querySelector('#whale-body')) void whale(el);
         return;
       }
@@ -559,7 +552,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       el.querySelectorAll<HTMLElement>('[data-ends]').forEach((n) => {
         const at = Number(n.dataset.ends);
         if (now >= at) out = true;
-        n.textContent = clock(at);
+        n.textContent = timeLeft(at);
         n.classList.toggle('late', at - now < LATE);
       });
       if (out) draw();

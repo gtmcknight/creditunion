@@ -9327,6 +9327,13 @@ dialog.share .share-swatches button {
 .whale-row .who img { width: 16px; height: 16px; }
 .whale-head .whale-amt { height: auto; text-align: right; }
 .whale-row.on { background: var(--raised); }
+/* Column names that sort: plain words, the sorted one in full ink with its arrow. Before the column rules, so each
+   keeps its own alignment. */
+.whale-sort { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; white-space: nowrap; cursor: pointer; }
+.whale-sort:hover, .whale-sort.on { color: var(--fg); }
+.whale-head .whale-sort { font-weight: 400; }
+.whale-head .whale-sort.on { font-weight: 500; }
+.whale-arrow { margin-left: 4px; }
 .whale-pick { grid-area: pick; appearance: auto; -webkit-appearance: checkbox; width: 18px; height: 18px; padding: 0; box-shadow: none; accent-color: var(--fg); cursor: pointer; }
 .whale-art { grid-area: art; position: relative; display: block; width: 28px; aspect-ratio: 76 / 95; background: var(--empty); border-radius: 2px; overflow: hidden; box-shadow: 0 0 0 1px var(--line); }
 .whale-name { grid-area: name; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }

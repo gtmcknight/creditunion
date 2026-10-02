@@ -2,12 +2,12 @@
 /// set what you bid on each (or one amount for all of them), and send them together. Where the wallet can bundle calls (EIP-5792) it's one step, all or nothing: if
 /// anyone outbids you on one before it lands, none go through. Other wallets get one bid after another, each checked
 /// against that auction's next bid right before it's sent. Every bid has to be the new high bid.
-import { parseEther } from 'viem';
+import { parseEther, type Address } from 'viem';
 import { batchAbi } from '../abi';
 import { canBatch, pub, send, sendBatch, session } from '../chain';
 import { listBatches, type Listed, type Summary } from '../data';
-import { hydrate, who } from '../ens';
-import { errText, esc, eth, ethNum, same, statementArt, toast } from '../ui';
+import { ens, hydrate, who } from '../ens';
+import { errText, esc, eth, ethNum, same, statementArt, timeLeft, toast } from '../ui';
 
 /// Biddable now: at auction, and its clock (if a first bid started it) still running.
 const biddable = (s: Summary) => s.state === 'Auction' && !(s.highBid && Date.now() / 1000 >= s.auctionEnd);
@@ -26,34 +26,21 @@ function weiOf(v: string): bigint | null {
 }
 
 let whaleRun = 0;
-/// Multibid's order, picked in the Auctions sort menu (lists.ts): the same orders as Live's.
-let whaleOrder = 'ending';
-let resort: (() => void) | null = null;
-export function whaleSort(k: string) {
-  if (k === whaleOrder) return;
-  whaleOrder = k;
-  resort?.();
-}
-const desc = (x: bigint, y: bigint) => (x === y ? 0 : x > y ? -1 : 1);
+/// The column the table is sorted by, from its headers: a click picks a column, a second flips it. Each column first
+/// sorts the way you'd read it: #1 and A first, the most members, bids and ETH first, the soonest to end first.
+type Col = 'name' | 'creator' | 'members' | 'bids' | 'now' | 'by' | 'ends';
+const FIRST: Record<Col, 1 | -1> = { name: 1, creator: 1, members: -1, bids: -1, now: -1, by: 1, ends: 1 };
+let sortCol: Col = 'ends', sortDir: 1 | -1 = 1;
+try {
+  const [c, d] = (localStorage.getItem('cu-multibid-sort') ?? '').split(':');
+  if (c in FIRST) (sortCol = c as Col), (sortDir = d === '-1' ? -1 : 1);
+} catch {}
 /// ETH the way a statement prints it: three places, so the points line up down a column (the unit is in the header).
 const ledger = (wei: bigint, up = false) => {
   const [i, d = ''] = ethNum(wei, 3, up).split('.');
   return `${i}.${d.padEnd(3, '0')}`;
 };
-/// Time left, calm until it matters: hours and minutes, then minutes and seconds in the last hour.
-const left = (at: number) => {
-  const t = Math.max(0, Math.ceil(at - Date.now() / 1000));
-  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60);
-  return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}:${String(t % 60).padStart(2, '0')}`;
-};
-const byOrder = (k: string) => (a: Listed, b: Listed) => {
-  const x = a.s, y = b.s;
-  if (k === 'high') return desc(x.highBid, y.highBid) || x.auctionEnd - y.auctionEnd;
-  if (k === 'low') return desc(y.highBid || y.minBid, x.highBid || x.minBid) || x.auctionEnd - y.auctionEnd;
-  if (k === 'new') return y.assembledAt - x.assembledAt;
-  // Ending soon: running clocks, the soonest to end first; then those waiting for a first bid, newest first.
-  return Number(!x.highBid) - Number(!y.highBid) || (x.highBid ? x.auctionEnd - y.auctionEnd : y.assembledAt - x.assembledAt);
-};
+const left = timeLeft; // hours and minutes until the last five minutes
 /// Draws into `host` (the Auctions page's tab body) and keeps itself current until `host` shows something else.
 export async function whale(host: HTMLElement) {
   const run = ++whaleRun;
@@ -76,7 +63,8 @@ export async function whale(host: HTMLElement) {
       fetch('/activity.json?bids').then((r) => r.json() as Promise<{ bids?: Record<string, number> }>).catch(() => ({}) as { bids?: Record<string, number> }),
     ]);
     if (counts.bids) bidCount = new Map(Object.entries(counts.bids));
-    list = all.filter((b) => biddable(b.s)).sort(byOrder(whaleOrder));
+    list = all.filter((b) => biddable(b.s));
+    await order();
     for (const k of [...picked]) if (!list.some((b) => b.s.address.toLowerCase() === k)) picked.delete(k); // ended since
   };
 
@@ -135,6 +123,12 @@ export async function whale(host: HTMLElement) {
     }</div>`;
   };
 
+  // A column name sorts by it; the sorted one carries an arrow.
+  const head = (col: Col, label: string) => {
+    const on = sortCol === col;
+    return `<button type="button" class="whale-sort whale-${col}${on ? ' on' : ''}" data-col="${col}" aria-label="Sort by ${label}${on ? (sortDir === 1 ? ', ascending' : ', descending') : ''}">${label}${on ? `<span class="whale-arrow" aria-hidden="true">${sortDir === 1 ? '↑' : '↓'}</span>` : ''}</button>`;
+  };
+
   const draw = () => {
     const body = document.getElementById('whale-body');
     if (!body || run !== whaleRun) return;
@@ -147,7 +141,7 @@ export async function whale(host: HTMLElement) {
       <p class="whale-lede muted">Pick the auctions you want and what to bid on each. They go in together, and each has to be the new high bid.</p>
       <div class="whale-each"><label>Bid <input type="text" inputmode="decimal" id="whale-each" class="num" value="${esc(each)}" placeholder="1.0" aria-label="ETH on each"> ETH on each one you pick</label>
         <span class="whale-acts"><button type="button" class="btn sm" id="whale-next">Next bid on each</button><button type="button" class="btn sm" id="whale-all">${picked.size === list.length ? 'Clear' : 'Pick all'}</button></span></div>
-      <div class="whale-list"><div class="whale-head small muted" aria-hidden="true"><span></span><span></span><span class="whale-name">Statement</span><span class="whale-creator">Creator</span><span class="whale-members">Members</span><span class="whale-bids">Bids</span><span class="whale-now">High bid (ETH)</span><span class="whale-by">Bidder</span><span class="whale-ends">Time left</span><span class="whale-amt">Your bid (ETH)</span></div>${list.map(row).join('')}</div>
+      <div class="whale-list"><div class="whale-head small muted"><span></span><span></span>${head('name', 'Statement')}${head('creator', 'Creator')}${head('members', 'Members')}${head('bids', 'Bids')}${head('now', 'High bid (ETH)')}${head('by', 'Bidder')}${head('ends', 'Time left')}<span class="whale-amt">Your bid (ETH)</span></div>${list.map(row).join('')}</div>
       ${bar()}`;
     hydrate(body);
     for (const b of list) {
@@ -157,12 +151,32 @@ export async function whale(host: HTMLElement) {
     }
   };
 
-  // A new order from the sort menu: the same picks and amounts, redrawn in it.
-  resort = () => {
-    if (run !== whaleRun) return;
-    list.sort(byOrder(whaleOrder));
-    draw();
-  };
+  // The table in its column's order. The name columns sort by ENS name where there is one (asked once, kept).
+  const names = new Map<string, string>();
+  async function order() {
+    if (sortCol === 'creator' || sortCol === 'by') {
+      const want = [...new Set(list.map((b) => (sortCol === 'creator' ? b.s.creator : b.s.highBidder).toLowerCase()))].filter((a) => !names.has(a));
+      const got = await Promise.all(want.map((a) => ens(a as Address).catch(() => ({ name: null }))));
+      want.forEach((a, i) => names.set(a, got[i].name?.toLowerCase() ?? '')); // '' for no name: after every name
+    }
+    const key = (b: Listed): number | bigint | string | null => {
+      const s = b.s;
+      if (sortCol === 'name') return s.statementId;
+      if (sortCol === 'creator') return names.get(s.creator.toLowerCase()) || null;
+      if (sortCol === 'members') return new Set(b.depositors.map((d) => d.toLowerCase())).size;
+      if (sortCol === 'bids') return bidCount.get(s.address.toLowerCase()) ?? 0;
+      if (sortCol === 'now') return s.highBid;
+      if (sortCol === 'by') return (s.highBid && names.get(s.highBidder.toLowerCase())) || null;
+      return s.highBid ? s.auctionEnd : null; // ends: no clock until a first bid
+    };
+    list.sort((a, b) => {
+      const x = key(a), y = key(b);
+      if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1; // nothing to show sorts last either way
+      const n = y as number | bigint;
+      const c = typeof x === 'string' ? x.localeCompare(String(y)) : x < n ? -1 : x > n ? 1 : 0;
+      return c * sortDir || a.s.auctionEnd - b.s.auctionEnd;
+    });
+  }
 
   // Only the bar and the row's marks change while typing, so the field keeps its focus and caret.
   const askWallet = () => {
@@ -232,6 +246,18 @@ export async function whale(host: HTMLElement) {
   });
   body.addEventListener('click', async (e) => {
     const t = e.target as HTMLElement;
+    const sorter = t.closest<HTMLElement>('.whale-sort');
+    if (sorter) {
+      const col = sorter.dataset.col as Col;
+      sortDir = col === sortCol ? (sortDir === 1 ? -1 : 1) : FIRST[col];
+      sortCol = col;
+      try {
+        localStorage.setItem('cu-multibid-sort', `${sortCol}:${sortDir}`);
+      } catch {}
+      await order();
+      draw();
+      return;
+    }
     if (t.id === 'whale-all') {
       const on = picked.size !== list.length;
       for (const b of list) pick(b.s.address.toLowerCase(), on);
