@@ -316,7 +316,7 @@ export function card({ s, ids, depositors, format }: Listed, fit?: bigint[], who
     <div class="card-art${picture ? ' picture' : ''}${draw ? ' dir-host' : ''}${burned ? ' statement-host' : ''}"${draw ? ` data-draw="${draw}" data-portrait="${s.address.toLowerCase()}:${ids.length}:${ids.length ? ids[ids.length - 1] : ''}:${draw}"${ready ? ' data-ready="1"' : ''}` : ''}>${sheet(ids, { size: 'sm', mine, placed: placements.get(placeKey({ s, ids })), batch: s.state === 'Open' ? s.address : undefined, painted: true })}${burned ? statementArt(s.statementId) : ''}</div>
     <div class="card-meta">
       <div class="meta-text">
-        <strong>${esc(s.name || 'Untitled')}</strong>
+        <strong>${esc(s.name || 'Untitled')}${burned ? ` <span class="stmt-no num">#${s.statementId}</span>` : ''}</strong>
         <span class="meta-line num"><span class="meta-line-text meta-byline">${who(s.creator, 'sm', 'nested')}<span class="meta-where">&nbsp;·&nbsp;${people}&nbsp;·&nbsp;${payWord(s.split === 1)}</span></span></span>
         <span class="meta-line num"><span class="meta-line-text">${where}${standing}${yoursText ? ` · <span class="meta-yours">${yoursText}</span>` : ''}</span></span>
         ${rating === undefined ? '' : `<span class="meta-line num">Rating ${rating.toLocaleString()}</span>`}

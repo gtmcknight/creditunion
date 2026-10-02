@@ -94,7 +94,7 @@ export async function whale(host: HTMLElement) {
     return `<label class="whale-row${picked.has(k) ? ' on' : ''}${lead ? ' lead' : ''}" data-union="${k}">
       <input type="checkbox" class="whale-pick"${picked.has(k) ? ' checked' : ''} aria-label="Bid on ${esc(s.name || 'this Statement')}">
       <span class="whale-art statement-host">${statementArt(s.statementId)}</span>
-      <strong class="whale-name">${esc(s.name || 'Untitled')}</strong>
+      <strong class="whale-name">${esc(s.name || 'Untitled')} <span class="stmt-no num">#${s.statementId}</span></strong>
       <span class="whale-creator small">${who(s.creator, 'sm', 'nested')}</span>
       <span class="whale-members muted small num">${members}</span>
       <span class="whale-bids muted small num">${n}</span>
