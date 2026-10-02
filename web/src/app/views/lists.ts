@@ -420,6 +420,19 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     };
     if (query.has('tab') || location.pathname.split('/').length > 3) remember(tab === 'parties' ? (view ? SLUGS[view] || null : null) : stage);
     let fit = new Map<Address, bigint[]>();
+    // Which open unions your Credits fit takes a chain read per painted union (canTake), so it's worked out only once
+    // Can join is opened.
+    let fitRead: 'no' | 'reading' | 'done' = 'no';
+    const findFit = () => {
+      if (fitRead !== 'no' || !session.account) return;
+      fitRead = 'reading';
+      fitByBatch(parties)
+        .then((m) => (fit = m), () => {})
+        .finally(() => {
+          fitRead = 'done';
+          if (document.getElementById('batches') === el) draw();
+        });
+    };
     let showEmpty = false; // All tabs its empty (0/80) unions behind a button: they're mostly abandoned
     let shownStage: Stage = 'live'; // the auctions tab showing, whose order the menu sets
     const grid = (items: Listed[]) => {
@@ -459,6 +472,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       if (tab === 'parties') {
         // Can join and Joined always show; signed out they ask to connect.
         const v = view ?? 'all';
+        if (v === 'invited') findFit();
         app.querySelectorAll<HTMLElement>('[data-view]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.view === v)));
         const acct = session.account;
         const isYours = (b: Listed) => !!acct && (mineIn(b).size > 0 || same(b.s.creator, acct));
@@ -470,11 +484,11 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         };
         for (const k of Object.keys(views) as View[]) {
           const n = document.getElementById(`n-${k}`);
-          if (n) n.textContent = (k === 'invited' || k === 'yours') && !acct ? '' : String(views[k].length);
+          if (n) n.textContent = ((k === 'invited' || k === 'yours') && !acct) || (k === 'invited' && fitRead !== 'done') ? '' : String(views[k].length);
         }
         const empty: Record<View, string> = {
           all: 'No Credit Union is taking Credits right now.',
-          invited: 'None of your Credits fit an open Credit Union right now.',
+          invited: fitRead === 'done' ? 'None of your Credits fit an open Credit Union right now.' : 'Checking your Credits…',
           yours: 'You haven’t joined or started a Credit Union yet.',
           filled: 'None full right now. A Credit Union stays here from 80/80 until its auction starts.',
         };
@@ -622,12 +636,6 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     Promise.all([placeCards(list), pictureCards(list)]).then((got) => {
       if (got.some(Boolean) && document.getElementById('batches') === el) draw();
     });
-    if (session.account && tab === 'parties') {
-      fitByBatch(parties).then((m) => {
-        fit = m;
-        if (document.getElementById('batches') === el) draw();
-      });
-    }
     // Bound once: a page drawn twice at once (a wallet reconnecting as it loads) would otherwise wire the one button
     // twice, and a click would open the menu and close it again.
     const pick = app.querySelector<HTMLElement>('.sort-pick:not([data-bound])');

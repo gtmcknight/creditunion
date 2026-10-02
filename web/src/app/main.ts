@@ -356,11 +356,14 @@ document.getElementById('theme')?.addEventListener('click', () => {
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawTheme);
 drawTheme();
 
+/// Set once the first draw has run. A saved wallet that reconnects before it (most do, within a moment) is drawn by
+/// that first draw rather than drawing the page twice.
+let booted = false;
 onSession(() => {
   invalidateFit();
   drawAccount();
   drawTestnet();
-  route();
+  if (booted) route();
   watchOutbid();
 });
 window.addEventListener('popstate', () => route());
@@ -422,6 +425,7 @@ document.addEventListener('click', (e) => {
   // Draw with the wallet if it answers quickly; never wait on it. A slow extension (Rainbow can take seconds to
   // answer eth_accounts) reconnects whenever it answers, and the page redraws then (onSession).
   await Promise.race([restore().catch(() => {}), new Promise((r) => setTimeout(r, 300))]);
+  booted = true;
   route();
   // Header counts. The Parties and Auctions pages fill them from their own read.
 })();
