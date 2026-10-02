@@ -139,7 +139,9 @@ export async function scan(o: {
   /// The batch's canTake: which of `ids` it would accept, booked in order (rules and, on a painted sheet, a
   /// free slot of each Credit's kind or an open one).
   take: (ids: bigint[]) => Promise<readonly boolean[]>;
-  live: (id: bigint, seller: Address, operator: Address) => Promise<boolean>;
+  /// Which of these OpenSea listings are still live (the seller holds the Credit and has its operator approved), asked
+  /// for a page's fitting listings at once, so the caller can read them in one call.
+  live: (ls: { id: bigint; seller: Address; operator: Address }[]) => Promise<readonly boolean[]>;
   hasCode: (a: Address) => Promise<boolean>;
   extra?: Extra[];
   /// Dev only: stand-in OpenSea listings instead of the API (they skip the on-chain liveness checks).
@@ -147,6 +149,9 @@ export async function scan(o: {
   /// Past OpenSea's cheapest pages: listings further up the price list that could fit (a union with its own list of
   /// Credits, or a rare trait), each with its order read. Asked once, only when the pages left the scan short.
   deep?: (seen: ReadonlySet<string>, need: number) => Promise<Cand[]>;
+  /// Whether the batch could ever take this Credit, checked here for free (its rules against the edition's traits):
+  /// `take` is asked only about those, and still has the last word.
+  admits?: (id: string) => boolean;
 }): Promise<Listing[]> {
   const picked: Listing[] = [];
   const seen = new Set<string>();
@@ -203,7 +208,8 @@ export async function scan(o: {
   return picked;
 
   /// One page's candidates, cheapest first: which the batch takes, which are live, then picked in price order.
-  async function consider(fresh: Cand[]) {
+  async function consider(page: Cand[]) {
+    const fresh = o.admits ? page.filter((c) => o.admits!(c.id)) : page;
     // Ask the batch in small chunks, with what's already picked booked first, so a painted sheet's slots fill in
     // price order and the scan keeps going past Credits it has no room for. Chunks keep each call's gas modest.
     // Enough that fit (with room for OpenSea ones failing liveness) ends the page early.
@@ -214,19 +220,16 @@ export async function scan(o: {
       const ok = await o.take([...lead, ...chunk]).catch(() => null);
       fits.push(...chunk.map((_, j) => !!ok?.[lead.length + j]));
     }
-    const ok = await Promise.all(
-      fresh.map(async (c, i) => {
-        // Cheapest first: most listings don't fit, so the liveness calls run only for those that do.
-        if (!fits[i]) return false;
-        // FWA and strategy listings are custodial and were just read on-chain; the dev stand-ins have nothing to check.
-        if (c.source !== 'opensea' || o.fakeOpenSea) return true;
-        const [live, contracts] = await Promise.all([
-          o.live(BigInt(c.id), c.seller!, c.operator!).catch(() => false),
-          Promise.all(c.recipients!.map(isContract)),
-        ]);
-        return live && !contracts.some(Boolean);
-      }),
-    );
+    // Cheapest first: most listings don't fit, so the liveness reads run only for those that do, all in one ask. FWA
+    // and strategy listings are custodial (their contract holds the Credit, and a buy reads each again); the dev
+    // stand-ins have nothing to check.
+    const check = fresh.flatMap((c, i) => (fits[i] && c.source === 'opensea' && !o.fakeOpenSea ? [i] : []));
+    const [live, contracts] = await Promise.all([
+      check.length ? o.live(check.map((i) => ({ id: BigInt(fresh[i].id), seller: fresh[i].seller!, operator: fresh[i].operator! }))).catch(() => [] as boolean[]) : [],
+      Promise.all(check.map((i) => Promise.all(fresh[i].recipients!.map(isContract)))),
+    ]);
+    const checked = new Map(check.map((i, k) => [i, !!live[k] && !contracts[k].some(Boolean)]));
+    const ok = fresh.map((_, i) => fits[i] && (checked.get(i) ?? true));
     for (let i = 0; i < fresh.length && picked.length < o.max; i++) {
       if (!ok[i]) continue;
       const c = fresh[i];

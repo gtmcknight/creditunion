@@ -19,7 +19,7 @@ import { timePage } from './views/time';
 import { bitsPage, ratingPage } from './views/scale';
 import { dayAndTime, esc, errText, openModal, timeLeft, toast } from './ui';
 import { watchOutbid } from './outbid';
-import { BURNING_FROM, burningOn, burnsAt, indexedBatch, listBatches, liveAuctions, me, onBatches, readNotice, recentBatches, type Listed } from './data';
+import { BURNING_FROM, burningOn, burnsAt, listBatches, liveAuctions, me, onBatches, readNotice, recentBatches, type Listed } from './data';
 
 const app = document.getElementById('app')!;
 let seq = 0;
@@ -388,18 +388,16 @@ document.addEventListener('click', (e) => {
 
 // A slider dragged with the pointer keeps no focus ring; one moved with the keyboard shows it.
 // Reading ahead: a pointer resting on a link to a Credit Union starts reading your side of it, so it opens with it
-// there. Resting, not passing: a pointer crossing a grid of cards reads none of them.
+// there. Resting, not passing: a pointer crossing a grid of cards reads none of them. (Not its Buy tab's listings:
+// a hover would start a market scan; the Worker hands out its last scan at once anyway.)
 let ahead: ReturnType<typeof setTimeout> | null = null;
 document.addEventListener('pointerover', (e) => {
   const to = (e.target as HTMLElement).closest?.<HTMLAnchorElement>('a[href^="/union/0x"]')?.pathname.slice(7);
   if (ahead) clearTimeout(ahead);
   ahead = null;
-  if (!to || !/^0x[0-9a-fA-F]{40}$/.test(to)) return;
-  ahead = setTimeout(() => {
-    if (session.account) void me(to as Address, session.account).catch(() => {});
-    // An open union's Buy tab: the Worker starts its scan of the market now, so the listings are waiting on arrival.
-    if (indexedBatch(to as Address)?.b.s.state === 'Open') void fetch(`/opensea/listings?batch=${to}`).catch(() => {});
-  }, 150);
+  if (!to || !/^0x[0-9a-fA-F]{40}$/.test(to) || !session.account) return;
+  const account = session.account;
+  ahead = setTimeout(() => void me(to as Address, account).catch(() => {}), 150);
 });
 document.addEventListener('pointerdown', (e) => (e.target as HTMLElement).closest?.('.sweep-range input')?.setAttribute('data-pointer', ''), true);
 document.addEventListener('keydown', (e) => (e.target as HTMLElement).closest?.('.sweep-range input')?.removeAttribute('data-pointer'), true);

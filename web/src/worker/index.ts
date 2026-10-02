@@ -896,7 +896,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       // A preview's listings carry their packed edition traits, so the Buy tab can book them against the sheet's
       // slots without reading edition-traits.bin (478 KB) itself.
       const table = live ? null : await load(env.ASSETS, url.origin).catch(() => null);
-      const more = (await extras(env, url, ctx)).extra;
+      const more = (await shopExtras(env, url, ctx)).extra;
       return Response.json(
         { listings: listings.map((l) => ({ id: l.id, price: l.price, source: l.source, url: listingUrl(env, live, l), ...(table ? { traits: table[Number(l.id) - 1] ?? 0 } : {}) })), preview: !live, sources: sourcesOf(env, more) },
         { headers: { 'cache-control': 'no-store' } },
@@ -2638,15 +2638,39 @@ async function previewFitting(env: Env, url: URL, ctx: ExecutionContext, batch: 
       let j = 0;
       return pass.map((p) => p && fit[j++]);
     },
-    live: (id, seller, operator) =>
-      Promise.all([
-        main.readContract({ address: MAINNET_CREDITS, abi: creditsAbi, functionName: 'ownerOf', args: [id] }),
-        main.readContract({ address: MAINNET_CREDITS, abi: creditsAbi, functionName: 'isApprovedForAll', args: [seller, operator] }),
-      ]).then(([o, a]) => o.toLowerCase() === seller.toLowerCase() && a),
+    live: (ls) => liveListings(main, MAINNET_CREDITS, ls),
     hasCode: (a) => main.getCode({ address: a }).then((code) => !!code && code !== '0x' && !/^0xef0100[0-9a-f]{40}$/i.test(code)), // an EIP-7702 wallet is a person's
   });
   ctx.waitUntil(cache.put(key, Response.json(listings, { headers: { 'cache-control': 'public, max-age=60' } })));
   return listings;
+}
+
+/// Which OpenSea listings are live (the seller holds the Credit and still has the listing's operator approved): every
+/// listing's two reads in one Multicall3 call, where there is one.
+async function liveListings(c: ReturnType<typeof client>, credits: Address, ls: { id: bigint; seller: Address; operator: Address }[]): Promise<boolean[]> {
+  const reads = ls.flatMap((l) => [
+    { address: credits, abi: creditsAbi, functionName: 'ownerOf', args: [l.id] } as const,
+    { address: credits, abi: creditsAbi, functionName: 'isApprovedForAll', args: [l.seller, l.operator] } as const,
+  ]);
+  const res = await c.multicall({ contracts: reads, allowFailure: true, multicallAddress: MULTICALL3, batchSize: 64_000 });
+  return ls.map((l, i) => {
+    const [owner, approved] = [res[2 * i], res[2 * i + 1]];
+    return owner.status === 'success' && approved.status === 'success' && String(owner.result).toLowerCase() === l.seller.toLowerCase() && approved.result === true;
+  });
+}
+
+/// Whether an address holds code, kept a day: a listing that pays a contract could revert a whole sweep, and sellers
+/// and fee recipients repeat across listings and scans. A wallet delegated under EIP-7702 (its code is just 0xef0100
+/// and the delegate's address) is a person's account, and takes ETH like one: only real contracts are kept out.
+const codes = new Map<string, { at: number; p: Promise<boolean> }>();
+function hasCodeAt(env: Env, a: Address): Promise<boolean> {
+  const k = a.toLowerCase(), hit = codes.get(k);
+  if (hit && Date.now() - hit.at < 86_400_000) return hit.p;
+  if (codes.size > 20_000) codes.clear();
+  const p = client(env).getCode({ address: a }).then((code) => !!code && code !== '0x' && !/^0xef0100[0-9a-f]{40}$/i.test(code));
+  codes.set(k, { at: Date.now(), p });
+  p.catch(() => codes.get(k)?.p === p && codes.delete(k)); // a failed read is asked again
+  return p;
 }
 
 /// Listings that fit a union, cheapest first. The scan (OpenSea's pages, FWA and the strategy, liveness checks) is the
@@ -2660,7 +2684,7 @@ async function fitting(env: Env, url: URL, ctx: ExecutionContext, batch: Address
   if (!listings && inflight.has(batch)) listings = await inflight.get(batch)!;
   if (!listings) {
     const book = chainBook(env);
-    const p = Promise.all([extras(env, url, ctx), deepCandidates(env, url, ctx, batch).catch(() => null)]).then(async ([more, deep]) => {
+    const p = Promise.all([shopExtras(env, url, ctx), deepCandidates(env, url, ctx, batch).catch(() => null)]).then(async ([more, deep]) => {
       if (book && !more.fakeOpenSea) {
         try {
           return await book.listings(batch, more.extra, SCAN_MS, deep);
@@ -2676,48 +2700,117 @@ async function fitting(env: Env, url: URL, ctx: ExecutionContext, batch: Address
     listings = await p;
     ctx.waitUntil(cache.put(scanKey, Response.json(listings, { headers: { 'cache-control': 'public, max-age=10' } })));
   }
+  // A Credit the market book has seen leave the market since the scan (sold, moved: its loop reads both every ~10 s)
+  // drops out now, not at the next scan: a listing shown is one a buy can still fill.
+  const live = await liveBook(env, url, ctx);
+  if (live) listings = listings.filter((l) => live.ids.has(l.id));
   // Slots: on a layout party two listings of one palette can fight over one slot, so the party replays its
-  // deposit rule over the whole bundle, in price order, and only the ones that would land are kept. Kept 5 s per set
-  // of listings for everyone watching the Buy tab; a quote asks now.
+  // deposit rule over the whole bundle, in price order, and only the ones that would land are kept. Kept a minute
+  // per set of listings and the union's Credits as the index has them (a deposit or a leave asks again), for
+  // everyone watching the Buy tab; 5 s without the index; a quote asks now.
   if (listings.length) {
-    const takeKey = new Request(`${url.origin}/opensea/take/${batch}/${idsKey(listings.map((l) => l.id))}`);
+    const held = await unionIndex(env, url, ctx)
+      .then((v) => (JSON.parse(oneUnion(v, batch)) as { union: { ids: number[] } | null }).union?.ids ?? null)
+      .catch(() => null);
+    const takeKey = new Request(`${url.origin}/opensea/take/${batch}/${idsKey(listings.map((l) => l.id))}${held ? `/${idsKey(held)}` : ''}`);
     let ok = fresh ? null : await cache.match(takeKey).then((r) => (r ? r.json<boolean[]>() : null));
     if (!ok) {
       try {
         ok = [...((await client(env).readContract({ address: batch, abi: batchAbi, functionName: 'canTake', args: [listings.map((l) => BigInt(l.id))] })) as readonly boolean[])];
-        ctx.waitUntil(cache.put(takeKey, Response.json(ok, { headers: { 'cache-control': 'public, max-age=5' } })));
+        ctx.waitUntil(cache.put(takeKey, Response.json(ok, { headers: { 'cache-control': `public, max-age=${held ? 60 : 5}` } })));
       } catch {}
     }
     if (ok) listings = listings.filter((_, i) => ok[i]);
   }
   return listings;
 }
-/// How long the ChainBook keeps a union's scan.
-const SCAN_MS = 20_000;
+/// The market book while it's current (its loop touches it every ~10 s), with the set of Credits it has for sale.
+async function liveBook(env: Env, url: URL, ctx: ExecutionContext): Promise<{ at: number; rows: Row[]; ids: Set<string> } | null> {
+  if (!hasSweeper(env) || !env.MARKET) return null;
+  const bk = await marketBook(env, url, ctx).catch(() => null);
+  if (!bk?.rows.length || Date.now() - bk.at > 2 * 60_000) return null;
+  bk.ids ??= new Set(bk.rows.map((r) => r[0]));
+  return bk as { at: number; rows: Row[]; ids: Set<string> };
+}
+/// FWA's and CreditStrategy's listings for a scan, from the market book (it reads both every 5 minutes and drops a
+/// Credit within seconds of it moving): no chain read per Buy tab. Without a current book, read now, as before. Buying
+/// reads each of them on-chain again before it sends.
+async function shopExtras(env: Env, url: URL, ctx: ExecutionContext): Promise<{ extra: Extra[]; fakeOpenSea?: { id: string; price: string }[] }> {
+  const bk = devFake(env, url) ? null : await liveBook(env, url, ctx);
+  if (!bk) return extras(env, url, ctx);
+  const extra: Extra[] = [];
+  for (const r of bk.rows) if (r[2] === 'fwa' || r[2] === 'strategy') extra.push({ id: r[0], price: r[1], source: r[2], ...(r[3] ? { listingId: r[3] } : {}) });
+  return { extra };
+}
+/// How long the ChainBook keeps a union's scan: a minute. Between scans, what sold drops out (liveBook) and what the
+/// union can no longer take drops out (canTake above); a new listing waits for the next scan.
+const SCAN_MS = 60_000;
 /// How old a scan can be and still be handed out (while a new one runs): the Buy tab shows it at once, and a buy
 /// prices every listing again before it sends.
 const STALE_MS = 30 * 60_000;
 /// The scan itself (opensea.ts), with this union's canTake and the chain's liveness checks; `deep`, a narrow union's
 /// Credits for sale (deepCandidates), is read through once OpenSea's cheapest pages come up short.
-function scanFor(env: Env, batch: Address, more: { extra: Extra[]; fakeOpenSea?: { id: string; price: string }[] }, deep?: readonly string[] | null) {
+async function scanFor(env: Env, batch: Address, more: { extra: Extra[]; fakeOpenSea?: { id: string; price: string }[] }, deep?: readonly string[] | null) {
   const c = client(env);
+  const admits = await admitsOf(env, batch);
   return scan({
     key: env.OPENSEA_API_KEY,
     slug: env.OPENSEA_SLUG,
     credits: env.CREDITS,
     ...more,
     deep: deep?.length && env.OPENSEA_API_KEY ? (seen, need) => deepOrders(env, deep, seen, need) : undefined,
+    admits: admits ? (id) => admits(Number(id)) : undefined,
     max: 40,
     take: (ids) => c.readContract({ address: batch, abi: batchAbi, functionName: 'canTake', args: [ids] }),
-    live: (id, seller, operator) =>
-      Promise.all([
-        c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'ownerOf', args: [id] }),
-        c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'isApprovedForAll', args: [seller, operator] }),
-      ]).then(([o, ok]) => o.toLowerCase() === seller.toLowerCase() && ok),
-    // A wallet delegated under EIP-7702 (its code is just 0xef0100 and the delegate's address) is a person's account,
-    // and takes ETH like one: only real contracts are kept out.
-    hasCode: (a) => c.getCode({ address: a }).then((code) => !!code && code !== '0x' && !/^0xef0100[0-9a-f]{40}$/i.test(code)),
+    live: (ls) =>
+      hasMulticall(env)
+        ? liveListings(c, env.CREDITS, ls)
+        : Promise.all(
+            ls.map(({ id, seller, operator }) =>
+              Promise.all([
+                c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'ownerOf', args: [id] }),
+                c.readContract({ address: env.CREDITS, abi: creditsAbi, functionName: 'isApprovedForAll', args: [seller, operator] }),
+              ]).then(([o, ok]) => o.toLowerCase() === seller.toLowerCase() && ok, () => false),
+            ),
+          ),
+    hasCode: (a) => hasCodeAt(env, a),
   });
+}
+
+/// What a union could ever take, by the edition's traits: its rules, its own list, and on a sheet with no open slot
+/// a painted slot of the Credit's kind. None of it changes, so it's worked out once per union per isolate (in the
+/// ChainBook, where scans run, once for the site). The scan asks the union's canTake only about these, so a narrow
+/// union's scan no longer asks it about every listing on the market; canTake still has the last word. Null when it
+/// can't be worked out now: every listing is asked about, as before.
+const admitting = new Map<string, Promise<((id: number) => boolean) | null>>();
+function admitsOf(env: Env, batch: Address): Promise<((id: number) => boolean) | null> {
+  const k = batch.toLowerCase();
+  let p = admitting.get(k);
+  if (!p) {
+    const origin = `https://${SITE_HOST}`; // the assets binding reads by path; any origin of ours does
+    p = (async () => {
+      const s = (await client(env).readContract({ address: batch, abi: batchAbi, functionName: 'summary' })) as unknown as {
+        filter: Filter & { layout0: bigint; layout1: bigint; layoutTrait?: number };
+        allowlistSize: bigint;
+      };
+      const f = s.filter;
+      const [ok, table] = await Promise.all([predicate(env.ASSETS, origin, { ...rulesOf(f), live: await liveTable(env, batch) }), load(env.ASSETS, origin)]);
+      const listed = Number(s.allowlistSize) > 0;
+      const list = listed ? await allowlistOf(env, batch) : null;
+      if (listed && !list) throw new Error('the union’s list can’t be read now');
+      const on = list ? new Set(list) : null;
+      const slots = Array.from({ length: 80 }, (_, i) => Number((BigInt(i < 64 ? f.layout0 : f.layout1) >> BigInt(4 * (i < 64 ? i : i - 64))) & 15n));
+      const kinds = slots.some(Boolean) && !slots.includes(0) ? new Set(slots) : null; // with an open slot, any kind fits
+      const trait = Number(f.layoutTrait ?? 0);
+      return (id: number) => ok(id) && (!on || on.has(id)) && (!kinds || kinds.has(keyOf(trait, table[id - 1] ?? 0)));
+    })().catch((e) => {
+      console.warn('[scan] rules unread', safeError(e));
+      admitting.delete(k);
+      return null;
+    });
+    admitting.set(k, p);
+  }
+  return p;
 }
 
 /// Most Credits the deep pass hands the scan, cheapest first.
@@ -2769,8 +2862,8 @@ async function deepCandidates(env: Env, url: URL, ctx: ExecutionContext, batch: 
 }
 /// The market book as /market.json has it: when it last changed, and its rows (id, price, source, a, b) cheapest first.
 /// The colo's copy, parsed and sorted once per isolate for 30 s.
-let bookMemo: { at: number; book: Promise<{ at: number; rows: Row[] }> } | null = null;
-function marketBook(env: Env, url: URL, ctx: ExecutionContext): Promise<{ at: number; rows: Row[] }> {
+let bookMemo: { at: number; book: Promise<{ at: number; rows: Row[]; ids?: Set<string> }> } | null = null;
+function marketBook(env: Env, url: URL, ctx: ExecutionContext): Promise<{ at: number; rows: Row[]; ids?: Set<string> }> {
   if (bookMemo && Date.now() - bookMemo.at < 30_000) return bookMemo.book;
   const book_ = (async () => {
     const key = new Request(`${url.origin}/market.json/v2`);
@@ -2778,8 +2871,11 @@ function marketBook(env: Env, url: URL, ctx: ExecutionContext): Promise<{ at: nu
     const body = hit ? await hit.text() : await book(env).snapshot();
     if (!hit) ctx.waitUntil(caches.default.put(key, new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=30' } })));
     const j = JSON.parse(body) as { at: number; items: string[][] };
-    const rows = j.items.map((x) => [x[0], x[1], x[2], x[3], x[4], '', 0] as Row);
-    rows.sort((a, b) => (BigInt(a[1]) < BigInt(b[1]) ? -1 : BigInt(a[1]) > BigInt(b[1]) ? 1 : 0));
+    // Each price parsed once, not twice per comparison: the Buy tabs read this book now too.
+    const rows = j.items
+      .map((x) => ({ p: BigInt(x[1]), r: [x[0], x[1], x[2], x[3], x[4], '', 0] as Row }))
+      .sort((a, b) => (a.p < b.p ? -1 : a.p > b.p ? 1 : 0))
+      .map((x) => x.r);
     return { at: j.at, rows };
   })();
   bookMemo = { at: Date.now(), book: book_ };
