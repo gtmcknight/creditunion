@@ -35,9 +35,14 @@ export function fullStatus(s: Summary) {
   const now = Date.now() / 1000;
   if (s.phase === 'Waiting') return notice ? `Burning starts ${startsAt(notice.at)}` : 'Waiting for Jack to launch Statements';
   if (s.phase === 'Countdown' && now < s.lockAt) return `Locks in ${clock(s.lockAt)}`;
-  if ((s.phase === 'Countdown' || s.phase === 'Burnable') && now < s.deadline) return 'Ready to burn';
+  if (burnHour(s)) return `${timeLeft(s.deadline)} left to convert`;
   return 'Unlocked';
 }
+
+/// A full union in its hour to convert: locked, and anyone can press Convert Union to Statement until its deadline.
+/// Nobody is paid to and nothing presses it for them: unpressed, it unlocks.
+export const burnHour = (s: Summary, now = Date.now() / 1000) =>
+  s.state === 'Full' && (s.phase === 'Countdown' || s.phase === 'Burnable') && now >= s.lockAt && now < s.deadline;
 
 /// A clock the auctions page ticks every second (`data-ends`): red inside the last 15 minutes, when a bid extends an
 /// auction to 15 minutes from then.
@@ -51,11 +56,11 @@ function auctionLine(s: Summary) {
   return `High bid ${eth(s.highBid)} · ${ends(s.auctionEnd)}`;
 }
 
-/// A full union's card line: its lock clock once it counts down, then Ready to burn.
+/// A full union's card line: its lock clock once it counts down, then the time left in its hour to convert.
 function fullLine(s: Summary) {
   const now = Date.now() / 1000;
   if (s.phase === 'Countdown' && now < s.lockAt) return `Locks in ${ends(s.lockAt)}`;
-  if ((s.phase === 'Countdown' || s.phase === 'Burnable') && now < s.deadline) return 'Ready to burn';
+  if (burnHour(s, now)) return `${ends(s.deadline)} left to convert`;
   return '80/80 Full';
 }
 
@@ -301,7 +306,9 @@ export function card({ s, ids, depositors, format }: Listed, fit?: bigint[], who
   // The art carries no text. Under it, three lines: the name; who started it and how many are in; where it stands and
   // what of yours is in or fits.
   const won = s.state === 'Auction' && !live; // the clock ran out: anyone can settle it
-  const cta = s.state === 'Open' && !mine.size ? 'Join' : live ? 'Bid' : won ? 'Settle' : '';
+  // In its hour to convert, Convert opens the union page at its Convert button.
+  const convert = burnHour(s);
+  const cta = s.state === 'Open' && !mine.size ? 'Join' : live ? 'Bid' : won ? 'Settle' : convert ? 'Convert' : '';
   const members = membersOf({ depositors });
   const people = `${members} ${members === 1 ? 'member' : 'members'}`;
   const where =
@@ -326,7 +333,7 @@ export function card({ s, ids, depositors, format }: Listed, fit?: bigint[], who
         <span class="meta-line num"><span class="meta-line-text">${where}${standing}${yoursText ? ` · <span class="meta-yours">${yoursText}</span>` : ''}</span></span>
         ${rating === undefined ? '' : `<span class="meta-line num">Rating ${rating.toLocaleString()}</span>`}
       </div>
-      ${cta ? `<span class="btn sm primary cta">${cta}</span>` : ''}
+      ${cta ? `<span class="btn sm primary cta"${convert ? ` data-href="/union/${s.address}?convert" role="link"` : ''}>${cta}</span>` : ''}
     </div>
   </a>`;
 }
@@ -556,7 +563,8 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       }),
     );
     draw();
-    // The clocks tick between reads. One that runs out redraws: its auction moves to Sold, a lock to Ready to burn.
+    // The clocks tick between reads. One that runs out redraws: its auction moves to Sold, a lock to its hour to
+    // convert, an unused hour back to Full.
     const tick = setInterval(() => {
       if (document.getElementById('batches') !== el) return clearInterval(tick);
       const now = Date.now() / 1000;

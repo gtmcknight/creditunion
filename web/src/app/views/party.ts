@@ -14,7 +14,7 @@ import { shareButton } from '../share';
 import { directionCanvas, directions, mountDirections, pickedDirection, primeInks, sheetInks, showDirection, viewerPicked, warmInks } from '../directions';
 import { markOutbidSeen, offerAlerts } from '../outbid';
 import { activityFold, ago } from './live';
-import { $$, art, clock, errText, dayAndTime, esc, eth, openModal, same, setRange, sheet, short, startsAt, statementArt, toast, until } from '../ui';
+import { $$, art, clock, errText, dayAndTime, esc, eth, localTime, openModal, same, setRange, sheet, short, startsAt, statementArt, timeLeft, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
 import { slotName } from '../../shared/layout';
 import { compose, DIRECTIONS, paint as paintMarks, PAGE, SHOWN, type Direction } from '../../shared/statement';
@@ -28,6 +28,11 @@ const directAbi = [
   ...batchAbi.filter((x) => x.type === 'error'),
 ] as const;
 const RATING_URL = 'https://jack.art/credits/rating';
+/// The burn button's label, word for word wherever the page tells people to press it.
+const CONVERT = 'Convert Union to Statement';
+/// After a full union's 5 minutes to leave: an hour in which anyone may press it. Nobody is paid to, and nothing
+/// presses it for them.
+const THEN_CONVERT = `Then anyone has an hour to press ${CONVERT}.`;
 const fmtScore = (s: number) => (Math.floor(s * 100) / 100).toFixed(2);
 
 /// Hovering one of your Credits in a picker: the same card as the sheet's cells (ghosts.ts): its number and rating,
@@ -151,6 +156,8 @@ let addTab: { at: string; tab: string } | null = null;
 /// /union/0x…?burn: the union whose page shows Convert Union to Statement before burns open (our own first burn on burn day).
 /// Read before the query string is cleared from the address bar, and kept for the visit.
 let burnAsk: string | null = null;
+/// /union/0x…?convert (a card's or the site bar's Convert): the union whose Convert button is brought into view.
+let convertAsk: string | null = null;
 /// Transactions in flight on this page: live refreshes wait while one is.
 let busy = 0;
 /// Drawings of a union page started, so a late redraw knows when a newer one has replaced it.
@@ -205,6 +212,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
     addTab = { at: address, tab: 'mine' };
   }
   if (new URLSearchParams(location.search).has('burn')) burnAsk = address.toLowerCase();
+  if (new URLSearchParams(location.search).has('convert')) convertAsk = address.toLowerCase();
   // Burn day's notice: a full union waiting on it says when burning starts (read already for the bar, kept a minute).
   if (b.s.state === 'Full' && b.s.phase === 'Waiting') await readNotice();
   if (location.search) history.replaceState(history.state, '', location.pathname);
@@ -541,7 +549,8 @@ function openCreated(b: Ctx, placed?: (bigint | null)[], joined?: number) {
   d.className = 'created';
   d.innerHTML = `<form method="dialog">
     <div class="created-art">${sheet(b.ids, { size: 'sm', placed })}</div>
-    <div class="created-head"><h3>${joined ? 'You’re in' : 'Your Credit Union is live'}</h3><p class="muted">${joined ? `${joined} ${joined === 1 ? 'Credit' : 'Credits'} in ${esc(name)} · ${left > 0 ? `${left} to go` : 'full'}` : esc(name)}</p></div>
+    <div class="created-head"><h3>${joined ? 'You’re in' : 'Your Credit Union is live'}</h3><p class="muted">${joined ? `${joined} ${joined === 1 ? 'Credit' : 'Credits'} in ${esc(name)} · ${left > 0 ? `${left} to go` : 'full'}` : esc(name)}</p>
+      <p class="muted">At 80, withdrawals close after 5 minutes. ${THEN_CONVERT}</p></div>
     <input class="created-link" type="text" readonly value="${esc(url)}" aria-label="Credit Union link">
     <div class="created-actions">
       <a class="btn primary" href="${esc(x)}" target="_blank" rel="noopener">Share on X</a>
@@ -813,13 +822,15 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>, pending = false) {
       case 'Countdown':
         return `<div class="box">
           <h3>Withdrawals close in <span class="num" data-clock="${s.lockAt}">${clock(s.lockAt)}</span></h3>
-          <p class="muted">After that, this Union burns its 80 Credits into one Statement and puts it up for auction.</p>
+          <p class="muted">${THEN_CONVERT}</p>
           ${mine}
         </div>`;
       case 'Burnable':
+        // The hour to convert: nobody is paid to press it and nothing presses it for you. Unpressed, it unlocks.
         return `<div class="box">
-          <h3>Ready</h3>
-          <div id="assemble-slot"><div class="stack"><button class="btn primary block" disabled>Convert Union to Statement</button><p class="small muted center">Opens in a few minutes.</p></div></div>
+          <h3><span class="num" data-clock="${s.deadline}" data-left>${timeLeft(s.deadline)}</span> left to convert</h3>
+          <p class="muted">If nobody converts it by ${localTime(s.deadline)}, it unlocks and members can withdraw again.</p>
+          <div id="assemble-slot"><div class="stack">${session.account ? `<button class="btn primary block" disabled>${CONVERT}</button>` : `<button class="btn primary block" data-connect>Connect to convert</button>`}<p class="small muted center">Anyone can press it. You pay the gas.</p></div></div>
         </div>`;
       default:
         return `<div class="box">
@@ -1012,8 +1023,16 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
       }
       if (!slot.isConnected) return;
       clearInterval(tick);
-      slot.innerHTML = `<div class="stack">${m ? `<button class="btn primary block" id="assemble">Convert Union to Statement</button>` : `<button class="btn primary block" data-connect>Connect wallet</button>`}
+      // Converting takes a wallet, not a share: anyone signed in can press it, while their side is still being read too.
+      slot.innerHTML = `<div class="stack">${session.account ? `<button class="btn primary block" id="assemble">${CONVERT}</button>` : `<button class="btn primary block" data-connect>Connect to convert</button>`}
         <p class="small muted center">Anyone can press it. You pay the gas.</p></div>`;
+      // From a card's or the bar's Convert: the button in view, focused.
+      if (convertAsk === s.address.toLowerCase()) {
+        convertAsk = null;
+        const btn = slot.querySelector<HTMLElement>('button');
+        btn?.scrollIntoView({ block: 'center' });
+        btn?.focus({ preventScroll: true });
+      }
       document.getElementById('assemble')?.addEventListener('click', (e) =>
         run(e.currentTarget as HTMLElement, 'Converting…', () =>
           send({ address: s.address, abi: batchAbi, functionName: 'assemble', gas: 16_000_000n }, txNote),
@@ -1107,7 +1126,7 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
     const late = 3 + Math.random() * 5;
     const t = setInterval(() => {
       if (!clocks[0].isConnected) return clearInterval(t);
-      for (const el of clocks) el.textContent = clock(Number(el.dataset.clock));
+      for (const el of clocks) el.textContent = ('left' in el.dataset ? timeLeft : clock)(Number(el.dataset.clock));
       if (clocks.some((el) => Date.now() / 1000 >= Number(el.dataset.clock) + late)) {
         clearInterval(t);
         rerender();

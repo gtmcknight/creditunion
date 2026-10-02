@@ -3,7 +3,7 @@ import { chain, config, connect, disconnect, loadConfig, onSession, restore, ses
 import { party } from './views/party';
 import './sheet-paint';
 import { create } from './views/create';
-import { lists } from './views/lists';
+import { burnHour, lists } from './views/lists';
 import { home } from './views/home';
 import { invalidateFit } from './fit';
 import { hydrate, who } from './ens';
@@ -17,9 +17,9 @@ import { credit } from './views/credit';
 import { traitPage } from './views/trait';
 import { timePage } from './views/time';
 import { bitsPage, ratingPage } from './views/scale';
-import { dayAndTime, esc, errText, openModal, toast } from './ui';
+import { dayAndTime, esc, errText, openModal, timeLeft, toast } from './ui';
 import { watchOutbid } from './outbid';
-import { BURNING_FROM, burningOn, burnsAt, indexedBatch, listBatches, me, readNotice } from './data';
+import { BURNING_FROM, burningOn, burnsAt, indexedBatch, listBatches, me, readNotice, type Listed } from './data';
 
 const app = document.getElementById('app')!;
 let seq = 0;
@@ -176,8 +176,34 @@ async function drawAuctions(page: string) {
   const el = document.getElementById('notice');
   if (!el || !burningOn || (el.innerHTML && !el.classList.contains('auctions-bar'))) return;
   el.classList.add('auctions-bar');
+  if (burnBar(el, all, page)) return;
   el.innerHTML = `<span><strong>${live === 1 ? '1 Statement is' : `${live} Statements are`} up for auction.</strong> <a href="/auctions">See auctions</a></span>`;
   el.hidden = !live || page === 'auctions';
+}
+
+/// While a full union is in its hour to convert, the bar says so instead: which one and how long is left, linked to
+/// its Convert button. Nobody is paid to press it, so someone has to see it. Several at once: how many, and the list.
+/// Not on the union's own page, which says it already. Ticks until the hour ends, then the bar goes back to auctions.
+let barTick: ReturnType<typeof setInterval> | undefined;
+function burnBar(el: HTMLElement, all: Listed[], page: string) {
+  clearInterval(barTick);
+  const ready = all.filter(({ s }) => burnHour(s)).sort((x, y) => x.s.deadline - y.s.deadline);
+  if (!ready.length) return false;
+  const one = ready.length === 1 ? ready[0].s : null;
+  el.innerHTML = one
+    ? `<span><strong>Anyone can convert <a href="/union/${one.address}?convert">${esc(one.name || 'Untitled')}</a> to a Statement, <span class="num" data-bar-ends>${timeLeft(one.deadline)}</span> left.</strong></span>`
+    : `<span><strong>Anyone can convert ${ready.length} Unions to Statements now.</strong> <a href="/unions/full">See them</a></span>`;
+  el.hidden = !!one && location.pathname.toLowerCase() === `/union/${one.address.toLowerCase()}`;
+  if (one) {
+    const n = el.querySelector<HTMLElement>('[data-bar-ends]')!;
+    barTick = setInterval(() => {
+      if (!n.isConnected) return clearInterval(barTick);
+      if (Date.now() / 1000 < one.deadline) return void (n.textContent = timeLeft(one.deadline));
+      clearInterval(barTick);
+      void drawAuctions(page);
+    }, 1000);
+  }
+  return true;
 }
 
 /// Phone browsers have no wallet inside them: open this page in a wallet's own browser instead.

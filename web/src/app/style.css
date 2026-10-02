@@ -1763,6 +1763,13 @@ nav a[hidden] {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+/* A union named in the bar (its hour to convert) wraps with the words around it, in even lines on a phone. */
+#notice strong a {
+  white-space: normal;
+}
+#notice > span {
+  text-wrap: balance;
+}
 /* Live auctions beside Auctions in the nav (main.ts drawAuctions): the bar's yellow, in either theme. */
 .nav-count {
   display: inline-block;
