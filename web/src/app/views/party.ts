@@ -873,7 +873,7 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>, pending = false) {
         ? `<div class="stack"><button class="btn primary block" id="settle">Settle auction</button><p class="small muted center">Sends the Statement to the winner and pays every member.</p></div>`
         : m
           ? `<form class="bid-form" id="bid-form"><label class="field"><input id="bid" inputmode="decimal" autocomplete="off" placeholder="${hasMin ? minEth(s.minBid) : '0.1'}"${again} aria-label="Bid in ETH"><span>ETH</span></label><button class="btn primary">Bid</button></form>
-             <p class="small muted">${hasMin ? `Min ${minEth(s.minBid)}. ` : ''}Outbid ETH returns instantly. Credit Union is unofficial and experimental, so use it at your own risk.</p>`
+             <p class="small muted">${hasMin ? `<button type="button" class="link bid-min" data-fill="${minEth(s.minBid)}">Min ${minEth(s.minBid)}</button>` : ''}<span class="bid-wallet" hidden></span>${hasMin ? '. ' : ''}Outbid ETH returns instantly. Credit Union is unofficial and experimental, so use it at your own risk.</p>`
           : connect
     }
     ${m?.shares ? `<p class="small">Your share <strong class="num">${myShare}</strong>${s.highBid ? ` · <span class="num">≈${eth(perUnit * myUnits)}</span> now` : ''}</p>` : ''}
@@ -1020,6 +1020,19 @@ function bind(b: Ctx, m: Mine, myIds: Set<string>, rerender: () => void, keyed: 
       send({ address: s.address, abi: batchAbi, functionName: 'withdrawOwed' }, txNote),
     'Refund collected.'),
   );
+
+  // The minimum fills the box; beside it, what your wallet holds.
+  document.querySelector<HTMLElement>('.bid-min')?.addEventListener('click', (e) => {
+    const input = document.getElementById('bid') as HTMLInputElement | null;
+    if (input) (input.value = (e.currentTarget as HTMLElement).dataset.fill ?? ''), input.focus();
+  });
+  const wallet = document.querySelector<HTMLElement>('.bid-wallet');
+  if (wallet && session.account)
+    void pub.getBalance({ address: session.account }).then((bal) => {
+      const min = !!document.querySelector('.bid-min');
+      wallet.textContent = min ? ` · You have ${eth(bal)}` : `You have ${eth(bal)}. `;
+      wallet.hidden = false;
+    }, () => {});
 
   document.getElementById('bid-form')?.addEventListener('submit', (e) => {
     e.preventDefault();

@@ -90,6 +90,7 @@ const RPC_METHODS = new Set([
   'eth_getTransactionReceipt',
   'eth_getTransactionByHash',
   'eth_getBlockByNumber',
+  'eth_getBalance', // a bidder's own ETH, shown under the bid box
 ]);
 /// A full sweep's simulation is the biggest body: 40 Seaport orders are ~65 KB of calldata, ~130 KB as hex.
 const MAX_RPC_BODY = 200_000;
@@ -2040,6 +2041,9 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
     } else if (method === 'eth_getTransactionReceipt' || method === 'eth_getTransactionByHash') {
       if (!/^0x[0-9a-fA-F]{64}$/.test(String(p[0] ?? ''))) return text('bad hash', 400);
       out = [String(p[0]).toLowerCase()];
+    } else if (method === 'eth_getBalance') {
+      if (!/^0x[0-9a-fA-F]{40}$/.test(String(p[0] ?? ''))) return text('bad address', 400);
+      out = [String(p[0]).toLowerCase(), 'latest'];
     } else {
       out = [];
     }
