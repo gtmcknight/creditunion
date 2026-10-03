@@ -1,7 +1,7 @@
 # Mainnet deployment
 
-The record of what was deployed, from which commit, with what settings. Blanks get filled in as each step lands.
-What the Safe can do afterwards: [SAFE.md](SAFE.md).
+The record of what was deployed, from which commit, with what settings. What the Safe can do afterwards:
+[SAFE.md](SAFE.md).
 
 ## Addresses
 
@@ -11,6 +11,9 @@ What the Safe can do afterwards: [SAFE.md](SAFE.md).
 | Batch implementation (clone source) | [`0xd578eC605E60eDD008b415c23B15Eb3483CC6c50`](https://etherscan.io/address/0xd578eC605E60eDD008b415c23B15Eb3483CC6c50) |
 | Sweeper | [`0x7b93309A12e05944Ab821470615983A4A2AC9799`](https://etherscan.io/address/0x7b93309A12e05944Ab821470615983A4A2AC9799) |
 | Ratings | [`0x61Ca63cDE107CE7e32785c0d89904fE58f9d371d`](https://etherscan.io/address/0x61Ca63cDE107CE7e32785c0d89904fE58f9d371d) (v3.4.0, 122,154 scores in 11 data contracts) |
+| UnionFormats (Oct 1) | [`0x16deCDa20c9164CcfDB4BE189557aDc4614aAedC`](https://etherscan.io/address/0x16deCDa20c9164CcfDB4BE189557aDc4614aAedC) |
+| StatementAdapter, the factory's assembler (Oct 1) | [`0x6CAEb9953bA8625226345CF39F93541CE53AbFd2`](https://etherscan.io/address/0x6CAEb9953bA8625226345CF39F93541CE53AbFd2) |
+| LiveRatings, `factory.ratings()` (Oct 2) | [`0xe27fC60dcE0a9c33743581bfCD72F619DB3612a6`](https://etherscan.io/address/0xe27fC60dcE0a9c33743581bfCD72F619DB3612a6) |
 
 Contracts it points at, fixed in `script/DeployMainnet.s.sol`:
 
@@ -27,12 +30,12 @@ Contracts it points at, fixed in `script/DeployMainnet.s.sol`:
 |---|---|
 | Fee recipient | Safe `0xFE4761e66C2A37492871d30d0e83bcBC454A7C10` (2 of 3) |
 | Assembler setter | The same Safe |
-| Assembler | None at deploy. Proposed by the Safe once Jack's Statement contract ships ([ADAPTER.md](ADAPTER.md)). |
+| Assembler | None at deploy. `StatementAdapter` since 8:10 PM ET Oct 1, permanent (below, and [ADAPTER.md](ADAPTER.md)). |
 | Protocol fee | 200 bps (2%) of each Statement sale |
 | Creator fee | 0 |
 | Sweeper fee | 200 bps (2%) of each buy |
 | Min Credits to open | 1 |
-| Ratings | Deployed by the script from `data/scores.bin` |
+| Ratings | Deployed by the script from `data/scores.bin`. `LiveRatings` for unions opened since Oct 2 (below). |
 
 ## Run
 
@@ -51,7 +54,8 @@ forge script script/DeployMainnet.s.sol --rpc-url $MAINNET_RPC \
   --broadcast --slow --verify
 ```
 
-Every transaction is in `broadcast/DeployMainnet.s.sol/1/run-latest.json`.
+Forge wrote every transaction to `broadcast/DeployMainnet.s.sol/1/run-latest.json`. `broadcast/` is gitignored, so
+that file is only on the machine that deployed; the transactions themselves are on Etherscan under the deployer.
 
 ## Checked before
 
@@ -67,18 +71,44 @@ Every transaction is in `broadcast/DeployMainnet.s.sol/1/run-latest.json`.
 - [x] All four verified on Etherscan (the 11 Ratings data contracts are raw data, no source)
 - [x] `factory.feeRecipient()` and `factory.assemblerSetter()` are the Safe
 - [x] `factory.protocolFeeBps()` 200, `creatorFeeBps()` 0, `sweeper.feeBps()` 200
-- [x] `factory.ratings()` is the Ratings address above, `ratingsHistory()` has one entry
-- [x] `factory.assembler()` is zero
-- [ ] `web/wrangler.jsonc` points at these addresses and `/config.json` shows chainId 1
+- [x] `factory.ratings()` is the Ratings address above, `ratingsHistory()` has one entry (at deploy; LiveRatings since Oct 2)
+- [x] `factory.assembler()` is zero (at deploy; the adapter came Oct 1)
+- [x] `web/wrangler.jsonc` points at these addresses and `/config.json` shows chainId 1 (checked Oct 3, with
+  `STATEMENTS` and `FORMATS` too)
+
+## UnionFormats (Oct 1 2026)
+
+`UnionFormats` 0x16deCDa20c9164CcfDB4BE189557aDc4614aAedC, block 26095891 (tx 0xb700c124…4e66), verified. Where a
+union's creator picks its Statement format; the adapter reads it at burn time, so it went up first. Source as in
+`c531062`, unchanged since. Deployed with `script/DeployUnionFormats.s.sol`; tests `test/UnionFormats.t.sol`.
+
+## StatementAdapter (Oct 1 2026)
+
+`StatementAdapter` 0x6CAEb9953bA8625226345CF39F93541CE53AbFd2, block 26100878 (tx 0x72bc7e50…7f4c), verified. Built
+against Jack's Statements 0x75Edd94b7e49b3bD5C8047b91F165A5e265a069b and the UnionFormats above. The verified
+source is in the repo as of `4a6180f`. Deployed with `script/DeployAdapter.s.sol` (`STATEMENTS`, `FORMATS`, optional
+`EXPECT`); fork test `test/StatementAdapter.fork.t.sol`. Burn day and the replaced first proposal:
+[RUNBOOK.md](RUNBOOK.md).
+
+- [x] Safe proposed it, then `activateAssembler()`; permanent since 8:10 PM ET Oct 1
+- [x] `factory.assembler()` reads 0x6CAE…bFd2 (checked Oct 3)
+- [ ] No written review round in [AUDIT.md](AUDIT.md) and no Halmos coverage (also true of UnionFormats and
+  LiveRatings)
 
 ## LiveRatings (Oct 2 2026)
 
 `LiveRatings` 0xe27fC60dcE0a9c33743581bfCD72F619DB3612a6, block 26105860, verified. It reads each Credit's score
 from the Statements contract's scorer (0x817A9cFfb4d6E7c206e745A4229001A472C1b7B7) when asked, ×10 rounded down;
 `count()` 122,154 like the table it replaces. Deployed with `script/DeployLiveRatings.s.sol`; fork test
-`test/LiveRatings.fork.t.sol`.
+`test/LiveRatings.fork.t.sol` (needs `MAINNET_RPC`, no default, and an archive node: it's pinned to a block).
 
 - [x] `scoreOf(9)` 7970 (797.0310), `scoreOf(53739)` 7451; `scorer()` and `credits()` as above
 - [x] `proposeRatings(0xe27f…12a6)` simulates from the Safe (calldata `0xf9489bd7…e27fc60dce0a9c33743581bfcd72f619db3612a6`)
 - [x] Safe proposed (Safe nonce 2); `activateRatings()` in tx 0x8480e4df…3db00; `factory.ratings()` reads it
 - [x] Unions opened before keep 0x61Ca…371d for their rating rules; the site picks each union's table
+
+## Tests now
+
+Oct 3: 282 passing, 252 without forks and 30 on mainnet forks. Set `MAINNET_RPC` to an archive node:
+`LiveRatings.fork.t.sol` has no default and `StatementAdapter.fork.t.sol` is pinned to an old block, so a public
+node only serves the Sweeper fork tests.

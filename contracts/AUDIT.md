@@ -1,10 +1,15 @@
-# Security review — 2026-09-24
+# Security review, 2026-09-24
 
 > Where things stand now, with the proofs and tests since: [Security in the README](../README.md#security). This file is the review log, oldest round first.
 
 Internal review of `Batch.sol`, `BatchFactory.sol`, `Sweeper.sol` and the Worker, before any external audit.
 Commit: see git history for "Security review" on this date. **This is not a substitute for an independent
-audit before mainnet.** The mainnet assembler adapter does not exist yet and must be reviewed with it.
+audit.** None has happened.
+
+> **Status, Oct 3 2026.** The mainnet adapter is `StatementAdapter`
+> ([0x6CAE…bFd2](https://etherscan.io/address/0x6CAEb9953bA8625226345CF39F93541CE53AbFd2)), live and permanent since
+> Oct 1. It, `UnionFormats` and `LiveRatings` have no written review round in this file, and the Halmos proofs cover
+> Batch, BatchFactory, Sweeper and Ratings only. How the adapter was tested: [ADAPTER.md](ADAPTER.md#how-it-was-tested).
 
 ## Method
 
@@ -33,7 +38,7 @@ audit before mainnet.** The mainnet assembler adapter does not exist yet and mus
 | S3 | Low | `depositFor(to = batch/factory)` created a share that could never withdraw or be paid. | Rejected. (Any other contract without `receive()` remains the caller's own mistake; the factory only moves the caller's Credits.) |
 | S4 | Info | Sweeper accepted `safeTransferFrom` of stray NFTs it could never move. | Receiver hook removed; such transfers now fail instead of stranding. |
 | W1 | High | `/rpc` was an open relay for the paid RPC key: any `eth_call`/`eth_getLogs` target, usable cross-site. | Six methods only; `eth_call` only to Credits, Factory, Sweeper or a factory batch (`isBatch` cached); same-site only; JSON re-serialised; size and batch caps; per-IP rate limit. |
-| W2 | High | `/opensea/quote` fanned out to ~500 uncached `eth_call`s and 40 OpenSea calls per anonymous request, against any address. | Batch must be a factory batch; scan cached 30 s per batch and coalesced while in flight; rules checked before any liveness call; rate limited (6/min/IP). (Round 2: the earlier note "RPC calls batched" was wrong — see R2-2.) |
+| W2 | High | `/opensea/quote` fanned out to ~500 uncached `eth_call`s and 40 OpenSea calls per anonymous request, against any address. | Batch must be a factory batch; scan cached 30 s per batch and coalesced while in flight; rules checked before any liveness call; rate limited (6/min/IP). (Round 2: the earlier note "RPC calls batched" was wrong, see R2-2.) |
 | W3 | Medium | Frontend displayed `ids`/`total` from the quote but sent `orders`; a bad quote could show 10 and buy 1. | `checkQuote` verifies every order's offer id/token and ETH-only consideration against the shown ids, prices and total before anything is sent. The Sweeper contract independently bounds spend by `msg.value`. |
 | W4 | Medium | No security headers. | CSP (`frame-ancestors 'none'`, `script-src 'self'`, images only self/data/ENS metadata), HSTS, nosniff, referrer and permissions policies on every response. |
 | W5 | Medium | `/ens` fetched name-owner-chosen avatar URLs from the Worker and never cached negatives. | Avatar is now ENS's own metadata service URL; negatives cached 1 h, errors 60 s; 5 s RPC timeout; rate limited. |
@@ -56,7 +61,7 @@ Trait rules are now sets: `Filter.palettes` (uint16, bit = C|M|Y|K mask of the c
 
 ### Accepted / documented
 
-- **The assembler is the trust boundary.** It is immutable and set at factory deploy. It is now isolated from Batch storage and its result is verified, but it holds operator rights over the batch's Credits for the duration of `assemble()`. The mainnet adapter must be reviewed before deploy.
+- **The assembler is the trust boundary.** It is immutable and set at factory deploy. It is now isolated from Batch storage and its result is verified, but it holds operator rights over the batch's Credits for the duration of `assemble()`. The mainnet adapter (`StatementAdapter`, deployed Oct 1) has no written review round here.
 - A depositor that is a contract without `receive()` cannot be paid; `claim()` reverts for them and there is no alternate recipient by design (ERC721 gives no other attribution). Self-inflicted.
 - `settle()` after `RESERVE_WINDOW` lets a 1 wei bid start the 24 h clock. Design: the reserve is a 7-day option, not a floor forever.
 - Slither Mediums not acted on: rounding in `settle()` is intentional (dust to the protocol fee; fuzz proves the split is exact); `ownerOf` return is intentionally unused inside `try/catch`.
@@ -120,11 +125,14 @@ Per-batch `Split { Equal, Early }` fixed at `initialize`. Early: position i (0-b
 
 `Filter.layout0/layout1` hold 80 × 4-bit palette masks (0 = any). A layout batch (`Arrangement.Layout`) keeps `_slots[p]` (slots wanting p), `_have[p]` (Credits of p in), `anySlots` and `overflow` = Σ max(0, have − slots). `_add` refuses a Credit whose palette has no painted slot left once `overflow == anySlots` (`NoSlot`); `withdraw` undoes the count. Invariant `overflow ≤ anySlots` plus Σ have = 80 at Full gives deficit 0, so `layoutOrder()` (painted slots take the earliest deposit of their palette, any slots the rest) always completes; `assemble()` burns in that order after the creator's day, and `assembleOrdered` lets the creator swap only within a palette (`LayoutMismatch`). `test/Layout.t.sol`: enforcement, withdraw, any-slot overflow, order, creator reorder, and a fuzz over random layouts and deposit/withdraw sequences proving every Full layout batch burns.
 
-## Before mainnet
+## Before mainnet (as written Sept 24; status Oct 3)
 
-1. Write `JackAssembler` against the published Statement contract; add fork tests against it.
-2. Independent audit of `Batch.sol`, `BatchFactory.sol`, `Sweeper.sol` and the adapter.
-3. Deploy with `PROTOCOL_FEE_BPS`/`SWEEP_FEE_BPS` decided; verify sources on Etherscan/Sourcify.
+1. Write `JackAssembler` against the published Statement contract; add fork tests against it. **Done as
+   `StatementAdapter`**, with fork tests against the live Statements contract (`test/StatementAdapter.fork.t.sol`).
+   No written review round.
+2. Independent audit of `Batch.sol`, `BatchFactory.sol`, `Sweeper.sol` and the adapter. **Not done.**
+3. Deploy with `PROTOCOL_FEE_BPS`/`SWEEP_FEE_BPS` decided; verify sources on Etherscan/Sourcify. **Done:** 200 bps
+   each, verified on Etherscan ([DEPLOY.md](DEPLOY.md)).
 
 
 ## Round 3: unlock after fill, Bits, Creator order retired (branch `unlock-after-fill`, Sept 25)

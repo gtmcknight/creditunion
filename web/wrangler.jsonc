@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "eighty", // the Worker keeps its first name: its secrets (RPC_URL, OPENSEA_API_KEY) live on it
+  "name": "eighty", // the Worker keeps its first name (the project was called Eighty): its secrets live on it. A fork renames it.
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-09-01",
   "assets": {
@@ -8,7 +8,8 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/rpc", "/unions.json", "/passes", "/bids/*", "/activity", "/activity.json", "/live", "/ratings", "/edition/*", "/art/*", "/statement/*", "/config.json", "/opensea/*", "/ens", "/ens/*", "/avatar/*", "/owner/*", "/", "/parties", "/about", "/about/*", "/docs", "/docs/*", "/how", "/how/*", "/faq", "/auctions", "/create", "/unions", "/union/*", "/party/*", "/b/*", "/mint", "/og", "/og/party/*", "/og/sample/*", "/me", "/member/*", "/credit/*", "/og/credit/*", "/credits", "/palette", "/palette/*", "/eights", "/eights/*", "/print", "/print/*", "/weight", "/weight/*", "/time", "/rating", "/bits", "/*.bin", "/wall/*", "/plans", "/plans/*", "/pictures/*", "/placed/*", "/allowlist/*", "/market/*", "/locks/*", "/printer", "/printer/*", "/market.json", "/burns"]
   },
-  // Public config served at /config.json. Secrets: `wrangler secret put RPC_URL` and `wrangler secret put OPENSEA_API_KEY`.
+  // Public config served at /config.json. Secrets (`wrangler secret put <NAME>`): RPC_URL, OPENSEA_API_KEY, and optionally
+  // OPENSEA_API_KEY_2 (a spare when the first is rate limited), ENS_RPC, KEEPER_KEY (the keeper's gas-only key).
   "vars": {
     "CHAIN_ID": "1",
     "CREDITS": "0x97630aA70AB14ed9883B41dAfccBc11349723043",
@@ -26,8 +27,7 @@
     // the picker.
     "FORMATS": "0x16deCDa20c9164CcfDB4BE189557aDc4614aAedC"
   },
-  // Sepolia: SWEEPER stays zero (OpenSea can't list the mock Credits), which hides buy-in.
-  // Mainnet addresses go here after DeployMainnet.
+  // creditunion.party, eighty.fun and eighty.rhps.fun are old names kept so their links still work. A fork puts its own domain here.
   "routes": [
     { "pattern": "creditunion.fun", "custom_domain": true },
     { "pattern": "creditunion.party", "custom_domain": true },

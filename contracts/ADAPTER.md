@@ -6,7 +6,7 @@
 > Butcher's Statements contract at
 > [0x75Edd94b7e49b3bD5C8047b91F165A5e265a069b](https://etherscan.io/address/0x75Edd94b7e49b3bD5C8047b91F165A5e265a069b).
 > A union burn takes 10–12M gas, under mainnet's 16,777,216 per-transaction cap (EIP-7825). The burn-day
-> checklist is [RUNBOOK.md](RUNBOOK.md).
+> record and the runbook are [RUNBOOK.md](RUNBOOK.md).
 
 Credit Union pools Credits, and Jack Butcher's Statement contract
 ([his announcement](https://x.com/jackbutcher/status/2102910106451021935)) burns 80 Credits into a Statement. The
@@ -80,11 +80,12 @@ One address, the factory's **setter**, can propose an adapter. It has no other p
 2. **We checked the adapter** against it: the fork test with `STATEMENTS=<his address>`, every test passing. The
    Credit Union side checks above don't change.
 3. **It's public:** deployed and verified on Etherscan, and its source here, under `contracts/src/`.
-4. **Test it** (next section). Nothing is proposed until every step passes.
-5. **The setter proposes it:** `factory.proposeAssembler(adapter)`. This starts a **30-minute notice**,
-   shown on the site. Nothing locks during it, and anyone who doesn't trust the adapter can withdraw.
-6. **Anyone activates it** after the 30 minutes: `factory.activateAssembler()`. From here it's permanent.
-7. **Credit Unions start burning:**
+4. **It was tested** (next section).
+5. **The setter proposed it:** `factory.proposeAssembler(adapter)`. That starts a **30-minute notice**, shown on
+   the site. Nothing locks during it, and anyone who doesn't trust the adapter can withdraw. The first proposal
+   had to be replaced, which restarted the notice ([RUNBOOK.md](RUNBOOK.md)).
+6. **It was activated** after the notice, `factory.activateAssembler()`, at 8:10 PM ET on Oct 1. It's permanent.
+7. **How Credit Unions burn:**
    - Every Credit Union already at 80 starts a **5-minute countdown**. Withdrawals still work, so it's a last
      chance to leave.
    - After the countdown the Credit Union is **locked for 1 hour**. Nobody can withdraw, and anyone can press
@@ -99,35 +100,32 @@ settles ended auctions and records full pictures' spots. It never burns: every S
 the notice as a bar above every page, with when burning starts, in the viewer's own time. There is no race: a union's 80 are its own, and
 his contract has no cap beyond the Credits themselves.
 
-## How we'll test it before proposing
+## How it was tested
 
-1. **Mainnet fork:**
-   - Deploy the adapter on a fork of mainnet with Jack's real Statement contract.
-   - Fill a Credit Union with real Credit ids (impersonated holders) in every burn order.
-   - Run the full path: countdown, lock, `assemble()`, auction, settle (which pays every member).
-   - Check that the Credits are burned, the Statement is owned by the Credit Union, and the order Jack's contract
-     received equals `burnOrder()` (`orderOf()` for a picture with recorded spots).
-2. **Adversarial cases:**
-   - An adapter that doesn't burn, keeps the Statement, returns a wrong id or reenters: every one must revert.
-   - These already exist for the mock adapter in `contracts/test/` and get rerun against the real one.
-   - `test/StatementAdapter.fork.t.sol` runs this whole list against his contract with `STATEMENTS=<his address>`.
-3. **Sepolia:** if Jack deploys a test version of his contract, we repeat the full flow on the site's
-   testnet. If he doesn't, we run a Sepolia stand-in with the same interface.
-4. **Review:** the adapter goes through the same internal audit process as the rest (`AUDIT.md`), with the
-   findings and fixes written up before proposing.
-5. **Mainnet canary:** after activation, the first burn is a Credit Union we fill ourselves. We confirm the Statement
-   and the auction before telling people to burn theirs.
+1. **The union's own checks:** an adapter that doesn't burn, keeps the Statement, returns a wrong id or reenters
+   reverts the whole burn. These are tested with mock adapters (`test/audit/`, `test/BurnOrder.t.sol`). The draft
+   adapter also had unit tests against a stand-in Statements contract; they were dropped once the fork tests ran
+   against the real one (`4a6180f`). `UnionFormats` has its own (`test/UnionFormats.t.sol`).
+2. **Fork tests against the real Statements contract:** `test/StatementAdapter.fork.t.sol` deploys the adapter on
+   a copy of mainnet, fills unions with real Credit ids from impersonated holders, and runs the whole path:
+   proposal, countdown, lock, `assemble()`, auction, settle, every member paid. It checks the Credits are burned,
+   the union owns the Statement, the cells Jack's contract recorded are `burnOrder()`, every full union on the
+   block burns, and the gas fits under the cap, a picture with the costliest recorded spots included. The
+   picture's spot order (`orderOf()`) itself isn't checked on the fork. It's pinned to a block, so it needs an archive node:
+   `MAINNET_RPC=<url> forge test --match-path test/StatementAdapter.fork.t.sol -vv`.
+3. **Burn-day rehearsals on mainnet forks** in place of a Sepolia run. The Sepolia step was skipped.
+4. **Mainnet canary:** we sent the first burn ourselves, Union Jack, Statement #1.
+
+Not done: no written review round for the adapter, `UnionFormats` or `LiveRatings` in [AUDIT.md](AUDIT.md), and
+none of the three is covered by the Halmos proofs. Nothing in Credit Union has had an independent audit.
 
 ## If something goes wrong
 
-- **Before activation:** nothing is locked. The setter can't withdraw a proposal, only replace it with another
-  adapter, which restarts the 30-minute notice.
-- **During the 30-minute notice:** anyone can leave any Credit Union.
 - **A burn fails:** the Credit Union's checks revert the whole transaction, so no Credits are lost. The Credit Union stays
   locked until the hour ends, then unlocks.
-- **After activation, the adapter turns out wrong:** it can't be swapped. Credit Unions that haven't locked can
-  still be left at any time before their countdown ends, and locked ones unlock after the hour if they can't
-  burn. The fix would be a new factory, and people moving to it by withdrawing and re-depositing.
+- **The adapter turns out wrong:** it can't be swapped. Credit Unions that haven't locked can still be left at any
+  time before their countdown ends, and locked ones unlock after the hour if they can't burn. The fix is a new
+  factory, with people moving to it by withdrawing and depositing again.
 
 ## The Statements contract, as deployed
 

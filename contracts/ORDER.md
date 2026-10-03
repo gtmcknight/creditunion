@@ -2,7 +2,9 @@
 
 Every Credit Union knows the exact order its 80 Credits burn in, before anyone deposits. Nobody picks it at burn
 time: the rule is fixed when the Credit Union opens, the contract computes the order itself, and `assemble()`
-hands that exact list to the adapter, which must not reorder it (see [ADAPTER.md](ADAPTER.md)).
+hands that exact list to the adapter. The adapter burns it as given, with one exception: a picture with recorded
+spots (below). Cell i of the Statement is the i-th Credit, 8 across and 10 down, row by row
+(see [ADAPTER.md](ADAPTER.md)).
 
 Read it any time:
 
@@ -10,6 +12,7 @@ Read it any time:
 cast call <union> "burnOrder()(uint256[])"   # the Credit ids, slot 1 first
 cast call <union> "layout()(uint8[80])"      # Layout unions: what each slot is painted with
 cast call <union> "arrangement()(uint8)"     # which rule this union uses
+cast call 0x6CAEb9953bA8625226345CF39F93541CE53AbFd2 "orderOf(address)(uint256[80])" <union>   # a picture's spots
 ```
 
 ## The rules
@@ -49,6 +52,18 @@ fills the `0` slots with everything else in deposit order. Once the union is ful
 
 **Before it's full,** `burnOrder()` returns only as many slots as there are deposits, and a painted slot with
 no matching Credit yet reads `0`. At 80 it's the whole sheet.
+
+## Picture unions
+
+A picture is a Layout union painted in Colors with all 80 slots painted, no `0`s (`isPicture` on the adapter).
+Every union made from a picture on the site is one.
+
+In layout order each Colors' spots go to that Colors' Credits in the order they went in, so one early leave slides
+every later Credit of that Colors back a spot and scrambles the picture. The adapter fixes that: `record(union)`
+writes down where each Credit sits (`orderOf(union)`), and from then on a leave opens only the leaver's own spot.
+The site saves the spots before a leave, and the keeper records each full picture once. At the burn the adapter
+puts recorded Credits in their spots and the rest of each Colors in layout order, always the same 80 the union
+handed over, each in a spot of its own Colors. With nothing recorded, a picture burns in `burnOrder()`.
 
 ## Filters vs order
 
@@ -95,10 +110,3 @@ Four C+K Credits have come in (153, 227, 337, 347) and took the first four frame
 frame slots still waiting for one. Everything else fills the middle in deposit order.
 
 To paint a yellow row over a cyan row, row 1 is `4 4 4 4 4 4 4 4` and row 2 is `1 1 1 1 1 1 1 1`.
-
-## Open: slot to sheet position
-
-Slot 1 is the first id in the list. We read it as top left, filling rows left to right, 8 across and 10 down.
-**Guess:** Jack's Statement contract decides how list position maps onto its sheet, and it hasn't shipped. When it
-does, check this before proposing the adapter. If it fills by column or from the bottom, the adapter reorders
-the ids so a painted row still prints as a row.

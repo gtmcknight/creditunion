@@ -1,10 +1,12 @@
 <a href="https://creditunion.fun"><img src="docs/banner.jpg" alt="Credit Union: join a Credit Union to make a Statement together"></a>
 
-<p align="center"><b><a href="https://creditunion.fun">creditunion.fun</a></b> · <a href="#how-a-credit-union-works">How it works</a> · <a href="#security">Security</a> · <a href="contracts/ADAPTER.md">Adapter plan</a> · <a href="#deployed-addresses">Addresses</a></p>
+<p align="center"><b><a href="https://creditunion.fun">creditunion.fun</a></b> · <a href="#how-a-credit-union-works">How it works</a> · <a href="#security">Security</a> · <a href="https://creditunion.fun/docs">Docs</a> · <a href="contracts/ADAPTER.md">Adapter</a> · <a href="#deployed-addresses">Addresses</a></p>
 
 # Credit Union
 
-Credit Union lets holders of Jack Butcher's [Credits](https://jack.art/credits) pool 80 Credits into a Credit Union. At 80 the Credit Union burns them into one Statement, auctions it onchain, and splits the sale among everyone in. Contracts hold the Credits and the ETH: no owner, pause or upgrade. The fee recipient (a multisig) sets fees and the score table for Credit Unions opened afterwards; it can't touch an open one. Contracts are on mainnet; burning opens when Jack's Statement contract ships.
+Credit Union lets holders of Jack Butcher's [Credits](https://jack.art/credits) pool 80 Credits into a Credit Union. At 80 the Credit Union burns them into one Statement, auctions it onchain, and splits the sale among everyone in. Contracts hold the Credits and the ETH: no owner, pause or upgrade. The fee recipient (a multisig) sets fees and the score table for Credit Unions opened afterwards; it can't touch an open one. Live on Ethereum mainnet since September 27, 2026. Burning opened October 1, when Union Jack became Statement #1.
+
+**To use it:** open [creditunion.fun](https://creditunion.fun), pick a Credit Union (or start one), and put in Credits you own or buy them through the site. At 80 it burns, auctions, and pays you. The full guide is at [creditunion.fun/docs](https://creditunion.fun/docs). If the site is ever down, [creditunionfun.eth.limo](https://creditunionfun.eth.limo) bids, settles and claims through your own wallet.
 
 <table>
 <tr><td width="33%" valign="top"><img src="docs/lifecycle.svg" alt="Start a Credit Union"><br><b>Start a Credit Union</b><br>Pool your Credits with other holders. At 80 they burn into a Statement, and everyone in shares the sale.</td><td width="33%" valign="top"><img src="docs/eligibility.svg" alt="Deposit"><br><b>Deposit</b><br>Pick exactly which Credits get in: any Credit, or only ones with the traits you choose.</td><td width="33%" valign="top"><img src="docs/order.svg" alt="Layout"><br><b>Layout</b><br>Arrange the 80 however you like: in deposit order, by Credit number, or painted into a design.</td></tr>
@@ -15,14 +17,16 @@ Credit Union lets holders of Jack Butcher's [Credits](https://jack.art/credits) 
 
 1. **Open.** Anyone with a Credit opens a Credit Union and sets its rules: who can join, the burn order, and the split (Equal or Early bird).
 2. **Join.** Holders deposit Credits. Every deposit is checked onchain against the Credit Union's rules. No Credit? The Sweeper buys the cheapest fitting OpenSea listings and deposits them in one transaction.
-3. **Leave.** Anyone can withdraw until the Credit Union locks. A full Credit Union never locks before Jack's contract and the burn adapter are live. Once they are, a full Credit Union counts down 5 minutes (leaving drops it to 79 and stops the clock), then locks for 1 hour, during which nobody can leave and anyone can burn. If nobody burns it, it unlocks: depositors can leave again, and anyone can call `restartCountdown()` for a fresh 5 minutes and hour.
-4. **Burn.** During the locked hour, anyone calls `assemble()`. The 80 Credits go to Jack's contract in the Credit Union's order and the Credit Union must end up holding the Statement, or the call reverts.
-5. **Auction.** 24 hours from the first bid. Each bid beats the last by 5% (minimum 0.01 ETH). Bids in the last 15 minutes extend it by 15 minutes. Outbid ETH is refunded in the same transaction. The site opens Credit Unions with no reserve.
+3. **Leave.** Anyone can withdraw until the Credit Union locks. A full Credit Union counts down 5 minutes (leaving drops it to 79 and stops the clock), then locks for 1 hour, during which nobody can leave and anyone can burn. If nobody burns it, it unlocks: depositors can leave again, and anyone can call `restartCountdown()` for a fresh 5 minutes and hour.
+4. **Burn.** During the locked hour, anyone calls `assemble()`. The 80 Credits go to Jack's Statements contract, through the burn adapter, in the Credit Union's order and the Credit Union must end up holding the Statement, or the call reverts.
+5. **Auction.** 24 hours from the first bid. Each bid beats the last by 5% (minimum 0.01 ETH). A bid in the last 15 minutes moves the end to 15 minutes after that bid. Outbid ETH is refunded in the same transaction. The site opens Credit Unions with no reserve.
 6. **Split.** Anyone settles. The Statement goes to the winner. A 2% protocol fee comes off the top, only if it sells. The rest goes to the 80 positions: 1/80 each (Equal), or a straight line from 1.5 shares for the first deposit to 0.5 for the last (Early bird). Settling pays every member in the same transaction. A member whose wallet won't take the payment keeps their share, and `claim` (callable by anyone for anyone) sends it later.
 
 **Who can join.** Any combination of Jack's traits (Colors, Eights, Print, Weight, Plates, Bits), payment time, [rating](https://jack.art/credits/rating), a Credit-number range, or a named list of up to 200 Credits.
 
-**Burn order.** Deposit order, mint time, Credit number, the creator's order, or a painted sheet (the 8×10 grid painted by palette; each painted slot only takes a matching Credit).
+**Burn order.** The order Credits joined, Credit number (up or down), a painted sheet (the 8×10 grid painted by trait; each painted spot only takes a matching Credit), or a picture (an uploaded image, drawn by the Credits that match it best). The creator also picks the Statement's format.
+
+**Reserve.** A Credit Union can be opened with a reserve (the site opens them with none): the first bid must meet it. If no bid comes within 7 days of the burn (`RESERVE_WINDOW`), the reserve lapses and the minimum first bid drops to 0.01 ETH.
 
 ## For developers
 
@@ -31,25 +35,28 @@ Credit Union lets holders of Jack Butcher's [Credits](https://jack.art/credits) 
 
 ```
 contracts/          Foundry
-  src/              Batch, BatchFactory, Sweeper, Ratings, LiveRatings, interfaces, mocks, vendored Credits art
+  src/              Batch, BatchFactory, Sweeper, Ratings, LiveRatings, StatementAdapter, UnionFormats,
+                    lens/ (read helpers), interfaces, mocks, vendored Credits art
   script/           deploy and check scripts
   test/             unit, fuzz, invariant, adversarial and mainnet fork tests; test/formal/ the Halmos proofs
   data/scores.bin   the v3.4.0 rating table deployed onchain (unions opened before LiveRatings)
   AUDIT.md          internal review log
-  ADAPTER.md        the plan for connecting Jack's Statement contract
+  ADAPTER.md        how a Credit Union becomes a Statement: the burn adapter, how it was tested and switched on
+  RUNBOOK.md        operations: the keeper, opening burns, restarting a countdown, what to do if the site is down
   ORDER.md          how each Credit Union decides where every Credit goes on the sheet
   DEPLOY.md         the mainnet deployment record: addresses, settings, commit
   SAFE.md           what the fee recipient multisig can and can't do
 web/                Cloudflare Worker + static site (Vite, TypeScript, viem, no framework)
   src/app/          the site; reads the chain directly, wallets sign in the browser (EIP-6963)
-  src/worker/       the Worker: config, RPC proxy, art, ratings, OpenSea, link cards
+  src/worker/       the Worker: config, RPC proxy, caches, art, ratings, listings, keeper, link cards
   src/shared/       code used by both (rating formula, eligibility rules, layout)
-  scripts/          data and asset builders
+  src/mirror/       the mirror: one static page that works with no server (see mirror/README.md)
+  scripts/          data and asset builders, the end-to-end matrix, the mainnet-copy chain, the mirror build
   public/           static assets and precomputed edition data
   data/             credits.json.gz, the full edition every derived file is built from
 ```
 
-There is no database or indexer. Credit Unions, slots and bids are read from the contracts.
+The contracts are the only source of truth: Credit Unions, slots, bids and payouts are read from them. The Worker caches those reads (a Durable Object, so every visitor shares one read), keeps the marketplace listings book, and stores Printer plans in KV. Nothing it stores can move Credits or ETH. The keeper signs with its own key, which holds no role in any contract.
 
 </details>
 
@@ -64,15 +71,16 @@ There is no database or indexer. Credit Unions, slots and bids are read from the
 | `Ratings` | Jack's rating for all 122,154 Credits under methodology v3.4.0 (`version()`), stored as data contracts. Credit Unions opened before Oct 2 2026 check their rating rules against it. Each Credit Union keeps the table it opened with, and `ratingsHistory()` lists every table used. |
 | `LiveRatings` | Since Oct 2 2026 the factory's table: each Credit's score as Jack's Statements contract computes it (the number a Statement's Credit Rating adds up), asked of that contract when a rule checks it, ×10 rounded down. Nothing stored. |
 | `IAssembler` | The adapter a Credit Union calls (never delegatecalls) to burn 80 Credits into a Statement. `MockAssembler` stands in for tests and local chains. |
-| `StatementAdapter` | **Draft, not deployed.** The mainnet adapter: takes a full Credit Union's 80, has Jack's Statement contract burn them in the direction the creator chose, and hands the Statement back. Finished once Jack's contract is published; until then its one call into it is a guess and the deploy script refuses mainnet. See [contracts/ADAPTER.md](contracts/ADAPTER.md) and [contracts/RUNBOOK.md](contracts/RUNBOOK.md). |
+| `StatementAdapter` | The factory's burn adapter, permanent since October 1: takes a full Credit Union's 80, has Jack's Statements contract burn them in the Credit Union's order and format, and hands the Statement back. See [contracts/ADAPTER.md](contracts/ADAPTER.md). |
+| `UnionFormats` | Where each Credit Union's creator picks its Statement format. The adapter reads it at burn time. |
 
-The factory can deploy with no assembler. Credit Unions fill but never lock, so anyone can always leave. When the adapter is ready, the setter address proposes it once; 30 minutes later anyone activates it and the setter has no further powers. Only then do full Credit Unions start their 5-minute countdowns.
+The factory deployed with no adapter, so until October 1 Credit Unions filled but never locked. The setter (the Safe) proposed `StatementAdapter` once; 30 minutes later it was activated and the setter has no further say over it. Since then full Credit Unions count down and lock.
 
 Fees are set at deploy and capped in code: protocol 2% (max 5%), creator 0% (max 10%), sweep 2% (max 5%). The fee recipient can change them within the caps; a Credit Union keeps the fees it opened with.
 
 Reviews, proofs and tests: [Security](#security).
 
-How burning gets switched on once Jack's Statement contract ships, who controls it, and how it's tested: [contracts/ADAPTER.md](contracts/ADAPTER.md).
+How burning works, how it was tested and switched on, and who controls what: [contracts/ADAPTER.md](contracts/ADAPTER.md).
 
 How the 80 are ordered, and how a Layout paints the sheet by trait: [contracts/ORDER.md](contracts/ORDER.md).
 
@@ -85,7 +93,7 @@ forge build
 forge test
 ```
 
-The fork tests (`*.fork.t.sol`) run against mainnet Seaport and Credits through a public node. Set `MAINNET_RPC` to use your own.
+The fork tests (`*.fork.t.sol`) run against mainnet. They need `MAINNET_RPC` set to an archive node: some pin past blocks, and `LiveRatings.fork.t.sol` has no fallback. To skip them: `forge test --no-match-path '*fork*'`.
 
 #### Deploy
 
@@ -96,8 +104,13 @@ Copy `contracts/.env.example` to `contracts/.env`, fill it in, and load it with 
 | `DeployMainnet.s.sol` | Mainnet: rating table, factory, Sweeper | `FEE_RECIPIENT` (required), `SETTER`, `ASSEMBLER`, `RATINGS`, `PROTOCOL_FEE_BPS`, `CREATOR_FEE_BPS`, `SWEEP_FEE_BPS` |
 | `DeployRatings.s.sol` | The rating table on its own | none |
 | `CheckRatings.s.sol` | Read-only: the deployed table matches `data/scores.bin` byte for byte | args `$RATINGS $CREDITS` |
+| `DeployUnionFormats.s.sol` | The format picker. Deploy before the adapter | none |
+| `DeployAdapter.s.sol` | The burn adapter; the Safe proposes it after | `STATEMENTS`, `FORMATS`, `EXPECT` (the proposed address) |
+| `DeployLiveRatings.s.sol` | The live rating table; the Safe proposes it after | none |
+| `DeployTestnet.s.sol`, `DeployFactory.s.sol` | Sepolia: test Credits, mock Statement, factory, Sweeper | see each header |
 | `SeedDemo.s.sol` | Local anvil: mocks plus Credit Unions in every state | none (anvil default keys) |
 | `Matrix.s.sol` | Local anvil: the end-to-end test matrix (every filter, combinations, arrangements, painted layouts per trait) | run by `web/scripts/e2e-matrix.mjs` |
+| `HostileDemo.s.sol`, `SplitCheck.s.sol` | Local anvil: a member whose wallet refuses ETH; an uneven Early bird split | none |
 
 ```sh
 forge script script/DeployMainnet.s.sol --rpc-url "$MAINNET_RPC" --private-key "$PRIVATE_KEY" --broadcast --slow
@@ -128,15 +141,15 @@ pnpm chain:fork --warp 24       # moves the clock 24 hours on
 ```sh
 cd web
 pnpm install
-cp .dev.vars.example .dev.vars   # optional locally; RPC falls back to a public node
+cp .dev.vars.example .dev.vars   # optional locally; RPC falls back to a public node. Every key is explained there
 pnpm dev
 ```
 
-Public config (`CHAIN_ID`, `CREDITS`, `FACTORY`, `SWEEPER`, `RATINGS`, `FALLBACK_RPC`) lives in `wrangler.jsonc` `vars`. To point the site at a local anvil, override them in `.dev.vars`.
+Public config (`CHAIN_ID`, `CREDITS`, `FACTORY`, `SWEEPER`, `RATINGS`, `STATEMENTS`, `FORMATS`, `FWA_MARKET`, `STRATEGY`, `OPENSEA_SLUG`, `FALLBACK_RPC`) lives in `wrangler.jsonc` `vars`. To point the site at a local anvil, override them in `.dev.vars`.
 
 After changing contracts, run `forge build` and then `pnpm abi` to regenerate `src/app/abi.ts`. `pnpm build` fails if the ABI is stale.
 
-Worker endpoints:
+Main Worker endpoints (the full set is the router in `src/worker/index.ts`):
 
 | Path | |
 |---|---|
@@ -150,6 +163,11 @@ Worker endpoints:
 | `/opensea/listings`, `/opensea/quote` | fitting listings and signed Seaport orders for the Sweeper |
 | `/opensea/listed`, `/opensea/credit/:id`, `/opensea/buyquote` | every Credit for sale, cheapest first (OpenSea, FWA, CreditStrategy); one Credit's cheapest listing; a price for the ones picked. Pages read listings again every 20 s to stay live; OpenSea's pages are cached 15 s, so viewers share each call |
 | `/bids/:party`, `/owner/:id`, `/ens/:address` | bid history, current holder of a Credit, ENS name and avatar |
+| `/burns` | burning's state and the keeper's address |
+| `/statement/:id.svg` | a Statement's art, as the Statements contract draws it |
+| `/market.json`, `/market/*` | the listings book for the Printer and Picture unions; Statements for sale |
+| `/plans/*`, `/pictures/*`, `/placed/*`, `/locks/*` | Printer plans, Picture union cards and spots, buy locks while a picture fills |
+| `/edition/rows`, `/*.bin` | edition data for the site's filters and walls |
 | `/og/...` | link-preview cards |
 
 Rate limits are per IP (`unsafe.bindings` in `wrangler.jsonc`). The build writes `_headers`, so pages the asset layer serves without the Worker get the same security headers, and hashed build files a year's cache.
@@ -170,12 +188,15 @@ ONLY='^L nearly' node scripts/e2e-matrix.mjs   # a subset; also HEADED=1, KEEP=1
 cd web
 pnpm wrangler secret put RPC_URL
 pnpm wrangler secret put OPENSEA_API_KEY   # without it buy-in is hidden
+pnpm wrangler secret put OPENSEA_API_KEY_2 # optional; a spare when the first is rate limited
 pnpm wrangler secret put ENS_RPC           # optional; mainnet RPC for ENS when not on mainnet
 pnpm wrangler secret put KEEPER_KEY        # optional; the keeper's private key (fund it with gas money only)
 pnpm run deploy                            # abi check, typecheck, vite build, wrangler deploy
 ```
 
-Use `pnpm run deploy`, not `pnpm deploy` (that is a built-in pnpm command). Edit the `routes` in `wrangler.jsonc` to deploy under your own domain.
+Use `pnpm run deploy`, not `pnpm deploy` (that is a built-in pnpm command).
+
+Forking it: in `wrangler.jsonc` change the Worker `name` (it is still `eighty`, the project's first name, because its secrets live on it), the `routes` (to your domain), and the KV namespace id (`wrangler kv namespace create PLANS`).
 
 #### Edition data
 
@@ -187,6 +208,7 @@ MAINNET_RPC=... node scripts/fetch-credits.ts data/credits.json
 gzip -k data/credits.json
 node scripts/edition.ts data/credits.json.gz   # public/*.bin, minutes.json, ../contracts/data/scores.bin
 node scripts/wall.ts                           # public/wall.bin, bits.bin, times.bin
+RPC=... node scripts/credit-score.ts           # public/credit-score.bin, scores-live.bin: each score as the Statements contract computes it
 ```
 
 Ratings follow Jack's published formula (methodology v3.4.0), reproduced in `web/src/shared/credits.ts` and checked against his API.
@@ -195,27 +217,33 @@ Ratings follow Jack's published formula (methodology v3.4.0), reproduced in `web
 
 ## Deployed addresses
 
-Ethereum mainnet, deployed 2026-09-27. Details in [contracts/DEPLOY.md](contracts/DEPLOY.md).
+Ethereum mainnet. Factory, Sweeper and Ratings deployed 2026-09-27; the adapter and format picker 2026-10-01; LiveRatings 2026-10-02. Details in [contracts/DEPLOY.md](contracts/DEPLOY.md).
 
 | | |
 |---|---|
 | BatchFactory | [`0xcb06f9076e5fbF3cB052086b1EE7C0F3836aa051`](https://etherscan.io/address/0xcb06f9076e5fbF3cB052086b1EE7C0F3836aa051) |
+| Batch implementation (each Credit Union is a clone) | [`0xd578eC605E60eDD008b415c23B15Eb3483CC6c50`](https://etherscan.io/address/0xd578eC605E60eDD008b415c23B15Eb3483CC6c50) |
+| StatementAdapter (burn) | [`0x6CAEb9953bA8625226345CF39F93541CE53AbFd2`](https://etherscan.io/address/0x6CAEb9953bA8625226345CF39F93541CE53AbFd2) |
+| UnionFormats | [`0x16deCDa20c9164CcfDB4BE189557aDc4614aAedC`](https://etherscan.io/address/0x16deCDa20c9164CcfDB4BE189557aDc4614aAedC) |
 | Sweeper | [`0x7b93309A12e05944Ab821470615983A4A2AC9799`](https://etherscan.io/address/0x7b93309A12e05944Ab821470615983A4A2AC9799) |
-| Ratings | [`0x61Ca63cDE107CE7e32785c0d89904fE58f9d371d`](https://etherscan.io/address/0x61Ca63cDE107CE7e32785c0d89904fE58f9d371d) |
+| LiveRatings (Credit Unions opened since Oct 2) | [`0xe27fC60dcE0a9c33743581bfCD72F619DB3612a6`](https://etherscan.io/address/0xe27fC60dcE0a9c33743581bfCD72F619DB3612a6) |
+| Ratings v3.4.0 (earlier Credit Unions) | [`0x61Ca63cDE107CE7e32785c0d89904fE58f9d371d`](https://etherscan.io/address/0x61Ca63cDE107CE7e32785c0d89904fE58f9d371d) |
+| Fee recipient and setter (Safe, 2 of 3) | [`0xFE4761e66C2A37492871d30d0e83bcBC454A7C10`](https://etherscan.io/address/0xFE4761e66C2A37492871d30d0e83bcBC454A7C10) |
 | Credits (Jack Butcher) | [`0x97630aA70AB14ed9883B41dAfccBc11349723043`](https://etherscan.io/address/0x97630aA70AB14ed9883B41dAfccBc11349723043) |
+| Statements (Jack Butcher) | [`0x75Edd94b7e49b3bD5C8047b91F165A5e265a069b`](https://etherscan.io/address/0x75Edd94b7e49b3bD5C8047b91F165A5e265a069b) |
 
-Burning waits for Jack's Statement contract: until the Safe sets the assembler, Credit Unions fill but never lock.
+What the Safe can and can't do: [contracts/SAFE.md](contracts/SAFE.md).
 
 ## Security
 
-- **Review log:** seven rounds of internal review, every finding and its fix: [contracts/AUDIT.md](contracts/AUDIT.md).
-- **Proofs:** 51 rules proved with Halmos on the deployed contracts, none broken, 5 timed out. What those leave unproven is at the top of [contracts/test/formal/REPORT.md](contracts/test/formal/REPORT.md).
-- **Tests:** 264 Foundry tests (unit, fuzz, invariant, adversarial, mainnet fork) pass on the deploy commit: [contracts/DEPLOY.md](contracts/DEPLOY.md).
+- **Review log:** seven rounds of internal review of `Batch`, `BatchFactory`, `Sweeper` and `Ratings`, every finding and its fix: [contracts/AUDIT.md](contracts/AUDIT.md). `StatementAdapter` and `LiveRatings` have mainnet-fork tests and `UnionFormats` unit tests, but none of the three has a written review round yet.
+- **Proofs:** 51 rules proved with Halmos on `Batch`, `BatchFactory`, `Sweeper` and `Ratings`, none broken, 5 timed out. What those leave unproven is at the top of [contracts/test/formal/REPORT.md](contracts/test/formal/REPORT.md).
+- **Tests:** 282 Foundry tests pass (252 unit, fuzz, invariant and adversarial; 30 mainnet fork). CI runs the non-fork suite on every push.
 - **Site:** an end-to-end run drives the site in Chrome against a local chain across 40 Credit Union setups (see [For developers](#for-developers)).
 
 No third-party audit.
 
-To report a vulnerability, open a private [GitHub security advisory](../../security/advisories/new) on this repo. Please don't open a public issue.
+To report a vulnerability, see [SECURITY.md](SECURITY.md). Please don't open a public issue.
 
 ## Credits
 

@@ -2,11 +2,22 @@
 # In production set each with: wrangler secret put <NAME>
 
 # Upstream for /rpc. Falls back to FALLBACK_RPC in wrangler.jsonc when unset.
-RPC_URL=https://eth-sepolia.example/your-key
+RPC_URL=https://eth-mainnet.example/your-key
+# Or a local chain: pnpm chain:fork prints the URL (http://127.0.0.1:8549).
 # Enables /opensea/listings and /opensea/quote. Without it, buy-in is hidden.
 OPENSEA_API_KEY=your-opensea-api-key
 # Optional. Mainnet RPC for ENS names when CHAIN_ID is not 1 (defaults to a public node).
 ENS_RPC=https://eth-mainnet.example/your-key
+# Optional. A second OpenSea key, used when the first is rate limited.
+# OPENSEA_API_KEY_2=
+
+# Optional. The keeper's private key: it switches burning on, settles ended auctions and retries failed payouts
+# every 5 minutes. Fund it with gas money only; it holds no role in any contract. Leave unset locally.
+# KEEPER_KEY=
+# KEEPER_MAX_GWEI=20
+
+# Localhost only: made-up listings to see every source on the Buy tab without real ones.
+# DEV_FAKE_LISTINGS=[{"id":1234,"price":"50000000000000000"}]   (price in wei)
 
 # Local preview of Activity without an RPC key (never set in production)
 # ACTIVITY_MIRROR=https://creditunion.fun/activity.json
