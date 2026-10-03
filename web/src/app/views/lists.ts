@@ -487,7 +487,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       const { owned, traits } = await myTraits(acct);
       for (const b of parties) {
         const ids = fit.get(b.s.address);
-        if (!ids?.length || b.s.state !== 'Open' || !paintedAll(b.s) || pictureChecked.has(checkedKey(b.s.address, acct))) continue;
+        if (!ids?.length || b.s.state !== 'Open' || !b.s.count || !paintedAll(b.s) || pictureChecked.has(checkedKey(b.s.address, acct))) continue;
         try {
           // As its page does: the picture's plan picks from all of yours, then only the picked ones its rules take.
           const picked = await pictureFit(b, acct, owned, traits);
@@ -552,7 +552,8 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
           all: list.filter((b) => b.s.state !== 'Full'),
           // A picture takes one of yours only where it draws an open spot about as well as the best for sale: a fully
           // painted union joins Can join once that test has run on it (checkPictures), never on its Colors alone.
-          invited: list.filter((b) => b.s.state === 'Open' && fit.has(b.s.address) && !isYours(b) && (!config.sweeper || !paintedAll(b.s) || pictureChecked.has(checkedKey(b.s.address)))),
+          // …and an empty union (0/80) isn't one to join: they're mostly abandoned, as Open's button for them says.
+          invited: list.filter((b) => b.s.state === 'Open' && b.s.count > 0 && fit.has(b.s.address) && !isYours(b) && (!config.sweeper || !paintedAll(b.s) || pictureChecked.has(checkedKey(b.s.address)))),
           yours: list.filter(isYours),
           filled: list.filter((b) => b.s.state === 'Full'),
         };
