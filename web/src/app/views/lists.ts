@@ -936,7 +936,7 @@ function howAuctions() {
     <ul class="how-rules">
       <li>Anyone can bid, members too.</li>
       <li>Every bid beats the last by at least 5%.</li>
-      <li>A bid in the last 15 minutes adds 15 minutes.</li>
+      <li>A bid in the last 15 minutes moves the end to 15 minutes after it.</li>
       <li>Outbid? Your ETH comes back in the same transaction.</li>
     </ul>
     <h4>The split</h4>

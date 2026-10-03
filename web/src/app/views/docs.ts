@@ -107,7 +107,7 @@ const sections = (): Section[] => [
       <li><b>Start.</b> Someone opens a Union and sets its rules: which Credits it takes, how they are arranged, and how the sale is split.</li>
       <li><b>Fill.</b> Members put in Credits they own or buy them through the site. The contract checks every Credit against the rules.</li>
       <li><b>Lock.</b> Once 80 Credits have been deposited, a 5 minute countdown starts. If anyone leaves, the clock stops. When it runs out, the Union locks for an hour.</li>
-      <li><b>Burn.</b> During that hour, anyone can burn the Union. If nobody does, it unlocks. Members can leave, or anyone can restart the countdown for another hour.</li>
+      <li><b>Burn.</b> During that hour, anyone can burn the Union. If nobody does, it unlocks. Members can leave, or anyone can restart it: a fresh 5 minute countdown, then another hour.</li>
       <li><b>Auction and split.</b> The Statement is auctioned onchain. There is no reserve. The auction runs 24 hours from the first bid, and a bid in the last 15 minutes resets the clock to 15 minutes. When the auction ends, the winner receives the Statement and every member is paid.</li>
     </ol>
     <h3 id="burning">When burning opens</h3>
@@ -180,7 +180,7 @@ const sections = (): Section[] => [
     id: 'safety',
     title: 'Safety',
     body: `<p>The contracts hold every Credit and every bid. They have no owner, pause or upgrade, and nobody, us included, can move pooled Credits, bids or payouts.</p>
-    <p>The code is open source on <a href="https://github.com/gtmcknight/creditunion" target="_blank" rel="noopener">GitHub</a>, with 264 tests, 51 formally proved rules and seven rounds of internal review. There has been no third-party audit.</p>
+    <p>The code is open source on <a href="https://github.com/gtmcknight/creditunion" target="_blank" rel="noopener">GitHub</a>, with 282 tests. The core contracts (the factory, Unions, the Sweeper and the first rating table) also have 51 formally proved rules and seven rounds of internal review. The burn contract, the format picker and the live rating table have their own tests but no written review yet. There has been no third-party audit.</p>
     <p>If this site goes down, everything still works without it. <a href="https://creditunionfun.eth.limo" target="_blank" rel="noopener">creditunionfun.eth.limo</a> is a copy on IPFS that bids, settles and claims through your own wallet, and Etherscan works too: leaving, burning, bidding, settling and claiming.</p>
     <p>Credit Union is independent and not affiliated with Jack Butcher. It is experimental software. Use it at your own risk.</p>`,
   },
@@ -191,9 +191,12 @@ const sections = (): Section[] => [
       [
         ['Credit Union factory', config.factory],
         ['Sweeper, for buying', config.sweeper],
+        ['Burn contract, Union to Statement', config.burn?.assembler ?? '0x6CAEb9953bA8625226345CF39F93541CE53AbFd2'],
+        ['Statement formats', config.formats ?? null],
         ['Ratings (Unions opened since Oct 2)', '0xe27fC60dcE0a9c33743581bfCD72F619DB3612a6'],
         ['Ratings (earlier Unions)', config.ratings],
         ['Credits, by Jack Butcher', config.credits],
+        ['Statements, by Jack Butcher', config.statements ?? null],
       ] as [string, string | null][]
     )
       .filter(([, a]) => a)
