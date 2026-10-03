@@ -5,6 +5,9 @@ import { esc, short } from './ui';
 type Ens = { name: string | null; avatar: string | null };
 const memo = new Map<string, Promise<Ens>>();
 const none: Ens = { name: null, avatar: null };
+/// Names already read this visit, for sorting by name without waiting.
+const known = new Map<string, string>();
+export const knownName = (a: Address) => known.get(a.toLowerCase()) ?? a.toLowerCase();
 
 /// A wallet's name and avatar, once per visit. Asked for in the same moment (a page of names), they go to the Worker
 /// together, 50 to a request.
@@ -35,6 +38,7 @@ async function ask() {
       .catch(() => ({}))) as Record<string, Ens>;
     for (const k of part) {
       const e = got[k] ?? none;
+      if (e.name) known.set(k, e.name.toLowerCase());
       // ENS's own avatar URL serves the original image, often megabytes: ours is the same picture at face size.
       all.get(k)!(e.name && e.avatar?.startsWith('https://metadata.ens.domains/') ? { ...e, avatar: `/avatar/${encodeURIComponent(e.name)}` } : e);
     }

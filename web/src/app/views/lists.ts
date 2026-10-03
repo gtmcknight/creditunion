@@ -2,7 +2,7 @@ import { config, session } from '../chain';
 import { eligible, listBatches, notice, readNotice, ratingTotal, scores, type Listed, type Summary, hasLayout, layoutSlot, placeOnLayout } from '../data';
 import { placedKeys } from '../slots';
 import { idsKey } from '../../shared/ids';
-import { hydrate, who } from '../ens';
+import { hydrate, knownName, who } from '../ens';
 import { fitByBatch, fitsRules, myTraits } from '../fit';
 import { pictureFit } from '../picture-fit';
 import { editionArt, examples, fillGhosts, hasPlan, planGhosts, registerDeposits, registerFilter } from '../ghosts';
@@ -14,6 +14,7 @@ import { drawStill, primeInks, showStill } from '../directions';
 import { outbidNow } from '../outbid';
 import { onReturn } from '../visible';
 import { whale } from './whale';
+import { ago } from './live';
 import { DIRECTIONS, type Direction } from '../../shared/statement';
 
 /// Last deposit per union, from the activity feed (filled in after the first draw).
@@ -384,6 +385,100 @@ export function card({ s, ids, depositors, format }: Listed, fit?: bigint[], who
   </a>`;
 }
 
+/// Auctions as a table, one line each as on Multibid: the Statement, its union, where its sale stands, and yours in it.
+/// One choice for every tab, remembered.
+let auctionView: 'cards' | 'table' = 'cards';
+try {
+  if (localStorage.getItem('cu-auction-view') === 'table') auctionView = 'table';
+} catch {}
+/// ETH to three places, padded, so the points line up down a column (the unit is in the header).
+const ledger = (wei: bigint, digits = 3) => {
+  const [i, d = ''] = eth(wei, digits).replace(' ETH', '').split('.');
+  return `${i}.${d.padEnd(digits, '0')}`;
+};
+/// The table sorts from its column names: a click picks a column, a second flips it. Each column first sorts the way
+/// you'd read it: #1 and A first, the most members, rating and ETH first, the soonest to end (or latest sold) first.
+type TCol = 'name' | 'creator' | 'members' | 'rating' | 'now' | 'per' | 'by' | 'ends' | 'got';
+const TFIRST: Record<TCol, 1 | -1> = { name: 1, creator: 1, members: -1, rating: -1, now: -1, per: -1, by: 1, ends: 1, got: -1 };
+const tableSort: Record<string, { col: TCol; dir: 1 | -1 }> = {};
+try {
+  Object.assign(tableSort, JSON.parse(localStorage.getItem('cu-auction-table-sort') ?? '{}'));
+} catch {}
+const sortOf = (stage: string) => tableSort[stage] ?? { col: 'ends' as TCol, dir: (stage === 'sold' ? -1 : 1) as 1 | -1 };
+/// Your cut of a sold one, as Batch.unitsOf × payoutPerUnit (as the union page has it): shares when Equal, position
+/// weights when Early bird.
+function gotOf(b: Listed) {
+  const s = b.s, mine = mineIn(b);
+  const units = s.split === 1 ? b.ids.reduce((n, id, i) => (mine.has(String(id)) ? n + 237n - 2n * BigInt(i) : n), 0n) : BigInt(mine.size);
+  return s.split === 1 ? (units * s.payoutPerShare) / 158n : units * s.payoutPerShare;
+}
+function sortTable(items: Listed[], stage: string) {
+  const { col, dir } = sortOf(stage);
+  const name = knownName;
+  const key = (b: Listed): number | string | bigint => {
+    const s = b.s;
+    switch (col) {
+      case 'name': return stage === 'upcoming' ? (s.name || '').toLowerCase() : s.statementId;
+      case 'creator': return name(s.creator);
+      case 'members': return membersOf(b);
+      case 'rating': return totalOf(b) ?? -1;
+      case 'now': return s.highBid;
+      case 'per': return s.payoutPerShare;
+      case 'by': return s.highBid ? name(s.highBidder) : '~';
+      case 'ends': return stage === 'upcoming' ? s.lockAt || Infinity : stage === 'live' ? (s.highBid ? s.auctionEnd : Infinity) : s.auctionEnd;
+      case 'got': return stage === 'sold' ? gotOf(b) : mineIn(b).size;
+    }
+  };
+  return items.sort((a, b) => {
+    const x = key(a), y = key(b);
+    return (x < y ? -1 : x > y ? 1 : 0) * dir;
+  });
+}
+function auctionTable(items: Listed[], stage: 'live' | 'upcoming' | 'sold') {
+  items = sortTable([...items], stage);
+  let total = 0n;
+  const you = session.account;
+  const row = (b: Listed) => {
+    const s = b.s, mine = mineIn(b);
+    const rating = totalOf(b);
+    const by = (a: Address) => (you && same(a, you) ? '<span class="meta-win">You</span>' : who(a, 'sm', 'nested'));
+    const head = `<a class="whale-row sold-row at-${stage}" href="/union/${s.address}">
+      <span class="whale-art${stage === 'upcoming' ? '' : ' statement-host'}" aria-hidden="true">${stage === 'upcoming' ? sheet(b.ids, { size: 'sm' }) : statementArt(s.statementId)}</span>
+      <span class="whale-name">${esc(s.name || 'Untitled')}${stage === 'upcoming' ? '' : ` <span class="stmt-no num">#${s.statementId}</span>`}</span>
+      <span class="whale-creator small">${who(s.creator, 'sm', 'nested')}</span>
+      <span class="whale-members muted small num">${membersOf(b)}</span>
+      <span class="whale-rating muted small num">${rating ? rating.toLocaleString() : ''}</span>`;
+    if (stage === 'upcoming')
+      return `${head}<span class="whale-ends muted small num">${fullLine(s)}</span><span class="sold-got num">${mine.size || ''}</span></a>`;
+    if (stage === 'live')
+      return `${head}<strong class="whale-now num">${s.highBid ? ledger(s.highBid) : ''}</strong>
+      <span class="whale-by small">${s.highBid ? by(s.highBidder) : ''}</span>
+      <span class="whale-ends muted small num">${s.highBid ? ends(s.auctionEnd) : '24h'}</span>
+      <span class="sold-got num">${mine.size || ''}</span></a>`;
+    const got = gotOf(b);
+    total += got;
+    return `${head}<strong class="whale-now num">${ledger(s.highBid)}</strong>
+      <span class="sold-per muted small num">${s.payoutPerShare ? ledger(s.payoutPerShare, 4) : ''}</span>
+      <span class="whale-by small">${by(s.highBidder)}</span>
+      <span class="whale-ends muted small num">${ago(s.auctionEnd)}</span>
+      <span class="sold-got num">${mine.size ? ledger(got) : ''}</span></a>`;
+  };
+  const rows = items.map(row).join('');
+  const cur = sortOf(stage);
+  const CLS: Record<TCol, string> = { name: 'whale-name', creator: 'whale-creator', members: 'whale-members', rating: 'whale-rating', now: 'whale-now', per: 'sold-per', by: 'whale-by', ends: 'whale-ends', got: 'sold-got' };
+  const h = (col: TCol, label: string) => {
+    const on = cur.col === col;
+    return `<button type="button" class="whale-sort ${CLS[col]}${on ? ' on' : ''}" data-tcol="${col}" aria-label="Sort by ${label}">${label}${on ? `<span class="whale-arrow" aria-hidden="true">${cur.dir === 1 ? '↑' : '↓'}</span>` : ''}</button>`;
+  };
+  const cols =
+    stage === 'upcoming' ? h('ends', 'Status') + h('got', 'Yours in')
+    : stage === 'live' ? h('now', 'High bid (ETH)') + h('by', 'Bidder') + h('ends', 'Time left') + h('got', 'Yours in')
+    : h('now', 'Sold (ETH)') + h('per', 'Per Credit') + h('by', 'To') + h('ends', 'When') + h('got', 'You got');
+  // What all of yours got, under the column.
+  const sum = total ? `<div class="sold-total"><span class="muted small">You got in all</span><strong class="num">${eth(total)}</strong></div>` : '';
+  return `<div class="whale-list sold-list"><div class="whale-row sold-row at-${stage} whale-head small muted"><span></span>${h('name', stage === 'upcoming' ? 'Union' : 'Statement')}${h('creator', 'Creator')}${h('members', 'Members')}${h('rating', 'Rating')}${cols}</div>${rows}</div>${sum}`;
+}
+
 const PARTY_STATES = new Set(['Open', 'Full', 'Expired']);
 const STAGES = [['live', 'Live'], ['upcoming', 'Upcoming'], ['sold', 'Sold'], ['multibid', 'Multibid']] as const;
 type Stage = (typeof STAGES)[number][0];
@@ -411,6 +506,8 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       ? SORTS.map(([k, l]) => `<li role="option" tabindex="-1" data-sort="${k}" aria-selected="${k === cur}">${l}</li>`)
       : AUCTION_SORTS.map(([k, l, st]) => `<li role="option" tabindex="-1" data-sort="${k}" data-stage="${st}" aria-selected="false"${st === 'live' ? '' : ' hidden'}>${l}</li>`);
   const sort = `<div class="sort-pick"><button type="button" class="sort-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Sort"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10M1.5 10.5 4 13l2.5-2.5M12 13V3M9.5 5.5 12 3l2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="sort-label">${tab === 'parties' ? (SORTS.find(([k]) => k === cur)?.[1] ?? '') : ''}</span></button><ul class="sort-menu" role="listbox" aria-label="Sort" hidden>${items.join('')}</ul></div>`;
+  // Auctions: cards or a table, remembered.
+  const views = tab === 'parties' ? '' : `<div class="view-pick" role="radiogroup" aria-label="View" hidden><button type="button" role="radio" data-auction-view="cards" aria-label="Cards" title="Cards"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button><button type="button" role="radio" data-auction-view="table" aria-label="Table" title="Table"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5h12M2 8h12M2 12.5h12" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button></div>`;
   app.innerHTML = `
   <section class="home">
     ${pageHead({
@@ -420,7 +517,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         tab === 'parties'
           ? [{ label: 'Open <span class="num muted" id="n-all"></span>', attrs: 'data-view="all"' }, { label: 'Can join <span class="num muted" id="n-invited"></span>', attrs: 'data-view="invited"' }, { label: 'Joined <span class="num muted" id="n-yours"></span>', attrs: 'data-view="yours"' }, { label: 'Full <span class="num muted" id="n-filled"></span>', attrs: 'data-view="filled"' }]
           : STAGES.map(([k, l]) => ({ label: k === 'multibid' ? l : `${l} <span class="num muted" id="n-${k}"></span>`, attrs: `data-stage-tab="${k}"` })),
-      tools: sort,
+      tools: views + sort,
       action: tab === 'parties' ? '<a class="btn primary" href="/create">Start a Credit Union</a>' : '<button type="button" class="btn" id="how-auctions">How it works</button>',
       label: 'Show',
     })}
@@ -597,6 +694,8 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       if (pick === 'multibid') {
         shownStage = pick;
         app.querySelector<HTMLElement>('.sort-pick')?.classList.add('idle');
+        const vp = app.querySelector<HTMLElement>('.view-pick');
+        if (vp) vp.hidden = true;
         if (!el.querySelector('#whale-body')) void whale(el);
         return;
       }
@@ -618,13 +717,24 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       const label = app.querySelector('.sort-label');
       if (label) label.textContent = AUCTION_SORTS.find(([k, , st]) => k === order && st === pick)?.[1] ?? '';
       // A tab with nothing to order keeps the menu's place, so the tabs don't move.
-      app.querySelector<HTMLElement>('.sort-pick')?.classList.toggle('idle', pick === 'upcoming');
+      app.querySelector<HTMLElement>('.sort-pick')?.classList.toggle('idle', pick === 'upcoming' || auctionView === 'table');
+      const vp = app.querySelector<HTMLElement>('.view-pick');
+      if (vp) vp.hidden = false;
+      vp?.querySelectorAll<HTMLElement>('[data-auction-view]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.auctionView === auctionView)));
+      const table = auctionView === 'table';
+      if (table && !totaling && shown.some((b) => totalOf(b) === undefined)) {
+        totaling = true;
+        totalCards(shown)
+          .then((got) => got && document.getElementById('batches') === el && draw())
+          .catch(() => {})
+          .finally(() => (totaling = false));
+      }
       const fresh = morph(
         el,
         !list.length
           ? `<div class="grid"><div class="card placeholder" id="auction-placeholder">${sheet([], { size: 'sm' })}<div class="card-body"><strong>No auctions yet</strong><span class="muted small">When a Credit Union burns its 80, its Statement is auctioned here.</span></div></div></div>`
           : shown.length
-            ? grid(shown)
+            ? table ? auctionTable(shown, pick) : grid(shown)
             : `<p class="muted">${pick === 'upcoming' ? 'No Credit Union is full right now.' : pick === 'live' ? 'Nothing at auction right now.' : 'Nothing sold yet.'}</p>`,
       );
       hydrate(el);
@@ -638,6 +748,25 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
           ph.querySelector('.sheet')!.outerHTML = sheet([], { size: 'sm', ghosts: ids.slice(0, 80).map((id) => ({ id: BigInt(id), src: editionArt(id) })) });
         });
     };
+    el.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-tcol]');
+      if (!b || !shownStage) return;
+      const col = b.dataset.tcol as TCol, cur = sortOf(shownStage);
+      tableSort[shownStage] = cur.col === col ? { col, dir: (cur.dir * -1) as 1 | -1 } : { col, dir: shownStage === 'sold' && col === 'ends' ? -1 : TFIRST[col] };
+      try {
+        localStorage.setItem('cu-auction-table-sort', JSON.stringify(tableSort));
+      } catch {}
+      draw();
+    });
+    app.querySelectorAll<HTMLElement>('[data-auction-view]').forEach((b) =>
+      b.addEventListener('click', () => {
+        auctionView = b.dataset.auctionView as 'cards' | 'table';
+        try {
+          localStorage.setItem('cu-auction-view', auctionView);
+        } catch {}
+        draw();
+      }),
+    );
     app.querySelectorAll<HTMLElement>('[data-stage-tab]').forEach((b) =>
       b.addEventListener('click', () => {
         stage = b.dataset.stageTab as Stage;

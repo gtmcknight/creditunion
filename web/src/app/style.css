@@ -9383,7 +9383,29 @@ a.whale-name:hover { text-decoration: underline; text-underline-offset: 3px; }
 .whale-sum { font-weight: 500; white-space: nowrap; }
 .whale-why { flex: 1; color: var(--muted); }
 .whale-bar .btn { margin-left: auto; white-space: nowrap; }
+/* Auctions → Sold as a table: Multibid's rows, without the pick and the bid; the whole row opens the union. */
+.sold-row {
+  grid-template-columns: 28px minmax(0, 1fr) 124px 60px 60px 80px 72px 124px 72px 96px;
+  grid-template-areas: 'art name creator members rating now per by ends got';
+  color: var(--fg);
+  text-decoration: none;
+}
+.sold-total { display: flex; justify-content: flex-end; align-items: baseline; gap: 12px; padding: 12px 8px; }
+.whale-row.at-live { grid-template-columns: 28px minmax(0, 1fr) 124px 60px 60px 96px 124px 72px 72px; grid-template-areas: 'art name creator members rating now by ends got'; }
+.whale-row.at-upcoming { grid-template-columns: 28px minmax(0, 1fr) 124px 60px 60px 200px 72px; grid-template-areas: 'art name creator members rating ends got'; }
+.whale-head .sold-per, .whale-head .sold-got { text-align: right; }
+.whale-head .whale-members, .whale-head .whale-rating, .whale-head .whale-now, .whale-head .whale-ends { text-align: right; }
+.sold-per { grid-area: per; text-align: right; white-space: nowrap; }
+.sold-got { grid-area: got; text-align: right; white-space: nowrap; font-weight: 500; }
+.view-pick { display: flex; gap: 2px; }
+.view-pick[hidden] { display: none; }
+.view-pick button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 0; background: none; color: var(--muted); cursor: pointer; }
+.view-pick button svg { width: 16px; height: 16px; }
+.view-pick button:hover, .view-pick button[aria-checked='true'] { color: var(--fg); }
+.view-pick button[aria-checked='true'] { background: var(--raised); }
 @media (max-width: 640px) {
+  .whale-row.sold-row, .whale-row.at-live, .whale-row.at-upcoming { grid-template-columns: 24px minmax(0, 1fr) auto auto; grid-template-areas: 'art name now got' 'art ends ends got'; }
+  .sold-per { display: none; }
   .whale-row { grid-template-columns: 18px 24px minmax(0, 1fr) auto 84px; grid-template-areas: 'pick art name now bid' 'pick art ends ends bid'; row-gap: 0; }
   .whale-head { display: none; }
   .whale-art { width: 24px; }
