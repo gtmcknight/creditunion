@@ -259,7 +259,7 @@ What the Safe can and can't do: [contracts/SAFE.md](contracts/SAFE.md).
 
 - **Review log:** seven rounds of internal review of `Batch`, `BatchFactory`, `Sweeper` and `Ratings`, every finding and its fix: [contracts/AUDIT.md](contracts/AUDIT.md). `StatementAdapter` and `LiveRatings` have mainnet-fork tests and `UnionFormats` unit tests, but none of the three has a written review round yet.
 - **Proofs:** 51 rules proved with Halmos on `Batch`, `BatchFactory`, `Sweeper` and `Ratings`, none broken, 5 timed out. What those leave unproven is at the top of [contracts/test/formal/REPORT.md](contracts/test/formal/REPORT.md).
-- **Tests:** 282 Foundry tests pass (252 unit, fuzz, invariant and adversarial; 30 mainnet fork). CI runs the non-fork suite on every push.
+- **Tests:** 282 Foundry tests pass (252 unit, fuzz, invariant and adversarial; 30 mainnet fork). CI runs the non-fork suite whenever the contracts change.
 - **Site:** an end-to-end run drives the site in Chrome against a local chain across 40 Credit Union setups (see [For developers](#for-developers)).
 
 No third-party audit.

@@ -1,0 +1,29 @@
+# Contracts: build and the non-fork suite (~9 min), only when contracts change. Site and docs pushes skip it.
+# The fork tests need an archive node, so they run locally (README, Build and test). Foundry is pinned: gas-bound
+# tests (SettlePays) depend on the version's gas metering.
+name: Contracts
+on:
+  push:
+    branches: [main]
+    paths: ['contracts/**', '.gitmodules', '.github/workflows/contracts.yml']
+  pull_request:
+    paths: ['contracts/**', '.gitmodules', '.github/workflows/contracts.yml']
+permissions:
+  contents: read
+concurrency:
+  group: contracts-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+      - run: forge build --sizes
+        working-directory: contracts
+      - run: forge test --no-match-path '*fork*'
+        working-directory: contracts
