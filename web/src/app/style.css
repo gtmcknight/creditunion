@@ -1689,7 +1689,7 @@ nav a[hidden] {
   padding: 0 12px 0 6px;
 }
 .btn.acct .who {
-  max-width: 160px;
+  max-width: 184px; /* room for a 22-character name like hot.visualizevalue.eth */
   font-size: 14px;
   font-weight: 500;
 }
