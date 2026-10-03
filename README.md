@@ -28,6 +28,27 @@ Credit Union lets holders of Jack Butcher's [Credits](https://jack.art/credits) 
 
 **Reserve.** A Credit Union can be opened with a reserve (the site opens them with none): the first bid must meet it. If no bid comes within 7 days of the burn (`RESERVE_WINDOW`), the reserve lapses and the minimum first bid drops to 0.01 ETH.
 
+## How the pieces fit
+
+```
+wallet ──signs──▶ BatchFactory ──clones──▶ Credit Union (a Batch clone)
+  │                    │                     holds the 80 Credits and every bid
+  │                    └─ deposits Credits   assemble() ──▶ StatementAdapter ──▶ Statements (Jack Butcher)
+  │                                                          reads UnionFormats   burns 80, mints 1
+  │                                          auction, settle, split, claim
+  │
+  ├──▶ Sweeper: buys OpenSea listings straight into a Credit Union
+  │
+  └──reads──▶ creditunion.fun ──▶ Worker: /rpc proxy, cached chain reads, listings, art
+                                    └─ keeper, every 5 min: settles ended auctions, retries failed
+                                       payouts, records full pictures' spots. Never burns.
+```
+
+The contracts hold everything of value and decide every rule. The site and Worker read, cache and help build
+transactions; wallets sign in the browser. The keeper's key holds no role in any contract, so it can only do what
+anyone could. If both go down, the [mirror](mirror/README.md) and Etherscan still bid,
+settle and claim.
+
 ## For developers
 
 <details>
