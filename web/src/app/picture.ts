@@ -393,11 +393,18 @@ export class Guide {
   fillYoursFirst(layout: readonly number[], placed: readonly (number | null)[], gone: ReadonlySet<number> = new Set()): (Candidate | null)[] {
     const rec = this.fill(layout, placed, gone);
     const at = new Map(this.cands.map((c, j) => [c, j]));
+    // With yours in the picture but none first anywhere, the Colors where moving them up costs least takes them
+    // anyway: one of yours that fits is enough to start or join without buying.
+    let ready = false, cheapest: { cost: number; next: Map<number, Candidate | null> } | null = null;
     for (const m of new Set(layout)) {
       if (!m) continue;
       const slots = [...layout.keys()].filter((t) => layout[t] === m && placed[t] === null && rec[t]);
       const own = slots.filter((t) => rec[t]!.owner >= 0), sale = slots.filter((t) => rec[t]!.owner < 0);
-      if (!own.length || own.every((t, i) => t === slots[i])) continue; // none of yours, or yours already first
+      if (!own.length) continue;
+      if (own.every((t, i) => t === slots[i])) {
+        ready = true; // yours already first
+        continue;
+      }
       // Yours to the first slots, the rest after, each set given its slots in the order that costs least.
       const assign = (who: number[], to: number[]) => {
         const left = [...who], out = new Map<number, number>();
@@ -412,8 +419,12 @@ export class Guide {
       const before = slots.reduce((n, t) => n + this.cost[t][at.get(rec[t]!)!], 0);
       const after = slots.reduce((n, t) => n + this.cost[t][at.get(rec[moved.get(t)!]!)!], 0);
       const next = new Map(slots.map((t) => [t, rec[moved.get(t)!]]));
-      if (after - before <= own.length * this.slack) for (const t of slots) rec[t] = next.get(t)!;
+      if (after - before <= own.length * this.slack) {
+        for (const t of slots) rec[t] = next.get(t)!;
+        ready = true;
+      } else if (!cheapest || after - before < cheapest.cost) cheapest = { cost: after - before, next };
     }
+    if (!ready && cheapest) for (const [t, c] of cheapest.next) rec[t] = c;
     return rec;
   }
 
