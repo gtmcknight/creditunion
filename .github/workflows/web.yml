@@ -21,7 +21,7 @@ jobs:
           submodules: recursive
       - uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: v1.7.1
+          version: v1.8.4
       - run: forge build
         working-directory: contracts
       - uses: pnpm/action-setup@v4

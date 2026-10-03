@@ -22,7 +22,7 @@ jobs:
           submodules: recursive
       - uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: v1.7.1
+          version: v1.8.4
       - run: forge build --sizes
         working-directory: contracts
       - run: forge test --no-match-path '*fork*'
