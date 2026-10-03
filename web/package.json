@@ -10,7 +10,8 @@
     "deploy": "npm run build && wrangler deploy",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.worker.json",
     "abi:check": "node scripts/abi.mjs --check",
-    "mirror": "node scripts/mirror.mjs"
+    "mirror": "node scripts/mirror.mjs",
+    "chain:fork": "node scripts/fork-chain.mjs"
   },
   "dependencies": {
     "@noble/hashes": "^2.4.0",

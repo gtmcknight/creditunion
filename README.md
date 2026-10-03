@@ -111,6 +111,15 @@ anvil --gas-limit 60000000
 bash script/seed-local.sh   # parties in every state; advances anvil's clock through the lock phases
 ```
 
+A copy of mainnet instead, with the real Credits, unions, Statements and burn contract as they are right now (needs `MAINNET_RPC` in `contracts/.env`):
+
+```sh
+cd web
+pnpm chain:fork                 # funds anvil's test accounts, lists the unions, prints how to point the site and a wallet at it
+pnpm chain:fork --credits 80    # also hands the test wallet 80 real Credits
+pnpm chain:fork --warp 24       # moves the clock 24 hours on
+```
+
 </details>
 
 <details>
