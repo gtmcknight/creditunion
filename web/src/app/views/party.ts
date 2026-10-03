@@ -868,14 +868,17 @@ function panel(b: Ctx, m: Mine, myIds: Set<string>, pending = false) {
   const owed = m && m.owed > 0n ? `<button class="btn block" id="owed">Collect ${eth(m.owed)} refund</button>` : '';
 
   if (s.state === 'Settled') {
-    const mine = m?.shares
-      ? m.claimable > 0n
-        ? `<div class="stack"><button class="btn primary block" id="claim">Claim ${eth(m.claimable)}</button><p class="small muted center num">${m.shares} of 80</p></div>`
-        : `<p class="small muted num">Paid · ${m.shares} of 80</p>`
-      : '';
+    // Your cut, as Batch.unitsOf × payoutPerUnit: shares when Equal, position weights (237 - 2i) when Early bird,
+    // where payoutPerShare is 158 units.
+    const units = s.split === 1 ? b.ids.reduce((n, id, i) => (myIds.has(String(id)) ? n + 237n - 2n * BigInt(i) : n), 0n) : BigInt(m?.shares ?? 0);
+    const got = s.split === 1 ? (units * per) / 158n : units * per;
+    const each = `${eth(per, 4)} ${s.split === 1 ? "avg " : ""}per Credit`;
+    const right = m?.shares
+      ? `<div><span>${m.claimable > 0n ? 'Yours to claim' : 'You got'}</span><strong class="num">${eth(m.claimable > 0n ? m.claimable : got)}</strong><em class="sub num">${each}</em></div>`
+      : `<div><span>${s.split === 1 ? 'Avg per Credit' : 'Per Credit'}</span><strong class="num">${eth(per, 4)}</strong></div>`;
+    const mine = m?.shares && m.claimable > 0n ? `<button class="btn primary block" id="claim">Claim ${eth(m.claimable)}</button>` : '';
     return `<div class="box">
-      <div class="bid-now"><div><span>Sold</span><strong class="num">${eth(s.highBid)}</strong></div><div><span>${s.split === 1 ? "Avg per Credit" : "Per Credit"}</span><strong class="num">${eth(per)}</strong></div></div>
-      <p class="small muted sold-to">To ${who(s.highBidder, 'sm', true)}</p>
+      <div class="bid-now"><div><span>Sold</span><strong class="num">${eth(s.highBid)}</strong><em class="sub">To ${who(s.highBidder, 'sm', true)}</em></div>${right}</div>
       ${mine}${owed}
     </div>`;
   }
