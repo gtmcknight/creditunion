@@ -12,7 +12,7 @@ export const SOURCES: Record<Source, { name: string; icon: string }> = {
   strategy: { name: 'CreditStrategy', icon: '/sources/strategy.svg' },
 };
 
-/// Credits this browser just bought. Listings are cached (60 s here, longer at the marketplaces), so a sold Credit
+/// Credits this browser just bought, or found sold on trying. Listings are cached (60 s here, longer at the marketplaces), so a sold Credit
 /// can still come back listed for a while; a fresh page leaves these out until the listings catch up. (On the page
 /// that bought them they stay in place and read "Yours".)
 const BOUGHT_KEY = 'cu-bought';
@@ -368,7 +368,20 @@ export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement, 
     if (!picked.size) return;
     const mine = [...picked];
     const cells = () => mine.map((id) => grid.querySelector<HTMLElement>(`.cc[data-id="${id}"]`)).filter((c): c is HTMLElement => !!c);
-    const got = await sweepToWallet(chosen(), go, () => cells().forEach((c) => c.classList.add('buying')));
+    const got = await sweepToWallet(chosen(), go, () => cells().forEach((c) => c.classList.add('buying')), undefined, (ids) => {
+      // Sold to someone else first: off the grid and out of the pick at once.
+      for (const id of ids) {
+        sale.byId.delete(id);
+        const i = sale.ls.findIndex((l) => l.id === id);
+        if (i >= 0) sale.ls.splice(i, 1);
+        const c = grid.querySelector<HTMLElement>(`.cc[data-id="${id}"]`);
+        if (!c) continue;
+        c.classList.remove('listed', 'sel');
+        const out = c.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(0.94)' }], { duration: 180, easing: 'ease-in', fill: 'forwards' });
+        void out.finished.then(() => c.remove(), () => c.remove());
+      }
+      mark();
+    });
     cells().forEach((c) => c.classList.remove('buying'));
     if (!got) return;
     // Bought: off the market here at once. Each square drops its price and says it's yours.
@@ -450,6 +463,7 @@ export type Quote = {
   fwa?: { listingId: string; id: string; price: string }[];
   strategy?: { id: string; price: string }[];
   error?: string;
+  sold?: string[];
 };
 
 /// The orders are what gets sent to the chain; the ids/prices/total are what gets shown. Make sure they agree,
@@ -530,7 +544,8 @@ export async function listedById(ids: string[], strict = false): Promise<Listed[
 /// `onSubmit` runs once the wallet has sent it (the Credits' squares start their buying pulse then).
 /// `whole`: all of them or none (a picture's Credits: one missing would shift the rest out of their slots). A quote
 /// short of any refuses before the wallet, naming them in `onSold`; the transaction itself reverts if one sells after.
-export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement, onSubmit?: () => void, whole?: { onSold: (ids: string[]) => void }): Promise<string[] | null> {
+/// `gone`: the picked Credits the fresh price found already sold, so the page can take them off its grid.
+export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement, onSubmit?: () => void, whole?: { onSold: (ids: string[]) => void }, gone?: (ids: string[]) => void): Promise<string[] | null> {
   const label = btn.textContent ?? '';
   btn.disabled = true;
   btn.textContent = 'Pricing…';
@@ -538,11 +553,20 @@ export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement, on
   try {
     const r = await fetch('/opensea/buyquote', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ listings: picked }) });
     const q = (await r.json()) as Quote;
+    if (q.sold?.length) {
+      rememberBought(q.sold);
+      whole?.onSold(q.sold);
+      gone?.(q.sold);
+      const n = q.sold.length;
+      throw new Error(`${n === 1 ? `#${Number(q.sold[0]).toLocaleString('en-US')}` : `All ${n}`} just sold. Pick another.`);
+    }
     if (!r.ok || q.error) throw new Error(q.error ?? 'No price right now.');
     checkQuote(q);
+    const have = new Set([...q.ids, ...(q.fwa ?? []).map((f) => f.id), ...(q.strategy ?? []).map((f) => f.id)]);
+    const sold = picked.map((l) => l.id).filter((id) => !have.has(id));
+    if (sold.length) rememberBought(sold);
+    if (sold.length && !whole) gone?.(sold); // the rest still go
     if (whole) {
-      const have = new Set([...q.ids, ...(q.fwa ?? []).map((f) => f.id), ...(q.strategy ?? []).map((f) => f.id)]);
-      const sold = picked.map((l) => l.id).filter((id) => !have.has(id));
       if (sold.length) {
         whole.onSold(sold);
         throw new Error(`${sold.map((id) => `#${id}`).join(', ')} just sold. The picture picked another for ${sold.length === 1 ? 'its slot' : 'their slots'}: check and buy again.`);

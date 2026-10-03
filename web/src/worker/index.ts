@@ -1239,6 +1239,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
     // Each listing is a call upstream (OpenSea's signed fill; a chain read for FWA and CreditStrategy): counted one by one.
     if (await limited(env.RL_FILL, req, ls.length)) return text('slow down', 429);
+    const wanted = ls.map((l) => l.id);
     // An OpenSea listing is priced only when the market book has that very order for that Credit: our key signs fills
     // for Credits on sale here, not for any order a caller names. A book that's behind (its loop stalled) can't say,
     // so then they go as asked.
@@ -1254,6 +1255,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     try {
       return Response.json(await quoteListings(env, url, ls), { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
+      // None of them still for sale: say which, so the page can take them off the grid.
+      if ((e as { sold?: boolean }).sold) return Response.json({ error: safeError(e), sold: wanted }, { status: 409, headers: { 'cache-control': 'no-store' } });
       return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
     }
   }
@@ -2537,7 +2540,7 @@ async function quoteListings(env: Env, url: URL, listings: Listing[]) {
       if (!fwaLive.length && !strategyLive.length) throw e; // with other listings still good, the quote is those
     }
   }
-  if (!os.ids.length && !fwaLive.length && !strategyLive.length) throw new Error('Those listings just sold. Try again.');
+  if (!os.ids.length && !fwaLive.length && !strategyLive.length) throw Object.assign(new Error('Those listings just sold. Try again.'), { sold: true });
   const fwa = fwaLive.map((l) => ({ listingId: l.listingId!, id: l.id, price: l.price }));
   const strategy = strategyLive.map((l) => ({ id: l.id, price: l.price }));
   const total = [...fwa, ...strategy].reduce((a, l) => a + BigInt(l.price), BigInt(os.total));
