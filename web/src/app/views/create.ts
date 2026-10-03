@@ -393,7 +393,7 @@ export async function create(app: HTMLElement) {
       <section class="rule" data-tab="credits" data-pane="always">
         <div class="picker lg" id="picker"><p class="muted">Reading your wallet…</p></div>
         <details class="picker-off" id="picker-off-wrap" hidden><summary class="muted small" id="picker-off-sum"></summary><div class="picker lg" id="picker-off"></div></details>
-        <div class="picture-callout" id="picture-callout" hidden><b>Its first Credits for sale</b><span>Each draws one spot. Pick any; one of a Colors brings those ahead of it.</span></div>
+        <h3 class="picture-callout" id="picture-callout" hidden>Or buy ones that draw it</h3>
         <div class="create-buy" id="create-buy" hidden></div>
       </section>
 
@@ -677,7 +677,7 @@ export async function create(app: HTMLElement) {
     // yours, buying is how it starts (bought ones go in, picked, unseen).
     const buyOnly = picturing() && buyToStart && !picPlan!.mine.size;
     for (const id of ['picker', 'n']) document.getElementById(id)!.hidden = buyOnly;
-    document.getElementById('picture-callout')!.hidden = !(picturing() && buyToStart);
+    document.getElementById('picture-callout')!.hidden = !(picturing() && buyToStart) || buyOnly; // buying only: the title above says it
     document.getElementById('dep-title')!.textContent = buyOnly ? 'Buy to start' : picturing() ? 'Yours that draw it' : 'Deposit Credits';
     for (const id of [...picks]) if (!fit.some((f) => f.toString() === id)) picks.delete(id);
     // Until you pick yourself, the least it takes to start is picked for you (Min 1: one of yours that fits), so

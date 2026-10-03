@@ -8382,20 +8382,15 @@ a.quiet:hover { text-decoration: underline; text-underline-offset: 3px; }
   padding-top: 4px;
   white-space: nowrap;
 }
-/* A Picture union's rule, said once, plainly, before anything else. */
+/* A Picture union's Credits for sale, under yours: a plain heading like the one above yours. */
 .picture-callout {
-  display: grid;
-  gap: 4px;
-  padding: 12px 14px;
-  border-radius: var(--r);
-  background: var(--raised);
-  box-shadow: var(--raised-shadow);
-  font: 400 13px/1.45 var(--sans);
-  color: var(--muted);
-}
-.picture-callout b {
-  font-weight: 500;
+  margin: 8px 0 0;
+  font: 600 15px/1.4 var(--sans);
   color: var(--fg);
+}
+/* No Credits for sale under it (still loading, or none can go in now): no heading for them either. */
+.picture-callout:has(+ .create-buy[hidden]) {
+  display: none;
 }
 .picture-callout[hidden] {
   display: none;
