@@ -293,6 +293,11 @@ export async function candidates(wallets: Address[], skip: ReadonlySet<number> =
 
 /// Most a recommended listing may cost, and how much edges count, as the Printer's defaults.
 const MAX_PRICE = 0.08;
+/// How much each ETH of a listing counts against its likeness in a picture's plan: 100 times the Printer's, so 0.01 ETH
+/// weighs about as much as a typical patch's mismatch. At the Printer's weight price only broke ties, and plans
+/// bought Credits at about 3.4 times their Colors' floor; at this one six live pictures cost 20 to 55% less and still
+/// read as themselves.
+const PRICE_WEIGHT = 2e7;
 export const DETAIL = 2;
 /// How much a Credit you hold is favoured over one for sale when a picture union plans its next Credits, in typical
 /// patch errors: yours takes a spot only when it draws it about as well as the best for sale.
@@ -330,8 +335,15 @@ export class Guide {
   static async of(px: Uint8ClampedArray, o: { wallets?: Address[]; held?: readonly bigint[]; colours?: (id: bigint) => number; detail?: number; progress?: (f: number) => void; own?: number; look?: Look; base?: Promise<Base> } = {}) {
     const { cands: all, wall, base: b } = await candidates(o.wallets ?? [], new Set(), o.held, o.base);
     const cands = all.filter((c) => c.owner >= 0 || c.price <= MAX_PRICE);
-    const cost = await costs(px, cands, wall, { features: o.detail ?? DETAIL, maxPrice: MAX_PRICE, own: o.own ?? 1, look: o.look }, o.progress);
-    return new Guide(cands, cost, Uint8Array.from(cands, (c) => (c.owner === 0 && o.colours?.(BigInt(c.id))) || paletteOf(b, c.id)), detailOf(px), (o.own ?? 1) * OWN_COST, px);
+    const pal = Uint8Array.from(cands, (c) => (c.owner === 0 && o.colours?.(BigInt(c.id))) || paletteOf(b, c.id));
+    // A Credit you hold isn't free: it's worth about the floor of its Colors (what it would sell for), so the plan
+    // prices it there, and one for sale wins its spot only by looking better than the difference in price.
+    const floor = new Map<number, number>();
+    cands.forEach((c, j) => c.owner < 0 && floor.set(pal[j], Math.min(floor.get(pal[j]) ?? Infinity, c.price)));
+    const lowest = floor.size ? Math.min(...floor.values()) : 0;
+    const priced = cands.map((c, j) => (c.owner >= 0 ? { ...c, price: floor.get(pal[j]) ?? lowest } : c));
+    const cost = await costs(px, priced, wall, { features: o.detail ?? DETAIL, maxPrice: MAX_PRICE, own: o.own ?? 1, look: o.look }, o.progress, PRICE_WEIGHT);
+    return new Guide(cands, cost, pal, detailOf(px), (o.own ?? 1) * OWN_COST, px);
   }
 
   /// A sheet for the picture: the best Credit for each slot, the most detailed slots choosing first, and its Colors
