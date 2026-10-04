@@ -387,6 +387,8 @@ abstract class Scene {
   abstract readonly key: ViewKey;
   t = 0;
   playing = false;
+  /// Has played since it was opened.
+  ran = false;
   /// Plays round and round (and its film loops) rather than stopping at its end.
   loop = false;
   /// Moves on its own: has Play and exports a video. Only the Stack does.
@@ -1580,7 +1582,7 @@ export class Views {
     if (sc.playing) sc.playing = false;
     else {
       if (sc.t >= sc.length() - 1e-3 && !sc.loop) sc.t = 0;
-      sc.playing = true;
+      sc.playing = sc.ran = true;
       this.kick();
     }
     this.hooks.changed();
@@ -1589,10 +1591,10 @@ export class Views {
   get playing() {
     return this.scene.playing;
   }
-  /// At the end of its run: Play starts it over.
+  /// At the end of a run it played: Play starts it over.
   get ended() {
     const sc = this.scene;
-    return sc.animated && !sc.loop && !sc.playing && sc.t >= sc.length() - 1e-3;
+    return sc.ran && !sc.loop && !sc.playing && sc.t >= sc.length() - 1e-3;
   }
   /// What a view reads from elsewhere, read ahead while nothing else is going on.
   warm() {
