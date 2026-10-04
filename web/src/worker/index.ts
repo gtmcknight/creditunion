@@ -1088,14 +1088,14 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   // are for sale. Kept ten minutes at the edge.
   if (url.pathname === '/statements/overprints.json') {
     if (req.method !== 'GET') return text('method not allowed', 405);
-    const key = new Request(`${url.origin}/statements/overprints.json`);
+    const key = new Request(`${url.origin}/statements/overprints-cache/v2`);
     const hit = await caches.default.match(key);
     if (hit) return hit;
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
     try {
       const statements = await statementsOf(env);
-      const items = statements ? await overprintsOf(client(env) as never, statements) : [];
-      const res = Response.json({ items }, { headers: { 'cache-control': 'public, max-age=600' } });
+      const body = statements ? await overprintsOf(client(env) as never, statements) : { items: [], total: 0 };
+      const res = Response.json(body, { headers: { 'cache-control': 'public, max-age=600' } });
       ctx.waitUntil(caches.default.put(key, res.clone()));
       return res;
     } catch (e) {

@@ -9643,7 +9643,7 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 .st-filter { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border: 0; border-radius: var(--r); background: none; font: inherit; font-size: 14px; color: var(--muted); cursor: pointer; transition: background-color 120ms var(--ease), color 120ms var(--ease); }
 .st-filter:hover { color: var(--fg); background: var(--surface); }
 .st-filter[aria-pressed='true'] { color: var(--fg); background: var(--surface); }
-.st-art.stacked { overflow: visible; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), var(--stack); }
-.st-art.stacked .statement-art { overflow: hidden; }
-/* Clear of the paper stacked above the first row. */
-.st-none { margin: 0 0 32px; }
+.st-art.stacked { overflow: visible; background: none; box-shadow: none; }
+/* The drawing, smaller by the paper's reach, at the bottom left of the spot; the paper fills the top right. */
+.st-art.stacked .statement-art { inset: auto auto 0 0; width: calc(100% - var(--reach)); height: auto; aspect-ratio: 4 / 5; background: var(--empty); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), var(--stack); }
+.st-none { margin: 32px 0 48px; }

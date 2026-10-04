@@ -64,9 +64,10 @@ const MULTICALL: Address = '0xcA11bde05977b3631167028862bE2a173976CA11';
 
 export type Overprint = { id: string; pages: number; rating: number | null; format: number | null };
 
-/// The overprinted Statements still standing (an owner, more than one page), most pages first, then newest: every
-/// Statement's history length and owner in one multicall (ids run 1..supply), then the rating and format of those.
-export async function overprintsOf(c: PublicClient, statements: Address, count = 12): Promise<Overprint[]> {
+/// The overprinted Statements still standing (an owner, more than one page), most pages first, then newest, up to
+/// `count`, and how many there are: every Statement's history length and owner in one multicall (ids run 1..supply),
+/// then the rating and format of those shown.
+export async function overprintsOf(c: PublicClient, statements: Address, count = 60): Promise<{ items: Overprint[]; total: number }> {
   const supply = Number(await c.readContract({ address: statements, abi: READ, functionName: 'supply' }));
   const ids = Array.from({ length: supply }, (_, i) => BigInt(i + 1));
   const reads = await c.multicall({
@@ -75,19 +76,20 @@ export async function overprintsOf(c: PublicClient, statements: Address, count =
     batchSize: 0,
     multicallAddress: MULTICALL,
   });
-  const standing = ids
+  const all = ids
     .map((id, i) => ({ id, pages: reads[2 * i].status === 'success' ? Number(reads[2 * i].result) : 0, owned: reads[2 * i + 1].status === 'success' }))
     .filter((x) => x.owned && x.pages > 1)
-    .sort((a, b) => b.pages - a.pages || Number(b.id - a.id))
-    .slice(0, count);
+    .sort((a, b) => b.pages - a.pages || Number(b.id - a.id));
+  const standing = all.slice(0, count);
   const more = await c.multicall({
     contracts: standing.flatMap((x) => [{ address: statements, abi: READ, functionName: 'creditScoreOf', args: [x.id] } as const, { address: statements, abi: READ, functionName: 'formatOf', args: [x.id] } as const]),
     allowFailure: true,
     batchSize: 0,
     multicallAddress: MULTICALL,
   });
-  return standing.map((x, i) => {
+  const items = standing.map((x, i) => {
     const sc = more[2 * i], f = more[2 * i + 1];
     return { id: x.id.toString(), pages: x.pages, rating: sc.status === 'success' ? Number((sc.result as bigint) / 10_000n) : null, format: f.status === 'success' ? Number(f.result) : null };
   });
+  return { items, total: all.length };
 }

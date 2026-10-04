@@ -17,6 +17,9 @@ type Standing = { id: string; pages: number; rating: number | null; format: numb
 /// stack stays inside the grid's gap).
 const stack = (pages: number) =>
   Array.from({ length: Math.min(pages, 6) - 1 }, (_, k) => `${(k + 1) * 3}px ${-(k + 1) * 3}px 0 0 #fff, ${(k + 1) * 3}px ${-(k + 1) * 3}px 0 1px rgba(0,0,0,.45)`).join(', ');
+/// How far that paper reaches past the drawing's top right: the drawing shrinks by it, so drawing and paper together
+/// keep a single Statement's spot.
+const reach = (pages: number) => (Math.min(pages, 6) - 1) * 3;
 const OVERPRINTS = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round" d="M8 2.2 14 5 8 7.8 2 5zM2 8.2l6 2.8 6-2.8M2 11.2 8 14l6-2.8"/></svg>';
 const ORDERS = [['cheap', 'Lowest price'], ['dear', 'Highest price'], ['rating', 'Top rated'], ['value', 'Most rating per ETH']] as const;
 type Order = (typeof ORDERS)[number][0];
@@ -28,12 +31,12 @@ export async function statementsMarket(app: HTMLElement, rerender: () => void) {
   try {
     overprints = localStorage.getItem('cu-statements-overprints') === '1';
   } catch {}
-  // A few standing overprints, read once, for when none are for sale.
-  let standing: Standing[] | null = null;
+  // The standing overprints (and how many there are), read once, for when none are for sale.
+  let standing: Standing[] | null = null, total = 0;
   const readStanding = () =>
     fetch('/statements/overprints.json')
-      .then((r) => r.json() as Promise<{ items?: Standing[] }>)
-      .then((d) => ((standing = (d.items ?? []).slice(0, 5)), draw()))
+      .then((r) => r.json() as Promise<{ items?: Standing[]; total?: number }>)
+      .then((d) => ((standing = d.items ?? []), (total = d.total ?? standing.length), draw()))
       .catch(() => ((standing = []), draw()));
   try {
     const v = localStorage.getItem('cu-statements-order');
@@ -77,7 +80,7 @@ export async function statementsMarket(app: HTMLElement, rerender: () => void) {
     const href = `/statement/${x.id}`;
     const pages = x.pages ?? 1;
     return `<div class="st-card" data-id="${x.id}">
-      <a class="st-art statement-host${pages > 1 ? ' stacked' : ''}" href="${href}"${pages > 1 ? ` style="--stack:${stack(pages)}"` : ''}>${statementArt(BigInt(x.id))}</a>
+      <a class="st-art statement-host${pages > 1 ? ' stacked' : ''}" href="${href}"${pages > 1 ? ` style="--stack:${stack(pages)};--reach:${reach(pages)}px"` : ''}>${statementArt(BigInt(x.id))}</a>
       <div class="st-meta">
         <a class="st-name" href="${href}">${esc(u?.name ?? 'Statement')} <span class="stmt-no num">#${x.id}</span></a>
         <span class="st-line muted small num">${x.rating != null ? `Rating ${x.rating.toLocaleString()}` : ''}${x.format != null && DIRECTIONS[x.format] ? ` · ${DIRECTIONS[x.format]}` : ''}${pages > 1 ? ` · ${pages} pages` : ''}</span>
@@ -91,7 +94,7 @@ export async function statementsMarket(app: HTMLElement, rerender: () => void) {
     const n = shown.length, what = overprints ? (n === 1 ? 'Overprint' : 'Overprints') : n === 1 ? 'Statement' : 'Statements';
     if (overprints && !n && !standing) void readStanding();
     const none = overprints
-      ? `<p class="muted st-none">No Overprints are for sale right now.${standing?.length ? ' Here are a few to explore.' : ''}</p>${standing?.length ? `<div class="st-grid">${standing.map(card).join('')}</div>` : ''}`
+      ? `<p class="muted st-none">No Overprints are for sale right now.${!standing?.length ? '' : total === 1 ? ' Here’s the only one.' : total > standing.length ? ` Here are ${standing.length} of the ${total} to explore.` : ` Here are all ${total} to explore.`}</p>${standing?.length ? `<div class="st-grid">${standing.map(card).join('')}</div>` : ''}`
       : '<p class="muted">No Statement is listed right now.</p>';
     app.innerHTML = `<section class="trait-page jb">
       ${creditsHead('statements')}
