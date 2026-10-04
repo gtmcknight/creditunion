@@ -1589,6 +1589,11 @@ export class Views {
   get playing() {
     return this.scene.playing;
   }
+  /// At the end of its run: Play starts it over.
+  get ended() {
+    const sc = this.scene;
+    return sc.animated && !sc.loop && !sc.playing && sc.t >= sc.length() - 1e-3;
+  }
   /// What a view reads from elsewhere, read ahead while nothing else is going on.
   warm() {
     (this.scenes.timeline as TimelineScene).read();

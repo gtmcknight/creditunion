@@ -33,6 +33,7 @@ const rating = (score: bigint) => Number(score / 10_000n).toLocaleString();
 const VIEW_KEY = 'statement-view';
 const icon = (d: string) => `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.25" d="${d}"/></svg>`;
 const PLAY = icon('M4.5 2.8v10.4L13 8z'), PAUSE = icon('M5 3v10M11 3v10'), EXPAND = icon('M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10');
+const REPLAY = icon('M3 8a5 5 0 1 0 1.6-3.7M3 2.5v2.8h2.8');
 const SHRINK = icon('M6 2.5V6H2.5M13.5 6H10V2.5M10 13.5V10h3.5M2.5 10H6v3.5');
 const SHARE = icon('M8 10.5V2.2M5.1 5.1 8 2.2l2.9 2.9M3.1 8.6v5.8h9.8V8.6');
 /// A 16-pixel glyph for each view, the weight of the format glyphs: what it shows, at a glance.
@@ -225,9 +226,10 @@ async function mount(app: HTMLElement, pages: Page[], own: Direction) {
     const play = bar.querySelector<HTMLButtonElement>('[data-act="play"]');
     if (play) {
       play.hidden = !views.scene.animated;
-      play.innerHTML = views.playing ? PAUSE : PLAY;
-      play.setAttribute('aria-label', views.playing ? 'Pause' : 'Play');
-      play.title = `${views.playing ? 'Pause' : 'Play'} (Space)`;
+      const say = views.playing ? 'Pause' : views.ended ? 'Replay' : 'Play';
+      play.innerHTML = views.playing ? PAUSE : views.ended ? REPLAY : PLAY;
+      play.setAttribute('aria-label', say);
+      play.title = `${say} (Space)`;
     }
     const ex = host.querySelector<HTMLButtonElement>('.st-expand')!, wide = page.classList.contains('st-wide');
     ex.innerHTML = wide ? SHRINK : EXPAND;
@@ -269,6 +271,15 @@ async function mount(app: HTMLElement, pages: Page[], own: Direction) {
   });
   views.draw();
   sync();
+  // The print run plays once, the first time the frame is seen, so it isn't missed behind Play.
+  if (layers && views.scene.key === 'statement' && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const seen = new IntersectionObserver((es) => {
+      if (!es.some((e) => e.isIntersecting)) return;
+      seen.disconnect();
+      if (canvas.isConnected && views.scene.key === 'statement' && !views.playing) views.play();
+    }, { threshold: 0.5 });
+    seen.observe(canvas);
+  }
   if (layers) {
     const idle = (f: () => void) => ('requestIdleCallback' in window ? requestIdleCallback(f, { timeout: 3000 }) : setTimeout(f, 1500));
     idle(() => views.warm());
