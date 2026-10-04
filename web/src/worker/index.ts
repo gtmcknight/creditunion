@@ -25,6 +25,7 @@ import { cacheStore, confirmListing, marketListings, type FwaListing } from './f
 import { confirmStrategy, strategyAbi, strategyListings } from './strategy';
 import { inks, ratings, loadTable } from './ratings';
 import { buyStatement, statementsForSale } from './statements-market';
+import { livesOf, overprintsOf } from './statement-history';
 import { load, loadScores, match, predicate, type Rules } from './match';
 import { cardFor, creditCard, creditsCard, partyCard, rangeCard, ruleLine, timeCard, traitCard, withCard, type Filter } from './og';
 import { parseTrait } from '../shared/trait';
@@ -1061,6 +1062,46 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
   }
 
+  // When each page of an overprinted Statement was made and burned (its Timeline view). What has happened doesn't
+  // change, so an answer is kept a day at the edge.
+  if (url.pathname === '/statements/lives.json') {
+    if (req.method !== 'GET' || !sameSite(req)) return text('forbidden', 403);
+    const ids = (url.searchParams.get('ids') ?? '').split(',');
+    if (ids.length > 64 || ids.some((x) => !/^\d{1,7}$/.test(x))) return text('bad request', 400);
+    const key = new Request(`${url.origin}/statements/lives-cache/v1/${ids.join('.')}`);
+    const hit = await caches.default.match(key);
+    if (hit) return hit;
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    try {
+      const statements = await statementsOf(env);
+      if (!statements) return Response.json({ items: [] });
+      const items = await livesOf(client(env) as never, rpcList(env), statements, ids.map(BigInt));
+      const res = Response.json({ items }, { headers: { 'cache-control': 'public, max-age=86400' } });
+      ctx.waitUntil(caches.default.put(key, res.clone()));
+      return res;
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
+  }
+
+  // The overprinted Statements still standing, most pages first, for Market → Statements to show when none of them
+  // are for sale. Kept ten minutes at the edge.
+  if (url.pathname === '/statements/overprints.json') {
+    if (req.method !== 'GET') return text('method not allowed', 405);
+    const key = new Request(`${url.origin}/statements/overprints.json`);
+    const hit = await caches.default.match(key);
+    if (hit) return hit;
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    try {
+      const statements = await statementsOf(env);
+      const items = statements ? await overprintsOf(client(env) as never, statements) : [];
+      const res = Response.json({ items }, { headers: { 'cache-control': 'public, max-age=600' } });
+      ctx.waitUntil(caches.default.put(key, res.clone()));
+      return res;
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
+  }
   // Market → Statements: every Statement listed on OpenSea with its rating and format, kept a minute at the edge.
   if (url.pathname === '/market/statements.json') {
     if (!env.OPENSEA_API_KEY) return text('OpenSea is not configured', 501);

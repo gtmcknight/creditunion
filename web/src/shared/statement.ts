@@ -8,7 +8,7 @@
 /// Geometry is in the contract's paper units: a 10,000 × 12,500 sheet. Consolidated and Reconciled share one box of
 /// 64 × 80 cells inside a 6-cell margin, one cell per pixel of Credit art.
 import { processOf } from './credits';
-import { accrued, amortized, assessed, binary, liquidated, paintModel, PALETTE } from './formats/statement-renderers';
+import { accrued, amortized, assessed, binary, liquidated, paintModel, paperColor, PALETTE } from './formats/statement-renderers';
 
 export const DIRECTIONS = ['Issued', 'Consolidated', 'Assessed', 'Reconciled', 'Accrued', 'Amortized', 'Liquidated', 'Recorded'] as const;
 export type Direction = (typeof DIRECTIONS)[number];
@@ -171,23 +171,67 @@ function placed<T extends object>(ctx: T): T {
   });
 }
 
-export function paint(g: Pen, W: number, marks: readonly Mark[]) {
+export function paint(g: Pen, W: number, marks: readonly Mark[], inverted = false) {
+  // On black paper the rects trade colours as they're set; a renderer's model trades its own (paintModel), so it
+  // draws on the plain pen, or it would trade them twice and come out on white.
+  const pen = inverted ? paperSwapped(g) : g;
   const k = W / PAGE.w;
   // Neighbouring cells reach their shared edge by different sums; trimming the float noise first keeps both
   // snapping to the same pixel, so no hairline of paper shows between them.
   const snap = (v: number) => Math.round(Math.round(v * 1e3) * 1e-3 * k);
-  g.fillStyle = '#fff';
-  g.fillRect(0, 0, W, Math.round((W * PAGE.h) / PAGE.w));
+  pen.fillStyle = '#fff';
+  pen.fillRect(0, 0, W, Math.round((W * PAGE.h) / PAGE.w));
   for (const m of marks) {
     if (!Array.isArray(m)) {
-      paintModel(placed(g), W, m.model);
+      paintModel(placed(g), W, m.model, inverted);
       continue;
     }
     const [x, y, w, h, colour] = m;
     const x0 = snap(x), y0 = snap(y), x1 = snap(x + w), y1 = snap(y + h);
-    if (x1 > x0 && y1 > y0) (g.fillStyle = colour), g.fillRect(x0, y0, x1 - x0, y1 - y0);
+    if (x1 > x0 && y1 > y0) (pen.fillStyle = colour), pen.fillRect(x0, y0, x1 - x0, y1 - y0);
   }
 }
+
+/// A pen whose colours trade paper for black as they're set (Statements.sol _swapPaper): black paper.
+function paperSwapped<T extends Pen>(g: T): T {
+  return new Proxy(g, {
+    get(t, p) {
+      const v = Reflect.get(t, p);
+      return typeof v === 'function' ? v.bind(t) : v;
+    },
+    set(t, p, v) {
+      (t as unknown as Record<PropertyKey, unknown>)[p] = p === 'fillStyle' && typeof v === 'string' ? paperColor(v) : v;
+      return true;
+    },
+  });
+}
+
+/// Overprinting ORs every page's ink into the base, cell by cell; each cell keeps the most 8s any page brought.
+/// `pages` in the contract's historyOf order: layer n is pages 0..n printed together.
+export function overprinted(pages: readonly (readonly (Ink | null)[])[]): (Ink | null)[] {
+  return Array.from({ length: 80 }, (_, c) => {
+    let out: Ink | null = null;
+    for (const page of pages) {
+      const ink = page[c];
+      if (!ink) continue;
+      if (!out) out = { px: new Uint8Array(144), eights: 0 };
+      for (let i = 0; i < 144; i++) out.px[i] |= ink.px[i];
+      out.eights = Math.max(out.eights, Math.min(ink.eights, 4));
+    }
+    return out;
+  });
+}
+
+/// Pages 0..n drawn as one Statement in `direction`. Accrued piles each page up as its own level, as the contract's
+/// renderer does from inkOf of each page in historyOf order: a page's ink is its own and everything overprinted onto
+/// it (`spans[j]`: how many pages from j that is), and the first is the whole Statement.
+export function layered(direction: Direction, pages: readonly (readonly (Ink | null)[])[], spans?: readonly number[]): Mark[] {
+  if (direction === 'Accrued') return [{ model: accrued(pages.map((_, j) => wordsOf(overprinted(j ? pages.slice(j, j + (spans?.[j] ?? 1)) : pages)))) }];
+  return compose(direction, overprinted(pages));
+}
+
+/// From this many pages on, a Statement prints on black paper for good (Statements.INVERTED_AT overprints + 1).
+export const BLACK_PAPER_PAGES = 8;
 
 /// An example Credit's colour: 28% ink on white, the sheet's ghost opacity.
 const FADED = MIX.map((hex) => {

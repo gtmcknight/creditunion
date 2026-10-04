@@ -9570,3 +9570,80 @@ a.whale-name:hover { text-decoration: underline; text-underline-offset: 3px; }
 :root[data-look='jack'] .subtabs :is(a, button):is([aria-current], [aria-selected='true']) { font-weight: 700; text-decoration: underline; text-underline-offset: 7px; color: var(--fg); }
 :root[data-look='jack'] .jb-crumb { align-items: baseline; gap: 28px; }
 :root[data-look='jack'] .acct-menu .acct-looks > button svg { color: #111; }
+
+/* A Statement's page (/statement/N): an overprinted Statement's views as a row of glyphs over the frame, Expand in
+   its corner, the format row under it with Play · Share, and beside it the facts (or, while pointing at something in
+   the views, that thing large). */
+.st-col { display: grid; gap: 10px; min-width: 0; }
+.st-page-art { container-type: inline-size; }
+.st-page-art .st-layer,
+.st-page-art .st-view { position: absolute; inset: 0; z-index: 2; display: block; width: 100%; height: 100%; }
+.st-page-art .st-layer { image-rendering: pixelated; }
+.st-view { touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.st-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 2px; min-height: 36px; font-size: 14px; }
+.st-top { display: flex; align-items: center; min-height: 36px; font-size: 14px; }
+/* The two rows' labels share a width, so their glyphs line up in columns. */
+.st-row-label, .st-formats .dir-word { min-width: 104px; margin-right: 0; text-align: left; }
+.st-row-label { color: var(--muted); }
+.st-formats .dir-word[aria-checked='true'] { box-shadow: none; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 9px; }
+/* A format this view can't draw in. */
+.st-formats .dir-glyph:disabled { opacity: 0.25; cursor: default; }
+.st-formats .dir-glyph:disabled::after { display: none; }
+.st-views, .st-formats .dirs { gap: 8px; }
+.st-formats { display: inline-flex; align-items: center; }
+.st-acts { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
+.st-act { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 36px; height: 36px; padding: 0 8px; border: 0; border-radius: var(--r); background: none; font: inherit; color: var(--fg); cursor: pointer; }
+.st-act:last-child { margin-right: -10px; }
+.st-act[hidden] { display: none; }
+.st-act svg { flex: none; }
+.st-act:hover { background: var(--surface); }
+.st-act, .st-act:active { transform: scale(0.96); }
+@media (prefers-reduced-motion: reduce) {
+  .st-act:active { transform: none; }
+}
+.st-page { display: grid; gap: 12px; padding-top: 24px; border-top: 1px solid var(--line); }
+.st-page-line { margin: 0; font-size: 14px; }
+.st-page-line strong { color: var(--fg); font-weight: 500; }
+.st-credits { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 3px; max-width: 296px; }
+.st-credits img { display: block; width: 100%; aspect-ratio: 1; image-rendering: pixelated; outline: 1px solid var(--img-outline); outline-offset: -1px; }
+.st-credits a:hover img { outline-color: var(--fg); }
+/* Expand, in the frame's top right corner: the views take the page's width over the facts, as tall as the window
+   leaves room for under the header with both rows in view, and the picture lays itself out wider. */
+.st-expand { position: absolute; top: 4px; right: 4px; z-index: 3; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r); background: none; color: var(--muted); cursor: pointer; transition: color 120ms var(--ease), background-color 120ms var(--ease), transform 120ms var(--ease); }
+.st-expand:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.st-expand:active { transform: scale(0.96); }
+.st-col { scroll-margin-top: 80px; }
+.credit-page.st-wide { grid-template-columns: minmax(0, 1fr); }
+.credit-page.st-wide .batch-side { display: none; }
+@media (min-width: 821px) {
+  .credit-page.st-wide .st-col { container-type: inline-size; }
+  .credit-page.st-wide .st-page-art { aspect-ratio: auto; height: clamp(440px, calc(100svh - 192px), 125cqw); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .st-expand { transition: none; }
+  .st-expand:active { transform: none; }
+}
+/* What's pointed at in the views, large, in place of the facts until the pointer leaves. */
+.batch-side { position: relative; }
+.st-peek { position: absolute; inset: 0 0 auto 0; z-index: 4; display: grid; gap: 6px; padding-bottom: 24px; background: var(--bg); opacity: 0; transform: translateY(4px); transition: opacity 140ms var(--ease), transform 140ms var(--ease); pointer-events: none; }
+.st-peek.on { opacity: 1; transform: none; }
+.st-peek canvas { display: block; margin-bottom: 8px; }
+.st-peek p { margin: 0; font-size: 14px; }
+@media (prefers-reduced-motion: reduce) {
+  .st-peek { transition: none; transform: none; }
+}
+dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); height: auto; margin: 0 auto; display: block; }
+.st-export-note { min-height: 1.4em; margin: 0; text-align: center; }
+@media (max-width: 720px) {
+  .st-credits { max-width: none; }
+}
+/* Market → Statements: Overprints shows only Statements with others overprinted onto them, drawn with their pages
+   stacked behind. */
+.jb-controls-end { display: inline-flex; align-items: center; gap: 6px; }
+.st-filter { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border: 0; border-radius: var(--r); background: none; font: inherit; font-size: 14px; color: var(--muted); cursor: pointer; transition: background-color 120ms var(--ease), color 120ms var(--ease); }
+.st-filter:hover { color: var(--fg); background: var(--surface); }
+.st-filter[aria-pressed='true'] { color: var(--fg); background: var(--surface); }
+.st-art.stacked { overflow: visible; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), var(--stack); }
+.st-art.stacked .statement-art { overflow: hidden; }
+/* Clear of the paper stacked above the first row. */
+.st-none { margin: 0 0 32px; }

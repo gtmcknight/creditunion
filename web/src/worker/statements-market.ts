@@ -10,6 +10,7 @@ const SLUG = 'statements';
 const READ = [
   { type: 'function', name: 'creditScoreOf', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'uint256' }] },
   { type: 'function', name: 'formatOf', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'uint8' }] },
+  { type: 'function', name: 'historyLength', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'uint256' }] },
 ] as const;
 
 /// Seaport 1.6's fulfillAdvancedOrder, its AdvancedOrder taken from the Sweeper's ABI (the same struct).
@@ -39,9 +40,10 @@ const FULFILL = [
   },
 ] as const;
 
-export type ForSale = Listing & { rating: number | null; format: number | null };
+export type ForSale = Listing & { rating: number | null; format: number | null; pages: number | null };
 
-/// Every Statement listed on OpenSea (cheapest per Statement), up to three pages, with its rating and format.
+/// Every Statement listed on OpenSea (cheapest per Statement), up to three pages, with its rating, format and how many
+/// pages it holds (more than one when others were overprinted onto it).
 export async function statementsForSale(key: string, statements: Address, c: PublicClient): Promise<ForSale[]> {
   const out: Listing[] = [];
   let next = '';
@@ -55,13 +57,19 @@ export async function statementsForSale(key: string, statements: Address, c: Pub
     contracts: out.flatMap((l) => [
       { address: statements, abi: READ, functionName: 'creditScoreOf', args: [BigInt(l.id)] } as const,
       { address: statements, abi: READ, functionName: 'formatOf', args: [BigInt(l.id)] } as const,
+      { address: statements, abi: READ, functionName: 'historyLength', args: [BigInt(l.id)] } as const,
     ]),
     allowFailure: true,
     multicallAddress: '0xcA11bde05977b3631167028862bE2a173976CA11',
   });
   return out.map((l, i) => {
-    const sc = reads[2 * i], f = reads[2 * i + 1];
-    return { ...l, rating: sc.status === 'success' ? Number((sc.result as bigint) / 10_000n) : null, format: f.status === 'success' ? Number(f.result) : null };
+    const sc = reads[3 * i], f = reads[3 * i + 1], h = reads[3 * i + 2];
+    return {
+      ...l,
+      rating: sc.status === 'success' ? Number((sc.result as bigint) / 10_000n) : null,
+      format: f.status === 'success' ? Number(f.result) : null,
+      pages: h.status === 'success' ? Number(h.result) : null,
+    };
   });
 }
 

@@ -34,7 +34,7 @@ export const canvasShowing = (c: HTMLCanvasElement) => drawn.get(c)?.d;
 export const directionCanvas = '<canvas class="dir-canvas" hidden aria-hidden="true"></canvas>';
 
 /// A 16-pixel glyph for each direction, what its sheet looks like. Every glyph fills the same page-shaped box with about the same ink, lines at 1.25 (Share matches).
-const GLYPH: Record<Direction, string> = {
+export const GLYPH: Record<Direction, string> = {
   Issued: '<path fill="currentColor" d="M2.5 3h2.5v2.5h-2.5zM2.5 7.25h2.5v2.5h-2.5zM2.5 11.5h2.5v2.5h-2.5zM6.75 3h2.5v2.5h-2.5zM6.75 7.25h2.5v2.5h-2.5zM6.75 11.5h2.5v2.5h-2.5zM11 3h2.5v2.5h-2.5zM11 7.25h2.5v2.5h-2.5zM11 11.5h2.5v2.5h-2.5z"/>', // Credits spaced on the page
   Consolidated: '<path fill="currentColor" d="M2 1h2v2h-2zM6 1h2v2h-2zM8 1h2v2h-2zM12 1h2v2h-2zM4 3h2v2h-2zM8 3h2v2h-2zM10 3h2v2h-2zM2 5h2v2h-2zM6 5h2v2h-2zM10 5h2v2h-2zM12 5h2v2h-2zM2 7h2v2h-2zM4 7h2v2h-2zM8 7h2v2h-2zM12 7h2v2h-2zM4 9h2v2h-2zM6 9h2v2h-2zM10 9h2v2h-2zM2 11h2v2h-2zM6 11h2v2h-2zM8 11h2v2h-2zM12 11h2v2h-2zM4 13h2v2h-2zM8 13h2v2h-2zM10 13h2v2h-2z"/>', // cells butted into one mosaic
   Assessed: '<path fill="currentColor" d="M2.5 2h5.5v5.5H2.5zM8.5 8.5h5v5.5h-5zM9 2.5h1v1h-1zM11 2.5h1v1h-1zM13 2.5h1v1h-1zM9 4.5h1v1h-1zM11 4.5h1v1h-1zM13 4.5h1v1h-1zM9 6.5h1v1h-1zM11 6.5h1v1h-1zM13 6.5h1v1h-1zM3 9h1v1h-1zM5 9h1v1h-1zM7 9h1v1h-1zM3 11h1v1h-1zM5 11h1v1h-1zM7 11h1v1h-1zM3 13h1v1h-1zM5 13h1v1h-1zM7 13h1v1h-1z"/>', // each Credit a block of its mix, dithered to how much it inks
@@ -45,7 +45,7 @@ const GLYPH: Record<Direction, string> = {
   Reconciled: '<path fill="currentColor" d="M2 1.5h12V3H2zM2 4.5h8V6H2zM2 7.5h10.5V9H2zM2 10.5h6V12H2zM2 13.5h9V15H2z"/>', // one row per Credit, ragged right
 };
 
-const glyph = (paths: string) => `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">${paths}</svg>`;
+export const glyph = (paths: string) => `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">${paths}</svg>`;
 
 /// The buttons of a row, the eight with All in front if `all`; `attr` names the attribute each carries its direction in.
 function row(radio: (d: Pick) => string, attr: string, all: boolean) {
@@ -263,21 +263,23 @@ let seedAsk: Map<string, (v: Seed | null) => void> | null = null;
 async function askSeeds() {
   const all = seedAsk!;
   seedAsk = null;
-  const ids = [...all.keys()];
-  for (let i = 0; i < ids.length; i += 500) {
-    const part = ids.slice(i, i + 500);
-    const r = await seeds(part).catch(() => null);
-    for (const id of part) {
-      const seed = r?.[id];
-      if (!seed?.[0]) {
-        seedReads.delete(id); // asked again next time
-        all.get(id)!(null);
-        continue;
+  const ids = [...all.keys()], parts: string[][] = [];
+  for (let i = 0; i < ids.length; i += 500) parts.push(ids.slice(i, i + 500));
+  await Promise.all(
+    parts.map(async (part) => {
+      const r = await seeds(part).catch(() => null);
+      for (const id of part) {
+        const seed = r?.[id];
+        if (!seed?.[0]) {
+          seedReads.delete(id); // asked again next time
+          all.get(id)!(null);
+          continue;
+        }
+        keep(id, seed);
+        all.get(id)!(seed);
       }
-      keep(id, seed);
-      all.get(id)!(seed);
-    }
-  }
+    }),
+  );
 }
 export function seedsOf(ids: readonly (string | null)[]): Promise<(Seed | null)[]> {
   for (const id of ids) {
