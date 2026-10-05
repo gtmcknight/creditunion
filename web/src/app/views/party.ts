@@ -6,7 +6,7 @@ import { ARRANGEMENTS, burnAdapter, ratingTotal, getSummary, spotsSaved, type Ph
 import { filterRules, maskInks, maskLabel, paletteBit, type Rule } from '../traits';
 import { ens, hydrate, identicon, pct, who } from '../ens';
 import { creditCard, examples, fillGhosts, planGhosts, registerDeposits, registerFilter } from '../ghosts';
-import { gapOf, Guide, inOrder, landing, planOf, sliceBase, unpackPicture, type Plan, type Stored, OWN_GOOD, runOf } from '../picture';
+import { gapOf, Guide, inOrder, landing, lockable, planOf, sliceBase, unpackPicture, type Plan, type Stored, OWN_GOOD, runOf } from '../picture';
 import { Room, books, keysOf, noRoomReason, placedKeys, type Books } from '../slots';
 import { MAX_SWEEP, buying, checkQuote, listedById, connectToBuy, live as keepLive, minEth, priceTag, relist, sweepControls, sweepRow, type Listed, type Quote, type Sale, type Source } from '../forsale';
 import { creditCell, creditSkel } from './trait';
@@ -105,7 +105,7 @@ async function planPicture(b: Ctx, slots: number[], placed: (bigint | null)[] | 
         if (!d) return null;
         const keys = held.length ? await keysOf(0, held).catch(() => new Map<string, number>()) : new Map<string, number>();
         if (d.look) looks.set(b.s.address.toLowerCase(), d.look);
-        // Only the listings of its Colors at the plan's price, and yours, not the whole edition and market (sliceBase).
+        // Only the listings of its Colors, and yours, not the whole edition and market (sliceBase).
         const base = sliceBase(slots, account ? held : []);
         return Guide.of(unpackPicture(d.px), { wallets: account ? [account] : [], held: account ? held : undefined, colours: (id) => keys.get(id.toString()) ?? 0, detail: d.detail, own: config.sweeper ? OWN_GOOD : 1, look: d.look, base }); // testnets can't buy: there yours lead
       });
@@ -135,7 +135,8 @@ function chooseSpots(from: 'mine' | 'buy', ids: Iterable<string>) {
   if (changed) art.dispatchEvent(new CustomEvent('ghosts', { bubbles: true }));
 }
 /// A Picture union's buy locks (worker/locks.ts): Colors someone is buying right now can't be bought by anyone else
-/// until their transaction lands, so no Credit lands a slot late. A lock gives a minute to confirm in the wallet; then
+/// until their transaction lands, so no Credit lands a slot late. Colors whose open spots all look the same
+/// (a plain background) aren't locked: any order draws them. A lock gives 30 s to confirm in the wallet; then
 /// the transaction it sent holds it, said again every 20 s until it's released (every 5 s while the Worker hasn't seen
 /// the transaction yet). Null answers mean locks are off (testnets, local).
 type LockOp = { op: 'acquire'; id: string; account: string; colours: number[] } | { op: 'hold'; id: string; tx: string } | { op: 'release'; id: string };
@@ -168,6 +169,9 @@ let draws = 0;
 /// The live-refresh timer for the Credit Union on screen (one at a time).
 let live: ReturnType<typeof setInterval> | null = null;
 const LIVE_MS = 8_000; // under a block: the index it reads is kept for everyone, so a poll costs no chain read
+/// While someone else is buying Colors of the picture on screen, and for half a minute after (their buy lands, then the
+/// index has it), the page looks as often as an auction's does: those Colors are back in Buy soon after it lands.
+let fastUntil = 0;
 /// An auction's page looks more often, a quarter of a block apart: being outbid is a race. It reads the same index
 /// (the site reads every union once a block), so watching costs no chain read; a bid checks the chain itself.
 const AUCTION_MS = 3_000;
@@ -534,7 +538,13 @@ function watchLive(app: HTMLElement, address: Address, b: Ctx, rerender: () => v
       looking = false;
     }
   };
-  const timer = (live = setInterval(look, b.s.state === 'Auction' ? AUCTION_MS : LIVE_MS));
+  let looked = Date.now();
+  const tick = () => {
+    if (b.s.state !== 'Auction' && Date.now() > fastUntil && Date.now() - looked < LIVE_MS - 500) return;
+    looked = Date.now();
+    void look();
+  };
+  const timer = (live = setInterval(tick, AUCTION_MS));
   onReturn(look, () => live === timer);
   if (now) void look();
 }
@@ -1349,10 +1359,10 @@ async function drawPicker(
         // …with their Colors locked first, so nobody's buy lands in their slots meanwhile (as a picture's buys do).
         const lockId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (x) => x.toString(16).padStart(2, '0')).join('');
         let locked = false;
-        if (plan) {
-          const colours = [...new Set(ids.flatMap((id) => plan.colour.get(id.toString()) ?? []))];
+        const colours = plan ? lockable(plan, ids.map(String)) : [];
+        if (colours.length) {
           const lk = await locks(s.address, { op: 'acquire', id: lockId, account: session.account!, colours });
-          if (lk && lk.ok === false) throw new Error(`Someone is buying ${(lk.busy ?? []).map((c) => slotName(0, c)).join(', ')} for this picture right now. Try again in a minute.`);
+          if (lk && lk.ok === false) throw new Error(`Someone is buying ${(lk.busy ?? []).map((c) => slotName(0, c)).join(', ')} for this picture right now. Try again in a moment.`);
           locked = !!lk;
         }
         const sent = (h: string) => (txNote(h), locked && void locks(s.address, { op: 'hold', id: lockId, tx: h }));
@@ -1529,10 +1539,15 @@ async function bindBuy(
       const want = byPlan([...p.buy].map((id) => ({ id })), p).slice(0, MAX_SWEEP).map((x) => x.id);
       const ls = await listedById(want, true);
       const sold = want.filter((id) => !ls.some((l) => l.id === id));
-      if (!sold.length) return { p, ls };
+      // Replanned around sold ones: the sheet draws the new plan, so every Credit offered shows its spot.
+      if (!sold.length) {
+        if (tries) void fillGhosts();
+        return { p, ls };
+      }
       sold.forEach((id) => gone.add(Number(id)));
       p = (await replans.get(batch.toLowerCase())?.(gone)) ?? p;
     }
+    void fillGhosts();
     return { p, ls: await listedById(byPlan([...p.buy].map((id) => ({ id })), p).slice(0, MAX_SWEEP).map((x) => x.id), true) };
   };
   const repicture = async (p: Plan) => {
@@ -1541,6 +1556,7 @@ async function bindBuy(
     order = got.p;
     all = got.ls;
     held = new Set(lk?.held ?? []);
+    if (held.size) fastUntil = Date.now() + 30_000;
     reshow();
   };
   // A picture union: nothing is offered until its plan is worked out, then only its planned Credits.
@@ -1556,6 +1572,7 @@ async function bindBuy(
       order = got.p;
       all = got.ls;
       held = new Set(lk?.held ?? []);
+      if (held.size) fastUntil = Date.now() + 30_000;
     }
   }
   // A picture's, in the order they go in; any other union's, cheapest first.
@@ -1630,13 +1647,13 @@ async function bindBuy(
     const lockId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (x) => x.toString(16).padStart(2, '0')).join('');
     let locked = false;
     await run(go, 'Buying…', async () => {
-      if (order) {
-        const colours = [...new Set(picked.map((l) => order!.colour.get(l.id)!))];
+      const colours = order ? lockable(order, picked.map((l) => l.id)) : [];
+      if (colours.length) {
         const lk = await locks(batch, { op: 'acquire', id: lockId, account: session.account!, colours });
         if (lk && lk.ok === false) {
           held = new Set([...held, ...(lk.busy ?? [])]);
           reshow();
-          throw new Error(`Someone is buying ${(lk.busy ?? []).map((m) => slotName(0, m)).join(', ')} for this picture right now. Try again in a minute, or buy other Colors.`);
+          throw new Error(`Someone is buying ${(lk.busy ?? []).map((m) => slotName(0, m)).join(', ')} for this picture right now. Try again in a moment, or buy other Colors.`);
         }
         locked = !!lk;
       }

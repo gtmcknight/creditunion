@@ -1,5 +1,5 @@
 /// Can join for a picture union: which of your Credits its plan would take now (null: not a picture), by the same test its own page runs
-/// (planPicture in views/party.ts). The picture is matched against the listings of its Colors at the plan's price and
+/// (planPicture in views/party.ts). The picture is matched against the listings of its Colors and
 /// yours, each open spot gets its best Credit, and one of yours takes a spot only where it draws it about as well as
 /// the best for sale (OWN_GOOD).
 import type { Address } from 'viem';

@@ -1,13 +1,13 @@
 /// Buy locks for Picture unions, one object per union. A picture's Colors fill their slots in the order Credits of
 /// them go in, so two people buying the same Colors at once would land one of them a slot late. A buy locks its
-/// Colors from the click until its transaction lands: a minute to confirm in the wallet, then, once the Worker has
+/// Colors from the click until its transaction lands: 30 s to confirm in the wallet, then, once the Worker has
 /// seen the transaction the wallet sent (index.ts), two minutes at a time while it's pending, never past CAP from the
 /// click. Anyone else sees those Colors as being bought and can buy the others. A lock with no transaction behind it
 /// is charged to the address that asked (BUDGET), so nobody can keep Colors locked just by asking again and again.
 /// Kept in memory: a lock only matters for minutes, and an object that restarts simply starts with none.
 import { DurableObject } from 'cloudflare:workers';
 
-/// The longest a lock lives, from the click: a minute in the wallet, then a transaction pending for several blocks.
+/// The longest a lock lives, from the click: 30 s in the wallet, then a transaction pending for several blocks.
 /// One still pending after that is stuck, and keeping everyone else from buying its Colors costs more than the slot
 /// order it protects.
 export const CAP = 10 * 60_000;

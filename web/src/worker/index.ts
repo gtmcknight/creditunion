@@ -170,8 +170,6 @@ function gzipped(req: Request, url: URL, body: ArrayBuffer, cache: string): Resp
   precompressed.add(res);
   return res;
 }
-/// The most a listing may cost to be drawn into a picture union's plan (picture.ts MAX_PRICE).
-const PICTURE_MAX_WEI = 80_000_000_000_000_000n;
 
 function secure(res: Response, url: URL) {
   const h = new Headers(res.headers);
@@ -567,21 +565,21 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
   }
 
-  // A Picture union's market, cut for its page (slice.ts): the listings at or under PICTURE_MAX_WEI that could draw
-  // the Colors in ?pal= (bit c for Colors c), each with its print. Built from the market book as /market.json is, and
-  // kept as long at the edge (30 s), so a listing that sells leaves it as soon as it leaves /market.json.
+  // A Picture union's market, cut for its page (slice.ts): the listings that could draw the Colors in ?pal= (bit c for
+  // Colors c), each with its print. Built from the market book as /market.json is, and kept as long at the edge
+  // (30 s), so a listing that sells leaves it as soon as it leaves /market.json.
   if (url.pathname === '/market/picture') {
     if (req.method !== 'GET' || !sameSite(req)) return text('forbidden', 403);
     const pal = Number(url.searchParams.get('pal'));
     if (!Number.isInteger(pal) || pal < 2 || pal > 0xfffe || pal & 1) return text('bad request', 400);
-    const key = new Request(`${url.origin}/market/picture-cache/v1/${pal}`);
+    const key = new Request(`${url.origin}/market/picture-cache/v3/${pal}`);
     const hit = await caches.default.match(key);
     if (hit) return gzipped(req, url, await hit.arrayBuffer(), 'public, max-age=30');
     if (await limited(env.RL_MISC, req, 5)) return text('slow down', 429);
     if (!env.MARKET) return text('no market book here', 503);
     try {
       const [bk, traits, wall] = await Promise.all([marketBook(env, url, ctx), load(env.ASSETS, url.origin), wallOf(env.ASSETS, url.origin)]);
-      const body = await gzip(rowsOf(pictureRows(bk.rows, traits, pal, PICTURE_MAX_WEI), wall, traits));
+      const body = await gzip(rowsOf(pictureRows(bk.rows, traits, pal), wall, traits));
       ctx.waitUntil(caches.default.put(key, new Response(body, { headers: { 'cache-control': 'public, max-age=30' } })));
       return gzipped(req, url, body, 'public, max-age=30');
     } catch (e) {
@@ -831,7 +829,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   }
 
   // A Picture union's buy locks (locks.ts): GET the Colors being bought. POST { op: 'acquire', id, account, colours }
-  // locks them for 60 s to confirm in the wallet; { op: 'hold', id, tx } keeps them 2 minutes more (never past
+  // locks them for 30 s to confirm in the wallet; { op: 'hold', id, tx } keeps them 2 minutes more (never past
   // locks.ts' CAP from the click) once tx is seen to be that account's buy or deposit into this union (lockTx: 202
   // while the network hasn't shown it yet, ask again); { op: 'release', id } frees them.
   const lockPath = url.pathname.match(/^\/locks\/(0x[0-9a-fA-F]{40})$/);
@@ -870,7 +868,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const colours = Array.isArray(b.colours) ? b.colours.map(Number) : [];
     const account = String(b.account ?? '').toLowerCase();
     if (b.op !== 'acquire' || !/^0x[0-9a-f]{40}$/.test(account) || !colours.length || colours.length > 15 || colours.some((c) => !Number.isInteger(c) || c < 1 || c > 15)) return text('bad request', 400);
-    const got = await stub.acquire(id, account, ipKey(req.headers.get('cf-connecting-ip') ?? 'anon'), [...new Set(colours)], 60_000);
+    const got = await stub.acquire(id, account, ipKey(req.headers.get('cf-connecting-ip') ?? 'anon'), [...new Set(colours)], 30_000);
     // Out of lock time without transactions: no lock (the page buys without one).
     if ('spent' in got) return text('slow down', 429);
     return Response.json(got, { headers: { 'cache-control': 'no-store' } });

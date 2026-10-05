@@ -240,9 +240,8 @@ export function loadBase() {
 /// A Credit's Colors value (CMYK mask).
 export const paletteOf = (b: Base, id: number) => b.traits[id - 1] & 15;
 
-/// What a Picture union's page reads instead (Guide only weighs a wallet's own Credits and listings at or under
-/// MAX_PRICE, and a union's plan only those of its Colors): the Worker's cut of the market for these Colors, and the
-/// viewer's own Credits, each with its print and traits (worker/slice.ts), a few hundred KB rather than 2.9 MB. The
+/// What a Picture union's page reads instead (a union's plan only weighs a wallet's own Credits and the listings of its
+/// Colors): the Worker's cut of the market for these Colors, and the viewer's own Credits, each with its print and traits (worker/slice.ts), a few hundred KB rather than 2.9 MB. The
 /// whole files when the cut can't be read.
 export function sliceBase(colours: Iterable<number>, own: readonly bigint[]): Promise<Base> {
   const mask = [...colours].reduce((m, c) => (c > 0 && c < 16 ? m | (1 << c) : m), 0);
@@ -291,8 +290,7 @@ export async function candidates(wallets: Address[], skip: ReadonlySet<number> =
   return { cands, wall: b.wall, owned: owned.map((x) => x.length), base: b };
 }
 
-/// Most a recommended listing may cost, and how much edges count, as the Printer's defaults.
-const MAX_PRICE = 0.08;
+/// How much edges count, as the Printer's default.
 /// How much each ETH of a listing counts against its likeness in a picture's plan: 100 times the Printer's, so 0.01 ETH
 /// weighs about as much as a typical patch's mismatch. At the Printer's weight price only broke ties, and plans
 /// bought Credits at about 3.4 times their Colors' floor; at this one six live pictures cost 20 to 55% less and still
@@ -334,7 +332,8 @@ export class Guide {
   /// `base`: what to weigh, when not the whole edition and market (sliceBase).
   static async of(px: Uint8ClampedArray, o: { wallets?: Address[]; held?: readonly bigint[]; colours?: (id: bigint) => number; detail?: number; progress?: (f: number) => void; own?: number; look?: Look; base?: Promise<Base> } = {}) {
     const { cands: all, wall, base: b } = await candidates(o.wallets ?? [], new Set(), o.held, o.base);
-    const cands = all.filter((c) => c.owner >= 0 || c.price <= MAX_PRICE);
+    // No price cap: PRICE_WEIGHT already makes a dearer listing win a spot only by looking that much better.
+    const cands = all;
     const pal = Uint8Array.from(cands, (c) => (c.owner === 0 && o.colours?.(BigInt(c.id))) || paletteOf(b, c.id));
     // A Credit you hold isn't free: it's worth about the floor of its Colors (what it would sell for), so the plan
     // prices it there, and one for sale wins its spot only by looking better than the difference in price.
@@ -342,7 +341,7 @@ export class Guide {
     cands.forEach((c, j) => c.owner < 0 && floor.set(pal[j], Math.min(floor.get(pal[j]) ?? Infinity, c.price)));
     const lowest = floor.size ? Math.min(...floor.values()) : 0;
     const priced = cands.map((c, j) => (c.owner >= 0 ? { ...c, price: floor.get(pal[j]) ?? lowest } : c));
-    const cost = await costs(px, priced, wall, { features: o.detail ?? DETAIL, maxPrice: MAX_PRICE, own: o.own ?? 1, look: o.look }, o.progress, PRICE_WEIGHT);
+    const cost = await costs(px, priced, wall, { features: o.detail ?? DETAIL, maxPrice: Infinity, own: o.own ?? 1, look: o.look }, o.progress, PRICE_WEIGHT);
     return new Guide(cands, cost, pal, detailOf(px), (o.own ?? 1) * OWN_COST, px);
   }
 
@@ -532,6 +531,17 @@ export function gapOf(plan: Plan, ids: Iterable<string>): string | null {
     if (next) return next;
   }
   return null;
+}
+
+/// The Colors of `ids` whose buy needs a lock: those with open spots that don't all look the same. A Colors whose open
+/// spots are one plain patch draws the same picture whichever Credit lands where, so buys into it can run at once.
+export function lockable(plan: Plan, ids: Iterable<string>): number[] {
+  const ms = new Set<number>();
+  for (const id of ids) {
+    const m = plan.colour.get(id);
+    if (m !== undefined && new Set((plan.open.get(m) ?? []).map((t) => plan.twin[t])).size > 1) ms.add(m);
+  }
+  return [...ms];
 }
 
 /// A Credit of `among`, not in `have`, planned for a spot that looks like `t` (the one planned for `t` first).

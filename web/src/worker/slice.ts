@@ -39,14 +39,14 @@ export function rowsOf(rows: { id: number; gwei: number }[], wall: Uint8Array, t
 
 /// Which listings a picture can use: registered, of one of the Colors in `colours` (bit c set for Colors c), priced at
 /// or under `maxWei`. `book`: [id, price in wei, …] rows.
-export function pictureRows(book: readonly (readonly [string, string, ...unknown[]])[], traits: Uint32Array, colours: number, maxWei: bigint) {
+export function pictureRows(book: readonly (readonly [string, string, ...unknown[]])[], traits: Uint32Array, colours: number) {
   const out: { id: number; gwei: number }[] = [];
   for (const r of book) {
     const id = Number(r[0]), t = traits[id - 1] ?? 0;
     if (!t || (t >> 4) & 7 || !(colours & (1 << (t & 15)))) continue;
-    const wei = BigInt(r[1]);
-    if (wei > maxWei) continue;
-    out.push({ id, gwei: Number(wei / 1_000_000_000n) });
+    const gwei = Number(BigInt(r[1]) / 1_000_000_000n);
+    if (gwei >= 2 ** 32) continue; // 4.29 ETH and up: past what a row holds, and no plan would pay it
+    out.push({ id, gwei });
   }
   return out;
 }

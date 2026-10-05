@@ -119,6 +119,24 @@ his contract has no cap beyond the Credits themselves.
 Not done: no written review round for the adapter, `UnionFormats` or `LiveRatings` in [AUDIT.md](AUDIT.md), and
 none of the three is covered by the Halmos proofs. Nothing in Credit Union has had an independent audit.
 
+## Not built: picture buys that check their own spots
+
+A picture's Colors fill front to back, so two people buying the same Colors at once would land one of them a spot
+late. The site prevents that off-chain: a buy locks its Colors (`web/src/worker/locks.ts`) from the click until its
+transaction lands, at most 30 s in the wallet first, and Colors whose open spots all look the same aren't locked.
+Everyone else buying that Colors waits.
+
+The on-chain version would remove the wait. A new Sweeper method, `sweepAt(batch, orders, …, spots)`, buys and
+deposits as `sweepAll` does, then reads `orderOf(batch)` and reverts unless each Credit it bought sits in the spot the
+buyer was shown, and calls `record(batch)` when they all do. Two buys racing for a Colors both go out; the second
+reverts and costs its sender only the gas spent until the revert, with no listing spent and nothing in a wrong spot.
+Depositing your own Credits would need the same check in a small `depositAt`.
+
+What it costs: a new Sweeper (the current one has no admin and can't change; the site points `config.sweeper` at the
+new one, the old one keeps working), more gas per buy (`orderOf` reads every Credit's Colors, and `record` writes ten
+slots; not measured), and a fork test with the deployed adapter where two buys of one Colors race and the second
+reverts.
+
 ## If something goes wrong
 
 - **A burn fails:** the Credit Union's checks revert the whole transaction, so no Credits are lost. The Credit Union stays
