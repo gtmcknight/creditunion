@@ -237,6 +237,11 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   const keysRead = slots && !burned ? placedKeys(s.address, b.ids).catch(() => null) : null;
   // A picture's spots as the burn contract keeps them, once it's on: after a leave only that spot is open.
   const spotsRead = slots?.every((v) => v) && !Number(s.filter.layoutTrait ?? 0) && !burned && b.ids.length ? keptSpots(s.address) : null;
+  // Burned: the Statement's own order (composedFrom), which is how the contract laid it out. Deposit order only
+  // matches it for a union with no layout, so every preview drawn from the sheet would otherwise scramble a picture.
+  const burnRead = burned
+    ? pub.readContract({ address: s.statement, abi: parseAbi(['function composedFrom(uint256) view returns (uint32[80])']), functionName: 'composedFrom', args: [s.statementId] }).catch(() => null)
+    : null;
   // Your side, if it's back within a moment. Otherwise the page draws without it (as for a visitor) and draws again,
   // in place, when it lands: a slow wallet read never holds the whole page blank.
   const drawing = ++draws;
@@ -293,6 +298,8 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   }
   const spots = spotsRead ? await spotsRead : null;
   if (spots) placed = spots;
+  const burnOrder = burnRead ? await burnRead : null;
+  if (burnOrder?.some((c) => c)) placed = burnOrder.map((c) => (c ? BigInt(c) : null));
   // Keys unread even after retrying: the sheet can't show where the Credits go, so it says so instead of drawing them
   // in deposit order.
   const unplaced = !!slots && !burned && b.ids.length > 0 && !placed;
@@ -309,7 +316,7 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
   registerDeposits(b.ids, b.depositors, b.s.split === 1);
   // A choice that no longer applies (the union filled, or your Credits left) falls back to Now.
   const artHtml = burned
-    ? `<figure class="statement"><div class="statement-host">${sheet(b.ids, { closed: true })}${statementArt(s.statementId)}</div>${directionCanvas}<figcaption class="legend muted small">${directions(s.address, false, true)}<div class="legend-end"><span>Statement #${s.statementId}</span>${shareButton()}</div></figcaption></figure>`
+    ? `<figure class="statement"><div class="statement-host">${sheet(b.ids, { closed: true, placed })}${statementArt(s.statementId)}</div>${directionCanvas}<figcaption class="legend muted small">${directions(s.address, false, true)}<div class="legend-end"><span>Statement #${s.statementId}</span>${shareButton()}</div></figcaption></figure>`
     : `${sheet(b.ids, { mine: myIds, fresh: placed ? undefined : seen < s.count ? seen : undefined, closing: s.state === 'Full', placed, batch: s.state === 'Open' ? s.address : undefined })}${unplaced ? '' : directionCanvas}
        <div class="legend muted small">${unplaced ? '<span>Couldn’t read which slot each Credit fills. Refresh to try again.</span>' : `<div class="legend-end"><span class="burns-in" hidden></span>${shareButton()}</div>${directions(s.address, false, true)}`}</div>
        ${unplaced ? '' : formatBox}`;
