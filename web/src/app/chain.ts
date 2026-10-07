@@ -95,6 +95,8 @@ export async function connect(w?: Announced) {
     localStorage.setItem('cu-wallet', w?.info.rdns ?? 'injected');
   } catch {}
   provider.on?.('accountsChanged', (accs: Address[]) => {
+    // A wallet we've since disconnected or swapped out still fires this (e.g. on unlock): it isn't the session's.
+    if (session.provider !== provider) return;
     session.account = accs[0];
     session.wallet = accs[0] ? createWalletClient({ account: accs[0], chain, transport: custom(provider) }) : undefined;
     emit();
@@ -156,7 +158,7 @@ export async function send(
   req: { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[]; value?: bigint; gas?: bigint },
   onHash?: (h: Hash) => void,
 ) {
-  if (!session.wallet || !session.account) throw new Error('Connect a wallet first.');
+  if (!session.wallet || !session.account || !session.provider) throw new Error('Connect a wallet first.');
   await ensureChain();
   // Short of ETH, the node's simulation only says "Transaction creation failed." Say what's missing instead.
   if (req.value) {
@@ -259,7 +261,7 @@ type Call = { address: Address; abi: readonly unknown[]; functionName: string; a
 /// Only the first call is simulated: the rest depend on it (an approval, then what it allows), and the RPC
 /// proxy doesn't run multi-call simulations. The wallet estimates the batch itself before you sign.
 export async function sendBatch(calls: Call[], onSubmit?: (id: string) => void) {
-  if (!session.wallet || !session.account) throw new Error('Connect a wallet first.');
+  if (!session.wallet || !session.account || !session.provider) throw new Error('Connect a wallet first.');
   await ensureChain();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await pub.simulateContract({ ...(calls[0] as any), account: session.account });
