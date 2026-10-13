@@ -71,12 +71,10 @@ export async function traitPage(app: HTMLElement, kind: string, raw: string) {
   }
   if (t && location.pathname !== traitPath(t)) history.replaceState(null, '', traitPath(t) + location.search);
   const saleKey = t ? `${t.kind}/${t.slug}` : undefined;
-  // /credits only: Cheapest or Best value (rating per ETH), remembered; each Credit shows its rating there.
-  let order: Where['order'] = undefined;
-  try {
-    const v = localStorage.getItem('cu-credits-order');
-    if (all && (v === 'value' || v === 'rating')) order = v;
-  } catch {}
+  // /credits only: Cheapest, Top rated or Most rating per ETH, from the URL (a permalink) or remembered; each
+  // Credit shows its rating there.
+  let order: Where['order'] = all ? readOrder() : undefined;
+  if (all) keepOrder(order);
   let scoreOf = new Uint32Array(0);
   if (all)
     await bin('credit-score.bin')
@@ -127,19 +125,19 @@ export async function traitPage(app: HTMLElement, kind: string, raw: string) {
     const next = k === 'cheap' ? undefined : (k as Where['order']);
     if (next === order) return;
     order = next;
-    try {
-      if (order) localStorage.setItem('cu-credits-order', order);
-      else localStorage.removeItem('cu-credits-order');
-    } catch {}
+    saveOrder(order);
+    keepOrder(order);
     void grid.start({ trait: saleKey, order });
   });
   // Not awaited: the page shows at once (the router fades it in when this returns), the grid filling in behind.
   void grid.start();
 }
 
-/// The Buy row's markup: the heading, Sweep beside it, then the grid and its Show more.
-export const buyRow = (heading: string) => `<div class="jb-controls">
+/// The Buy row's markup: the heading, the sort menu (when `sort` is given) and Sweep beside it, then the grid and
+/// its Show more.
+export const buyRow = (heading: string, sort?: { order: Where['order'] }) => `<div class="jb-controls">
       <h2 class="jb-buy">${esc(heading)}</h2>
+      ${sort ? `<div class="jb-sorter">${sortMenu(CREDIT_ORDERS, sort.order ?? 'cheap')}</div>` : ''}
       <div class="jb-sweep" id="sale-act"></div>
     </div>
     <div class="trait-grid" id="trait-grid"></div>
@@ -163,8 +161,38 @@ export async function unionsLink(app: HTMLElement, test: (b: Listed) => boolean,
 /// marketplace's own page. `start()` again (after `where` changes) redraws it. Needs .jb-buy, #sale-act, #trait-grid
 /// and #trait-more inside `app`.
 export type Where = { trait?: string; rules?: Record<string, number>; order?: 'value' | 'rating' };
-/// /credits: how listed Credits are ordered.
+/// How listed Credits are ordered (/credits, /rating, /bits).
 const CREDIT_ORDERS = [['cheap', 'Lowest price'], ['rating', 'Top rated'], ['value', 'Most rating per ETH']] as const;
+const ORDER_KEY = 'cu-credits-order';
+/// The order from the page's URL (?order=value|rating, so a sorted page is a permalink), else the one last picked.
+/// From the URL, it's remembered too.
+export function readOrder(): Where['order'] {
+  const q = new URLSearchParams(location.search).get('order');
+  if (q === 'value' || q === 'rating' || q === 'cheap') {
+    const o = q === 'cheap' ? undefined : q;
+    saveOrder(o); // a permalink opened is the order now, as if picked
+    return o;
+  }
+  try {
+    const v = localStorage.getItem(ORDER_KEY);
+    if (v === 'value' || v === 'rating') return v;
+  } catch {}
+  return undefined;
+}
+/// Remember the order picked across the Credits pages.
+export function saveOrder(order: Where['order']) {
+  try {
+    if (order) localStorage.setItem(ORDER_KEY, order);
+    else localStorage.removeItem(ORDER_KEY);
+  } catch {}
+}
+/// ?order= in the page's URL as it is now (cheapest, the default, leaves it out), the rest of the URL kept.
+export function keepOrder(order: Where['order']) {
+  const u = new URL(location.href);
+  if (order) u.searchParams.set('order', order);
+  else u.searchParams.delete('order');
+  history.replaceState(null, '', u.pathname + u.search + u.hash);
+}
 export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => Promise<{ ids: number[]; total: number }>, line?: (id: number) => string, onTotal?: (n: number) => void) {
   const grid = app.querySelector<HTMLElement>('#trait-grid')!;
   const more = app.querySelector<HTMLButtonElement>('#trait-more')!;

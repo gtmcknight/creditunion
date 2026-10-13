@@ -2,7 +2,8 @@ import type { Listed } from '../data';
 import { listBatches } from '../data';
 import { bin } from '../bins';
 import { rangeStrip, stripHTML } from './range';
-import { buyGrid, buyRow, creditsHead, pct, unionsLink } from './trait';
+import { buyGrid, buyRow, creditsHead, keepOrder, pct, readOrder, saveOrder, unionsLink, type Where } from './trait';
+import { bindSort } from '../ui';
 
 const PAGE = 120; // Credits per Show more
 const n = (x: number) => x.toLocaleString();
@@ -53,6 +54,8 @@ async function scalePage(app: HTMLElement, s: Spec) {
   const clamp = (u: number) => Math.max(0, Math.min(M - 1, u));
   a = clamp(a);
   b = clamp(b);
+  // The listed ones' order, from the URL or remembered (as on /credits).
+  let sort: Where['order'] = readOrder();
 
   app.innerHTML = `
   <section class="trait-page time-page scale-page jb">
@@ -63,7 +66,7 @@ async function scalePage(app: HTMLElement, s: Spec) {
       <div class="win-inputs scale-inputs"><label><span>Min</span><input type="number" inputmode="decimal" id="scale-min" step="${s.step}" min="${s.show(0)}" max="${s.show(M - 1)}"></label><label><span>Max</span><input type="number" inputmode="decimal" id="scale-max" step="${s.step}" min="${s.show(0)}" max="${s.show(M - 1)}"></label></div>
       <div class="win-presets">${s.picks.map(([k, l]) => `<button type="button" data-pick="${k}">${l}</button>`).join('')}</div>
     </div>
-    ${buyRow('Buy these Credits')}
+    ${buyRow('Buy these Credits', { order: sort })}
   </section>`;
 
   const readout = document.getElementById('scale-readout')!;
@@ -117,6 +120,7 @@ async function scalePage(app: HTMLElement, s: Spec) {
   const settle = () => {
     if (!app.isConnected) return;
     history.replaceState(null, '', `/${s.kind}?min=${s.show(a)}&max=${s.show(b)}`);
+    keepOrder(sort);
     void unionsLink(app, (l) => s.overlaps(l, a, b), unions, s.unionsQuery(a, b));
     if (s.best === 'high') ids = order.slice(above[b + 1], above[a]);
     else {
@@ -125,8 +129,15 @@ async function scalePage(app: HTMLElement, s: Spec) {
       ids = Uint32Array.from(out);
     }
     app.querySelector('.jb-buy')!.textContent = s.buy(a, b);
-    void grid.start({ rules: s.rules(a, b) });
+    void grid.start({ rules: s.rules(a, b), order: sort });
   };
+  bindSort(app, (k) => {
+    const next = k === 'cheap' ? undefined : (k as Where['order']);
+    if (next === sort) return;
+    sort = next;
+    saveOrder(sort);
+    settle();
+  });
   let timer = 0;
   function update(now = false) {
     strip.set(a, b);
