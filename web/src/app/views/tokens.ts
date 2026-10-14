@@ -667,7 +667,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const rate = per ? `${usd ? `$${(per * usd).toPrecision(2)}` : `${per.toPrecision(2)} ETH`} each` : '';
     setText('amt-usd', dollars(Number(formatUnits(wei, 18))));
     // Two lines: what each one costs, then how it arrives and what we take on that way.
-    setText('route', route === 'batch' && hasBatch ? `${rate} · ${b!.out.length} Credit NFT${b!.out.length === 1 ? '' : 's'} bought for you` : rate);
+    setText('route', route === 'batch' && hasBatch ? `${b!.out.length} Credit NFT${b!.out.length === 1 ? '' : 's'} now · this ${TOKEN} when the batch fills` : rate);
     setText('route2', split ? `${whole(leftN)} via Uniswap · instant` : '');
     const label: Record<Route, [string, string]> = {
       pool: ['Uniswap', 'Instant'],
@@ -723,7 +723,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
         : short
           ? 'Not enough ETH'
           : route === 'batch'
-            ? `Get ${whole(withBatch)} ${sym()}${!split && b!.spent < wei ? ` · ${ethNum(b!.spent, 4)} ETH` : ''}`
+            ? `Buy ${plural(b!.out.length)}${split ? ` + ${whole(leftN)} ${sym()}` : ''} · ${ethNum(b!.spent + (split ? left : 0n), 4)} ETH`
             : route === 'pool'
               ? `Get ${whole(poolN)} ${sym()}`
               : route === 'statement'
