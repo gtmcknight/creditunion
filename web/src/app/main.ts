@@ -103,7 +103,7 @@ async function route() {
   try {
     if (page === '') home(app);
     else if (page === 'docs') docs(app);
-    else if (page === 'balance') balance(app);
+    else if (page === 'balance') config.tokenFactory ? await (await import('./views/tokens')).tokensPage(app, route) : balance(app);
     else if (page === 'mint') await mint(app, route);
     else if (page === 'og') await previews(app);
     else if (page === 'activity' || page === 'live') await live(app);
@@ -421,6 +421,7 @@ document.addEventListener('click', (e) => {
     return;
   }
   drawTestnet();
+  // Tokens shows in the nav once the token factory is deployed.
   void drawNotice();
   watchOutbid();
   document.getElementById('magic-eye')?.addEventListener('click', () => import('./magic').then((m) => m.openMagic()));

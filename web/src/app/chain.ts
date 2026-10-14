@@ -34,6 +34,18 @@ export type Config = {
   liveAuctions?: number;
   burnable?: number;
   factsAt?: number;
+  /// Token unions: a second factory whose burn puts the Statement in a vault and pays members its tokens
+  /// (TokenAdapter), and that factory's own UnionFormats. Null until the vault exists and they're deployed.
+  tokenFactory?: Address | null;
+  tokenAdapter?: Address | null;
+  tokenFormats?: Address | null;
+  /// The token factory's own Sweeper: buys deposit into token unions through it.
+  tokenSweeper?: Address | null;
+  /// BALANCE and its Uniswap pool, for Buy and Sell on /tokens: the token, the pool's settings beyond ETH and the token,
+  /// and our slice of each swap's output. Null until the vars name the token.
+  balance?: { token: Address; pool: { fee: number; tickSpacing: number; hooks: Address }; feeBps: number; feeTo: Address | null } | null;
+  /// The Worker reads a local copy of mainnet (RPC_URL on localhost): sends check the wallet is on it too.
+  fork?: boolean;
 };
 
 const CHAINS: Record<number, Chain> = { 1: mainnet, 11155111: sepolia, 31337: foundry };
@@ -48,7 +60,9 @@ export let pub: ReturnType<typeof makePublic>;
 const makePublic = (c: Chain, wallet?: EIP1193Provider) => {
   // One retry, a second later: a busy moment passes, and a rate limit isn't hit four times in a row.
   const rpc = http('/rpc', { batch: { wait: 16, batchSize: 40 }, retryCount: 1, retryDelay: 1_000 });
-  return createPublicClient({ chain: c, transport: wallet ? fallback([rpc, walletReads(wallet, c)], { retryCount: 1, retryDelay: 1_000 }) : rpc });
+  // Not on a local copy of mainnet: there the wallet's own connection is usually real mainnet, which has none of the
+  // copy's contracts, so a read that fell through would answer as if they didn't exist.
+  return createPublicClient({ chain: c, transport: wallet && !config?.fork ? fallback([rpc, walletReads(wallet, c)], { retryCount: 1, retryDelay: 1_000 }) : rpc });
 };
 /// The wallet's connection, for reads only while it's on our chain: a read never answers from another chain.
 const walletReads = (p: EIP1193Provider, c: Chain) =>
@@ -132,12 +146,28 @@ export async function restore() {
 export async function ensureChain() {
   const p = session.provider!;
   const current = Number(await p.request({ method: 'eth_chainId' }));
-  if (current === chain.id) return;
-  try {
-    await p.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: `0x${chain.id.toString(16)}` }] });
-  } catch {
-    throw new Error(`Switch your wallet to ${chain.name}.`);
+  if (current !== chain.id) {
+    try {
+      await p.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: `0x${chain.id.toString(16)}` }] });
+    } catch {
+      throw new Error(`Switch your wallet to ${chain.name}.`);
+    }
   }
+  if (config.fork) await onTheCopy(p);
+}
+
+/// A local copy of mainnet (pnpm chain:fork) answers as chain 1 too, so a wallet still on real mainnet passes the
+/// chain check, and what it signs would go to mainnet: real ETH, to contracts that only exist on the copy. Before
+/// anything is sent, the wallet's latest block must be the copy's.
+async function onTheCopy(p: EIP1193Provider) {
+  for (let tries = 0; tries < 2; tries++) {
+    const [theirs, ours] = await Promise.all([
+      p.request({ method: 'eth_getBlockByNumber', params: ['latest', false] } as never) as Promise<{ hash?: string } | null>,
+      pub.getBlock(),
+    ]);
+    if (theirs?.hash && theirs.hash === ours.hash) return;
+  }
+  throw new Error('Your wallet is on mainnet, not this local copy. Add a network with RPC http://127.0.0.1:8549 and chain ID 1, switch to it, then try again.');
 }
 
 /// Run after each transaction we send settles (landed, reverted or refused), so cached reads start over.

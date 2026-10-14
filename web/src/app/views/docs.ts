@@ -176,11 +176,28 @@ const sections = (): Section[] => [
     title: 'Fees',
     body: `<p>Starting and joining a Union is free apart from gas. Credit Union takes 2% of a Statement’s sale, only if it sells, and 2% on Credits you buy through the site.</p>`,
   },
+  ...(config.tokenFactory
+    ? [
+        {
+          id: 'balance',
+          title: 'BALANCE',
+          body: `<p>On the BALANCE page, Credits go into batches of 80. When a batch is full and BALANCE is live, its 80 become a Statement, the Statement goes into the BALANCE contract, and the BALANCE it pays is split among the batch’s members by the rating each put in. One rating point is one BALANCE.</p>
+    <h3>Colors</h3>
+    <p>BALANCE carries the ink of the Statement it comes from. Any takes every Credit and is the cheapest way in. C, M, Y and K batches take only Credits printed in that one ink, so their Statements, and the BALANCE they pay, are a single color. Each batch converts and pays out from a wallet of its own, so no batch’s color ever mixes into another’s.</p>
+    <h3>Paying in, leaving</h3>
+    <p>Pay with ETH and the page buys the cheapest Credits per rating point in your color and puts them in, or put in Credits you hold. You can withdraw yours any time until your batch converts.</p>
+    <h3>Converting</h3>
+    <p>A full batch locks 5 minutes after BALANCE goes live, or after it fills if that’s later. Then anyone can convert it within the hour. We convert every full batch as soon as it can be and pay its members in the same pass. If a payment can’t reach your wallet, claim it from the BALANCE page.</p>
+    <h3>Fees</h3>
+    <p>2% of the BALANCE a batch converts into, and 2% on Credits bought through the page.</p>`,
+        },
+      ]
+    : []),
   {
     id: 'safety',
     title: 'Safety',
     body: `<p>The contracts hold every Credit and every bid. They have no owner, pause or upgrade, and nobody, us included, can move pooled Credits, bids or payouts.</p>
-    <p>The code is open source on <a href="https://github.com/gtmcknight/creditunion" target="_blank" rel="noopener">GitHub</a>, with 282 tests. The core contracts (the factory, Unions, the Sweeper and the first rating table) also have 51 formally proved rules and seven rounds of internal review. The burn contract, the format picker and the live rating table have their own tests but no written review yet. There has been no third-party audit.</p>
+    <p>The code is open source on <a href="https://github.com/gtmcknight/creditunion" target="_blank" rel="noopener">GitHub</a>, with 294 tests. The core contracts (the factory, Unions, the Sweeper and the first rating table) also have 51 formally proved rules and seven rounds of internal review. The burn contract, the format picker and the live rating table have their own tests but no written review yet. There has been no third-party audit.</p>
     <p>If this site goes down, everything still works without it. <a href="https://creditunionfun.eth.limo" target="_blank" rel="noopener">creditunionfun.eth.limo</a> is a copy on IPFS that bids, settles and claims through your own wallet, and Etherscan works too: leaving, burning, bidding, settling and claiming.</p>
     <p>Credit Union is independent and not affiliated with Jack Butcher. It is experimental software. Use it at your own risk.</p>`,
   },
@@ -193,6 +210,9 @@ const sections = (): Section[] => [
         ['Sweeper, for buying', config.sweeper],
         ['Burn contract, Union to Statement', config.burn?.assembler ?? '0x6CAEb9953bA8625226345CF39F93541CE53AbFd2'],
         ['Statement formats', config.formats ?? null],
+        ['Token union factory', config.tokenFactory ?? null],
+        ['Token union Sweeper', config.tokenSweeper ?? null],
+        ['Token union converter, Statement to token', config.tokenAdapter ?? null],
         ['Ratings (Unions opened since Oct 2)', '0xe27fC60dcE0a9c33743581bfCD72F619DB3612a6'],
         ['Ratings (earlier Unions)', config.ratings],
         ['Credits, by Jack Butcher', config.credits],
@@ -220,4 +240,6 @@ export function docs(app: HTMLElement) {
     </div>
   </section>`;
   mountCalculator(app.querySelector<HTMLElement>('#calc')!);
+  // Opened at a section (/docs#balance): the page is drawn after the browser looked for it, so go there now.
+  if (location.hash) requestAnimationFrame(() => document.getElementById(location.hash.slice(1))?.scrollIntoView());
 }

@@ -5,8 +5,10 @@
 //   node scripts/fork-chain.mjs                     (from web/; needs anvil and MAINNET_RPC in contracts/.env)
 //   node scripts/fork-chain.mjs --credits 80        also hand the test wallet 80 real Credits from their holders
 //   node scripts/fork-chain.mjs --warp 24           move the clock 24 hours on (auctions end, burn hours run out)
+//   node scripts/fork-chain.mjs --tokens            deploy token unions as stage 1 (pooling only, no adapter)
+//   node scripts/fork-chain.mjs --tokens --vault    …and stage 2: a test vault + TokenAdapter, active (30 min warped)
 // Env: ANVIL_PORT (8549) MIRROR (the mirror's URL, default http://localhost:5310/).
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -15,7 +17,7 @@ import { parseArgs } from 'node:util';
 import { createPublicClient, encodeFunctionData, formatEther, http } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi } from '../src/app/abi.ts';
 
-const { values: opt } = parseArgs({ options: { credits: { type: 'string', default: '0' }, warp: { type: 'string', default: '0' } } });
+const { values: opt } = parseArgs({ options: { credits: { type: 'string', default: '0' }, warp: { type: 'string', default: '0' }, tokens: { type: 'boolean', default: false }, vault: { type: 'boolean', default: false } } });
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CONTRACTS = join(WEB, '..', 'contracts');
 const PORT = Number(process.env.ANVIL_PORT ?? 8549);
@@ -101,11 +103,32 @@ if (Number(opt.warp) > 0) {
   await rpc('evm_mine');
   log(`clock moved ${opt.warp}h on`);
 }
+// Token unions: forge deploys from anvil's account 0 (unlocked), the setter and fee recipient too.
+const forge = (env) => {
+  const out = execFileSync('forge', ['script', 'script/DeployTokenUnions.s.sol', '--rpc-url', RPC, '--unlocked', '--sender', ACCOUNTS[0], '--broadcast', '--slow'], {
+    cwd: CONTRACTS,
+    env: { ...process.env, PATH, ...env },
+    encoding: 'utf8',
+  });
+  return Object.fromEntries([...out.matchAll(/^\s*(TOKEN_\w+|VAULT)\s+(0x[0-9a-fA-F]{40})/gm)].map((m) => [m[1], m[2]]));
+};
+const tokenVars = {};
+if (opt.tokens) {
+  Object.assign(tokenVars, forge({ SETTER: ACCOUNTS[0], FEE_RECIPIENT: ACCOUNTS[0] }));
+  log('token unions, stage 1:', tokenVars);
+  if (opt.vault) {
+    Object.assign(tokenVars, forge({ FACTORY: tokenVars.TOKEN_FACTORY, FORMATS: tokenVars.TOKEN_FORMATS, MOCK_VAULT: 'true', FORK: 'true' }));
+    await rpc('evm_increaseTime', [1800]);
+    await rpc('evm_mine');
+    await send(ACCOUNTS[0], tokenVars.TOKEN_FACTORY, factoryAbi, 'activateAssembler');
+    log('token unions, stage 2: test vault', tokenVars.VAULT, 'adapter', tokenVars.TOKEN_ADAPTER, 'active');
+  }
+}
 log('unions on this copy:');
 await listUnions();
 console.log(`
   RPC        ${RPC}   (chain id 1, any address can send: anvil impersonates)
-  Site       put RPC_URL=${RPC} in web/.dev.vars, then pnpm dev
+  Site       put RPC_URL=${RPC} in web/.dev.vars, then pnpm dev${Object.keys(tokenVars).length ? `\n  Tokens     add to web/.dev.vars:\n${Object.entries(tokenVars).filter(([k]) => k !== 'VAULT').map(([k, v]) => `             ${k}=${v}`).join('\n')}` : ''}
   Wallet     add a network: RPC ${RPC}, chain id 1; import the test key ${WALLET_KEY} (${WALLET})
   Mirror     ${MIRROR}?rpc=${encodeURIComponent(RPC)}&preview=1   (look only, no wallet)
   Clock      cast rpc evm_increaseTime 3600 --rpc-url ${RPC} && cast rpc evm_mine --rpc-url ${RPC}

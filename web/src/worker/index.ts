@@ -14,11 +14,12 @@
 /// Every response carries the security headers in `secure()` (headers.ts; the build copies them into _headers for
 /// what the asset layer serves on its own).
 import { DurableObject } from 'cloudflare:workers';
-import { BaseError, ContractFunctionRevertedError, ccipRequest, createPublicClient, decodeFunctionData, fallback, hexToBytes, http, type Address, type Hex, parseAbiItem } from 'viem';
+import { ETH, PERMIT2, UNIVERSAL_ROUTER, V4_QUOTER } from '../shared/v4swap';
+import { BaseError, ContractFunctionRevertedError, ccipRequest, createPublicClient, decodeFunctionData, fallback, hexToBytes, http, type Address, type Hex, parseAbi, parseAbiItem } from 'viem';
 import { mainnet } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { normalize } from 'viem/ens';
-import { batchAbi, creditsAbi, creditArtAbi, factoryAbi, sweeperAbi, unionFormatsAbi } from '../app/abi';
+import { batchAbi, creditsAbi, creditArtAbi, factoryAbi, sweeperAbi, tokenAdapterAbi, unionFormatsAbi } from '../app/abi';
 import { setSpareKey, best, bestOrder, bestPage, events, quote, scan, type Cand, type Extra, type Listing } from './opensea';
 import type { Row } from './market';
 import { cacheStore, confirmListing, marketListings, type FwaListing } from './fwa';
@@ -81,11 +82,28 @@ interface Env {
   FWA_MARKET?: string;
   /// UnionFormats: where each union's creator picks its Statement format. Zero until deployed.
   FORMATS?: string;
+  /// Token unions (TokenAdapter's factory, the adapter, that factory's UnionFormats). Empty until deployed.
+  TOKEN_FACTORY?: string;
+  TOKEN_ADAPTER?: string;
+  TOKEN_FORMATS?: string;
+  /// The token factory's own Sweeper (a Sweeper deposits into one factory). Empty until deployed.
+  TOKEN_SWEEPER?: string;
+  /// BALANCE's Uniswap pool for /tokens Buy and Sell: the token, the pool's fee, tick spacing and hooks (the launch picks
+  /// them), and our slice of each swap's output (bps, capped at 5%) and where it goes. Unset: no Buy or Sell.
+  BALANCE_TOKEN?: string;
+  BALANCE_POOL_FEE?: string;
+  BALANCE_POOL_TICK_SPACING?: string;
+  BALANCE_POOL_HOOKS?: string;
+  SWAP_FEE_BPS?: string;
+  SWAP_FEE_TO?: string;
   /// CreditStrategy (nftstrategy.fun) on mainnet: the Credits it holds for sale are a third Buy Credits source.
   /// Empty to turn it off.
   STRATEGY?: string;
   /// Dev only (localhost): JSON [{ "id": "123", "price": "<wei>", "source": "fwa" | "strategy" | "opensea" }] shown as listings.
   DEV_FAKE_LISTINGS?: string;
+  /// DEV_MARKET_FROM, on localhost only: read the market book from this site, so a local copy of the chain has real
+  /// listings to price without running OpenSea's feed. Locally with an empty book, the live site's book is read anyway.
+  DEV_MARKET_FROM?: string;
 }
 
 /// Exactly what viem's public client needs for readContract, simulateContract and waitForTransactionReceipt.
@@ -114,12 +132,17 @@ const inSupply = (id: number) => Number.isInteger(id) && id >= 1 && id <= SUPPLY
 const OLD_HOSTS = new Set(['creditunion.party', 'eighty.fun', 'www.eighty.fun', 'eighty.rhps.fun']);
 const SITE_HOST = 'creditunion.fun';
 const rpcUrl = (env: Env) => env.RPC_URL || env.FALLBACK_RPC;
+/// RPC_URL is a local copy of mainnet (pnpm chain:fork). It answers as chain 1, so nothing may fall back to a real
+/// mainnet node (whose answers would say the copy's contracts don't exist), and it can take minutes to fetch cold
+/// state, so it gets time.
+const localRpc = (env: Env) => /^https?:\/\/(127\.0\.0\.1|localhost)(:|\/|$)/.test(env.RPC_URL ?? '');
+const rpcTimeout = (env: Env, ms: number) => (localRpc(env) ? 300_000 : ms);
 /// The RPCs to try in order: the paid one, then the public one.
-const rpcList = (env: Env) => [...new Set([env.RPC_URL, env.FALLBACK_RPC].filter((u): u is string => !!u))];
+const rpcList = (env: Env) => (localRpc(env) ? [env.RPC_URL!] : [...new Set([env.RPC_URL, env.FALLBACK_RPC].filter((u): u is string => !!u))]);
 /// The public node behind the paid RPC, for when the paid key is over its limit, refused or down.
-const hasFallback = (env: Env) => !!env.RPC_URL && !!env.FALLBACK_RPC && env.RPC_URL !== env.FALLBACK_RPC;
+const hasFallback = (env: Env) => !!env.RPC_URL && !!env.FALLBACK_RPC && env.RPC_URL !== env.FALLBACK_RPC && !localRpc(env);
 const rpcTransport = (env: Env) =>
-  hasFallback(env) ? fallback([http(env.RPC_URL, { timeout: 8_000 }), http(env.FALLBACK_RPC, { timeout: 8_000 })]) : http(rpcUrl(env), { timeout: 8_000 });
+  hasFallback(env) ? fallback([http(env.RPC_URL, { timeout: 8_000 }), http(env.FALLBACK_RPC, { timeout: 8_000 })]) : http(rpcUrl(env), { timeout: rpcTimeout(env, 8_000) });
 /// Listing scans in progress, per batch, so a burst of quotes costs one scan.
 const inflight = new Map<string, Promise<Awaited<ReturnType<typeof scan>>>>();
 // No request batching here: viem's batch scheduler is shared across concurrent requests in one isolate, and a
@@ -341,12 +364,14 @@ async function activityItems(env: Env, store: Cache, stateKey: string): Promise<
   const c = client(env);
   // Mainnet scans from the factory's deploy block; elsewhere, the last ~2 weeks.
   const from = env.CHAIN_ID === '1' ? ACTIVITY_FROM : (await c.getBlockNumber()) - 100_000n;
-  const items = await readActivity(c as never, store, stateKey, {
-    factory: env.FACTORY,
-    sweeper: hasSweeper(env) ? env.SWEEPER : null,
-    credits: env.CREDITS,
-    from: from < 0n ? 0n : from,
-  });
+  const cfg = { credits: env.CREDITS, from: from < 0n ? 0n : from };
+  const tokens = addrOrNull(env.TOKEN_FACTORY);
+  // Token unions keep their own scan state; both lists merge newest first.
+  const [main, more] = await Promise.all([
+    readActivity(c as never, store, stateKey, { ...cfg, factory: env.FACTORY, sweeper: hasSweeper(env) ? env.SWEEPER : null }),
+    tokens ? readActivity(c as never, store, `${stateKey}/tokens/${tokens.toLowerCase()}`, { ...cfg, factory: tokens, sweeper: tokenSweeper(env) }) : Promise.resolve([]),
+  ]);
+  const items = more.length ? [...main, ...more].sort((a, b) => b.block - a.block || b.i - a.i) : main;
   // A plan's union stays out of Activity until it fills.
   const hidden = await hiddenUnions(env);
   const filling = new Set<string>();
@@ -387,7 +412,31 @@ const publicConfig = (env: Env) => ({
   fwaMarket: addrOrNull(env.FWA_MARKET),
   formats: addrOrNull(env.FORMATS),
   statements: addrOrNull(env.STATEMENTS),
+  tokenFactory: addrOrNull(env.TOKEN_FACTORY),
+  tokenAdapter: addrOrNull(env.TOKEN_ADAPTER),
+  tokenFormats: addrOrNull(env.TOKEN_FORMATS),
+  tokenSweeper: env.OPENSEA_API_KEY ? tokenSweeper(env) : null,
+  balance: balanceConfig(env),
+  ...(localRpc(env) ? { fork: true } : {}),
 });
+
+/// BALANCE and its pool for /tokens Buy and Sell, once BALANCE_TOKEN names it; our slice only with somewhere to send it.
+function balanceConfig(env: Env) {
+  // Lowercase: a var pasted with a bad checksum would otherwise fail in every visitor's swap encoding.
+  const low = (a: Address | null) => (a ? (a.toLowerCase() as Address) : null);
+  const token = low(addrOrNull(env.BALANCE_TOKEN));
+  if (!token) return null;
+  const feeTo = low(addrOrNull(env.SWAP_FEE_TO));
+  const bps = Math.min(Math.max(Math.floor(Number(env.SWAP_FEE_BPS ?? 0) || 0), 0), 500);
+  return {
+    token,
+    pool: { fee: Number(env.BALANCE_POOL_FEE ?? 3000), tickSpacing: Number(env.BALANCE_POOL_TICK_SPACING ?? 60), hooks: low(addrOrNull(env.BALANCE_POOL_HOOKS)) ?? ETH },
+    feeBps: feeTo ? bps : 0,
+    feeTo,
+  };
+}
+/// What /tokens Buy and Sell read through /rpc: the token, Uniswap's quoter, Permit2 and the router (its swaps simulate).
+const swapTargets = (env: Env) => (addrOrNull(env.BALANCE_TOKEN) ? [addrOrNull(env.BALANCE_TOKEN), V4_QUOTER, PERMIT2, UNIVERSAL_ROUTER] : []);
 
 /// /edition/match answers kept per isolate: the edition never changes within a deploy, and every visitor of /unions
 /// asks for the same cards' examples.
@@ -545,6 +594,11 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   // many pages ask; only a request that has to pull it counts against the rate limit.
   if (url.pathname === '/market.json') {
     if (!sameSite(req)) return text('forbidden', 403);
+    const from = env.DEV_MARKET_FROM ?? (isDev(url) && !(env.MARKET && (await book(env).state()).rows) ? 'https://creditunion.fun' : '');
+    if (from && isDev(url)) {
+      const r = await fetch(`${from}/market.json`, { headers: { referer: `${from}/balance` } });
+      return new Response(r.body, { status: r.status, headers: { 'content-type': 'application/json' } });
+    }
     const key = new Request(`${url.origin}/market.json/v2`);
     const hit = await caches.default.match(key);
     if (hit) return hit;
@@ -1056,7 +1110,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         listings = listings.filter((l) => want.has(l.id));
       }
       listings = listings.slice(0, n);
-      return Response.json(await quoteListings(env, url, listings), { headers: { 'cache-control': 'no-store' } });
+      return Response.json(await quoteListings(env, url, listings, await sweeperFor(env, batch as Address)), { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
     }
@@ -1086,6 +1140,28 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
 
   // The overprinted Statements still standing, most pages first, for Market → Statements to show when none of them
   // are for sale. Kept ten minutes at the edge.
+  // The Statements a wallet holds, with each one's rating in whole points: the Yours panel on /balance redeems them.
+  const ownedM = url.pathname.match(/^\/statements\/owned\/(0x[0-9a-fA-F]{40})\.json$/);
+  if (ownedM) {
+    if (!sameSite(req)) return text('forbidden', 403);
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    try {
+      const statements = addrOrNull(env.STATEMENTS) ?? (await statementsOf(env));
+      if (!statements) return Response.json({ items: [] });
+      const abi = parseAbi(['function supply() view returns (uint256)', 'function ownerOf(uint256) view returns (address)', 'function creditScoreOf(uint256) view returns (uint256)']);
+      const c = client(env);
+      const n = Number(await c.readContract({ address: statements, abi, functionName: 'supply' }));
+      const ids = Array.from({ length: n }, (_, i) => BigInt(i + 1));
+      const own = await c.multicall({ contracts: ids.map((id) => ({ address: statements, abi, functionName: 'ownerOf', args: [id] }) as const), allowFailure: true, multicallAddress: MULTICALL3, batchSize: 1024 });
+      const who = ownedM[1].toLowerCase();
+      const mine = ids.filter((_, i) => own[i].status === 'success' && String(own[i].result).toLowerCase() === who);
+      const sc = mine.length ? await c.multicall({ contracts: mine.map((id) => ({ address: statements, abi, functionName: 'creditScoreOf', args: [id] }) as const), allowFailure: true, multicallAddress: MULTICALL3 }) : [];
+      const items = mine.map((id, i) => ({ id: String(id), rating: sc[i]?.status === 'success' ? Math.floor(Number(sc[i].result) / 10_000) : 0 }));
+      return Response.json({ items }, { headers: { 'cache-control': 'no-store' } });
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502 });
+    }
+  }
   if (url.pathname === '/statements/overprints.json') {
     if (req.method !== 'GET') return text('method not allowed', 405);
     const key = new Request(`${url.origin}/statements/overprints-cache/v2`);
@@ -1295,11 +1371,23 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     if (!hasSweeper(env)) return text('buying is off here', 501);
     if (await limited(env.RL_QUOTE, req)) return text('slow down', 429);
     let ls: Listing[];
+    let into: Address | null = null;
+    let toTokens = false;
     try {
       const raw = await readBody(req, 16_000);
       if (raw === null) return text('too large', 413);
-      const b = JSON.parse(raw) as { listings?: unknown };
+      const b = JSON.parse(raw) as { listings?: unknown; batch?: unknown; tokens?: unknown };
       if (!Array.isArray(b.listings) || !b.listings.length || b.listings.length > MAX_SWEEP) throw 0;
+      // Priced for a union's sweep (the Sweeper that deposits into it fills the orders) rather than a buy to the wallet.
+      if (b.batch !== undefined) {
+        if (typeof b.batch !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(b.batch)) throw 0;
+        into = b.batch as Address;
+      }
+      // Bought to the wallet through the token factory's Sweeper (then deposited by the page).
+      if (b.tokens === true) {
+        if (!tokenSweeper(env)) throw 0;
+        toTokens = true;
+      }
       ls = b.listings.map((x) => {
         const l = x as Record<string, unknown>;
         const id = String(l.id), price = String(l.price), source = String(l.source);
@@ -1327,7 +1415,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       }
     }
     try {
-      return Response.json(await quoteListings(env, url, ls), { headers: { 'cache-control': 'no-store' } });
+      if (into && !(await isBatch(env, url, into))) return text('not a batch', 404);
+      return Response.json(await quoteListings(env, url, ls, into ? await sweeperFor(env, into) : toTokens ? tokenSweeper(env)! : env.SWEEPER), { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
       // None of them still for sale: say which, so the page can take them off the grid.
       if ((e as { sold?: boolean }).sold) return Response.json({ error: safeError(e), sold: wanted }, { status: 409, headers: { 'cache-control': 'no-store' } });
@@ -2538,7 +2627,7 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
   // Every call in a batch counts against the limit, not just the request (one was charged above).
   if (await limited(env.RL_RPC, req, calls.length - 1)) return text('slow down', 429);
 
-  const allowed = new Set([env.CREDITS, env.FACTORY, env.SWEEPER, addrOrNull(env.FORMATS)].map((a) => a?.toLowerCase()).filter(Boolean));
+  const allowed = new Set([env.CREDITS, addrOrNull(env.STATEMENTS), env.FACTORY, env.SWEEPER, addrOrNull(env.FORMATS), addrOrNull(env.TOKEN_FACTORY), addrOrNull(env.TOKEN_ADAPTER), addrOrNull(env.TOKEN_FORMATS), tokenSweeper(env), ...swapTargets(env)].map((a) => a?.toLowerCase()).filter(Boolean));
   const clean: { jsonrpc: string; id: unknown; method: string; params: unknown[] }[] = [];
   // Targets outside `allowed`, by the call that first names each. They are checked together below (Credits' art
   // contract once, each batch address once, in parallel), not one call at a time.
@@ -2586,8 +2675,8 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
   // factory's burn contract (a picture's spots), the Statements it mints into (a burned union's format), or a batch
   // the factory made. Every target named before the first malformed call must pass, as when checked in order.
   if (others.size) {
-    const [art, adapter, statements] = await Promise.all([artOf(env), assemblerOf(env), statementsOf(env)]);
-    const rest = [...others.keys()].filter((to) => to !== art && to !== adapter && to !== statements?.toLowerCase());
+    const [art, adapter, statements, token] = await Promise.all([artOf(env), assemblerOf(env), statementsOf(env), tokenOf(env)]);
+    const rest = [...others.keys()].filter((to) => to !== art && to !== adapter && to !== statements?.toLowerCase() && to !== token?.toLowerCase());
     const ok = await Promise.all(rest.map((to) => isBatch(env, url, to as Address)));
     if (ok.some((x) => !x)) return text('target not allowed', 403);
   }
@@ -2595,7 +2684,7 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
   const payload = JSON.stringify(Array.isArray(parsed) ? clean : clean[0]);
   const post = async (to: string) => {
     try {
-      const r = await fetch(to, { method: 'POST', headers: { 'content-type': 'application/json' }, body: payload, signal: AbortSignal.timeout(6_000) });
+      const r = await fetch(to, { method: 'POST', headers: { 'content-type': 'application/json' }, body: payload, signal: AbortSignal.timeout(rpcTimeout(env, 6_000)) });
       return { status: r.status, body: await r.text() };
     } catch {
       return null; // down, or slower than a page should wait
@@ -2629,6 +2718,13 @@ let rpcCooling = 0;
 /// Listings that fit a party and would land in it, cheapest first. The scan (list pages, trait and liveness
 /// checks) is the expensive part and the same for everyone, so it is cached briefly and shared while in flight.
 const hasSweeper = (env: Env) => !!env.SWEEPER && !/^0x0+$/.test(env.SWEEPER);
+const tokenSweeper = (env: Env) => addrOrNull(env.TOKEN_SWEEPER);
+/// The Sweeper that deposits into `batch`: the token factory's for a token union, the first one otherwise.
+async function sweeperFor(env: Env, batch: Address): Promise<Address> {
+  const t = addrOrNull(env.TOKEN_FACTORY), sw = tokenSweeper(env);
+  if (t && sw && (await client(env).readContract({ address: t, abi: factoryAbi, functionName: 'isBatch', args: [batch] }).catch(() => false))) return sw;
+  return env.SWEEPER;
+}
 const addrOrNull = (a?: string) => (a && /^0x[0-9a-fA-F]{40}$/.test(a) && !/^0x0+$/.test(a) ? (a as Address) : null);
 /// Mainnet reads (FWA). ENS_RPC when set; publicnode otherwise, which (unlike drpc's free tier) honours an eth_call's
 /// gas price, needed to price FWA's randomness fee.
@@ -2641,7 +2737,7 @@ const mainClient = (env: Env) =>
 type Fake = { id: string; price: string; source: 'fwa' | 'strategy' | 'opensea' };
 /// A price for exactly these listings, ready for the Sweeper: OpenSea's as signed Seaport orders (the Sweeper as
 /// fulfiller), FWA's and CreditStrategy's each re-read now and sent by id and price. Gone ones drop out.
-async function quoteListings(env: Env, url: URL, listings: Listing[]) {
+async function quoteListings(env: Env, url: URL, listings: Listing[], sweeper: Address = env.SWEEPER) {
   // FWA and strategy listings need no signed fill: read each again now, and send it with its price to the Sweeper.
   const main = mainClient(env);
   const confirmed = async (source: 'fwa' | 'strategy') =>
@@ -2665,7 +2761,7 @@ async function quoteListings(env: Env, url: URL, listings: Listing[]) {
   if (osPicked.length) {
     const dead: { id: string; hash: string }[] = [];
     try {
-      os = await quote({ key: env.OPENSEA_API_KEY!, sweeper: env.SWEEPER, listings: osPicked, n: osPicked.length, origin: url.origin, onDead: (l) => l.hash && dead.push({ id: l.id, hash: l.hash }) });
+      os = await quote({ key: env.OPENSEA_API_KEY!, sweeper, listings: osPicked, n: osPicked.length, origin: url.origin, onDead: (l) => l.hash && dead.push({ id: l.id, hash: l.hash }) });
     } catch (e) {
       if (!fwaLive.length && !strategyLive.length) {
         if (dead.length && env.MARKET) await book(env).dropOrders(dead).catch(() => {});
@@ -3283,6 +3379,19 @@ function assemblerOf(env: Env): Promise<string | null> {
 /// The Statements contract burned unions mint into: the factory's burn contract's statement(). Read once a minute per
 /// isolate; null until a burn contract is active.
 let statementsKept: { at: number; addr: Promise<Address | null> } | null = null;
+/// The token a token union's Statement converts into (TokenAdapter.token()), for its symbol and balances. A minute.
+let tokenKept: { at: number; addr: Promise<Address | null> } | null = null;
+function tokenOf(env: Env): Promise<Address | null> {
+  const adapter = addrOrNull(env.TOKEN_ADAPTER);
+  if (!adapter) return Promise.resolve(null);
+  if (tokenKept && Date.now() - tokenKept.at < 60_000) return tokenKept.addr;
+  const addr = client(env)
+    .readContract({ address: adapter, abi: tokenAdapterAbi, functionName: 'token' })
+    .then((a) => addrOrNull(a as string))
+    .catch(() => null);
+  tokenKept = { at: Date.now(), addr };
+  return addr;
+}
 function statementsOf(env: Env): Promise<Address | null> {
   if (statementsKept && Date.now() - statementsKept.at < 60_000) return statementsKept.addr;
   const c = client(env);
@@ -3356,8 +3465,8 @@ async function lockTx(env: Env, batch: Address, account: string, tx: Hex): Promi
   };
   const ok =
     t.from.toLowerCase() === account &&
-    ((to === env.SWEEPER.toLowerCase() && into(sweeperAbi, ['sweep', 'sweepAll'], 0)) ||
-      (to === env.FACTORY.toLowerCase() && into(factoryAbi, ['deposit'], 0)) ||
+    (((to === env.SWEEPER.toLowerCase() || to === tokenSweeper(env)?.toLowerCase()) && into(sweeperAbi, ['sweep', 'sweepAll'], 0)) ||
+      ((to === env.FACTORY.toLowerCase() || to === addrOrNull(env.TOKEN_FACTORY)?.toLowerCase()) && into(factoryAbi, ['deposit'], 0)) ||
       (to === env.CREDITS.toLowerCase() && into(creditsAbi, ['safeTransferFrom'], 1)));
   if (!ok) return 'bad';
   if (t.blockNumber !== null && (await c.getBlockNumber()) - t.blockNumber > LOCK_BLOCKS) return 'bad';
@@ -3371,8 +3480,11 @@ async function isBatch(env: Env, url: URL, addr: Address): Promise<boolean> {
   const hit = await cache.match(key);
   if (hit) return (await hit.text()) === '1';
   let ok = false;
+  // A union from either factory: the auction one, or the token one once it's deployed (same Batch code).
+  const tokens = addrOrNull(env.TOKEN_FACTORY);
   try {
     ok = await client(env).readContract({ address: env.FACTORY, abi: factoryAbi, functionName: 'isBatch', args: [addr] });
+    if (!ok && tokens) ok = await client(env).readContract({ address: tokens, abi: factoryAbi, functionName: 'isBatch', args: [addr] });
   } catch {
     return false;
   }

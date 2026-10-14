@@ -25,7 +25,10 @@
     "STRATEGY": "0x8e607209899b5d12bd3167a6cd0e8e11feb053d6",
     // UnionFormats: where each union's creator picks its Statement format; the burn contract reads it. Zero hides
     // the picker.
-    "FORMATS": "0x16deCDa20c9164CcfDB4BE189557aDc4614aAedC"
+    "FORMATS": "0x16deCDa20c9164CcfDB4BE189557aDc4614aAedC",
+    "TOKEN_FACTORY": "0x1Ea4b73dE4e946bc58A9A477a7291abe7D7417C1",
+    "TOKEN_FORMATS": "0xF3bf99F0a28c4Fc0cf77eB4480F5d0f87d782a25",
+    "TOKEN_SWEEPER": "0xA4a4dBFddD6C8cc771F4a013Ccd30494Fc82bC5e"
   },
   // creditunion.party, eighty.fun and eighty.rhps.fun are old names kept so their links still work. A fork puts its own domain here.
   "routes": [

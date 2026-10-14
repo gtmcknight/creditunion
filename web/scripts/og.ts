@@ -1,6 +1,7 @@
 // Draws the link-preview cards (1200×630) into public/og/: the living wall of real Credits as the ground, with a
 // headline on black bars, like the home hero. Drawn in Chrome (playwright-core; CHROME= to point at it).
-//   node scripts/og.ts
+//   node scripts/og.ts                 every card
+//   ONLY=tokens node scripts/og.ts     just these (comma separated), leaving the rest as they are
 // The worker points each route's og:image at one of these (src/worker/og.ts); /og previews them all.
 import { deflateSync } from 'node:zlib';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -16,10 +17,12 @@ const n = cells.length / 32;
 const PALETTE = ['#ffffff', '#00b5e2', '#e4007c', '#00006e', '#ffd100', '#009400', '#e40000', '#000000', '#111111', '#000c0f', '#0f0008', '#000007', '#110e00', '#000a00', '#0f0000', '#000000'];
 const RGB = PALETTE.map((h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)));
 
-type Order = 'time' | 'color' | 'density';
+type Order = 'time' | 'color' | 'density' | 'pure';
 function order(kind: Order, from = 0) {
-  const ids = Array.from({ length: n }, (_, i) => i);
-  if (kind === 'color') ids.sort((a, b) => (traits[a] & 15) - (traits[b] & 15) || a - b);
+  let ids = Array.from({ length: n }, (_, i) => i);
+  // Pure: only Credits printed in one ink, in C, M, Y, K order (BALANCE's colors).
+  if (kind === 'pure') ids = ids.filter((i) => [1, 2, 4, 8].includes(traits[i] & 15));
+  if (kind === 'color' || kind === 'pure') ids.sort((a, b) => (traits[a] & 15) - (traits[b] & 15) || a - b);
   if (kind === 'density') ids.sort((a, b) => bits[a] - bits[b] || a - b);
   return ids.slice(from).concat(ids.slice(0, from));
 }
@@ -30,12 +33,12 @@ function wall(kind: Order, k: number, from = 0) {
   const T = 8 * k, rows = Math.ceil(H / T), cols = Math.ceil(W / T);
   const ids = order(kind, from);
   // Color: one horizontal stripe of rows per ink combination, as on the site.
-  const pals = kind === 'color' ? [...new Set(ids.map((i) => traits[i] & 15))] : [];
+  const pals = kind === 'color' || kind === 'pure' ? [...new Set(ids.map((i) => traits[i] & 15))] : [];
   const byPal = new Map(pals.map((p) => [p, ids.filter((i) => (traits[i] & 15) === p)]));
   for (let c = 0; c < cols; c++)
     for (let r = 0; r < rows; r++) {
       let id: number;
-      if (kind === 'color') {
+      if (kind === 'color' || kind === 'pure') {
         const p = pals[Math.min(pals.length - 1, Math.floor((r * pals.length) / rows))];
         const list = byPal.get(p)!;
         id = list[(c * rows + r) % list.length];
@@ -102,7 +105,9 @@ async function draw() {
   const { chromium } = await import('playwright-core');
   const browser = await chromium.launch({ executablePath: process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' });
   const page = await browser.newPage({ viewport: { width: W, height: H } });
+  const only = process.env.ONLY?.split(',');
   for (const c of cards) {
+    if (only && !only.includes(c.name)) continue;
     await page.setContent(`<html><head><link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600&display=swap" rel="stylesheet"><style>
       body{margin:0;width:${W}px;height:${H}px;background:url(data:image/png;base64,${c.ground.toString('base64')}) 0 0/${W}px ${H}px;font-family:Geist,sans-serif;position:relative}
       .t{position:absolute;left:64px;top:50%;translate:0 -50%}
@@ -125,5 +130,6 @@ card('auctions', wall('color', 3), ['Statements', 'at auction']);
 card('create', wall('time', 5, 40_000), ['Start a Credit Union']);
 card('party', wall('color', 5, 7), ['Join this Credit Union']);
 card('mint', wall('density', 5, 90_000), ['Mint test Credits']);
+card('tokens', wall('pure', 5), ['Credits in,', 'BALANCE out.']);
 
 await draw();

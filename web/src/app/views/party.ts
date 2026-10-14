@@ -17,6 +17,7 @@ import { onReturn } from '../visible';
 import { activityFold, ago } from './live';
 import { $$, art, clock, errText, dayAndTime, esc, eth, localTime, openModal, same, setRange, sheet, short, startsAt, statementArt, timeLeft, toast, until } from '../ui';
 import { stamp } from '../../shared/stamp';
+import { isTokenUnion } from '../tokens';
 import { slotName } from '../../shared/layout';
 import { compose, DIRECTIONS, paint as paintMarks, PAGE, SHOWN, type Direction } from '../../shared/statement';
 import { go as navigate } from '../main';
@@ -208,6 +209,11 @@ export async function party(app: HTMLElement, address: Address, rerender: () => 
       pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'isBatch', args: [address] }).catch(() => null),
       getBatch(address).catch(() => null),
     ]);
+    // A token union lives on /tokens, at its color.
+    if (ours === false && (await isTokenUnion(address))) {
+      const color = ({ 2: 'c', 4: 'm', 16: 'y', 256: 'k' } as Record<number, string>)[Number(got?.s.filter.palettes ?? 0)];
+      return navigate(color ? `/balance?color=${color}` : '/balance');
+    }
     if (!ours || !got) {
       mine?.catch(() => {});
       app.innerHTML = `<section class="prose"><h1>${ours === false ? 'Credit Union not found' : 'Couldn’t load this Credit Union'}</h1><p>${ours === false ? '' : 'Refresh to try again. '}<a href="/unions">← Credit Unions</a></p></section>`;
