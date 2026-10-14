@@ -3,7 +3,7 @@ import { fmtScore } from '../../shared/credits';
 import { batchAbi } from '../abi';
 import { bin } from '../bins';
 import { config, pub, send, session } from '../chain';
-import { listBatches, myCredits, ratingTotal, type Listed } from '../data';
+import { listBatches, myCredits, ratingTotal, tokenBatches, type Listed } from '../data';
 import { hydrate, who } from '../ens';
 import { fillGhosts } from '../ghosts';
 import { errText, esc, eth, pageHead, same, toast } from '../ui';
@@ -38,7 +38,8 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
   // until it does, and shows the Credits alone if it never does.
   let scoreOf: Uint32Array | undefined;
   const scoring = bin('credit-score.bin').then((b) => (scoreOf = new Uint32Array(b)), () => (scoreOf = new Uint32Array(0)));
-  const [owned, list] = await Promise.all([myCredits(account), listBatches()]);
+  // Auction unions from the index, and token batches ($BALANCE) from their own factory.
+  const [owned, list] = await Promise.all([myCredits(account), Promise.all([listBatches(), tokenBatches().catch(() => [] as Listed[])]).then(([a, b]) => [...a, ...b])]);
   const mine = list.filter((b) => mineIn(b, account).size > 0 || same(b.s.creator, account));
   const deposited = mine.reduce((n, b) => n + mineIn(b, account).size, 0);
 

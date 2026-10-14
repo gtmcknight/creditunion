@@ -278,6 +278,16 @@ export async function getBatch(a: Address) {
   return { s: toSummary(a, s as Record<string, unknown>), ids: slots[0], depositors: slots[1] };
 }
 
+/// Every token batch ($BALANCE), newest first, read from the token factory: they aren't in the union index.
+export async function tokenBatches(): Promise<Listed[]> {
+  const f = config.tokenFactory;
+  if (!f) return [];
+  const n = (await pub.readContract({ address: f, abi: factoryAbi, functionName: 'batchCount' })) as bigint;
+  if (!n) return [];
+  const addrs = (await pub.readContract({ address: f, abi: factoryAbi, functionName: 'batches', args: [0n, n] })) as readonly Address[];
+  return (await Promise.all(addrs.map((a) => getBatch(a).then((b) => ({ ...b, ids: [...b.ids], depositors: [...b.depositors], format: null }) as Listed).catch(() => null)))).filter((b): b is Listed => !!b);
+}
+
 /// Your side of a Credit Union, kept 20 s (forgotten after any transaction of ours), so a page you open, or are about
 /// to (a link under the pointer reads ahead), has it waiting.
 const MINE_MS = 20_000;

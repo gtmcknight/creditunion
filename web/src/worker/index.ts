@@ -124,6 +124,8 @@ const MAINNET_CREDITS: Address = '0x97630aA70AB14ed9883B41dAfccBc11349723043';
 const MAX_RPC_BATCH = 50;
 /// The mainnet factory's deploy block (contracts/DEPLOY.md); /activity.json scans from here.
 const ACTIVITY_FROM = 26_072_342n;
+/// The token factory's deploy block (2026-10-14): its activity scan starts there, not at the first factory's.
+const TOKEN_ACTIVITY_FROM = 26_193_327n;
 /// Credits ever minted; ids outside 1..SUPPLY are refused before any RPC.
 const SUPPLY = 122_154;
 const inSupply = (id: number) => Number.isInteger(id) && id >= 1 && id <= SUPPLY;
@@ -369,7 +371,7 @@ async function activityItems(env: Env, store: Cache, stateKey: string): Promise<
   // Token unions keep their own scan state; both lists merge newest first.
   const [main, more] = await Promise.all([
     readActivity(c as never, store, stateKey, { ...cfg, factory: env.FACTORY, sweeper: hasSweeper(env) ? env.SWEEPER : null }),
-    tokens ? readActivity(c as never, store, `${stateKey}/tokens/${tokens.toLowerCase()}`, { ...cfg, factory: tokens, sweeper: tokenSweeper(env) }) : Promise.resolve([]),
+    tokens ? readActivity(c as never, store, `${stateKey}/tokens/${tokens.toLowerCase()}/from-deploy`, { ...cfg, from: env.CHAIN_ID === '1' ? TOKEN_ACTIVITY_FROM : cfg.from, factory: tokens, sweeper: tokenSweeper(env) }) : Promise.resolve([]),
   ]);
   const items = more.length ? [...main, ...more].sort((a, b) => b.block - a.block || b.i - a.i) : main;
   // A plan's union stays out of Activity until it fills.
