@@ -85,6 +85,8 @@ const shown = new Map<string, number>();
 let view: 'buy' | 'sell' | 'credits' | 'out' = 'buy';
 /// What's typed: ETH to buy with, or the token to sell.
 let typed = '';
+/// The first draw of a visit: holders open on Convert with all theirs picked, everyone else on Buy at 0.1 ETH.
+let landed = false;
 /// Buy on Uniswap even when a batch gets more: you'd rather have it now.
 let instant = false;
 /// The way to buy someone tapped (null: the best).
@@ -254,7 +256,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   /// What `wei` gets through a batch: those Credits, what they cost, and the tokens they pay out (our fee off).
   const viaBatch = (wei: bigint, key: Lane['key'] = laneKey, cap = MAX_BUY) => {
     const f = fitBudget(wei, key, cap);
-    return { ...f, tokens: est(f.out.reduce((a, x) => a + x.tenths, 0)) };
+    return { ...f, tokens: est(f.out.reduce((a, x) => a + t(x.id), 0)) }; // the same score table the batch box and payouts use
   };
   /// What a full batch of this color costs per 1,000 BALANCE right now: its cheapest 80 per point, fee included.
   const batchPrice = (l: Lane) => {
@@ -581,8 +583,12 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     kept.clear();
     app.innerHTML = `
     <section class="tokens">
-      <header class="create-head"><h1>${TOKEN}</h1><p class="create-lede"><button type="button" class="link" id="tk-how">What is ${TOKEN}?</button></p></header>
-      ${trade?.open && !previewSoon ? '' : `<div class="tk-soon"><span class="tk-dot" aria-hidden="true"></span><div><p><b>${TOKEN} opens ${new Date(OPENS_AT).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}</b><span class="muted" id="tk-left"></span></p><p class="muted">Credits only turn into ${TOKEN} 80 at a time. Put yours in a batch here, or buy some, and you're paid when it opens. Withdraw anytime before.</p></div></div>`}
+      <header class="create-head"><h1>${trade?.open && !previewSoon ? TOKEN : `Get ${TOKEN} before it opens`}</h1><p class="create-lede"><button type="button" class="link" id="tk-how">What is ${TOKEN}?</button></p></header>
+      ${trade?.open && !previewSoon ? '' : `<div class="tk-soon"><span class="tk-dot" aria-hidden="true"></span><div><p><b>Opens ${new Date(OPENS_AT).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}</b><span class="muted" id="tk-left"></span><span class="muted">${(() => {
+        const people = new Set(waiting.flatMap((u) => u.depositors.map((d) => d.toLowerCase()))).size;
+        const credits = waiting.reduce((n, u) => n + u.s.count, 0);
+        return people >= 3 ? ` · ${people} people, ${credits} Credits waiting` : '';
+      })()}</span></p><p class="muted">Credits become ${TOKEN} 80 at a time. Put yours in a batch or buy some here. Withdraw anytime before.</p></div></div>`}
       <div class="tk-layout">
       <section class="tk-card">
         <form class="design-form tk-form" novalidate style="${inkVar(l)}">
@@ -1237,6 +1243,13 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     }
   }
 
+  if (!landed) {
+    landed = true;
+    if (account && owned.length && view === 'buy') {
+      view = 'credits';
+      for (const id of ownedHere()) picks.add(id.toString());
+    } else if (view === 'buy' && !typed) typed = '0.1';
+  }
   // Your Credits in a pure color open with yours of that ink picked, however you got here (its card, or a ?color= link).
   if (viewNow() === 'credits' && lane().ink >= 0 && !picks.size) for (const id of ownedHere()) picks.add(id.toString());
   draw();
