@@ -8,7 +8,7 @@ optimizer = true
 optimizer_runs = 200
 via_ir = true
 remappings = ["@openzeppelin/=lib/openzeppelin-contracts/", "forge-std/=lib/forge-std/src/"]
-fs_permissions = [{ access = "read", path = "./data" }]
+fs_permissions = [{ access = "read", path = "./data" }, { access = "read", path = "./test/fixtures" }]
 
 [profile.default.fuzz]
 runs = 512

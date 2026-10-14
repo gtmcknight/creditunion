@@ -25,7 +25,7 @@ import {IAssembler} from "./interfaces/IAssembler.sol";
 contract BatchFactory {
     uint256 public constant MIN_DURATION = 3 days;
     uint256 public constant MAX_DURATION = 90 days;
-    uint256 public constant MAX_PROTOCOL_FEE_BPS = 500; // hard ceiling, deploy or later: 5%
+    uint256 public constant MAX_PROTOCOL_FEE_BPS = 1500; // hard ceiling, deploy or later: 15%
     uint256 public constant MAX_CREATOR_FEE_BPS = 1000; // 10%
     uint256 public constant ASSEMBLER_DELAY = 30 minutes; // notice before a proposed assembler can go live
     uint256 public constant RATINGS_DELAY = 30 minutes; // notice before a proposed score table can go live

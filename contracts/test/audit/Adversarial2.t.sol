@@ -441,7 +441,7 @@ contract Adversarial2Test is Test {
         vm.expectRevert(Batch.NotFactory.selector);
         b.depositFrom(fee, _one(41));
         vm.expectRevert(BatchFactory.ProtocolFeeTooHigh.selector);
-        factory.setFees(501, 0);
+        factory.setFees(1501, 0);
         vm.expectRevert(BatchFactory.CreatorFeeTooHigh.selector);
         factory.setFees(0, 1001);
         IAssembler cur = factory.assembler();

@@ -28,7 +28,7 @@ contract FactoryFormal is FormalBase {
     function check_fees_neverAboveCaps(address caller, uint256 p, uint256 c) public {
         vm.prank(caller);
         try factory.setFees(p, c) {} catch {}
-        assert(factory.protocolFeeBps() <= 500);
+        assert(factory.protocolFeeBps() <= factory.MAX_PROTOCOL_FEE_BPS());
         assert(factory.creatorFeeBps() <= 1000);
     }
 

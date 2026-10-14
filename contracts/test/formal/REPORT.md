@@ -1,5 +1,7 @@
 # Credit Union: formal verification (Halmos)
 
+**Rerun 2026-10-14 on branch balance-ready** (the token factory: `Batch` asks its assembler for a shorter lock delay, protocol fee cap 15%): the same 51 rules proved and the same 5 timed out, none broken. Run with `FOUNDRY_DYNAMIC_TEST_LINKING=false` (now set in `run.sh`): Foundry 1.8 builds test deploys through `vm.deployCode`, which Halmos 0.3.3 rejects in `setUp`. Bitwuzla for the three payout rules, `--loop 5` for the invariants, as below.
+
 | | |
 |---|---|
 | Commit | `bcf9a04`: the contracts deployed on mainnet. `DEPLOY.md` records the deploy from contracts as of `fc506e8`, and `src/` and `test/formal/` are identical at `bcf9a04`. Every rule below was rerun there. |

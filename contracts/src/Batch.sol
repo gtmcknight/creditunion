@@ -28,8 +28,9 @@ interface IBatchFactory {
 ///         Full      80 held. See `phase()` for the lock:
 ///                   Waiting    no active assembler yet (none set, or proposed and still in its 30-minute delay):
 ///                              never locked, depositors withdraw freely.
-///                   Countdown  from max(filledAt, assembler activation) until lockAt = that + LOCK_DELAY
-///                              (5 minutes): last chance to leave. Leaving drops it under 80; refilling starts
+///                   Countdown  from max(filledAt, assembler activation) until lockAt = that + the lock delay
+///                              (LOCK_DELAY, 5 minutes, unless the assembler states a shorter one: a token union
+///                              locks the moment it fills): last chance to leave. Leaving drops it under 80; refilling starts
 ///                              a new countdown.
 ///                   Burnable   from lockAt for BURN_WINDOW (1 hour): withdrawals revert and anyone can
 ///                              assemble. This is the only time a burn can happen, and it always follows at
@@ -48,7 +49,7 @@ interface IBatchFactory {
 contract Batch is IERC721Receiver, ReentrancyGuardTransient {
     uint256 public constant SIZE = 80;
     uint256 public constant MAX_CREATOR_FEE_BPS = 1000; // 10%
-    uint256 public constant MAX_PROTOCOL_FEE_BPS = 500; // 5%
+    uint256 public constant MAX_PROTOCOL_FEE_BPS = 1500; // 15%
     uint256 public constant LOCK_DELAY = 5 minutes; // notice between a full batch's countdown start and its lock
     uint256 public constant BURN_WINDOW = 1 hours; // how long it stays locked and burnable
     uint256 public constant RESERVE_WINDOW = 7 days; // with no bid by then, the reserve no longer applies
@@ -343,13 +344,22 @@ contract Batch is IERC721Receiver, ReentrancyGuardTransient {
         return _ids.length == SIZE ? State.Full : State.Open;
     }
 
-    /// @notice When a full, unassembled batch locks and becomes burnable: LOCK_DELAY after it filled or after the
+    /// @notice When a full, unassembled batch locks and becomes burnable: the lock delay after it filled or after the
     ///         assembler went live, whichever is later. 0 when under 80, assembled, or no assembler is active.
     function lockAt() public view returns (uint256) {
         if (_ids.length != SIZE || statement != address(0)) return 0;
         uint256 active = factory.assemblerActiveAt();
         if (active == 0) return 0;
-        return (active > filledAt ? active : filledAt) + LOCK_DELAY;
+        return (active > filledAt ? active : filledAt) + _lockDelay();
+    }
+
+    /// @dev The assembler's own notice before a full batch locks, when it states a shorter one (a token union
+    ///      converts the moment it fills); LOCK_DELAY on anything else: no such function, a revert, an odd answer.
+    function _lockDelay() internal view returns (uint256 d) {
+        (bool ok, bytes memory ret) = address(factory.assembler()).staticcall(abi.encodeWithSignature("lockDelay()"));
+        if (!ok || ret.length != 32) return LOCK_DELAY;
+        d = abi.decode(ret, (uint256));
+        if (d > LOCK_DELAY) d = LOCK_DELAY;
     }
 
     /// @notice When the burn window closes and the batch unlocks again; 0 when lockAt() is 0.

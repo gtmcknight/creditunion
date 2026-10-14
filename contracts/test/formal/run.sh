@@ -3,6 +3,8 @@
 # Usage: test/formal/run.sh <Contract> [seconds per rule, default 900] [extra halmos flags...]
 # Full output per rule lands in test/formal/logs/<Contract>.<rule>.log.
 set -u
+# Foundry 1.8+ links test deploys through vm.deployCode, which Halmos 0.3.3 can't run: build without it.
+export FOUNDRY_DYNAMIC_TEST_LINKING=false
 c=$1; cap=${2:-900}; shift; shift 2>/dev/null || true
 cd "$(dirname "$0")/../.."
 mkdir -p test/formal/logs

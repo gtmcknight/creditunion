@@ -386,7 +386,7 @@ contract BatchTest is Test {
         factory.setFees(200, 100);
         vm.prank(fee);
         vm.expectRevert(BatchFactory.ProtocolFeeTooHigh.selector);
-        factory.setFees(501, 0);
+        factory.setFees(1501, 0);
         vm.prank(fee);
         factory.setFees(200, 100);
         assertEq(factory.protocolFeeBps(), 200);
@@ -418,7 +418,7 @@ contract BatchTest is Test {
     function test_ProtocolFeeCappedAt5Percent() public {
         MockAssembler asm = new MockAssembler(statement);
         vm.expectRevert(BatchFactory.ProtocolFeeTooHigh.selector);
-        new BatchFactory(ICredits(address(credits)), IRatings(address(0)), asm, address(0), fee, 501, 0, 10);
+        new BatchFactory(ICredits(address(credits)), IRatings(address(0)), asm, address(0), fee, 1501, 0, 10);
     }
 
     function test_CreatorAndProtocolSplit() public {
