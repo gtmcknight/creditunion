@@ -11,6 +11,7 @@ import { mint } from './views/mint';
 import { previews } from './views/previews';
 import { activityTicker, live, tickerHtml } from './views/live';
 import { docs } from './views/docs';
+import { balance } from './views/balance';
 import { profile } from './views/profile';
 import { printer } from './views/printer';
 import { credit } from './views/credit';
@@ -27,17 +28,19 @@ const loadedAt = Date.now();
 // Any page's read of the union list brings the nav's count up to date.
 onBatches((all) => void drawAuctions(pagePath()[0], all));
 
-/// Real paths: / (how it works and live activity), /docs, /unions, /auctions, /credits, /create, /union/0x…, /credit/123, /mint, /me,
+/// Real paths: / (how it works and live activity), /docs, /statements (Buy) and /unions (Make), /credits, /balance, /create, /union/0x…, /credit/123, /mint, /me,
 /// trait pages /palette/CMYK, /eights/3, /print/slip, /weight/sparse, and /time?from=&to=, /rating, /bits. Pages keep their old
 /// internal names (party, parties). Old #/ links and old paths (/party, /parties, /new, /b, /docs, /how) still land.
-const LEGACY: Record<string, string> = { union: 'party', unions: 'parties', new: 'create', b: 'party', faq: 'docs', how: '', about: '' };
+const LEGACY: Record<string, string> = { union: 'party', unions: 'parties', new: 'create', b: 'party', faq: 'docs', how: '', about: '', tokens: 'balance' };
 function pagePath(): string[] {
   const parts = location.pathname.replace(/^\/+|\/+$/g, '').split('/');
   parts[0] = LEGACY[parts[0]] ?? parts[0];
   return parts;
 }
-// /whale is Auctions → Multibid.
-if (location.pathname.replace(/\/+$/, '') === '/whale') history.replaceState(null, '', '/auctions/multibid');
+// /whale is Statements → Buy → Multibid. /auctions (and its stages) became Statements' Buy half; its Upcoming is Make's Full.
+if (location.pathname.replace(/\/+$/, '') === '/whale') history.replaceState(null, '', '/statements/multibid');
+if (/^\/auctions(\/|$)/.test(location.pathname)) history.replaceState(null, '', location.pathname === '/auctions/upcoming' ? '/unions/full' : location.pathname.replace(/^\/auctions/, '/statements'));
+if (location.pathname.replace(/\/+$/, '') === '/tokens') history.replaceState(null, '', '/balance');
 if (location.hash.startsWith('#/')) {
   const [p, ...rest] = location.hash.slice(2).split('/');
   history.replaceState(null, '', '/' + [LEGACY[p] ?? p, ...rest].filter(Boolean).join('/'));
@@ -55,7 +58,7 @@ export function go(path: string) {
 }
 
 /// The Credits explorer: its landing, the trait indexes and pages, the range pages.
-const EXPLORER = new Set(['credits', 'statements', 'statement', 'palette', 'eights', 'print', 'weight', 'time', 'rating', 'bits']);
+const EXPLORER = new Set(['credits', 'statement', 'palette', 'eights', 'print', 'weight', 'time', 'rating', 'bits']);
 
 let lastPath = '';
 let lastPage = '';
@@ -67,7 +70,7 @@ async function route() {
   const self = page === 'me' || (page === 'member' && !!arg && arg.toLowerCase() === session.account?.toLowerCase());
   siteTicker(page);
   void drawAuctions(page);
-  const current = self ? 'me' : page === 'party' ? 'parties' : EXPLORER.has(page) ? 'credits' : page === '' ? 'home' : page;
+  const current = self ? 'me' : ['party', 'parties', 'auctions', 'statements', 'statement'].includes(page) ? 'statements' : EXPLORER.has(page) ? 'credits' : page === '' ? 'home' : page;
   document.querySelectorAll<HTMLAnchorElement>('[data-nav]').forEach((a) => a.toggleAttribute('aria-current', a.dataset.nav === current));
   document.querySelectorAll<HTMLAnchorElement>('#account [data-nav]').forEach((a) =>
     a.classList.toggle('current', self),
@@ -100,6 +103,7 @@ async function route() {
   try {
     if (page === '') home(app);
     else if (page === 'docs') docs(app);
+    else if (page === 'balance') balance(app);
     else if (page === 'mint') await mint(app, route);
     else if (page === 'og') await previews(app);
     else if (page === 'activity' || page === 'live') await live(app);
@@ -112,11 +116,11 @@ async function route() {
     else if (page === 'time') await timePage(app);
     else if (page === 'rating') await ratingPage(app);
     else if (page === 'bits') await bitsPage(app);
-    else if (page === 'statements') await (await import('./views/statements')).statementsMarket(app, route);
     else if (page === 'statement') await (await import('./views/statement')).statement(app, arg ?? '', route);
     else if (page === 'credits' || page === 'palette' || page === 'eights' || page === 'print' || page === 'weight') await traitPage(app, page, arg ?? '');
     else if (page === 'party' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await party(app, arg as Address, route);
     else if (page === 'parties' || page === 'auctions') await lists(app, page);
+    else if (page === 'statements') await lists(app, 'auctions');
     else home(app);
   } catch (e) {
     if (run === seq) app.innerHTML = `<section class="prose"><h1>Something went wrong</h1><p class="error">${esc(errText(e))}</p></section>`;
@@ -176,15 +180,15 @@ async function drawAuctions(page: string, list: Listed[] | null = recentBatches(
   const all = list ?? (given ? null : await listBatches().catch(() => null));
   const live = all ? liveAuctions(all) : config.liveAuctions;
   if (live === undefined) return;
-  const a = document.querySelector<HTMLAnchorElement>('.main-nav [data-nav="auctions"]');
-  if (a) a.innerHTML = live ? `Auctions <span class="nav-count num" aria-label="${live} live">${live}</span>` : 'Auctions';
+  const a = document.querySelector<HTMLAnchorElement>('.main-nav [data-nav="statements"]');
+  if (a) a.innerHTML = live ? `Statements <span class="nav-count num" aria-label="${live} live auctions">${live}</span>` : 'Statements';
   await readNotice();
   const el = document.getElementById('notice');
   if (!el || !burningOn || (el.innerHTML && !el.classList.contains('auctions-bar'))) return;
   el.classList.add('auctions-bar');
   if (burnBar(el, all ?? [], page)) return; // no list: the page's facts say no union is near its hour to convert
-  el.innerHTML = `<span><strong>${live === 1 ? '1 Statement is' : `${live} Statements are`} up for auction.</strong> <a href="/auctions">See auctions</a></span>`;
-  el.hidden = !live || page === 'auctions';
+  el.innerHTML = `<span><strong>${live === 1 ? '1 Statement is' : `${live} Statements are`} up for auction.</strong> <a href="/statements">See them</a></span>`;
+  el.hidden = !live || page === 'auctions' || page === 'statements';
 }
 
 /// While a full union is in its hour to convert, the bar says so instead: which one and how long is left, linked to

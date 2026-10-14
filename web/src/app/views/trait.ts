@@ -442,21 +442,19 @@ function valuesOf(kind: TraitKind): TraitValue[] {
 export const creditsHead = (current: string, value?: string, side = '') => {
   const sections: [string, string][] = [...TRAIT_KINDS.map((k): [string, string] => [k, valuesOf(k)[0].label]), ['time', 'Time'], ['rating', 'Rating'], ['bits', 'Bits']];
   const label = sections.find(([k]) => k === current)?.[1] ?? '';
-  // Market's two halves at its top: Credits (with its trait tabs) and Statements.
+  // Credits (with its trait tabs); a Statement's page sits under Statements, where it's for sale.
   const crumb =
     current === 'credits'
-      ? '<b>Credits</b><a class="crumb-alt" href="/statements">Statements</a>'
-      : current === 'statements'
-        ? '<a class="crumb-alt" href="/credits">Credits</a><b>Statements</b>'
-        : current === 'statement'
-          ? `<a href="/statements">Statements</a><span>/</span><b>${esc(value ?? '')}</b>`
+      ? '<b>Credits</b>'
+      : current === 'statement'
+        ? `<a href="/statements">Statements</a><span>/</span><b>${esc(value ?? '')}</b>`
         : !label
         ? `<a href="/credits">Credits</a><span>/</span><b>${esc(value ?? '')}</b>`
         : `<a href="/credits">Credits</a><span>/</span>${value ? `<a href="/${current}">${esc(label)}</a><span>/</span><b>${esc(value)}</b>` : `<b>${esc(label)}</b>`}`;
   const tabs: [string, string][] = [['credits', 'All'], ...sections];
   return `<header class="page-head">
       <nav class="jb-crumb" aria-label="Where">${crumb}</nav>
-      ${current === 'statements' || current === 'statement' ? '' : `<div class="page-bar"><nav class="subtabs swipe" aria-label="Credits by">${tabs.map(([k, l]) => `<a href="/${k}"${k === current ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</nav>${side ? `<span class="page-side">${side}</span>` : ''}</div>`}
+      ${current === 'statement' ? '' : `<div class="page-bar"><nav class="subtabs swipe" aria-label="Credits by">${tabs.map(([k, l]) => `<a href="/${k}"${k === current ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</nav>${side ? `<span class="page-side">${side}</span>` : ''}</div>`}
     </header>`;
 };
 

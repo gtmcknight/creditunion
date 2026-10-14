@@ -138,7 +138,7 @@ function tell(list: Listed[]) {
     });
     n.onclick = () => {
       window.focus();
-      location.href = one ? `/union/${one.s.address}` : '/auctions/multibid';
+      location.href = one ? `/union/${one.s.address}` : '/statements/multibid';
       n.close();
     };
   }
@@ -149,7 +149,7 @@ function say(list: Listed[]) {
   toast(
     one
       ? `Outbid on <a href="/union/${one.s.address}">${esc(title(one))}</a>: ${eth(one.s.highBid)} now.`
-      : `Outbid on ${list.length} auctions. <a href="/auctions/multibid">Bid again</a>`,
+      : `Outbid on ${list.length} auctions. <a href="/statements/multibid">Bid again</a>`,
     'info', // news, not an error: red is for what failed
     12_000,
     true,

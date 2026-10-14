@@ -7,7 +7,8 @@ import { fitByBatch, fitsRules, myTraits } from '../fit';
 import { pictureFit } from '../picture-fit';
 import { editionArt, examples, fillGhosts, hasPlan, planGhosts, registerDeposits, registerFilter } from '../ghosts';
 import type { Address } from 'viem';
-import { clock, eth, esc, openModal, pageHead, same, sheet, startsAt, statementArt, timeLeft, toast, until } from '../ui';
+import { clock, errText, eth, esc, openModal, pageHead, same, sheet, startsAt, statementArt, timeLeft, toast, until } from '../ui';
+import { buyListed, listings, overprintsStanding, OVERPRINTS, stackStyle, type ForSale, type Standing } from './statements';
 import { TRAIT_KINDS, parseTrait, type TraitValue } from '../../shared/trait';
 import { creditsOf, takes } from './trait';
 import { drawStill, primeInks, showStill } from '../directions';
@@ -114,12 +115,11 @@ const membersOf = (b: Pick<Listed, 'depositors'>) => new Set(b.depositors.map((d
 
 /// Auctions: each tab its own orders, Live opening on the soonest to end.
 const AUCTION_SORTS = [
+  ['low', 'Lowest price', 'live'],
+  ['high', 'Highest price', 'live'],
   ['ending', 'Ending soon', 'live'],
-  ['high', 'Highest bid', 'live'],
-  ['low', 'Lowest bid', 'live'],
-  ['new', 'Newest', 'live'],
-  ['number', 'Statement number', 'live'],
   ['rating', 'Top rated', 'live'],
+  ['value', 'Most rating per ETH', 'live'],
   ['recent', 'Recently sold', 'sold'],
   ['top', 'Highest price', 'sold'],
   ['bottom', 'Lowest price', 'sold'],
@@ -480,11 +480,68 @@ function auctionTable(items: Listed[], stage: 'live' | 'upcoming' | 'sold') {
 }
 
 const PARTY_STATES = new Set(['Open', 'Full', 'Expired']);
-const STAGES = [['live', 'Live'], ['upcoming', 'Upcoming'], ['sold', 'Sold'], ['multibid', 'Multibid']] as const;
+const STAGES = [['live', 'For sale'], ['sold', 'Sold'], ['multibid', 'Multibid']] as const;
 type Stage = (typeof STAGES)[number][0];
-/// Live is what you can bid on now; an auction whose clock ran out is sold, waiting for anyone to settle it.
-const stageOf = (b: Listed): Stage =>
-  b.s.state === 'Full' ? 'upcoming' : b.s.state === 'Settled' || (b.s.highBid && Date.now() / 1000 >= b.s.auctionEnd) ? 'sold' : 'live';
+/// For sale is what you can bid on now; an auction whose clock ran out is sold, waiting for anyone to settle it.
+const stageOf = (b: Listed): Stage => (b.s.state === 'Settled' || (b.s.highBid && Date.now() / 1000 >= b.s.auctionEnd) ? 'sold' : 'live');
+/// Buy's unions: at auction or sold. Full ones waiting to burn are Make's (its Full view).
+const isSale = (b: Listed) => b.s.state === 'Auction' || b.s.state === 'Settled';
+
+/// One line of the For sale list: a union at auction here, or a Statement listed on OpenSea.
+type Sale = { b: Listed; x?: undefined } | { x: ForSale; b?: undefined };
+const priceOf = (s: Sale) => (s.b ? s.b.s.highBid || s.b.s.minBid : BigInt(s.x.price));
+const ratingOf = (s: Sale) => (s.b ? (totalOf(s.b) ?? -1) : (s.x.rating ?? -1));
+const perEth = (s: Sale) => ratingOf(s) / (Number(priceOf(s) / 1_000_000_000_000n) / 1e6 || 1);
+const cmpWei = (a: bigint, b: bigint) => (a < b ? -1 : a > b ? 1 : 0);
+/// Cheapest first unless asked otherwise. Ending soon: running clocks first, then auctions waiting for a first bid,
+/// then the listings (no clock), cheapest first.
+function sortSales(items: Sale[], k: AuctionSort) {
+  return items.sort((a, b) => {
+    switch (k) {
+      case 'high':
+        return cmpWei(priceOf(b), priceOf(a));
+      case 'ending': {
+        const ea = a.b?.s.highBid ? a.b.s.auctionEnd : Infinity, eb = b.b?.s.highBid ? b.b.s.auctionEnd : Infinity;
+        return (ea !== eb ? ea - eb : 0) || Number(!!b.b) - Number(!!a.b) || cmpWei(priceOf(a), priceOf(b));
+      }
+      case 'rating':
+        return ratingOf(b) - ratingOf(a) || cmpWei(priceOf(a), priceOf(b));
+      case 'value':
+        return perEth(b) - perEth(a);
+      default:
+        return cmpWei(priceOf(a), priceOf(b));
+    }
+  });
+}
+
+/// A listed Statement's card, in the union card's frame: its drawing (pages stacked behind an overprint), the union
+/// that made it when it was one of ours, its price on OpenSea, and Buy. A standing overprint (nothing for sale) has
+/// no price and no button.
+function listingCard(x: ForSale | Standing, made: Map<string, Listed>, rated: boolean) {
+  const b = made.get(x.id);
+  const sale = 'price' in x ? x : null;
+  const mine = !!sale && !!session.account && same(sale.seller as Address, session.account);
+  const pages = x.pages ?? 1;
+  const href = `/statement/${x.id}`;
+  const members = b ? membersOf(b) : 0;
+  const by = b
+    ? `${who(b.s.creator, 'sm', 'nested')}<span class="meta-where">&nbsp;·&nbsp;${members} ${members === 1 ? 'member' : 'members'}&nbsp;·&nbsp;${payWord(b.s.split === 1)}</span>`
+    : sale ? `Listed by&nbsp;${who(sale.seller as Address, 'sm', 'nested')}` : 'Made elsewhere';
+  const where = sale ? `${eth(BigInt(sale.price))} on OpenSea` : 'Not for sale';
+  const cta = !sale || mine ? '' : session.account ? `<button type="button" class="btn sm primary cta" data-buy="${x.id}">Buy</button>` : '<button type="button" class="btn sm primary cta" data-connect>Buy</button>';
+  return `<div class="card listing" data-id="${x.id}">
+    <a class="card-art statement-host${pages > 1 ? ' stacked' : ''}" href="${href}"${stackStyle(pages)}>${sheet([], { size: 'sm' })}${statementArt(BigInt(x.id))}</a>
+    <div class="card-meta">
+      <div class="meta-text">
+        <strong><a href="${href}">${esc(b?.s.name || 'Statement')} <span class="stmt-no num">#${x.id}</span></a></strong>
+        <span class="meta-line num"><span class="meta-line-text meta-byline">${by}</span></span>
+        <span class="meta-line num"><span class="meta-line-text">${where}${pages > 1 ? ` · ${pages} pages` : ''}${mine ? ' · <span class="meta-yours">Yours</span>' : ''}</span></span>
+        ${rated && x.rating != null ? `<span class="meta-line num">Rating ${x.rating.toLocaleString()}</span>` : ''}
+      </div>
+      ${cta}
+    </div>
+  </div>`;
+}
 export type HomeTab = 'parties' | 'auctions';
 
 
@@ -495,10 +552,11 @@ export type HomeTab = 'parties' | 'auctions';
 let listsRun = 0;
 export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
   const run = ++listsRun;
+  // Statements has two halves, one heading: Buy (at auction here, or listed on OpenSea) and Make (the Credit Unions).
   const head =
     tab === 'parties'
-      ? ['Unions', 'Each Credit Union pools Credits toward 80. Join with ones that fit, and leave anytime before it fills.']
-      : ['Auctions', 'Every Statement a Credit Union makes is sold here. 24 hours from the first bid, split among its members.'];
+      ? ['Make', 'Each Credit Union pools Credits toward 80. Join with ones that fit, and leave anytime before it fills.']
+      : ['Buy', 'Every Statement you can get right now: at auction here, 24 hours from the first bid, or listed on OpenSea.'];
   // One small menu, not a second row of tabs: a sort glyph and the current order; the choices drop down under it.
   const cur = sortKey();
   const items =
@@ -506,18 +564,20 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       ? SORTS.map(([k, l]) => `<li role="option" tabindex="-1" data-sort="${k}" aria-selected="${k === cur}">${l}</li>`)
       : AUCTION_SORTS.map(([k, l, st]) => `<li role="option" tabindex="-1" data-sort="${k}" data-stage="${st}" aria-selected="false"${st === 'live' ? '' : ' hidden'}>${l}</li>`);
   const sort = `<div class="sort-pick"><button type="button" class="sort-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Sort"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10M1.5 10.5 4 13l2.5-2.5M12 13V3M9.5 5.5 12 3l2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="sort-label">${tab === 'parties' ? (SORTS.find(([k]) => k === cur)?.[1] ?? '') : ''}</span></button><ul class="sort-menu" role="listbox" aria-label="Sort" hidden>${items.join('')}</ul></div>`;
-  // Auctions: cards or a table, remembered.
+  // Buy: the Overprints filter on For sale; Sold as cards or a table, remembered.
+  const over = tab === 'parties' ? '' : `<button type="button" class="st-filter" id="overprints" aria-pressed="false" title="Only Statements with others overprinted onto them" hidden>${OVERPRINTS}<span>Overprints</span></button>`;
   const views = tab === 'parties' ? '' : `<div class="view-pick" role="radiogroup" aria-label="View" hidden><button type="button" role="radio" data-auction-view="cards" aria-label="Cards" title="Cards"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button><button type="button" role="radio" data-auction-view="table" aria-label="Table" title="Table"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5h12M2 8h12M2 12.5h12" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button></div>`;
   app.innerHTML = `
   <section class="home">
     ${pageHead({
       title: head[0],
+      pair: tab === 'parties' ? { label: 'Buy', href: '/statements', before: true, of: 'Statements' } : { label: 'Make', href: '/unions', of: 'Statements' },
       lede: head[1],
       tabs:
         tab === 'parties'
           ? [{ label: 'Open <span class="num muted" id="n-all"></span>', attrs: 'data-view="all"' }, { label: 'Can join <span class="num muted" id="n-invited"></span>', attrs: 'data-view="invited"' }, { label: 'Joined <span class="num muted" id="n-yours"></span>', attrs: 'data-view="yours"' }, { label: 'Full <span class="num muted" id="n-filled"></span>', attrs: 'data-view="filled"' }]
           : STAGES.map(([k, l]) => ({ label: k === 'multibid' ? l : `${l} <span class="num muted" id="n-${k}"></span>`, attrs: `data-stage-tab="${k}"` })),
-      tools: views + sort,
+      tools: views + over + sort,
       action: tab === 'parties' ? '<a class="btn primary" href="/create">Start a Credit Union</a>' : '<button type="button" class="btn" id="how-auctions">How it works</button>',
       label: 'Show',
     })}
@@ -531,8 +591,9 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     const el = document.getElementById('batches');
     if (!el || run !== listsRun) return; // navigated away, or drawn again since
     const parties = all.filter((b) => PARTY_STATES.has(b.s.state));
-    // Auctions: full ones waiting to burn (Upcoming), at auction (Live), and sold.
-    const auctions = all.filter((b) => b.s.state !== 'Open' && b.s.state !== 'Expired');
+    // Buy: at auction and sold. Which union made each Statement, for a listing's name and byline.
+    const auctions = all.filter(isSale);
+    const made = new Map(all.filter((b) => b.s.statementId).map((b) => [b.s.statementId.toString(), b] as const));
     // ?eights=3 (or palette, print, weight): only the open Credit Unions that take those Credits.
     const want = tab === 'parties' ? filterFromQuery() : null;
     const list = want ? parties.filter((b) => b.s.state === 'Open' && want.test(b)) : tab === 'parties' ? parties : auctions;
@@ -546,7 +607,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     type View = 'all' | 'invited' | 'yours' | 'filled';
     // The tab lives in the path (/unions/join, /auctions/sold), so Back from a union returns to it. Old
     // ?tab= links (?tab=invited, ?tab=yours, ?tab=full) still land and are rewritten to the path.
-    const base = tab === 'parties' ? '/unions' : '/auctions';
+    const base = tab === 'parties' ? '/unions' : '/statements';
     const SLUGS: Record<View, string> = { all: '', invited: 'join', yours: 'joined', filled: 'full' };
     const OLD: Record<string, View> = { all: 'all', invited: 'invited', yours: 'yours', full: 'filled' };
     const query = new URLSearchParams(location.search);
@@ -554,6 +615,18 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     const VIEWS = Object.keys(SLUGS) as View[];
     let view: View | null = VIEWS.find((v) => SLUGS[v] && SLUGS[v] === slug) ?? OLD[slug] ?? null;
     let stage: Stage | null = STAGES.some(([k]) => k === slug) ? (slug as Stage) : null;
+    // OpenSea's listings, read once the page is up; the For sale list draws again when they land.
+    let sales: ForSale[] | null = null, salesErr = '';
+    let overprints = false; // only Statements with others overprinted onto them
+    let standing: Standing[] | null = null, standingTotal = 0; // the overprints not for sale, when none are
+    try {
+      overprints = localStorage.getItem('cu-statements-overprints') === '1';
+    } catch {}
+    if (tab === 'auctions')
+      listings().then(
+        (xs) => ((sales = xs), document.getElementById('batches') === el && draw()),
+        (e) => ((sales = []), (salesErr = errText(e)), document.getElementById('batches') === el && draw()),
+      );
     const remember = (t: string | null) => {
       const u = new URL(location.href);
       u.searchParams.delete('tab');
@@ -605,7 +678,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     let showEmpty = false; // All tabs its empty (0/80) unions behind a button: they're mostly abandoned
     let shownStage: Stage = 'live'; // the auctions tab showing, whose order the menu sets
     const grid = (items: Listed[]) => {
-      const rated = tab === 'parties' ? sortFor(view) === 'rating' : shownStage !== 'upcoming' && auctionSort(shownStage) === 'rating';
+      const rated = tab === 'parties' ? sortFor(view) === 'rating' : auctionSort(shownStage) === 'rating';
       return `<div class="grid">${items.map((b) => card(b, fit.get(b.s.address), 'yours', rated ? totalOf(b) : undefined)).join('')}</div>`;
     };
     let totaling = false;
@@ -681,64 +754,86 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         void fillGhosts(el);
         return;
       }
-      const staged = STAGES.map(([k]) => [k, list.filter((b) => stageOf(b) === k)] as const);
-      for (const [k, items] of staged) {
-        const n = document.getElementById(`n-${k}`);
-        if (n) n.textContent = String(items.length);
-      }
-      // Until someone picks, open on Live when there is any, else the first stage that has any, else Live.
-      const pick = stage ?? (staged.find(([k, items]) => k === 'live' && items.length) ?? staged.find(([k, items]) => k !== 'multibid' && items.length) ?? staged[0])[0];
+      const liveNow = list.filter((b) => stageOf(b) === 'live'), sold = list.filter((b) => stageOf(b) === 'sold');
+      // For sale: the unions at auction and OpenSea's listings, one list (a Statement at auction here isn't listed).
+      const forSale: Sale[] = [...liveNow.map((b): Sale => ({ b })), ...(sales ?? []).filter((x) => !liveNow.some((b) => b.s.statementId.toString() === x.id)).map((x): Sale => ({ x }))];
+      const nLive = document.getElementById('n-live'), nSold = document.getElementById('n-sold');
+      if (nLive) nLive.textContent = sales === null && !forSale.length ? '' : String(forSale.length);
+      if (nSold) nSold.textContent = String(sold.length);
+      const pick: Stage = stage ?? 'live';
       app.querySelectorAll<HTMLElement>('[data-stage-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.stageTab === pick)));
+      const overBtn = app.querySelector<HTMLElement>('#overprints');
+      if (overBtn) {
+        overBtn.hidden = pick !== 'live';
+        overBtn.setAttribute('aria-pressed', String(overprints));
+      }
+      const vp = app.querySelector<HTMLElement>('.view-pick');
+      if (vp) vp.hidden = pick !== 'sold';
       // Multibid keeps itself current (its picks and amounts survive the reads), so it's drawn once.
       // Multibid sorts from its own column names, so the menu steps aside (keeping its place, so the tabs don't move).
       if (pick === 'multibid') {
         shownStage = pick;
         app.querySelector<HTMLElement>('.sort-pick')?.classList.add('idle');
-        const vp = app.querySelector<HTMLElement>('.view-pick');
-        if (vp) vp.hidden = true;
         if (!el.querySelector('#whale-body')) void whale(el);
         return;
       }
-      // This tab's orders in the menu (Upcoming has one: the next to lock first).
+      // This tab's orders in the menu.
       const order = auctionSort(pick);
-      const shown = sortAuctions([...staged.find(([k]) => k === pick)![1]], order);
       shownStage = pick;
-      if (order === 'rating' && !totaling && shown.some((b) => totalOf(b) === undefined)) {
-        totaling = true;
-        totalCards(shown)
-          .then((got) => got && document.getElementById('batches') === el && draw())
-          .catch(() => {})
-          .finally(() => (totaling = false));
-      }
       app.querySelectorAll<HTMLElement>('.sort-menu [data-sort]').forEach((o) => {
         o.hidden = o.dataset.stage !== pick;
         o.setAttribute('aria-selected', String(o.dataset.stage === pick && o.dataset.sort === order));
       });
       const label = app.querySelector('.sort-label');
       if (label) label.textContent = AUCTION_SORTS.find(([k, , st]) => k === order && st === pick)?.[1] ?? '';
-      // A tab with nothing to order keeps the menu's place, so the tabs don't move.
-      app.querySelector<HTMLElement>('.sort-pick')?.classList.toggle('idle', pick === 'upcoming' || auctionView === 'table');
-      const vp = app.querySelector<HTMLElement>('.view-pick');
-      if (vp) vp.hidden = false;
+      const table = pick === 'sold' && auctionView === 'table';
+      app.querySelector<HTMLElement>('.sort-pick')?.classList.toggle('idle', table);
       vp?.querySelectorAll<HTMLElement>('[data-auction-view]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.auctionView === auctionView)));
-      const table = auctionView === 'table';
-      if (table && !totaling && shown.some((b) => totalOf(b) === undefined)) {
+      // Rating, for the unions, is read once someone orders by it (a listing carries its own).
+      const needTotals = (xs: Listed[]) => {
+        if (totaling || !xs.some((b) => totalOf(b) === undefined)) return;
         totaling = true;
-        totalCards(shown)
+        totalCards(xs)
           .then((got) => got && document.getElementById('batches') === el && draw())
           .catch(() => {})
           .finally(() => (totaling = false));
+      };
+      if (pick === 'live') {
+        const shown = sortSales(overprints ? forSale.filter((x) => x.x && (x.x.pages ?? 1) > 1) : forSale, order);
+        const rated = order === 'rating' || order === 'value';
+        if (rated) needTotals(liveNow);
+        let html: string;
+        if (shown.length) html = `<div class="grid">${shown.map((x) => (x.b ? card(x.b, undefined, 'yours', rated ? totalOf(x.b) : undefined) : listingCard(x.x, made, rated))).join('')}</div>`;
+        else if (sales === null) html = '<p class="muted">Reading listings…</p>';
+        else if (overprints) {
+          // No overprint for sale: a few standing ones to look at, read once.
+          if (!standing) {
+            standing = [];
+            overprintsStanding()
+              .then((d) => ((standing = d.items), (standingTotal = d.total), document.getElementById('batches') === el && draw()))
+              .catch(() => {});
+          }
+          const n = standing.length;
+          html = `<p class="muted st-none">No Overprints are for sale right now.${!n ? '' : standingTotal === 1 ? ' Here’s the only one.' : standingTotal > n ? ` Here are ${n} of the ${standingTotal} to explore.` : ` Here are all ${standingTotal} to explore.`}</p>${n ? `<div class="grid">${standing.map((x) => listingCard(x, made, false)).join('')}</div>` : ''}`;
+        } else html = '<p class="muted">Nothing for sale right now.</p>';
+        if (salesErr) html += `<p class="muted small">OpenSea’s listings couldn’t be read: ${esc(salesErr)}</p>`;
+        const fresh = morph(el, html);
+        hydrate(el);
+        drawPictures(el, fresh);
+        fillGhosts(el);
+        return;
       }
+      const shown = sortAuctions([...sold], order);
+      if (order === 'rating' || table) needTotals(shown);
       const fresh = morph(
         el,
         !list.length
-          ? `<div class="grid"><div class="card placeholder" id="auction-placeholder">${sheet([], { size: 'sm' })}<div class="card-body"><strong>No auctions yet</strong><span class="muted small">When a Credit Union burns its 80, its Statement is auctioned here.</span></div></div></div>`
+          ? `<div class="grid"><div class="card placeholder" id="auction-placeholder">${sheet([], { size: 'sm' })}<div class="card-body"><strong>Nothing sold yet</strong><span class="muted small">When a Credit Union burns its 80, its Statement is auctioned here and the sale split among its members.</span></div></div></div>`
           : shown.length
             ? table ? auctionTable(shown, pick) : grid(shown)
-            : `<p class="muted">${pick === 'upcoming' ? 'No Credit Union is full right now.' : pick === 'live' ? 'Nothing at auction right now.' : 'Nothing sold yet.'}</p>`,
+            : '<p class="muted">Nothing sold yet.</p>',
       );
       hydrate(el);
-      // Unions waiting to burn show the format they burn in here too, as on /unions (a kept card already does).
       drawPictures(el, fresh);
       fillGhosts(el);
       // Empty Auctions: a greyed Statement of real edition Credits stands in for the first one.
@@ -749,6 +844,12 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         });
     };
     el.addEventListener('click', (e) => {
+      const buy = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-buy]');
+      if (buy) {
+        const x = sales?.find((i) => i.id === buy.dataset.buy);
+        if (x) void buyListed(buy, x, () => ((sales = (sales ?? []).filter((i) => i.id !== x.id)), draw()));
+        return;
+      }
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-tcol]');
       if (!b || !shownStage) return;
       const col = b.dataset.tcol as TCol, cur = sortOf(shownStage);
@@ -774,6 +875,13 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         draw();
       }),
     );
+    app.querySelector<HTMLElement>('#overprints')?.addEventListener('click', () => {
+      overprints = !overprints;
+      try {
+        localStorage.setItem('cu-statements-overprints', overprints ? '1' : '0');
+      } catch {}
+      draw();
+    });
     app.querySelectorAll<HTMLElement>('[data-view]').forEach((b) =>
       b.addEventListener('click', () => {
         view = b.dataset.view as View;
@@ -814,7 +922,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       seen = sig(next);
       const was = new Map(list.map((b) => [b.s.address, b.s]));
       const nextParties = next.filter((b) => PARTY_STATES.has(b.s.state));
-      const nextList = want ? nextParties.filter((b) => b.s.state === 'Open' && want.test(b)) : tab === 'parties' ? nextParties : next.filter((b) => b.s.state !== 'Open' && b.s.state !== 'Expired');
+      const nextList = want ? nextParties.filter((b) => b.s.state === 'Open' && want.test(b)) : tab === 'parties' ? nextParties : next.filter(isSale);
       list.splice(0, list.length, ...nextList);
       parties.splice(0, parties.length, ...nextParties);
       await Promise.all([placeCards(list), pictureCards(list)]);

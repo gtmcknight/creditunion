@@ -256,7 +256,7 @@ export type SubTab = { label: string; href?: string; current?: boolean; attrs?: 
 /// Every section page opens the same way: the h1, one muted line, then a bar with sub-nav tabs on the left and
 /// the page's controls on the right. `title` and `lede` are HTML; callers escape.
 /// `action`: the page's one call to action, to the right of the title and lede.
-export function pageHead({ title, lede, tabs, tools, action, label = 'Sections', under }: { title: string; lede?: string; tabs?: SubTab[]; tools?: string; action?: string; label?: string; under?: string }) {
+export function pageHead({ title, lede, tabs, tools, action, label = 'Sections', under, pair }: { title: string; lede?: string; tabs?: SubTab[]; tools?: string; action?: string; label?: string; under?: string; pair?: { label: string; href: string; before?: boolean; of?: string } }) {
   const links = !!tabs?.[0]?.href;
   const items = (tabs ?? [])
     .map((t) =>
@@ -267,7 +267,9 @@ export function pageHead({ title, lede, tabs, tools, action, label = 'Sections',
     .join('');
   const nav = !tabs?.length ? '' : links ? `<nav class="subtabs" aria-label="${label}">${items}</nav>` : `<div class="subtabs" role="tablist" aria-label="${label}">${items}</div>`;
   const bar = nav || tools ? `<div class="page-bar">${nav}${tools ? `<div class="page-tools">${tools}</div>` : ''}</div>` : '';
-  const words = `<h1>${title}</h1>${lede ? `<p class="page-lede">${lede}</p>` : ''}`;
+  const other = pair ? `<a href="${pair.href}">${pair.label}</a>` : '';
+  const h1 = pair ? `<div class="h1-pair">${pair.before ? other : ''}<h1>${title}${pair.of ? `<span class="vh"> ${pair.of}</span>` : ''}</h1>${pair.before ? '' : other}</div>` : `<h1>${title}</h1>`;
+  const words = `${h1}${lede ? `<p class="page-lede">${lede}</p>` : ''}`;
   return `<header class="page-head">${action ? `<div class="page-top"><div>${words}</div><div class="page-action">${action}</div></div>` : words}${under ?? ''}${bar}</header>`;
 }
 

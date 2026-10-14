@@ -8,7 +8,8 @@ const CARDS_V = 6;
 const CARDS: Record<string, Card> = {
   home: { title: 'Credit Union', description: 'Join a Credit Union to make a Statement together.', image: '/og/home.png' },
   parties: { title: 'Credit Unions', description: 'Credit Unions pooling Credits toward a Statement. Join one, leave any time before it fills.', image: '/og/party.png' },
-  auctions: { title: 'Auctions · Credit Union', description: 'Statements at auction: 24 hours from the first bid, split between the 80 Credits that made them.', image: '/og/auctions.png' },
+  statements: { title: 'Statements · Credit Union', description: 'Every Statement you can get right now: at auction here or listed on OpenSea. Or make one with a Credit Union.', image: '/og/auctions.png' },
+  balance: { title: 'Balance · Credit Union', description: 'Credits in. Balance out. Pool 80 Credits, burn them into a Statement, and split the Balance by rating.', image: '/og/home.png' },
   create: { title: 'Start a Credit Union', description: 'Pick who joins and how the 80 are laid out. Anyone can burn the moment it fills.', image: '/og/create.png' },
   about: { title: 'How Credit Union works', description: 'One wallet nobody owns, rules nobody can change. 80 Credits make a Statement.', image: '/og/about.png' },
   party: { title: 'Join this Credit Union', description: '80 Credits. One Statement. Split 80 ways. Leave any time before it fills.', image: '/og/party.png' },
@@ -31,6 +32,7 @@ export function cardFor(path: string): Card | null {
   if (first === '') return CARDS.home;
   if (first === 'b' || first === 'party' || first === 'union') return CARDS.party;
   if (first === 'unions') return CARDS.parties;
+  if (first === 'auctions') return CARDS.statements;
   if (first === 'member') return CARDS.member;
   if (first === 'docs') return CARDS.about;
   if (first === 'new') return CARDS.create;

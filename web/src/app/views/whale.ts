@@ -1,4 +1,4 @@
-/// Auctions → Multibid (/auctions/multibid, and /whale): every live auction in one list. Tick the ones you want,
+/// Statements → Buy → Multibid (/statements/multibid, and /whale): every live auction in one list. Tick the ones you want,
 /// set what you bid on each (or one amount for all of them), and send them together. Where the wallet can bundle calls (EIP-5792) it's one step, all or nothing: if
 /// anyone outbids you on one before it lands, none go through. Other wallets get one bid after another, each checked
 /// against that auction's next bid right before it's sent. Every bid has to be the new high bid.
