@@ -24,23 +24,23 @@ export function balance(app: HTMLElement) {
   <section class="tokens">
     <header class="create-head">
       <h1>Balance opens ${OPENS}.</h1>
-      <p class="create-lede">Every Statement redeems for its rating in $BALANCE. Buy one now, or the Credits to make one.</p>
+      <p class="create-lede">Every Statement redeems for its rating in $BALANCE. Buy the Credits to make one, or a Statement outright.</p>
     </header>
     <section class="bal-price">
       <div class="bal-tiles">
-        <div class="bal-tile">
-          <h4>Statement <span class="tag" id="bp-stmt-best" hidden>Cheapest</span></h4>
-          <div class="bal-io"><span class="muted small">You pay</span><strong class="num" id="bp-stmt-pay">…</strong><span class="muted small num" id="bp-stmt-pay-sub"></span></div>
-          <div class="bal-io"><span class="muted small">You receive on ${OPENS}</span><strong class="num" id="bp-stmt-get">…</strong><span class="muted small num" id="bp-stmt-each"></span></div>
-          ${buy('bp-stmt-buy', 'Buy')}
-          <span class="muted small bal-note" id="bp-stmt-sub">Reading listings…</span>
-        </div>
         <div class="bal-tile">
           <h4>Credits <span class="tag" id="bp-cred-best" hidden>Cheapest</span></h4>
           <div class="bal-io"><span class="muted small">You pay</span><strong class="num" id="bp-cred-pay">…</strong><span class="muted small num" id="bp-cred-pay-sub"></span></div>
           <div class="bal-io"><span class="muted small">Worth on ${OPENS}</span><strong class="num" id="bp-cred-get">…</strong><span class="muted small num" id="bp-cred-each"></span></div>
           <div class="bal-pick">${rangeHtml('bal-n', 1, MAX_SWEEP, DEFAULT_N)}${buy('bp-cred-buy', `Buy ${DEFAULT_N}`)}</div>
           <span class="muted small bal-note" id="bp-cred-sub">Reading listings…</span>
+        </div>
+        <div class="bal-tile">
+          <h4>Statement <span class="tag" id="bp-stmt-best" hidden>Cheapest</span></h4>
+          <div class="bal-io"><span class="muted small">You pay</span><strong class="num" id="bp-stmt-pay">…</strong><span class="muted small num" id="bp-stmt-pay-sub"></span></div>
+          <div class="bal-io"><span class="muted small">You receive on ${OPENS}</span><strong class="num" id="bp-stmt-get">…</strong><span class="muted small num" id="bp-stmt-each"></span></div>
+          ${buy('bp-stmt-buy', 'Buy')}
+          <span class="muted small bal-note" id="bp-stmt-sub">Reading listings…</span>
         </div>
         <div class="bal-tile bal-off">
           <h4>Pool</h4>
