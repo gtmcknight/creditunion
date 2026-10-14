@@ -6,6 +6,8 @@ import { session } from '../chain';
 
 /// When Balance opens and a Statement converts.
 const OPENS = 'Oct 20';
+/// Every Credit's rating, so every BALANCE there could ever be (Jack's supply count, 2026-10-02).
+const BALANCE_EVER = 53_752_386;
 /// Where the Credits slider starts, and how many listings the page ranks to pick from.
 const DEFAULT_N = 10;
 const POOL = 240;
@@ -84,7 +86,9 @@ async function priceBoard(app: HTMLElement) {
     for (const k of ['stmt', 'cred'] as const) {
       const v = vals[k];
       if (v === null) continue;
-      q(`bp-${k}-each`)!.textContent = `${fmt(v)} each`;
+      const each = q(`bp-${k}-each`)!;
+      each.textContent = `${fmt(v)} each`;
+      each.title = `At this price all ${(BALANCE_EVER / 1e6).toFixed(2)}M BALANCE is worth ${fmt(v * BALANCE_EVER, true)}`;
       costLine(k);
     }
     if (vals.stmt !== null && vals.cred !== null) {
