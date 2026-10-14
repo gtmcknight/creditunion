@@ -9795,7 +9795,7 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 .tk-batch-head { font-weight: 500; font-size: 16px; }
 .tk-batch[hidden] { display: none; }
 /* Under the picked Credits row: one object with it (no gap, no double border). */
-.tk-batch.attached { margin: -7px 0 0; border-radius: 0 0 var(--r) var(--r); box-shadow: inset 1.5px 0 0 var(--fg), inset -1.5px 0 0 var(--fg), inset 0 -1.5px 0 var(--fg); }
+.tk-batch.attached { margin: -7px 0 0; padding: 4px 12px 14px; color: var(--fg); border-radius: 0 0 var(--r) var(--r); box-shadow: inset 1.5px 0 0 var(--fg), inset -1.5px 0 0 var(--fg), inset 0 -1.5px 0 var(--fg); }
 .tk-ways .tk-way[aria-checked="true"]:has(+ .tk-batch.attached) { border-radius: var(--r) var(--r) 0 0; box-shadow: inset 1.5px 0 0 var(--fg), inset -1.5px 0 0 var(--fg), inset 0 1.5px 0 var(--fg); }
 /* Yours, above the tabs: what this wallet holds and has waiting, one row each with the one thing to do. */
 /* The card and Yours side by side: the swap card on the left, Yours a sidebar on the right that's always there.
@@ -9932,3 +9932,4 @@ dialog.how .how-tile img.st { height: 84%; }
 .tk-form #tk-batch-home .tk-batch { margin: 0; }
 .tk-form > .submit { padding-top: 0; margin-top: 24px; }
 .tk-form .tk-eth { margin-bottom: 0; }
+.tk-batch.attached .tk-batch-head { font-size: 14px; font-weight: 400; }
