@@ -453,6 +453,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const n = account ? owned.length : 0;
     return `<div class="subtabs tk-modes" role="tablist" aria-label="Buy, sell or convert">${sweeps || poolOk() ? tab('buy', 'Buy') : ''}${m ? tab('sell', 'Sell') : ''}${tab('credits', n ? `Convert <span class="muted num">${n}</span>` : 'Convert')}</div>`;
   }
+  /// A token's mark and name, as a chip on the right of a panel: ETH's diamond; $BALANCE as its ink, the batch's colours.
+  const ETH_ICON = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M8 1 3.5 8.2 8 10.8l4.5-2.6z" fill="currentColor" opacity=".9"/><path d="M8 11.7 3.5 9.1 8 15l4.5-5.9z" fill="currentColor" opacity=".6"/></svg>';
+  const tokenChip = (eth: boolean) => `<span class="tk-unit">${eth ? ETH_ICON : `<span class="sw-ink tk-coin">${swatch(lane())}</span>`}${eth ? 'ETH' : esc(sym())}</span>`;
   const payHtml = (selling: boolean) => {
     const max = selling
       ? account ? `<span class="tk-bal">You hold <span class="num">${tokAmt(tokenHeld)}</span> <button type="button" class="link small" id="amt-max">Max</button></span>` : ''
@@ -464,7 +467,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     return `
           <div class="tk-gethead"><h2 class="form-title">${selling ? 'Sell' : 'Pay'}</h2>${quick}</div>
           <section class="rule">
-            <div class="tk-eth"><input id="amt" class="num" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="${selling ? `${esc(sym())} to sell` : 'ETH to spend'}" value="${esc(typed)}"><span>${selling ? esc(sym()) : 'ETH'}</span><span class="tk-usd num" id="amt-usd"></span>${max}</div>
+            <div class="tk-eth"><input id="amt" class="num" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="${selling ? `${esc(sym())} to sell` : 'ETH to spend'}" value="${esc(typed)}">${tokenChip(!selling)}<span class="tk-usd num" id="amt-usd"></span>${max}</div>
             <p class="term-desc tk-ethrow"><span id="amt-line"></span></p>
           </section>`;
   };
@@ -472,7 +475,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   const getHtml = (selling: boolean) => `
           <div class="tk-gethead"><h2 class="form-title" id="tk-gettitle">You get</h2>${selling ? '' : colorChip()}</div>
           <section class="rule">
-            ${selling ? '<div class="tk-get tk-panel"><span class="num tk-out" id="get-eth">0</span><span class="tk-unit">ETH</span><span class="tk-usd" id="route"></span></div>' : `<div class="tk-get tk-panel"><span id="get">${balanceSvg('0', EVEN)}</span><span class="tk-unit">${esc(sym())}</span><span class="tk-usd" id="route"></span></div>`}
+            ${selling ? '<div class="tk-get tk-panel"><span class="num tk-out" id="get-eth">0</span>${tokenChip(true)}<span class="tk-usd" id="route"></span></div>' : `<div class="tk-get tk-panel"><span id="get">${balanceSvg('0', EVEN)}</span>${tokenChip(false)}<span class="tk-usd" id="route"></span></div>`}
             <div class="tk-lines term-desc"><p id="route2"></p><p id="alt"></p><p id="fees"></p></div>
           </section>`;
   const goHtml = (label: string) => (account ? `<button type="button" class="btn primary block" id="go" disabled>${label}</button>` : '<button type="button" class="btn primary block" data-connect>Connect wallet</button>');
@@ -676,7 +679,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     setText('amt-usd', dollars(Number(formatUnits(wei, 18))));
     // Two lines: what each one costs, then how it arrives and what we take on that way.
     setText('tk-gettitle', way === 'batch' || route === 'statement' ? 'You’ll get' : 'You get');
-    setText('route', route === 'batch' && hasBatch ? `${b!.out.length} Credit NFT${b!.out.length === 1 ? '' : 's'} now · this ${TOKEN} when the batch fills` : rate);
+    setText('route', route === 'batch' && hasBatch ? `${b!.out.length} Credit NFT${b!.out.length === 1 ? '' : 's'} deposited now · this ${TOKEN} when it opens` : rate);
     setText('route2', split ? `${whole(leftN)} via Uniswap · instant` : '');
     const label: Record<Route, [string, string]> = {
       pool: ['Uniswap', 'Instant'],
@@ -715,7 +718,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     setText(
       'amt-line',
       way === 'batch' && market === 'loading'
-        ? 'Finding Credits for sale…'
+        ? ''
         : route !== 'pool' && sweeps && market === 'ready' && !ls.length && (!poolOk() || (wei && !poolN))
           ? `No ${which}Credits for sale right now.`
           : wei && !route && ls.length
@@ -738,7 +741,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
               : route === 'statement'
                 ? `Buy Statement #${st!.id} · ${ethNum(BigInt(st!.price), 3)} ETH`
               : sweeps && market === 'loading'
-                ? 'Finding Credits…'
+                ? 'Pricing…'
                 : ls.length
                   ? 'Not enough for a Credit'
                   : 'No price right now',

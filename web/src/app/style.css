@@ -9753,7 +9753,11 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 /* The amount, its unit, and under the number what it's worth in dollars (Uniswap's layout). */
 .tk-eth { display: grid; grid-template-columns: 1fr auto; align-items: baseline; row-gap: 2px; }
 .tk-eth .tk-usd { grid-column: 1; font-size: 13px; color: var(--muted); min-height: 1.3em; }
-.tk-eth .tk-bal { grid-column: 2; justify-self: end; font-size: 13px; color: var(--muted); }
+.tk-eth .tk-bal { grid-column: 2; justify-self: end; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.tk-eth .tk-bal * { font-size: inherit; }
+/* The token on the right of each panel: icon and name, same place in both. */
+.tk-eth .tk-unit, .tk-get.tk-panel .tk-unit { grid-column: 2; grid-row: 1; justify-self: end; display: inline-flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 500; }
+.tk-unit .sw-ink { flex: none; }
 /* Both panels the same height; both titles the same distance above them. */
 .tk-eth, .tk-get.tk-panel { min-height: 108px; box-sizing: border-box; align-content: center; }
 .tk-ethrow:has(#amt-line:empty) { display: none; }
@@ -9914,3 +9918,15 @@ dialog.how .how-tile img.st { height: 84%; }
 .how-ways { margin: 0 0 12px; font-size: 15px; font-weight: 500; }
 .how-arrow { flex: none; align-self: flex-start; margin-top: min(48px, 12vw); transform: translateY(-50%); }
 @media (max-width: 480px) { .color-steps > li { grid-template-columns: 1fr; gap: 8px; } }
+/* The /balance card's vertical rhythm, one place: 24px between blocks (tabs, Pay, You get, the batch, the button),
+   10px from a title to its panel. Overrides the generic design-form spacing it inherits. */
+.tk-form { display: grid; gap: 0; }
+.tk-form > .tk-modes { margin: 0; }
+.tk-form > .tk-gethead { margin-top: 24px; height: 28px; }
+.design-form.tk-form > .rule, .design-form.tk-form .tk-gethead + .rule { padding: 0; margin-top: 10px; gap: 10px; border: 0; }
+.tk-form > .rule > .tk-lines:not(:has(p:not(:empty))) , .tk-form > .rule > .tk-ethrow:has(#amt-line:empty) { display: none; }
+.tk-form .tk-lines p { margin: 0; }
+.tk-form > #tk-batch-home:has(.tk-batch:not([hidden])) { margin-top: 24px; }
+.tk-form #tk-batch-home .tk-batch { margin: 0; }
+.tk-form > .submit { padding-top: 0; margin-top: 24px; }
+.tk-form .tk-eth { margin-bottom: 0; }
