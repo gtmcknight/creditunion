@@ -1103,6 +1103,24 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
   }
   // Market → Statements: every Statement listed on OpenSea with its rating and format, kept a minute at the edge.
+  // ETH in USD (Coinbase spot), read here and kept five minutes, so the page prices in dollars without a
+  // third-party call of its own (the site's CSP allows none).
+  if (url.pathname === '/market/eth-usd.json') {
+    if (!sameSite(req)) return text('forbidden', 403);
+    const key = new Request(`${url.origin}/market/eth-usd.json`);
+    const hit = await caches.default.match(key);
+    if (hit) return hit;
+    try {
+      const r = (await (await fetch('https://api.coinbase.com/v2/prices/ETH-USD/spot', { signal: AbortSignal.timeout(5_000) })).json()) as { data?: { amount?: string } };
+      const usd = Number(r.data?.amount);
+      if (!(usd > 0)) throw new Error('no rate');
+      const res = Response.json({ usd, at: Date.now() }, { headers: { 'cache-control': 'public, max-age=300' } });
+      ctx.waitUntil(caches.default.put(key, res.clone()));
+      return res;
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
+  }
   // What 1 BALANCE costs by each way in, hourly since the board went up (the cron records it), for the chart on
   // /balance.
   if (url.pathname === '/market/balance.json') {

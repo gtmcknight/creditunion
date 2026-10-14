@@ -55,8 +55,8 @@ export function balance(app: HTMLElement) {
 }
 
 /// The board: prices read live (the cheapest Statement for sale per rating point, bought on OpenSea with no fee;
-/// the 80 listed Credits with the most rating per ETH, what the Sweeper takes, fee in), in USD (Coinbase spot). The
-/// Buys run here.
+/// the 80 listed Credits with the most rating per ETH, what the Sweeper takes, fee in), in USD (Coinbase spot, through the
+/// worker). The Buys run here.
 async function priceBoard(app: HTMLElement) {
   const q = <T extends HTMLElement>(id: string) => app.querySelector<T>(`#${id}`);
   let usd: number | null = null; // ETH in USD, read once; a BALANCE is cents, so dollars read at a glance (ETH until the rate is in)
@@ -95,8 +95,8 @@ async function priceBoard(app: HTMLElement) {
   };
   const rate = (async () => {
     try {
-      const r = (await (await fetch('https://api.coinbase.com/v2/prices/ETH-USD/spot')).json()) as { data?: { amount?: string } };
-      usd = Number(r.data?.amount) || null;
+      const r = (await (await fetch('/market/eth-usd.json')).json()) as { usd?: number };
+      usd = r.usd && r.usd > 0 ? r.usd : null;
     } catch {}
     paint();
   })();
