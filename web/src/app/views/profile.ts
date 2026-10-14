@@ -1,7 +1,9 @@
 import type { Address } from 'viem';
+import { fmtScore } from '../../shared/credits';
 import { batchAbi } from '../abi';
+import { bin } from '../bins';
 import { config, pub, send, session } from '../chain';
-import { listBatches, myCredits, type Listed } from '../data';
+import { listBatches, myCredits, ratingTotal, type Listed } from '../data';
 import { hydrate, who } from '../ens';
 import { fillGhosts } from '../ghosts';
 import { errText, esc, eth, pageHead, same, toast } from '../ui';
@@ -85,6 +87,12 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
   const filling = joined.filter((b) => !selling(b));
   const auctions = list.filter((b) => selling(b) && (joined.includes(b) || same(b.s.highBidder, account)));
   const inUnions = joined.flatMap((b) => [...mineIn(b, account)].map((id) => ({ id: BigInt(id), b })));
+  // Each Credit's rating (what it pays, as a Statement's share or as BALANCE), from the edition's score table: read
+  // once there are Credits to show; the tab says "Loading…" until it lands, and shows the Credits alone if it never does.
+  let scoreOf: Uint32Array | undefined;
+  const score = (id: bigint) => (scoreOf?.[Number(id) - 1] ?? 0) / 10_000;
+  // A section's count, and the rating of all its Credits together, as a Statement of them would state it.
+  const headN = (ids: readonly bigint[]) => (ids.length ? `${ids.length}${scoreOf?.length ? ` · Rating ${ratingTotal(ids.map(score)).toLocaleString('en-US')}` : ''}` : '');
   // What they've done, from the site-wide feed; the tab's count fills in when it's read (undefined while it is,
   // null if it couldn't be).
   let activity: Awaited<ReturnType<typeof activityOf>> | undefined;
@@ -95,9 +103,13 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
     Activity: () => activity?.length ?? null,
   };
   const grid = (bs: Listed[], empty: string) => (bs.length ? `<div class="grid">${bs.map((b) => card(b)).join('')}</div>` : `<p class="muted">${empty}</p>`);
-  // The explorer's tile, as every grid of Credits: art, number; where it sits in a union, on hover.
+  // The explorer's tile, as every grid of Credits: art, number, rating; where it sits in a union, on hover.
   const tiles = (xs: { id: bigint; b?: Listed }[]) =>
-    `<div class="trait-grid">${xs.map(({ id, b }) => creditCell(Number(id), '', { title: `Credit #${id}${b ? ` · in ${b.s.name || 'Untitled'}` : ''}` })).join('')}</div>`;
+    `<div class="trait-grid">${xs
+      .map(({ id, b }) =>
+        creditCell(Number(id), '', { title: `Credit #${id}${b ? ` · in ${b.s.name || 'Untitled'}` : ''}`, line: score(id) ? `Rating ${fmtScore(score(id))}` : '' }),
+      )
+      .join('')}</div>`;
   // Deposited Credits under the union each sits in, with where it stands: closest to full first, then at auction,
   // sold, expired.
   const standing = (b: Listed) =>
@@ -118,9 +130,11 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
     Unions: () => grid(filling, own ? 'You’re not in any Credit Union yet. <a href="/unions">Browse Credit Unions</a>' : 'Not in any Credit Union yet.'),
     Auctions: () => grid(auctions, own ? 'None of your Credit Unions has made a Statement yet.' : 'None of their Credit Unions has made a Statement yet.'),
     Credits: () =>
-      `<div class="section-head"><h3>In wallet</h3><span class="muted num">${owned.length || ''}</span></div>${
-        owned.length ? tiles([...owned].reverse().map((id) => ({ id }))) : `<p class="muted">None.${own && config.chainId !== 1 ? ' <a href="/mint">Mint test Credits →</a>' : ''}</p>`
-      }<div class="section-head"><h3>Deposited</h3><span class="muted num">${inUnions.length || ''}</span></div>${inUnions.length ? deposits() : '<p class="muted">None.</p>'}`,
+      owned.length + inUnions.length && !scoreOf
+        ? '<p class="muted">Loading…</p>'
+        : `<div class="section-head"><h3>In wallet</h3><span class="muted num">${headN(owned)}</span></div>${
+            owned.length ? tiles([...owned].reverse().map((id) => ({ id }))) : `<p class="muted">None.${own && config.chainId !== 1 ? ' <a href="/mint">Mint test Credits →</a>' : ''}</p>`
+          }<div class="section-head"><h3>Deposited</h3><span class="muted num">${headN(inUnions.map((x) => x.id))}</span></div>${inUnions.length ? deposits() : '<p class="muted">None.</p>'}`,
     Activity: () => (activity === undefined ? '<p class="muted">Loading…</p>' : `<ol class="live-list fold-list">${activityItems(activity, { member: true })}</ol>`),
   };
   const at = document.getElementById('tab-body')!;
@@ -155,6 +169,10 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
     activity = rows;
     if (at.isConnected) draw();
   });
+  if (owned.length + inUnions.length)
+    void bin('credit-score.bin')
+      .then((b) => (scoreOf = new Uint32Array(b)), () => (scoreOf = new Uint32Array(0)))
+      .then(() => { if (at.isConnected) draw(); });
 
   hydrate(app);
 
