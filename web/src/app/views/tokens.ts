@@ -466,7 +466,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   };
   /// You get, then the way it goes, the other way when it's a real choice, and our fees on this way.
   const getHtml = (selling: boolean) => `
-          <div class="tk-gethead"><h2 class="form-title">You get</h2>${selling ? '' : colorChip()}</div>
+          <div class="tk-gethead"><h2 class="form-title" id="tk-gettitle">You get</h2>${selling ? '' : colorChip()}</div>
           <section class="rule">
             ${selling ? '<div class="tk-get tk-panel"><span class="num tk-out" id="get-eth">0</span><span class="tk-unit">ETH</span><span class="tk-usd" id="route"></span></div>' : `<div class="tk-get tk-panel"><span id="get">${balanceSvg('0', EVEN)}</span><span class="tk-unit">${esc(sym())}</span><span class="tk-usd" id="route"></span></div>`}
             <div class="tk-lines term-desc"><p id="route2"></p><p id="alt"></p><p id="fees"></p></div>
@@ -582,7 +582,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     app.innerHTML = `
     <section class="tokens">
       <header class="create-head"><h1>${TOKEN}</h1><p class="create-lede"><button type="button" class="link" id="tk-how">What is ${TOKEN}?</button></p></header>
-      ${trade?.open && !previewSoon ? '' : `<p class="tk-soon"><span class="tk-dot" aria-hidden="true"></span><span>${TOKEN} opens <b>${new Date(OPENS_AT).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}</b><span class="muted" id="tk-left"></span>. Convert now and it's yours the moment it opens.</span></p>`}
+      ${trade?.open && !previewSoon ? '' : `<div class="tk-soon"><span class="tk-dot" aria-hidden="true"></span><div><p><b>${TOKEN} opens ${new Date(OPENS_AT).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}</b><span class="muted" id="tk-left"></span></p><p class="muted">Credits only turn into ${TOKEN} 80 at a time. Put yours in a batch here, or buy some, and you're paid when it opens. Withdraw anytime before.</p></div></div>`}
       <div class="tk-layout">
       <section class="tk-card">
         <form class="design-form tk-form" novalidate style="${inkVar(l)}">
@@ -667,6 +667,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const rate = per ? `${usd ? `$${(per * usd).toPrecision(2)}` : `${per.toPrecision(2)} ETH`} each` : '';
     setText('amt-usd', dollars(Number(formatUnits(wei, 18))));
     // Two lines: what each one costs, then how it arrives and what we take on that way.
+    setText('tk-gettitle', way === 'batch' || route === 'statement' ? 'You’ll get' : 'You get');
     setText('route', route === 'batch' && hasBatch ? `${b!.out.length} Credit NFT${b!.out.length === 1 ? '' : 's'} now · this ${TOKEN} when the batch fills` : rate);
     setText('route2', split ? `${whole(leftN)} via Uniswap · instant` : '');
     const label: Record<Route, [string, string]> = {
