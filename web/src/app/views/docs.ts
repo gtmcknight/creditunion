@@ -183,13 +183,13 @@ const sections = (): Section[] => [
           title: 'BALANCE',
           body: `<p>On the BALANCE page, Credits go into batches of 80. When a batch is full and BALANCE is live, its 80 become a Statement, the Statement goes into the BALANCE contract, and the BALANCE it pays is split among the batch’s members by the rating each put in. One rating point is one BALANCE.</p>
     <h3>Colors</h3>
-    <p>BALANCE carries the ink of the Statement it comes from. Any takes every Credit and is the cheapest way in. C, M, Y and K batches take only Credits printed in that one ink, so their Statements, and the BALANCE they pay, are a single color. Each batch converts and pays out from a wallet of its own, so no batch’s color ever mixes into another’s.</p>
+    <p>BALANCE carries the ink of the Statement it comes from. Mixed takes every Credit and is the cheapest way in. C, M, Y and K batches take only Credits printed in that one ink, so their Statements, and the BALANCE they pay, are a single color. Each batch converts and pays out from a wallet of its own, so no batch’s color ever mixes into another’s.</p>
     <h3>Paying in, leaving</h3>
-    <p>Pay with ETH and the page buys the cheapest Credits per rating point in your color and puts them in, or put in Credits you hold. You can withdraw yours any time until your batch converts.</p>
+    <p>Pay with ETH and the page buys the Credits with the most rating per ETH in your color and puts them in, or convert Credits you hold. You can withdraw yours any time until your batch converts.</p>
     <h3>Converting</h3>
-    <p>A full batch locks 5 minutes after BALANCE goes live, or after it fills if that’s later. Then anyone can convert it within the hour. We convert every full batch as soon as it can be and pay its members in the same pass. If a payment can’t reach your wallet, claim it from the BALANCE page.</p>
+    <p>Once BALANCE is live, a batch locks the moment its 80th Credit lands, and anyone can convert it. We convert every full batch as soon as we can and pay its members once BALANCE can be transferred. If a payment can’t reach your wallet, claim it from the BALANCE page.</p>
     <h3>Fees</h3>
-    <p>2% of the BALANCE a batch converts into, and 2% on Credits bought through the page.</p>`,
+    <p>6% of the BALANCE a batch converts into, set when the batch opens, and 2% on Credits bought through the page.</p>`,
         },
       ]
     : []),
