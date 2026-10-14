@@ -7013,13 +7013,16 @@ a.quiet:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 /* ---------------------------------------------------------------- Credit page: How it was made */
 
-/* Left to right on wide screens (ID and hash → four plates → the Credit), stacked on phones. */
+/* Left to right on wide screens (ID and hash → four plates → the Credit), stacked on phones. Three parts with the same
+   gap between them, the arrows in the gaps; the Credit's tile is a plate's size, the ID and hash stand as tall as the
+   plates and their captions, top to top and bottom to bottom. */
 .credit-process {
   margin-top: 56px;
 }
 .proc {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 32px minmax(0, 1.7fr) 32px minmax(0, 0.41fr); /* the Credit tile matches a plate */
+  /* in plate widths: the text as wide as it is, a 0.4 gap, four plates (and three 6px gaps), a 0.4 gap, the Credit */
+  grid-template-columns: max-content minmax(24px, 0.4fr) minmax(0, 4.18fr) minmax(24px, 0.4fr) minmax(0, 1fr);
   align-items: start;
 }
 .proc-step {
@@ -7027,6 +7030,13 @@ a.quiet:hover { text-decoration: underline; text-underline-offset: 3px; }
   gap: 8px;
   align-content: start;
   min-width: 0;
+}
+.proc-step:first-child {
+  align-self: stretch;
+  grid-template-rows: auto auto 1fr auto; /* the hash sits at the bottom, level with the captions */
+}
+.proc-step:first-child > :nth-child(3) {
+  align-self: end;
 }
 .proc-k {
   margin: 0;
@@ -7038,7 +7048,7 @@ a.quiet:hover { text-decoration: underline; text-underline-offset: 3px; }
   margin-top: -2px;
 }
 .proc-seed {
-  margin-bottom: 12px;
+  margin-bottom: 4px;
   font: 500 15px/1.4 var(--mono);
   letter-spacing: 0.03em;
   overflow-wrap: anywhere;
@@ -7049,8 +7059,8 @@ a.quiet:hover { text-decoration: underline; text-underline-offset: 3px; }
 }
 .proc-hash {
   display: grid;
-  gap: 2px;
-  font: 12px/1.6 var(--mono);
+  gap: 1px;
+  font: 12px/1.5 var(--mono);
   color: var(--muted);
 }
 .proc-hash span {
@@ -7060,15 +7070,23 @@ a.quiet:hover { text-decoration: underline; text-underline-offset: 3px; }
 .proc-hash .h1 { border-color: var(--ink1); }
 .proc-hash .h2 { border-color: var(--ink2); }
 .proc-hash .h3 { border-color: var(--ink3); }
+/* The arrow's box is 0.4 plates wide and half a plate tall, so its bottom edge is the tiles' centre line, whatever
+   the page's width; the chevron hangs on that edge. */
 .proc-arrow {
-  align-self: center;
-  justify-self: center;
+  align-self: start;
+  justify-self: stretch;
+  aspect-ratio: 0.8;
+  display: flex;
+  align-items: end;
+  justify-content: center;
+}
+.proc-arrow::after {
+  content: '';
   width: 12px;
   height: 12px;
   border-top: 1.5px solid var(--muted);
   border-right: 1.5px solid var(--muted);
-  transform: rotate(45deg);
-  margin-top: -24px; /* centre on the tiles, not on the captions under them */
+  transform: translateY(6px) rotate(45deg);
 }
 .proc-plates {
   display: grid;
@@ -7119,7 +7137,11 @@ a.quiet:hover { text-decoration: underline; text-underline-offset: 3px; }
     gap: 16px;
   }
   .proc-arrow {
-    margin: 0;
+    aspect-ratio: auto;
+    justify-content: start;
+    padding-left: 2px;
+  }
+  .proc-arrow::after {
     transform: rotate(135deg);
   }
   .proc-out {

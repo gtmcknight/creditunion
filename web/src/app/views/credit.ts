@@ -190,14 +190,22 @@ async function drawFits(id: bigint, r: Rated | undefined, list: Listed[], mine: 
     el.innerHTML = `<p class="muted">No open Credit Union takes it right now.</p>`;
     return;
   }
-  el.innerHTML = `<div class="grid">${fits
-    .map((b) => {
-      const html = card(b, mine ? [id] : undefined);
-      return mine ? html.replace(`href="/union/${b.s.address}"`, `href="/union/${b.s.address}?pick=${id}"`) : html;
-    })
-    .join('')}</div>`;
-  hydrate(el);
-  fillGhosts(el);
+  // The three closest to full first (the ones that will burn soonest); the rest behind one button.
+  fits.sort((a, b) => b.s.count - a.s.count || b.s.filledAt - a.s.filledAt);
+  const draw = (n: number) => {
+    const rest = fits.length - n;
+    el.innerHTML = `<div class="grid">${fits
+      .slice(0, n)
+      .map((b) => {
+        const html = card(b, mine ? [id] : undefined);
+        return mine ? html.replace(`href="/union/${b.s.address}"`, `href="/union/${b.s.address}?pick=${id}"`) : html;
+      })
+      .join('')}</div>${rest > 0 ? `<button type="button" class="btn show-empty" id="fits-more">Show ${rest} more</button>` : ''}`;
+    document.getElementById('fits-more')?.addEventListener('click', () => draw(fits.length));
+    hydrate(el);
+    fillGhosts(el);
+  };
+  draw(3);
 }
 
 const buyAbi = parseAbi(['function sellTargetNFT(uint256 tokenId) payable', 'function buy(uint256 listingId, address recipient) payable']);
