@@ -600,7 +600,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
           : ''
       }
     </section>`;
-    previewed = `${laneKey}|`;
+    previewed = ''; // the batch box's bar and key come from drawSheet, so its first run goes through
     bind();
     prices();
     paint();
@@ -667,7 +667,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const rate = per ? `${usd ? `$${(per * usd).toPrecision(2)}` : `${per.toPrecision(2)} ETH`} each` : '';
     setText('amt-usd', dollars(Number(formatUnits(wei, 18))));
     // Two lines: what each one costs, then how it arrives and what we take on that way.
-    setText('route', rate);
+    setText('route', route === 'batch' && hasBatch ? `${rate} · ${b!.out.length} Credit NFT${b!.out.length === 1 ? '' : 's'} bought for you` : rate);
     setText('route2', split ? `${whole(leftN)} via Uniswap · instant` : '');
     const label: Record<Route, [string, string]> = {
       pool: ['Uniswap', 'Instant'],
@@ -710,7 +710,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
         : route !== 'pool' && sweeps && market === 'ready' && !ls.length && (!poolOk() || (wei && !poolN))
           ? `No ${which}Credits for sale right now.`
           : wei && !route && ls.length
-            ? `Min ${ethNum(cheapest + (cheapest * feeBps) / 10_000n, 4)} ETH`
+            ? `<button type="button" class="link small" id="amt-min" data-amt="${ethNum(cheapest + (cheapest * feeBps) / 10_000n, 4, true)}">Min ${ethNum(cheapest + (cheapest * feeBps) / 10_000n, 4, true)} ETH for one Credit</button>`
             : route === 'batch' && !split && b!.out.length >= MAX_BUY
               ? `${MAX_BUY} Credits at most per buy`
               : '',
@@ -895,6 +895,14 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const amt = document.getElementById('amt') as HTMLInputElement | null;
     amt?.addEventListener('input', () => {
       typed = amt.value;
+      $$<HTMLButtonElement>('.tk-q', app).forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.amt === typed.trim())));
+      paint();
+    });
+    document.getElementById('amt-line')?.addEventListener('click', (e) => {
+      const min = (e.target as HTMLElement).closest<HTMLElement>('#amt-min')?.dataset.amt;
+      if (!min || !amt) return;
+      typed = amt.value = min;
+      $$<HTMLButtonElement>('.tk-q', app).forEach((x) => x.setAttribute('aria-pressed', 'false'));
       paint();
     });
     $$<HTMLButtonElement>('.tk-q', app).forEach((q) =>
