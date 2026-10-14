@@ -9752,7 +9752,15 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 .design-form .tk-eth input { font-size: 40px; height: auto; padding: 0; box-shadow: none; background: none; }
 /* The amount, its unit, and under the number what it's worth in dollars (Uniswap's layout). */
 .tk-eth { display: grid; grid-template-columns: 1fr auto; align-items: baseline; row-gap: 2px; }
-.tk-eth .tk-usd { grid-column: 1 / -1; font-size: 13px; color: var(--muted); min-height: 1.3em; }
+.tk-eth .tk-usd { grid-column: 1; font-size: 13px; color: var(--muted); min-height: 1.3em; }
+.tk-eth .tk-bal { grid-column: 2; justify-self: end; font-size: 13px; color: var(--muted); }
+/* Both panels the same height; both titles the same distance above them. */
+.tk-eth, .tk-get.tk-panel { min-height: 108px; box-sizing: border-box; align-content: center; }
+.tk-ethrow:has(#amt-line:empty) { display: none; }
+.tk-gethead .tk-quick { display: inline-flex; gap: 4px; }
+.tk-gethead .tk-q { height: 26px; padding: 0 8px; font-size: 13px; }
+.design-form .tk-gethead + .rule { padding-top: 0; margin-top: 2px; }
+.tk-form .tk-get.tk-panel { min-height: 108px; }
 /* You get mirrors Pay: the title with the colour on one line, then a panel with the amount left, the unit right and
    what each one costs under it. */
 .tk-gethead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; height: 22px; }

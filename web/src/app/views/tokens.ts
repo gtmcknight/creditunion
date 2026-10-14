@@ -459,11 +459,13 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       : ethHeld !== null ? `<span class="tk-bal">Wallet <span class="num">${ethNum(ethHeld, 4)}</span> ETH <button type="button" class="link small" id="amt-max">Max</button></span>` : '';
     // Paying ETH: a few amounts a tap away (about 2, 4 and 20 Credits' worth at today's prices).
     const quick = selling ? '' : `<span class="tk-quick">${['0.05', '0.1', '0.5'].map((v) => `<button type="button" class="tk-q num" data-amt="${v}" aria-pressed="${typed === v}">${v}</button>`).join('')}</span>`;
+    // Pay mirrors You get: the title with its quick amounts on one line, then the panel with the amount, its unit,
+    // what it's worth and, at the bottom right, your balance with Max (as Uniswap does).
     return `
-          <h2 class="form-title">${selling ? 'Sell' : 'Pay'}</h2>
+          <div class="tk-gethead"><h2 class="form-title">${selling ? 'Sell' : 'Pay'}</h2>${quick}</div>
           <section class="rule">
-            <div class="tk-eth"><input id="amt" class="num" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="${selling ? `${esc(sym())} to sell` : 'ETH to spend'}" value="${esc(typed)}"><span>${selling ? esc(sym()) : 'ETH'}</span><span class="tk-usd num" id="amt-usd"></span></div>
-            <p class="term-desc tk-ethrow">${quick || '<span id="amt-line"></span>'}${max}</p>${quick ? '<p class="term-desc"><span id="amt-line"></span></p>' : ''}
+            <div class="tk-eth"><input id="amt" class="num" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="${selling ? `${esc(sym())} to sell` : 'ETH to spend'}" value="${esc(typed)}"><span>${selling ? esc(sym()) : 'ETH'}</span><span class="tk-usd num" id="amt-usd"></span>${max}</div>
+            <p class="term-desc tk-ethrow"><span id="amt-line"></span></p>
           </section>`;
   };
   /// You get, then the way it goes, the other way when it's a real choice, and our fees on this way.
@@ -583,7 +585,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     kept.clear();
     app.innerHTML = `
     <section class="tokens">
-      <header class="create-head"><h1>${trade?.open && !previewSoon ? TOKEN : `Get ${TOKEN} before it opens`}</h1><p class="create-lede"><button type="button" class="link" id="tk-how">What is ${TOKEN}?</button></p></header>
+      <header class="create-head"><h1>${trade?.open && !previewSoon ? TOKEN : `Get in before ${TOKEN} opens`}</h1><p class="create-lede"><button type="button" class="link" id="tk-how">What is ${TOKEN}?</button></p></header>
       ${trade?.open && !previewSoon ? '' : `<div class="tk-soon"><span class="tk-dot" aria-hidden="true"></span><div><p><b>Opens ${new Date(OPENS_AT).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}</b><span class="muted" id="tk-left"></span><span class="muted">${(() => {
         const people = new Set(waiting.flatMap((u) => u.depositors.map((d) => d.toLowerCase()))).size;
         const credits = waiting.reduce((n, u) => n + u.s.count, 0);
