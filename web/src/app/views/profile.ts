@@ -33,6 +33,11 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
     return;
   }
 
+  // Each Credit's rating (what it pays, as a Statement's share or as BALANCE), from the edition's score table: asked
+  // for first, so it lands while the chain is read (the browser keeps it for a year); the Credits tab says "Loading…"
+  // until it does, and shows the Credits alone if it never does.
+  let scoreOf: Uint32Array | undefined;
+  const scoring = bin('credit-score.bin').then((b) => (scoreOf = new Uint32Array(b)), () => (scoreOf = new Uint32Array(0)));
   const [owned, list] = await Promise.all([myCredits(account), listBatches()]);
   const mine = list.filter((b) => mineIn(b, account).size > 0 || same(b.s.creator, account));
   const deposited = mine.reduce((n, b) => n + mineIn(b, account).size, 0);
@@ -87,9 +92,6 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
   const filling = joined.filter((b) => !selling(b));
   const auctions = list.filter((b) => selling(b) && (joined.includes(b) || same(b.s.highBidder, account)));
   const inUnions = joined.flatMap((b) => [...mineIn(b, account)].map((id) => ({ id: BigInt(id), b })));
-  // Each Credit's rating (what it pays, as a Statement's share or as BALANCE), from the edition's score table: read
-  // once there are Credits to show; the tab says "Loading…" until it lands, and shows the Credits alone if it never does.
-  let scoreOf: Uint32Array | undefined;
   const score = (id: bigint) => (scoreOf?.[Number(id) - 1] ?? 0) / 10_000;
   // A section's count, and the rating of all its Credits together, as a Statement of them would state it.
   const headN = (ids: readonly bigint[]) => (ids.length ? `${ids.length}${scoreOf?.length ? ` · Rating ${ratingTotal(ids.map(score)).toLocaleString('en-US')}` : ''}` : '');
@@ -169,10 +171,9 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
     activity = rows;
     if (at.isConnected) draw();
   });
-  if (owned.length + inUnions.length)
-    void bin('credit-score.bin')
-      .then((b) => (scoreOf = new Uint32Array(b)), () => (scoreOf = new Uint32Array(0)))
-      .then(() => { if (at.isConnected) draw(); });
+  void scoring.then(() => {
+    if (at.isConnected) draw();
+  });
 
   hydrate(app);
 
