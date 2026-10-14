@@ -682,7 +682,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     setText('route', route === 'batch' && hasBatch ? `${b!.out.length} Credit NFT${b!.out.length === 1 ? '' : 's'} deposited now · ${pct(feeBps)} fee included` : rate);
     setText('route2', split ? `${whole(leftN)} via Uniswap · instant` : '');
     const label: Record<Route, [string, string]> = {
-      pool: ['Uniswap', 'Instant'],
+      pool: ['Uniswap', `Instant${m?.feeBps ? ` · ${pct(m.feeBps)} fee` : ''}`],
       batch: ['Credits', `In a ${lane().name} batch, lands when it fills`],
       statement: [st ? `Statement #${st.id}` : 'Statement', `On OpenSea · redeems when ${TOKEN} opens`],
     };
@@ -704,7 +704,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       'fees',
       way === 'batch'
         ? `${split ? `${whole(b!.tokens)} ${lands().toLowerCase()}${m!.feeBps ? ` · ${pct(m!.feeBps)} on the swap` : ''}` : ''}`
-        : route === 'statement'
+        : wei && ways.length > 1
+          ? ''
+          : route === 'statement'
           ? `Bought on OpenSea · uses ${ethNum(BigInt(st!.price), 3)} of your ${ethNum(wei, 3)} ETH`
           : way === 'pool'
           ? `Instant via Uniswap${m!.feeBps ? ` · ${pct(m!.feeBps)} fee` : ''}`
