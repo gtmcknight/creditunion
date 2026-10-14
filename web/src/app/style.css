@@ -8490,7 +8490,7 @@ dialog.how .small { margin-top: 16px; }
 .board-note { margin-top: 12px; }
 @media (max-width: 480px) { .board-row { grid-template-columns: 28px minmax(0, 1fr) auto; } .board-u { display: none; } }
 .live-list[hidden] { display: none; }
-.live-more { display: block; margin: 20px auto 0; }
+.btn.live-more { display: block; margin: 20px auto 0; }
 .live-row[hidden] { display: none; }
 .site-tick { width: 100%; max-width: var(--max); margin: 0 auto; padding: 0 var(--gutter); }
 .site-tick[hidden] { display: none; }
