@@ -13,6 +13,19 @@ import { activityTicker, live, tickerHtml } from './views/live';
 import { docs } from './views/docs';
 import { balance } from './views/balance';
 import { profile } from './views/profile';
+
+// A tab left open across a deploy asks for chunks the new build removed. Reload once to pick up the new build.
+window.addEventListener('vite:preloadError', (e) => {
+  e.preventDefault();
+  try {
+    const last = Number(sessionStorage.getItem('cu-reloaded') ?? 0);
+    if (Date.now() - last < 30_000) return;
+    sessionStorage.setItem('cu-reloaded', String(Date.now()));
+  } catch {
+    return;
+  }
+  location.reload();
+});
 import { printer } from './views/printer';
 import { credit } from './views/credit';
 import { traitPage } from './views/trait';
