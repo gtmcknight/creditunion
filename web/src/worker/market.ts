@@ -119,6 +119,17 @@ export class MarketBook extends DurableObject<Env> {
     this.changed();
   }
 
+  /// OpenSea refused these orders at quote time (sold, cancelled or superseded, whatever the feed missed): each row
+  /// still carrying that order goes now, so the next read doesn't offer it again. A newer order of the same Credit
+  /// stays.
+  async dropOrders(orders: { id: string; hash: string }[]) {
+    if (!orders.length) return;
+    this.ctx.storage.transactionSync(() => {
+      for (const o of orders) this.sql.exec(`DELETE FROM listings WHERE id = ? AND source = 'opensea' AND lower(a) = ?`, o.id, o.hash.toLowerCase());
+    });
+    this.changed();
+  }
+
   /// Keep the 10-second loop running (the cron calls this each minute; the first call starts it).
   async kick() {
     if (this.env.MARKET_LOOP === 'off') return;

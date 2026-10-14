@@ -2663,11 +2663,17 @@ async function quoteListings(env: Env, url: URL, listings: Listing[]) {
   const osPicked = listings.filter((l) => l.source === 'opensea');
   let os = { orders: [] as unknown[], ids: [] as string[], prices: [] as string[], total: '0', expires: null as number | null };
   if (osPicked.length) {
+    const dead: { id: string; hash: string }[] = [];
     try {
-      os = await quote({ key: env.OPENSEA_API_KEY!, sweeper: env.SWEEPER, listings: osPicked, n: osPicked.length, origin: url.origin });
+      os = await quote({ key: env.OPENSEA_API_KEY!, sweeper: env.SWEEPER, listings: osPicked, n: osPicked.length, origin: url.origin, onDead: (l) => l.hash && dead.push({ id: l.id, hash: l.hash }) });
     } catch (e) {
-      if (!fwaLive.length && !strategyLive.length) throw e; // with other listings still good, the quote is those
+      if (!fwaLive.length && !strategyLive.length) {
+        if (dead.length && env.MARKET) await book(env).dropOrders(dead).catch(() => {});
+        throw e; // with other listings still good, the quote is those
+      }
     }
+    // The book forgets what OpenSea just refused, so a sold Credit stops being offered the moment anyone tries it.
+    if (dead.length && env.MARKET) await book(env).dropOrders(dead).catch(() => {});
   }
   if (!os.ids.length && !fwaLive.length && !strategyLive.length) throw Object.assign(new Error('Those listings just sold. Try again.'), { sold: true });
   const fwa = fwaLive.map((l) => ({ listingId: l.listingId!, id: l.id, price: l.price }));

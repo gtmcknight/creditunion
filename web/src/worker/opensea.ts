@@ -261,7 +261,7 @@ export async function bestOrder(key: string, slug: string, credits: Address, id:
 /// (gasless cancel, superseded listing): those come back "Order not valid" and are skipped, and the next
 /// cheapest takes their place. The Sweeper is named as the fulfiller: OpenSea's zone checks it against
 /// Seaport's caller.
-export async function quote(o: { key: string; sweeper: Address; listings: Listing[]; n: number; origin: string }): Promise<Quote> {
+export async function quote(o: { key: string; sweeper: Address; listings: Listing[]; n: number; origin: string; onDead?: (l: Listing) => void }): Promise<Quote> {
   if (!o.listings.length) throw new Error('No listings fit this batch right now.');
   const got: { l: Listing; order: Json }[] = [];
   let next = 0;
@@ -295,8 +295,10 @@ export async function quote(o: { key: string; sweeper: Address; listings: Listin
           const err = e as Error;
           // "Order not valid" (400) is a dead listing, and a malformed fill is skipped the same way; a rate
           // limit or outage stops the walk, and what was already collected is still a valid quote.
-          if ((e as { status?: number }).status === 400 || /no order parameters/.test(err.message)) stale = true;
-          else upstream = err;
+          if ((e as { status?: number }).status === 400 || /no order parameters/.test(err.message)) {
+            stale = true;
+            o.onDead?.(l); // dead on OpenSea's side (sold, cancelled, superseded): the book drops it at once
+          } else upstream = err;
           return null;
         }
       }),
