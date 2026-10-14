@@ -9830,6 +9830,8 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 .tk-fill i { display: block; height: 100%; transition: width 300ms var(--ease); }
 .tk-fill i.o { background: var(--fg); opacity: 0.35; }
 .tk-fill i.y { background: var(--c, var(--fg)); }
+.tk-keyrow { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.tk-keyrow #tk-bfee { white-space: nowrap; }
 .tk-key { display: flex; gap: 14px; margin: 0; color: var(--muted); }
 .tk-key span { display: inline-flex; align-items: center; gap: 6px; }
 .tk-key i { width: 8px; height: 8px; background: var(--line); display: inline-block; }

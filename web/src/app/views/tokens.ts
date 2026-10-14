@@ -385,7 +385,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     // What you'll be paid when it fills: your Credits' rating in it (in already and about to be), after the fee.
     const bget = document.getElementById('tk-bget');
     const yoursTenths = [...(cur ? mineIn(cur) : []), ...add].reduce((n, id) => n + t(id), 0);
-    if (bget) bget.textContent = yoursTenths ? `At 80 you get paid ≈ ${est(yoursTenths).toLocaleString('en-US')} ${TOKEN}.` : `At 80 it converts to ${TOKEN} and pays each of you by rating.`;
+    if (bget) bget.textContent = yoursTenths ? `At 80 you get ≈ ${est(yoursTenths).toLocaleString('en-US')} ${TOKEN}.` : `At 80 it converts to ${TOKEN} and pays each of you by rating.`;
     if (legend) legend.innerHTML = `${yours ? `<span><i class="y"></i>${yours} yours</span>` : ''}<span><i class="o"></i>${others} others</span><span><i></i>${open} open</span>`;
   };
   /// The BALANCE you'd hold after the buy or sale typed, as Jack's artwork draws a wallet: its balance in its colors.
@@ -518,8 +518,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     return `<div class="tk-batch" id="tk-batch"${viaSheet() ? '' : ' hidden'}>
             <p class="tk-batch-head"><span>${l.ink < 0 ? 'Mixed' : l.name} batch</span><span class="num" id="tk-bn">${count} of 80</span></p>
             <div class="tk-fill" style="${inkVar(l)}"><i class="y" id="tk-fy" style="width:0"></i><i class="o" id="tk-fo" style="width:${(count / 80) * 100}%"></i></div>
-            <p class="tk-key small num" id="tk-legend"></p>
-            <p class="small muted"><span id="tk-bget">At 80 it converts to ${TOKEN} and pays each of you by rating.</span> Withdraw anytime before. <span id="tk-bfee"></span></p>
+            <div class="tk-keyrow"><p class="tk-key small num" id="tk-legend"></p><span class="small muted" id="tk-bfee"></span></div>
+            <p class="small muted"><span id="tk-bget">At 80 it converts to ${TOKEN} and pays each of you by rating.</span> Withdraw anytime before.</p>
           </div>`;
   }
   const sellHtml = () => `${payHtml(true)}${getHtml(true)}
@@ -698,7 +698,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
           ? `Instant via Uniswap${m!.feeBps ? ` · ${pct(m!.feeBps)} fee` : ''}`
           : '',
     );
-    setText('tk-bfee', way === 'batch' ? `${pct(feeBps)} fee on Credits, ${pct(bpsOf())} on conversion.` : '');
+    setText('tk-bfee', way === 'batch' ? `<span title="${pct(feeBps)} on Credits bought, ${pct(bpsOf())} on conversion">Fees ${pct(feeBps)} + ${pct(bpsOf())}</span>` : '');
     // Under the amount, only what needs saying: still looking, nothing for sale, too little for one, one buy's limit.
     const ls = pools.get(laneKey) ?? [];
     const cheapest = ls.reduce((a, x) => (BigInt(x.price) < a ? BigInt(x.price) : a), ls.length ? BigInt(ls[0].price) : 0n);
@@ -784,7 +784,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       room = room > 0 ? room - take : 80 - take;
     }
     setText('fees', '');
-    setText('tk-bfee', `${pct(bpsOf())} fee${txs > 1 ? `, ${txs} wallet confirmations` : ''}.`);
+    setText('tk-bfee', `${pct(bpsOf())} fee${txs > 1 ? ` · ${txs} confirmations` : ''}`);
     const all = document.getElementById('pick-all');
     if (all) all.textContent = mine.length ? 'Clear' : 'Select all';
     setText('n-sel', mine.length ? `${mine.length} of your ${ownedHere().length} picked` : `Pick from your ${ownedHere().length}.`);
