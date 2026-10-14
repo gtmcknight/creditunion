@@ -334,7 +334,7 @@ function morph(el: HTMLElement, html: string): Set<Element> {
   return fresh;
 }
 
-/// `rating`: the union's total rating, shown as a fourth line (while sorting by it).
+/// `rating`: the union's total rating, shown as a fourth line (always on Buy; on Make while sorting by it).
 export function card({ s, ids, depositors, format }: Listed, fit?: bigint[], whose = 'yours', rating?: number) {
   const mine = mineIn({ s, ids, depositors });
   const room = 80 - s.count;
@@ -515,9 +515,9 @@ function sortSales(items: Sale[], k: AuctionSort) {
 }
 
 /// A listed Statement's card, in the union card's frame: its drawing (pages stacked behind an overprint), the union
-/// that made it when it was one of ours, its price on OpenSea, and Buy. A standing overprint (nothing for sale) has
-/// no price and no button.
-function listingCard(x: ForSale | Standing, made: Map<string, Listed>, rated: boolean) {
+/// that made it when it was one of ours, its price on OpenSea, its rating, and Buy. A standing overprint (nothing for
+/// sale) has no price and no button.
+function listingCard(x: ForSale | Standing, made: Map<string, Listed>) {
   const b = made.get(x.id);
   const sale = 'price' in x ? x : null;
   const mine = !!sale && !!session.account && same(sale.seller as Address, session.account);
@@ -536,7 +536,7 @@ function listingCard(x: ForSale | Standing, made: Map<string, Listed>, rated: bo
         <strong><a href="${href}">${esc(b?.s.name || 'Statement')} <span class="stmt-no num">#${x.id}</span></a></strong>
         <span class="meta-line num"><span class="meta-line-text meta-byline">${by}</span></span>
         <span class="meta-line num"><span class="meta-line-text">${where}${pages > 1 ? ` · ${pages} pages` : ''}${mine ? ' · <span class="meta-yours">Yours</span>' : ''}</span></span>
-        ${rated && x.rating != null ? `<span class="meta-line num">Rating ${x.rating.toLocaleString()}</span>` : ''}
+        ${x.rating != null ? `<span class="meta-line num">Rating ${x.rating.toLocaleString()}</span>` : ''}
       </div>
       ${cta}
     </div>
@@ -678,7 +678,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     let showEmpty = false; // All tabs its empty (0/80) unions behind a button: they're mostly abandoned
     let shownStage: Stage = 'live'; // the auctions tab showing, whose order the menu sets
     const grid = (items: Listed[]) => {
-      const rated = tab === 'parties' ? sortFor(view) === 'rating' : auctionSort(shownStage) === 'rating';
+      const rated = tab === 'parties' ? sortFor(view) === 'rating' : true;
       return `<div class="grid">${items.map((b) => card(b, fit.get(b.s.address), 'yours', rated ? totalOf(b) : undefined)).join('')}</div>`;
     };
     let totaling = false;
@@ -762,6 +762,9 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       if (nSold) nSold.textContent = String(sold.length);
       const pick: Stage = stage ?? 'live';
       app.querySelectorAll<HTMLElement>('[data-stage-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.stageTab === pick)));
+      // Multibid is for live auctions: with none, the tab steps out (unless you're on it, say from an outbid alert).
+      const mb = app.querySelector<HTMLElement>('[data-stage-tab="multibid"]');
+      if (mb) mb.hidden = !liveNow.length && pick !== 'multibid';
       const overBtn = app.querySelector<HTMLElement>('#overprints');
       if (overBtn) {
         overBtn.hidden = pick !== 'live';
@@ -789,7 +792,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       const table = pick === 'sold' && auctionView === 'table';
       app.querySelector<HTMLElement>('.sort-pick')?.classList.toggle('idle', table);
       vp?.querySelectorAll<HTMLElement>('[data-auction-view]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.auctionView === auctionView)));
-      // Rating, for the unions, is read once someone orders by it (a listing carries its own).
+      // Rating: what a Statement pays for, so every Buy card states it. A union's is read here (a listing carries its own).
       const needTotals = (xs: Listed[]) => {
         if (totaling || !xs.some((b) => totalOf(b) === undefined)) return;
         totaling = true;
@@ -800,10 +803,9 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       };
       if (pick === 'live') {
         const shown = sortSales(overprints ? forSale.filter((x) => x.x && (x.x.pages ?? 1) > 1) : forSale, order);
-        const rated = order === 'rating' || order === 'value';
-        if (rated) needTotals(liveNow);
+        needTotals(liveNow);
         let html: string;
-        if (shown.length) html = `<div class="grid">${shown.map((x) => (x.b ? card(x.b, undefined, 'yours', rated ? totalOf(x.b) : undefined) : listingCard(x.x, made, rated))).join('')}</div>`;
+        if (shown.length) html = `<div class="grid">${shown.map((x) => (x.b ? card(x.b, undefined, 'yours', totalOf(x.b)) : listingCard(x.x, made))).join('')}</div>`;
         else if (sales === null) html = '<p class="muted">Reading listings…</p>';
         else if (overprints) {
           // No overprint for sale: a few standing ones to look at, read once.
@@ -814,7 +816,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
               .catch(() => {});
           }
           const n = standing.length;
-          html = `<p class="muted st-none">No Overprints are for sale right now.${!n ? '' : standingTotal === 1 ? ' Here’s the only one.' : standingTotal > n ? ` Here are ${n} of the ${standingTotal} to explore.` : ` Here are all ${standingTotal} to explore.`}</p>${n ? `<div class="grid">${standing.map((x) => listingCard(x, made, false)).join('')}</div>` : ''}`;
+          html = `<p class="muted st-none">No Overprints are for sale right now.${!n ? '' : standingTotal === 1 ? ' Here’s the only one.' : standingTotal > n ? ` Here are ${n} of the ${standingTotal} to explore.` : ` Here are all ${standingTotal} to explore.`}</p>${n ? `<div class="grid">${standing.map((x) => listingCard(x, made)).join('')}</div>` : ''}`;
         } else html = '<p class="muted">Nothing for sale right now.</p>';
         if (salesErr) html += `<p class="muted small">OpenSea’s listings couldn’t be read: ${esc(salesErr)}</p>`;
         const fresh = morph(el, html);
@@ -824,7 +826,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         return;
       }
       const shown = sortAuctions([...sold], order);
-      if (order === 'rating' || table) needTotals(shown);
+      needTotals(shown);
       const fresh = morph(
         el,
         !list.length

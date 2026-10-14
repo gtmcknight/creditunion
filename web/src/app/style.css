@@ -2630,6 +2630,9 @@ input[type='datetime-local'] {
 .subtabs button:hover {
   color: var(--fg);
 }
+.subtabs button[hidden] {
+  display: none;
+}
 .subtabs a[aria-selected='true'],
 .subtabs button[aria-selected='true'] {
   background: var(--line);
