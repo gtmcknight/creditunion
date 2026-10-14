@@ -440,7 +440,8 @@ function valuesOf(kind: TraitKind): TraitValue[] {
 /// sections as the same tabs, the current one lit (none on a Credit's page). `value`: the crumb's end.
 /// `side`: a link at the right end of the trait tabs (Start a Credit Union).
 export const creditsHead = (current: string, value?: string, side = '') => {
-  const sections: [string, string][] = [...TRAIT_KINDS.map((k): [string, string] => [k, valuesOf(k)[0].label]), ['time', 'Time'], ['rating', 'Rating'], ['bits', 'Bits']];
+  // Rating first after All: it's what a Credit pays, and the most-opened section.
+  const sections: [string, string][] = [['rating', 'Rating'], ...TRAIT_KINDS.map((k): [string, string] => [k, valuesOf(k)[0].label]), ['time', 'Time'], ['bits', 'Bits']];
   const label = sections.find(([k]) => k === current)?.[1] ?? '';
   // Credits (with its trait tabs); a Statement's page sits under Statements, where it's for sale.
   const crumb =
