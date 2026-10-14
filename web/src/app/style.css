@@ -9790,7 +9790,9 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 /* One swap-card column: tabs, Pay, You get, the button, then the batch it lands in as one line and a fill bar. */
 .tk-card { width: 100%; max-width: 480px; justify-self: center; margin-top: 24px; }
 .tk-card .tk-form { width: 100%; }
-.tk-batch { margin: 12px 0 4px; display: grid; gap: 10px; padding: 14px 16px; border-radius: var(--r); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.tk-batch { margin: 12px 0 4px; display: grid; gap: 10px; }
+/* The batch reads as a section like Pay and You get: its title row, then the bar, key and line; no box (it's not an input). */
+.tk-batch-head { font-weight: 500; font-size: 16px; }
 .tk-batch[hidden] { display: none; }
 /* Under the picked Credits row: one object with it (no gap, no double border). */
 .tk-batch.attached { margin: -7px 0 0; border-radius: 0 0 var(--r) var(--r); box-shadow: inset 1.5px 0 0 var(--fg), inset -1.5px 0 0 var(--fg), inset 0 -1.5px 0 var(--fg); }
