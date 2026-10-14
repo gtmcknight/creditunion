@@ -387,7 +387,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     // What you'll be paid when it fills: your Credits' rating in it (in already and about to be), after the fee.
     const bget = document.getElementById('tk-bget');
     const yoursTenths = [...(cur ? mineIn(cur) : []), ...add].reduce((n, id) => n + t(id), 0);
-    if (bget) bget.textContent = yoursTenths ? `At 80 you get ≈ ${est(yoursTenths).toLocaleString('en-US')} ${TOKEN}.` : `At 80 it converts to ${TOKEN} and pays each of you by rating.`;
+    if (bget) bget.textContent = yoursTenths ? `When it fills to 80, it converts and you get ≈ ${est(yoursTenths).toLocaleString('en-US')} ${TOKEN} after the ${pct(bpsOf())} fee.` : `When it fills to 80, it converts to ${TOKEN} and pays each of you by rating.`;
     if (legend) legend.innerHTML = `${yours ? `<span><i class="y"></i>${yours} yours</span>` : ''}<span><i class="o"></i>${others} others</span><span><i></i>${open} open</span>`;
   };
   /// The BALANCE you'd hold after the buy or sale typed, as Jack's artwork draws a wallet: its balance in its colors.
@@ -488,16 +488,16 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const mineHere = ownedHere();
     const pick = (id: bigint) => {
       const p = lane().ink < 0 ? pure(inkOf(id)) : null; // in Mixed, a single-ink Credit is marked with its ink
-      return `<button type="button" class="pick" data-id="${id}" aria-pressed="${picks.has(id.toString())}" aria-label="Credit #${id}"><img src="${art(id)}" alt="" loading="lazy">${p ? `<span class="tk-pure" style="${inkVar(p)}" title="${p.name} only"></span>` : ''}<span class="pick-id num">${pts(t(id))}</span></button>`;
+      return `<button type="button" class="pick" data-id="${id}" aria-pressed="${picks.has(id.toString())}" aria-label="Credit #${id}" title="Credit #${id} · ${pts(t(id))} rating"><img src="${art(id)}" alt="" loading="lazy">${p ? `<span class="tk-pure" style="${inkVar(p)}" title="${p.name} only"></span>` : ''}<span class="pick-id num">${pts(t(id))}</span></button>`;
     };
     return `
-          <h2 class="form-title">Your Credits</h2>
+          <div class="tk-gethead"><h2 class="form-title">Your Credits</h2>${account && mineHere.length ? '<button type="button" class="link small" id="pick-all">Select all</button>' : ''}</div>
           <section class="rule">
             ${
               !account
                 ? '<p class="term-desc">Connect to add Credits you own.</p>'
                 : mineHere.length
-                  ? `<p class="tk-sel term-desc"><span id="n-sel">Pick the ones to convert.</span><button type="button" class="link small" id="pick-all">Select all</button></p>
+                  ? `<p class="tk-sel term-desc"><span id="n-sel">Pick the ones to convert.</span></p>
                      <div class="picker captioned" id="picker">${mineHere.map(pick).join('')}</div>`
                   : `<p class="term-desc">${owned.length ? `None of yours are printed in ${lane().name.toLowerCase()} only.` : 'No Credits in this wallet.'}</p>`
             }
@@ -510,10 +510,10 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   function outHtml() {
     const ps = outHere();
     return `
-          <h2 class="form-title">Withdraw</h2>
+          <div class="tk-gethead"><h2 class="form-title">Withdraw</h2></div>
           <section class="rule">
             <p class="term-desc" id="n-out">Pick some, or withdraw all.</p>
-            <div class="picker captioned" id="out-picker">${ps.map((p) => `<button type="button" class="pick" data-id="${p.id}" aria-pressed="${outPicks.has(p.id.toString())}" aria-label="Credit #${p.id}"><img src="${art(p.id)}" alt="" loading="lazy"><span class="pick-id num">${pts(t(p.id))}</span></button>`).join('')}</div>
+            <div class="picker captioned" id="out-picker">${ps.map((p) => `<button type="button" class="pick" data-id="${p.id}" aria-pressed="${outPicks.has(p.id.toString())}" aria-label="Credit #${p.id}" title="Credit #${p.id} · ${pts(t(p.id))} rating"><img src="${art(p.id)}" alt="" loading="lazy"><span class="pick-id num">${pts(t(p.id))}</span></button>`).join('')}</div>
           </section>
           <div class="submit"><button type="button" class="btn primary block" id="leave">Withdraw all ${plural(ps.length)}</button>${linkHtml('buy', 'Back')}</div>`;
   }
@@ -526,7 +526,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
             <p class="tk-batch-head"><span>${l.ink < 0 ? 'Mixed' : l.name} batch</span><span class="num" id="tk-bn">${count} of 80</span></p>
             <div class="tk-fill" style="${inkVar(l)}"><i class="y" id="tk-fy" style="width:0"></i><i class="o" id="tk-fo" style="width:${(count / 80) * 100}%"></i></div>
             <div class="tk-keyrow"><p class="tk-key small num" id="tk-legend"></p><span class="small muted" id="tk-bfee"></span></div>
-            <p class="small muted"><span id="tk-bget">At 80 it converts to ${TOKEN} and pays each of you by rating.</span> Withdraw anytime before.</p>
+            <p class="small muted"><span id="tk-bget">When it fills to 80, it converts to ${TOKEN} and pays each of you by rating.</span> Until then, withdraw anytime.</p>
           </div>`;
   }
   const sellHtml = () => `${payHtml(true)}${getHtml(true)}
@@ -679,7 +679,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     setText('amt-usd', dollars(Number(formatUnits(wei, 18))));
     // Two lines: what each one costs, then how it arrives and what we take on that way.
     setText('tk-gettitle', way === 'batch' || route === 'statement' ? 'You’ll get' : 'You get');
-    setText('route', route === 'batch' && hasBatch ? `${b!.out.length} Credit NFT${b!.out.length === 1 ? '' : 's'} deposited now · this ${TOKEN} when it opens` : rate);
+    setText('route', route === 'batch' && hasBatch ? `${b!.out.length} Credit NFT${b!.out.length === 1 ? '' : 's'} deposited now · ${pct(feeBps)} fee included` : rate);
     setText('route2', split ? `${whole(leftN)} via Uniswap · instant` : '');
     const label: Record<Route, [string, string]> = {
       pool: ['Uniswap', 'Instant'],
@@ -710,7 +710,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
           ? `Instant via Uniswap${m!.feeBps ? ` · ${pct(m!.feeBps)} fee` : ''}`
           : '',
     );
-    setText('tk-bfee', way === 'batch' ? `<span title="${pct(feeBps)} on Credits bought, ${pct(bpsOf())} on conversion">Fees ${pct(feeBps)} + ${pct(bpsOf())}</span>` : '');
+    setText('tk-bfee', '');
     // Under the amount, only what needs saying: still looking, nothing for sale, too little for one, one buy's limit.
     const ls = pools.get(laneKey) ?? [];
     const cheapest = ls.reduce((a, x) => (BigInt(x.price) < a ? BigInt(x.price) : a), ls.length ? BigInt(ls[0].price) : 0n);
@@ -796,7 +796,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       room = room > 0 ? room - take : 80 - take;
     }
     setText('fees', '');
-    setText('tk-bfee', `${pct(bpsOf())} fee${txs > 1 ? ` · ${txs} confirmations` : ''}`);
+    setText('tk-bfee', txs > 1 ? `${txs} confirmations` : '');
     const all = document.getElementById('pick-all');
     if (all) all.textContent = mine.length ? 'Clear' : 'Select all';
     setText('n-sel', mine.length ? `${mine.length} of your ${ownedHere().length} picked` : `Pick from your ${ownedHere().length}.`);
