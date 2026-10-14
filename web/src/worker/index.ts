@@ -281,6 +281,8 @@ export default {
   async scheduled(_event, env, ctx) {
     // The market book, kept live each minute (keepMarket).
     ctx.waitUntil(keepMarket(env, ctx).catch((e) => console.error('[market] update failed', safeError(e))));
+    // What 1 BALANCE costs, once an hour, for the chart on /balance.
+    if (new Date(_event.scheduledTime).getUTCMinutes() === 0) ctx.waitUntil(recordBalance(env).catch((e) => console.error('[balance] record failed', safeError(e))));
     // The keeper runs every 5 minutes, as before.
     if (new Date(_event.scheduledTime).getUTCMinutes() % 5 !== 0) return;
     if (!env.KEEPER_KEY) return;
@@ -1101,6 +1103,21 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
   }
   // Market → Statements: every Statement listed on OpenSea with its rating and format, kept a minute at the edge.
+  // What 1 BALANCE costs by each way in, hourly since the board went up (the cron records it), for the chart on
+  // /balance.
+  if (url.pathname === '/market/balance.json') {
+    if (!sameSite(req)) return text('forbidden', 403);
+    const key = new Request(`${url.origin}/market/balance.json`);
+    const hit = await caches.default.match(key);
+    if (hit) return hit;
+    try {
+      const res = Response.json({ points: await balanceHistory(env), at: Date.now() }, { headers: { 'cache-control': 'public, max-age=300' } });
+      ctx.waitUntil(caches.default.put(key, res.clone()));
+      return res;
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502 });
+    }
+  }
   if (url.pathname === '/market/statements.json') {
     if (!env.OPENSEA_API_KEY) return text('OpenSea is not configured', 501);
     const key = new Request(`${url.origin}/market/statements.json`);
@@ -2079,6 +2096,61 @@ async function keepMarket(env: Env, ctx: ExecutionContext) {
   if (new Date().getUTCMinutes() % 5 === 0) await b.setExtras((await extras(env, url, ctx)).extra.map((e) => [e.id, e.price, e.source, e.listingId ?? '', '', '', 0] as Row));
 }
 
+
+/// What 1 BALANCE costs now, in ETH, by each way in: the cheapest Statement for sale per rating point (OpenSea, no
+/// fee), and the 80 listed Credits with the most rating per ETH (what the Sweeper takes, fee in). null where there
+/// is nothing to price.
+async function balanceQuote(env: Env, url: URL): Promise<{ stmt: number | null; cred: number | null }> {
+  let stmt: number | null = null, cred: number | null = null;
+  if (env.OPENSEA_API_KEY) {
+    const statements = await statementsOf(env).catch(() => null);
+    const items = statements ? await statementsForSale(env.OPENSEA_API_KEY, statements, client(env) as never).catch(() => []) : [];
+    for (const x of items) {
+      if (!x.rating) continue;
+      const v = Number(BigInt(x.price)) / 1e18 / x.rating;
+      if (stmt === null || v < stmt) stmt = v;
+    }
+  }
+  if (env.MARKET) {
+    const { items } = JSON.parse(await book(env).snapshot()) as { items: string[][] };
+    const sc = (await loadTable(env.ASSETS, url.origin)).score;
+    const rows = items
+      .filter((r) => r[2] !== 'opensea' || (r[3] && r[4])) // an OpenSea row without its order can't be bought
+      .map((r) => ({ price: BigInt(r[1]), score: sc[Number(r[0]) - 1] ?? 0 }))
+      .filter((r) => r.score > 0 && r.price > 0n)
+      .sort((a, b) => b.score / Number(b.price / 1_000_000_000n || 1n) - a.score / Number(a.price / 1_000_000_000n || 1n))
+      .slice(0, 80);
+    if (rows.length === 80) {
+      const bps = BigInt((await sweeperFeeOf(env).catch(() => undefined)) ?? 200);
+      const sum = rows.reduce((t, r) => t + r.price, 0n);
+      const rating = Math.floor(rows.reduce((t, r) => t + r.score, 0) / 10_000);
+      cred = Number(sum + (sum * bps) / 10_000n) / 1e18 / rating;
+    }
+  }
+  return { stmt, cred };
+}
+
+/// The hourly record: [unix seconds, ETH per BALANCE via a Statement, via 80 Credits][], newest last, in KV.
+const BALANCE_KEY = 'balance-history';
+const BALANCE_POINTS = 2400; // 100 days of hours
+type BalancePoint = [number, number | null, number | null];
+async function balanceHistory(env: Env): Promise<BalancePoint[]> {
+  const raw = await keptGet(env, BALANCE_KEY);
+  try {
+    return raw ? (JSON.parse(raw) as BalancePoint[]) : [];
+  } catch {
+    return [];
+  }
+}
+async function recordBalance(env: Env) {
+  if (!env.PLANS) return;
+  const url = new URL('https://creditunion.fun/');
+  const q = await balanceQuote(env, url);
+  if (q.stmt === null && q.cred === null) return;
+  const points = (await env.PLANS.get(BALANCE_KEY).catch(() => null).then((r) => (r ? (JSON.parse(r) as BalancePoint[]) : [])));
+  points.push([Math.floor(Date.now() / 1000), q.stmt, q.cred]);
+  await env.PLANS.put(BALANCE_KEY, JSON.stringify(points.slice(-BALANCE_POINTS)));
+}
 
 async function readUnions(env: Env): Promise<string> {
   return toJson({ at: Math.floor(Date.now() / 1000), unions: await unionList(env) });
