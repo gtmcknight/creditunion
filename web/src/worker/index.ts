@@ -2620,7 +2620,7 @@ function openseaTrait(t: NonNullable<ReturnType<typeof parseTrait>>): { traitTyp
 /// today, as a guard.
 const RANGE_DEPTH = 150;
 
-/// The most Credits one quote takes: the Printer buys 40 at a time; the site's own Buy sliders stop at 24.
+/// The most Credits one quote takes: the Printer buys 40 at a time; the site's own Buy sliders stop at 32.
 const MAX_SWEEP = 40;
 /// Listed Credits per page of /opensea/listed (before a trait filters them).
 const LISTED_CHUNK = 60;

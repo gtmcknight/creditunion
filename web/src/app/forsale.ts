@@ -46,7 +46,7 @@ export const sourceMark = (id: string | number, source: Source, url?: string) =>
 export type Listed = { id: string; price: string; source: Source; url?: string; hash?: string; protocol?: string; listingId?: string };
 
 /// The most one buy takes, on every Buy (the worker's quote allows as many).
-export const MAX_SWEEP = 24;
+export const MAX_SWEEP = 32;
 
 /// Every Buy the same: a slider for how many, with the count beside it (the button can't always say it: signed out
 /// it asks to connect), then what the wallet will ask, fee in (sweepTotal fills it). On phones the slider takes its
