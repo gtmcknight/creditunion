@@ -162,10 +162,11 @@ export async function unionsLink(app: HTMLElement, test: (b: Listed) => boolean,
 /// and #trait-more inside `app`.
 export type Where = { trait?: string; rules?: Record<string, number>; order?: 'value' | 'rating' };
 /// How listed Credits are ordered (/credits, /rating, /bits).
-const CREDIT_ORDERS = [['cheap', 'Lowest price'], ['rating', 'Top rated'], ['value', 'Most rating per ETH']] as const;
+const CREDIT_ORDERS = [['cheap', 'Lowest price'], ['rating', 'Top rated'], ['value', 'Most BALANCE per ETH']] as const;
 const ORDER_KEY = 'cu-credits-order';
-/// The order from the page's URL (?order=value|rating, so a sorted page is a permalink), else the one last picked.
-/// From the URL, it's remembered too.
+/// The order from the page's URL (?order=value|rating|cheap, so a sorted page is a permalink), else the one last
+/// picked, else most BALANCE per ETH (BALANCE pays by rating, so that's the price that matters). From the URL, it's
+/// remembered too. Lowest price is `undefined` throughout.
 export function readOrder(): Where['order'] {
   const q = new URLSearchParams(location.search).get('order');
   if (q === 'value' || q === 'rating' || q === 'cheap') {
@@ -175,22 +176,22 @@ export function readOrder(): Where['order'] {
   }
   try {
     const v = localStorage.getItem(ORDER_KEY);
-    if (v === 'value' || v === 'rating') return v;
+    if (v === 'cheap') return undefined;
+    if (v === 'rating') return v;
   } catch {}
-  return undefined;
+  return 'value';
 }
 /// Remember the order picked across the Credits pages.
 export function saveOrder(order: Where['order']) {
   try {
-    if (order) localStorage.setItem(ORDER_KEY, order);
-    else localStorage.removeItem(ORDER_KEY);
+    localStorage.setItem(ORDER_KEY, order ?? 'cheap');
   } catch {}
 }
-/// ?order= in the page's URL as it is now (cheapest, the default, leaves it out), the rest of the URL kept.
+/// ?order= in the page's URL as it is now (most BALANCE per ETH, the default, leaves it out), the rest kept.
 export function keepOrder(order: Where['order']) {
   const u = new URL(location.href);
-  if (order) u.searchParams.set('order', order);
-  else u.searchParams.delete('order');
+  if (order === 'value') u.searchParams.delete('order');
+  else u.searchParams.set('order', order ?? 'cheap');
   history.replaceState(null, '', u.pathname + u.search + u.hash);
 }
 export function buyGrid(app: HTMLElement, where: Where, rest: (page: number) => Promise<{ ids: number[]; total: number }>, line?: (id: number) => string, onTotal?: (n: number) => void) {
