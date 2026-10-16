@@ -4,7 +4,6 @@ import { esc, short } from '../ui';
 
 
 
-const link = (href: string, text: string) => `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(text)} ↗</a>`;
 
 /* ---------------------------------------------------------------- figures
    Drawn in the Credits' own inks on paper. Plate mixes indexed by the 4-bit CMYK mask, as in wall.ts. */
@@ -119,46 +118,32 @@ type Chapter = { id: string; nav: string; title: string; figure?: string; body: 
 export function home(app: HTMLElement) {
   const chapters: Chapter[] = [
     {
-      id: 'lifecycle',
-      nav: 'How it runs',
-      title: 'Start a Credit Union',
+      id: 'deposit',
+      nav: 'Put Credits in',
+      title: 'Put Credits in',
+      figure: FAMILY.batch,
+      body: `<p>Join a batch of 80 with other holders, or pay ETH and the page buys Credits in for you. Take yours back anytime before it fills.</p>`,
+    },
+    {
+      id: 'rating',
+      nav: 'Get BALANCE',
+      title: 'Get BALANCE',
+      figure: FAMILY.rating,
+      body: `<p>A full batch becomes a Statement, and the Statement becomes BALANCE: one per rating point, split by what each of you put in.</p>`,
+    },
+    {
+      id: 'colors',
+      nav: 'Pick a color',
+      title: 'Pick a color',
+      figure: FAMILY.lanes,
+      body: `<p>Mixed takes any Credit. C, M, Y and K take one ink only, and pay BALANCE in that color.</p>`,
+    },
+    {
+      id: 'statement',
+      nav: 'Make a Statement',
+      title: 'Or make a Statement',
       figure: FAMILY.story,
-      body: `<p>Pool your Credits with other holders. At 80 they burn into a Statement, and everyone in shares the sale.</p>`,
-    },
-    {
-      id: 'eligibility',
-      nav: 'Who joins',
-      title: 'Deposit',
-      figure: FAMILY.invited,
-      body: `<p>Pick exactly which Credits get in: any Credit, or only ones with the <a href="/palette">traits</a> you choose.</p>`,
-    },
-    {
-      id: 'order',
-      nav: 'Layout',
-      title: 'Layout',
-      figure: FAMILY.painted,
-      body: `<p>Arrange the 80 however you like: in deposit order, by Credit number, or painted into a design.</p>`,
-    },
-    {
-      id: 'buying',
-      nav: 'Buying in',
-      title: 'Buy in',
-      figure: FAMILY.buy,
-      body: `<p>Buy Credits right here, through OpenSea, to help fill any Credit Union.</p>`,
-    },
-    {
-      id: 'exit',
-      nav: 'Leaving',
-      title: 'Withdrawals',
-      figure: FAMILY.door,
-      body: `<p>Withdraw anytime until a full Credit Union locks. If nobody burns it within the hour, it unlocks again.</p>`,
-    },
-    {
-      id: 'auction',
-      nav: 'Auction',
-      title: 'Dividends',
-      figure: FAMILY.paddles,
-      body: `<p>The Statement goes to auction, and the proceeds are split across its members.</p>`,
+      body: `<p>Pool 80 Credits with other holders, auction the Statement, and split the sale.</p>`,
     },
   ];
 
@@ -170,8 +155,8 @@ export function home(app: HTMLElement) {
       ${c.figure ?? ''}
     </section>`;
 
-  const headline = `<h1><span>Join a Credit Union</span> <span>to make a Statement together.</span></h1>`;
-  const cta = `<p class="wall-cta"><a class="btn primary" href="/unions">Browse Credit Unions →</a><a class="btn" href="/create">Start your own</a></p>`;
+  const headline = `<h1><span>Turn your Credits</span> <span>into BALANCE.</span></h1>`;
+  const cta = `<p class="wall-cta"><a class="btn primary" href="/balance">Get BALANCE →</a><a class="btn" href="/unions">Make a Statement</a></p>`;
   app.innerHTML = `
   <section class="hero"><div id="wall"></div><div class="hero-text">${headline}${cta}</div></section>
   <article class="about doc">

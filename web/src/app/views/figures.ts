@@ -240,4 +240,35 @@ export const FAMILY = {
     return fig(svg(statement(x0, 150 - sh / 2, sw, 'gallery') +
       widths.map((w, i) => r(bx, by - (i + 1) * CELL - i * 2 * GAP, w, CELL, i === 3 ? M : K)).join('')));
   })(),
+  // 7A · BALANCE: a batch filling; one more Credit goes in.
+  batch: (() => {
+    const inks = inks80(31), next = 46, inX = SX + SW + 2 * PITCH, y = slotY(next), cy = y + CELL / 2;
+    return fig(svg(
+      partySheet((i) => (i < next ? inks[i] : EMPTY)) +
+        cellSq(inX, y, inks[next]) + arrow(inX - 5, cy, slotX(next) + CELL + 5, cy, K, LINE),
+    ));
+  })(),
+
+  // 7B · paid by rating: three members' Credits in one sheet, each paid a bar of BALANCE in proportion.
+  rating: (() => {
+    const cut = [40, 65], x0 = 24, bars: [number, string][] = [[40, C], [25, M], [15, Y]];
+    const base = SY + SH, unit = SH / 40, bx = x0 + SW + 4 * PITCH, ay = SY + SH / 2;
+    return fig(svg(
+      partySheet((i) => (i < cut[0] ? C : i < cut[1] ? M : Y), x0) +
+        arrow(x0 + SW + 10, ay, bx - 10, ay, K, LINE) +
+        bars.map(([v, f], k) => r(bx + k * (CELL + 2 * GAP), base - v * unit, CELL, v * unit, f)).join(''),
+    ));
+  })(),
+
+  // 7C · the five batch colors: Mixed takes any Credit, the rest one ink each.
+  lanes: (() => {
+    const c = 9, g = 3, w = 4 * c + 3 * g, h = 5 * c + 4 * g, lane = 11, x0 = 150 - (5 * w + 4 * lane) / 2, y0 = 150 - h / 2 - 10;
+    const rand = rng(12);
+    const mixed = Array.from({ length: 20 }, () => randomInk(rand));
+    const lanes: [string, (i: number) => string][] = [['Mixed', (i) => mixed[i]], ['C', () => C], ['M', () => M], ['Y', () => Y], ['K', () => K]];
+    return fig(svg(lanes.map(([name, fill], k) => {
+      const x = x0 + k * (w + lane);
+      return Array.from({ length: 20 }, (_, i) => r(x + (i % 4) * (c + g), y0 + ((i / 4) | 0) * (c + g), c, c, fill(i))).join('') + label(x + w / 2, y0 + h + 26, name);
+    }).join('')));
+  })(),
 };
