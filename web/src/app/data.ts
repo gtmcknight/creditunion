@@ -189,7 +189,8 @@ function toSummary(address: Address, s: Record<string, unknown>): Summary {
 }
 
 /// `format`: a full union's format pick (an index into the Statement formats), null for none or not full.
-export type Listed = { s: Summary; ids: readonly bigint[]; depositors: readonly Address[]; format?: number | null };
+/// `token`: a token batch ($BALANCE), paid by rating, not split.
+export type Listed = { s: Summary; ids: readonly bigint[]; depositors: readonly Address[]; format?: number | null; token?: boolean };
 
 /// Every Credit Union, newest first, from the Worker's union index (/unions.json: read once for the whole site,
 /// preloaded by list pages). Most pages read it, so one read serves every page for a few seconds. Forgotten after
@@ -285,7 +286,7 @@ export async function tokenBatches(): Promise<Listed[]> {
   const n = (await pub.readContract({ address: f, abi: factoryAbi, functionName: 'batchCount' })) as bigint;
   if (!n) return [];
   const addrs = (await pub.readContract({ address: f, abi: factoryAbi, functionName: 'batches', args: [0n, n] })) as readonly Address[];
-  return (await Promise.all(addrs.map((a) => getBatch(a).then((b) => ({ ...b, ids: [...b.ids], depositors: [...b.depositors], format: null }) as Listed).catch(() => null)))).filter((b): b is Listed => !!b);
+  return (await Promise.all(addrs.map((a) => getBatch(a).then((b) => ({ ...b, ids: [...b.ids], depositors: [...b.depositors], format: null, token: true }) as Listed).catch(() => null)))).filter((b): b is Listed => !!b);
 }
 
 /// Your side of a Credit Union, kept 20 s (forgotten after any transaction of ours), so a page you open, or are about

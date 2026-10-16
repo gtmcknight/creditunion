@@ -306,8 +306,9 @@ export function mineIn(b: Listed, by = session.account) {
 }
 
 /// The payout at a glance, beside the creator: five level bars for Equal, five stepping down for Early bird.
-/// The payout rule as a word, its meaning on hover.
-const payWord = (early: boolean) =>
+/// The payout rule as a word, its meaning on hover. A token batch pays BALANCE by each Credit's rating.
+const payWord = (early: boolean, token = false) =>
+  token ? `<span class="pay-word" title="Converts to BALANCE by each Credit’s rating">BALANCE</span>` :
   `<span class="pay-word" title="${early ? 'First in get 1.5×, last in 0.5×' : 'Every Credit gets 1/80'}">${early ? 'Early bird' : 'Equal split'}</span>`;
 
 /// A picture card can draw once its Credits are placed and, while open, its plan is known; until then it shows its
@@ -335,7 +336,7 @@ function morph(el: HTMLElement, html: string): Set<Element> {
 }
 
 /// `rating`: the union's total rating, shown as a fourth line (always on Buy; on Make while sorting by it).
-export function card({ s, ids, depositors, format }: Listed, fit?: bigint[], whose = 'yours', rating?: number) {
+export function card({ s, ids, depositors, format, token }: Listed, fit?: bigint[], whose = 'yours', rating?: number) {
   const mine = mineIn({ s, ids, depositors });
   const room = 80 - s.count;
   const picture = pictures.has(s.address);
@@ -376,7 +377,7 @@ export function card({ s, ids, depositors, format }: Listed, fit?: bigint[], who
     <div class="card-meta">
       <div class="meta-text">
         <strong>${esc(s.name || 'Untitled')}${burned ? ` <span class="stmt-no num">#${s.statementId}</span>` : ''}</strong>
-        <span class="meta-line num"><span class="meta-line-text meta-byline">${who(s.creator, 'sm', 'nested')}<span class="meta-where">&nbsp;·&nbsp;${people}&nbsp;·&nbsp;${payWord(s.split === 1)}</span></span></span>
+        <span class="meta-line num"><span class="meta-line-text meta-byline">${who(s.creator, 'sm', 'nested')}<span class="meta-where">&nbsp;·&nbsp;${people}&nbsp;·&nbsp;${payWord(s.split === 1, token)}</span></span></span>
         <span class="meta-line num"><span class="meta-line-text">${where}${standing}${yoursText ? ` · <span class="meta-yours">${yoursText}</span>` : ''}</span></span>
         ${rating === undefined ? '' : `<span class="meta-line num">Rating ${rating.toLocaleString()}</span>`}
       </div>
