@@ -388,7 +388,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const bget = document.getElementById('tk-bget');
     const yoursTenths = [...(cur ? mineIn(cur) : []), ...add].reduce((n, id) => n + t(id), 0);
     if (bget) bget.textContent = yoursTenths ? `When it fills to 80, it converts and you get ≈ ${est(yoursTenths).toLocaleString('en-US')} ${TOKEN} after the ${pct(bpsOf())} fee.` : `When it fills to 80, it converts to ${TOKEN} and pays each of you by rating.`;
-    if (legend) legend.innerHTML = `${yours ? `<span><i class="y"></i>${yours} yours</span>` : ''}<span><i class="o"></i>${others} others</span><span><i></i>${open} open</span>`;
+    // Credits a buy would bring in aren't anyone's yet (and signed out there's no "you"), so they say buying.
+    const buying = viewNow() === 'buy' ? add.length : 0, mineAll = yours - buying;
+    if (legend) legend.innerHTML = `${mineAll ? `<span><i class="y"></i>${mineAll} yours</span>` : ''}${buying ? `<span><i class="y"></i>${buying} buying</span>` : ''}<span><i class="o"></i>${others} others</span><span><i></i>${open} open</span>`;
   };
   /// The BALANCE you'd hold after the buy or sale typed, as Jack's artwork draws a wallet: its balance in its colors.
   /// What comes in mixes in by amount; selling never changes your colors.
