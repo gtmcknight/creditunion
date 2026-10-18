@@ -558,18 +558,19 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const fan = (ids: readonly bigint[]) => `<span class="tk-yart tk-fan">${ids.slice(0, 3).map((id) => `<img src="${art(id)}" alt="" loading="lazy">`).join('')}</span>`;
     const coin = `<span class="tk-yart"><span class="tk-ycoin">${balanceSvg('$', myPal ?? EVEN, 2)}</span></span>`;
     // One shape for every row: its art, a bold line and a grey line under it, and the one action on the right.
-    const row = (artHtml: string, title: string, sub: string, action = '') => `<div class="tk-yrow">${artHtml}<div class="tk-ytext"><b>${title}</b><span class="muted small">${sub}</span></div>${action}</div>`;
+    const row = (artHtml: string, title: string, sub: string | string[], action = '') => `<div class="tk-yrow">${artHtml}<div class="tk-ytext"><b>${title}</b>${[sub].flat().filter(Boolean).map((l) => `<span class="muted small">${l}</span>`).join('')}</div>${action}</div>`;
     if (m && tokenHeld > 0n) rows.push(row(coin, `<span class="num">${tokAmt(tokenHeld)}</span> ${TOKEN}`, 'In your wallet'));
     else if (!m && held && held.amount > 0n) rows.push(row(coin, `<span class="num">${amount(held.amount)}</span> ${TOKEN}`, 'In your wallet'));
     for (const w of waitingBy) {
       const b = curOf(w.x);
       const mine = b ? mineIn(b) : [];
-      const worth = Math.round(mine.reduce((n, id) => n + t(id), 0) / 10);
+      // What they pay out when the batch fills, after the conversion fee (the same figure as the batch box).
+      const worth = est(mine.reduce((n, id) => n + t(id), 0));
       rows.push(
         row(
           fan(mine),
-          `${plural(w.n)} in ${w.x.name}`,
-          `${b ? `${b.s.count} of 80` : ''}${worth ? ` · ≈ ${worth.toLocaleString('en-US')} ${TOKEN}` : ''}`,
+          `${plural(w.n)} deposited`,
+          [worth ? `${worth.toLocaleString('en-US')} ${TOKEN} expected` : '', b ? `${b.s.count} of 80 in the ${w.x.name} batch` : ''],
           leavable.some((p) => laneOf(p.u.s) === w.x) ? `<button type="button" class="tk-yact quiet" data-out="${w.x.key}">Withdraw</button>` : '',
         ),
       );
