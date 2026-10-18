@@ -682,7 +682,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     setText('amt-usd', dollars(Number(formatUnits(wei, 18))));
     // Two lines: what each one costs, then how it arrives and what we take on that way.
     setText('tk-gettitle', way === 'batch' || route === 'statement' ? 'You’ll get' : 'You get');
-    setText('route', route === 'batch' && hasBatch ? `${b!.out.length} Credit NFT${b!.out.length === 1 ? '' : 's'} deposited now · ${pct(feeBps)} fee included` : rate);
+    setText('route', route === 'batch' && hasBatch ? `${b!.out.length} Credit${b!.out.length === 1 ? '' : 's'} deposited now · after the ${pct(bpsOf())} conversion fee` : rate);
     setText('route2', split ? `${whole(leftN)} via Uniswap · instant` : '');
     const label: Record<Route, [string, string]> = {
       pool: ['Uniswap', `Instant${m?.feeBps ? ` · ${pct(m.feeBps)} fee` : ''}`],
