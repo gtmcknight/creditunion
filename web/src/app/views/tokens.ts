@@ -83,6 +83,8 @@ const shown = new Map<string, number>();
 /// What the box does: Buy with ETH, Sell on Uniswap, Convert your own Credits in a batch, or Withdraw yours from one.
 /// Kept while you move around the page.
 let view: 'buy' | 'sell' | 'credits' | 'out' = 'buy';
+/// The batch whose Withdraw opened that view: only its Credits are offered, still after a partial withdraw.
+let outFrom: Address | null = null;
 /// What's typed: ETH to buy with, or the token to sell.
 let typed = '';
 /// The first draw of a visit: holders open on Convert with all theirs picked, everyone else on Buy at 0.1 ETH.
@@ -151,12 +153,16 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   const bpsOf = () => curOf(lane())?.s.protocolFeeBps ?? Number(feeNow);
   // One rating point is one token; the protocol fee comes off the top.
   const est = (tenthsIn: number) => Math.floor((tenthsIn / 10) * (1 - bpsOf() / 10_000));
+  /// The conversion fee on that rating, in tokens: its rate of the rating, rounded.
+  const feeOn = (tenthsIn: number) => Math.round(((tenthsIn / 10) * bpsOf()) / 10_000);
   const yoursT = pending.reduce((a, p) => a + t(p.id), 0);
   const amount = (v: bigint) => Number(formatUnits(v, got.decimals)).toLocaleString('en-US', { maximumFractionDigits: 0 });
   /// Whether ETH can buy Credits into a batch here (the token factory's Sweeper).
   const sweeps = !!config.tokenSweeper;
   // Per color: the batch filling (the fullest open one) and how many are full.
   const curOf = (l: Lane) => all.filter((u) => laneOf(u.s) === l && u.s.state === 'Open' && u.s.count < 80).sort((a, b) => b.s.count - a.s.count)[0] ?? null;
+  /// A batch's name as it opened with ("Mixed 5"), the one the activity feed and its own page show.
+  const nameOf = (l: Lane, u: Union) => esc(u.s.name || `${l.name} batch`);
   const fullOf = (l: Lane) => all.filter((u) => laneOf(u.s) === l && u.s.state === 'Full').length;
   // The palette a batch's BALANCE carries: a pure color's own ink; a mixed batch's, about the share of each ink across
   // its Credits (each Credit split evenly over its inks), an even mix while it's empty.
@@ -207,7 +213,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   const lane = () => LANES.find((l) => l.key === laneKey)!;
   const ownedHere = () => [...owned].filter((id) => fitsLane(lane(), inkOf(id))).sort((a, b) => t(b) - t(a));
   /// Your Credits waiting in this color's batches that can come back now (not in a burn hour), and the ones picked to.
-  const outHere = () => leavable.filter((p) => laneOf(p.u.s) === lane());
+  const outHere = () => leavable.filter((p) => laneOf(p.u.s) === lane() && (!outFrom || p.u.s.address === outFrom));
   const outPicks = new Set<string>();
   /// Uniswap is a way in for Mixed once trading opens: the pool sells its own mix, never a pure color.
   const poolFor = (l: Lane) => !!m && !!trade?.open && l.ink < 0;
@@ -258,13 +264,15 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const f = fitBudget(wei, key, cap);
     return { ...f, tokens: est(f.out.reduce((a, x) => a + t(x.id), 0)) }; // the same score table the batch box and payouts use
   };
-  /// What a full batch of this color costs per 1,000 BALANCE right now: its cheapest 80 per point, fee included.
+  /// What a full batch of this color costs per 1,000 BALANCE received right now: its cheapest 80 per point, the sweep
+  /// fee on the ETH and the conversion fee on the tokens included.
   const batchPrice = (l: Lane) => {
     const ls = (pools.get(l.key) ?? []).slice(0, 80);
     const tenths = ls.reduce((a, x) => a + x.tenths, 0);
     if (!tenths) return null;
     const wei = ls.reduce((a, x) => a + BigInt(x.price), 0n);
-    return ((wei + (wei * feeBps) / 10_000n) * 10_000n) / BigInt(tenths);
+    const keep = 10_000n - BigInt(curOf(l)?.s.protocolFeeBps ?? Number(feeNow));
+    return ((wei + (wei * feeBps) / 10_000n) * 10_000n * 10_000n) / (BigInt(tenths) * keep);
   };
   /// The buy for a color and budget fixed when the button was pressed, re-picked from what's still for sale.
   const pickFor = (l: Lane, wei: bigint, cap: number) => () => fitBudget(wei, l.key, cap).out;
@@ -388,10 +396,11 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     if (bn) bn.textContent = `${80 - open} of 80`;
     // What you'll be paid when it fills: your Credits' rating in it (in already and about to be), after the fee.
     const bget = document.getElementById('tk-bget');
-    const yoursTenths = [...(cur ? mineIn(cur) : []), ...add].reduce((n, id) => n + t(id), 0);
+    const inTenths = (cur ? mineIn(cur) : []).reduce((n, id) => n + t(id), 0), addTenths = add.reduce((n, id) => n + t(id), 0);
+    const yoursTenths = inTenths + addTenths;
     // With some of yours in already, the total all of yours will pay; otherwise the box above already says it.
     const inAlready = cur ? mineIn(cur).length : 0;
-    if (bget) bget.textContent = inAlready && add.length ? `When it fills to 80, all ${inAlready + add.length} of yours convert: ≈ ${est(yoursTenths).toLocaleString('en-US')} ${TOKEN}. Until then, withdraw anytime.` : yoursTenths ? 'Withdraw anytime before it fills.' : `When it fills to 80, it converts to ${TOKEN} and pays each of you by rating. Until then, withdraw anytime.`;
+    if (bget) bget.textContent = inAlready && add.length ? `When it fills to 80, all ${inAlready + add.length} of yours convert: ≈ ${(est(inTenths) + est(addTenths)).toLocaleString('en-US')} ${TOKEN}. Until then, withdraw anytime.` : yoursTenths ? 'Withdraw anytime before it fills.' : `When it fills to 80, it converts to ${TOKEN} and pays each of you by rating. Until then, withdraw anytime.`;
     // Credits a buy would bring in aren't anyone's yet (and signed out there's no "you"), so they say buying.
     const buying = viewNow() === 'buy' ? add.length : 0, mineAll = yours - buying;
     if (legend) legend.innerHTML = `${mineAll ? `<span><i class="y"></i>${mineAll} yours</span>` : ''}${buying ? `<span><i class="y"></i>${buying} buying</span>` : ''}<span><i class="o"></i>${others} others</span><span><i></i>${open} open</span>`;
@@ -507,7 +516,6 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
                      <div class="picker captioned" id="picker">${mineHere.map(pick).join('')}</div>`
                   : `<p class="term-desc">${owned.length ? `None of yours are printed in ${lane().name.toLowerCase()} only.` : 'No Credits in this wallet.'}</p>`
             }
-            <p class="tk-nudge small" id="tk-nudge" hidden></p>
             ${account && lane().ink >= 0 && owned.length > mineHere.length ? `<p class="tk-back small"><button type="button" class="link small" id="tk-back">← Back to Mixed</button> for your other ${plural(owned.length - mineHere.length)}</p>` : ''}
           </section>
           ${getHtml(false)}
@@ -515,13 +523,14 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   }
   function outHtml() {
     const ps = outHere();
+    const from = outFrom ? waiting.find((u) => u.s.address === outFrom) : undefined;
     return `
-          <div class="tk-gethead"><h2 class="form-title">Withdraw</h2></div>
+          <div class="tk-gethead"><h2 class="form-title">${from ? `Withdraw from ${nameOf(lane(), from)}` : 'Withdraw'}</h2></div>
           <section class="rule">
-            <p class="term-desc" id="n-out">Pick some, or withdraw all.</p>
+            <p class="term-desc" id="n-out">${ps.length > 1 ? 'Pick some, or withdraw all.' : ''}</p>
             <div class="picker captioned" id="out-picker">${ps.map((p) => `<button type="button" class="pick" data-id="${p.id}" aria-pressed="${outPicks.has(p.id.toString())}" aria-label="Credit #${p.id}" title="Credit #${p.id} · ${pts(t(p.id))} rating"><img src="${art(p.id)}" alt="" loading="lazy"><span class="pick-id num">${pts(t(p.id))}</span></button>`).join('')}</div>
           </section>
-          <div class="submit"><button type="button" class="btn primary block" id="leave">Withdraw all ${plural(ps.length)}</button>${linkHtml('buy', 'Back')}</div>`;
+          <div class="submit"><button type="button" class="btn primary block" id="leave">Withdraw ${ps.length > 1 ? 'all ' : ''}${plural(ps.length)}</button>${linkHtml('buy', 'Back')}</div>`;
   }
   /// The batch a buy or a conversion goes into, said plainly above the button: the Credits wait in it, it converts
   /// when the 80th lands, and until then they come back on request.
@@ -529,7 +538,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const l = lane();
     const count = curOf(l)?.s.count ?? 0;
     return `<div class="tk-batch" id="tk-batch"${viaSheet() ? '' : ' hidden'}>
-            <p class="tk-batch-head"><span>${l.ink < 0 ? 'Mixed' : l.name} batch</span><span class="num" id="tk-bn">${count} of 80</span></p>
+            <p class="tk-batch-head"><span>${curOf(l) ? nameOf(l, curOf(l)!) : `New ${l.name} batch`}</span><span class="num" id="tk-bn">${count} of 80</span></p>
             <div class="tk-fill" style="${inkVar(l)}"><i class="y" id="tk-fy" style="width:0"></i><i class="o" id="tk-fo" style="width:${(count / 80) * 100}%"></i></div>
             <div class="tk-keyrow"><p class="tk-key small num" id="tk-legend"></p><span class="small muted" id="tk-bfee"></span></div>
             <p class="small muted"><span id="tk-bget">When it fills to 80, it converts to ${TOKEN} and pays each of you by rating. Until then, withdraw anytime.</span></p>
@@ -554,7 +563,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     if (cur) shown.set(cur.s.address, count);
     // The sheet shows the batch's Credits (their hover cards say whose), and open paper for the rest.
     if (cur) registerDeposits(cur.ids, cur.depositors);
-    const waitingBy = LANES.map((x) => ({ x, n: pending.filter((p) => laneOf(p.u.s) === x).length })).filter((w) => w.n);
+    // The batches yours wait in, by color, oldest first: a full one waiting to convert isn't the one filling now.
+    const yourBatches = LANES.flatMap((x) => waiting.filter((u) => laneOf(u.s) === x && mineIn(u).length).reverse());
     // Yours, under the title: only when there's something (BALANCE held, Credits waiting, a payout to claim).
     // Yours: what this wallet holds and has waiting, each with the one thing to do about it. Only when there's something.
     const rows: string[] = [];
@@ -565,23 +575,24 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const row = (artHtml: string, title: string, sub: string | string[], action = '') => `<div class="tk-yrow">${artHtml}<div class="tk-ytext"><b>${title}</b>${[sub].flat().filter(Boolean).map((l) => `<span class="muted small">${l}</span>`).join('')}</div>${action}</div>`;
     if (m && tokenHeld > 0n) rows.push(row(coin, `<span class="num">${tokAmt(tokenHeld)}</span> ${TOKEN}`, 'In your wallet'));
     else if (!m && held && held.amount > 0n) rows.push(row(coin, `<span class="num">${amount(held.amount)}</span> ${TOKEN}`, 'In your wallet'));
-    for (const w of waitingBy) {
-      const b = curOf(w.x);
-      const mine = b ? mineIn(b) : [];
-      // What they pay out when the batch fills, after the conversion fee (the same figure as the batch box).
-      const worth = est(mine.reduce((n, id) => n + t(id), 0));
+    for (const u of yourBatches) {
+      const l = laneOf(u.s)!, mine = mineIn(u), p = u.s.phase;
+      // What they pay out when it converts, after the fee this batch opened with (the same figure as the batch box).
+      const worth = Math.floor((mine.reduce((n, id) => n + t(id), 0) / 10) * (1 - u.s.protocolFeeBps / 10_000));
+      // Full: waiting for BALANCE to open, converting (locked), or its hour passed unconverted (withdrawable again).
+      const where = p === 'Open' ? `${u.s.count} of 80 so far` : p === 'Waiting' ? (trade?.open ? 'Full, converting soon' : 'Full, converts when it opens') : p === 'Expired' ? 'Full, waiting to convert' : 'Full, converting now';
       rows.push(
         row(
           fan(mine),
-          `${plural(w.n)} deposited`,
-          [worth ? `${worth.toLocaleString('en-US')} ${TOKEN} expected` : '', b ? `${b.s.count} of 80 in the ${w.x.name} batch` : ''],
-          leavable.some((p) => laneOf(p.u.s) === w.x) ? `<button type="button" class="tk-yact quiet" data-out="${w.x.key}">Withdraw</button>` : '',
+          `${plural(mine.length)} in ${nameOf(l, u)}`,
+          [worth ? `${worth.toLocaleString('en-US')} ${TOKEN} expected` : '', where],
+          p === 'Burnable' ? '' : `<button type="button" class="tk-yact quiet" data-out="${l.key}" data-batch="${u.s.address}">Withdraw</button>`,
         ),
       );
     }
     // Credits still in the wallet: what they'd convert into, and the way to do it.
     if (owned.length) {
-      const worth = Math.round(owned.reduce((n, id) => n + t(id), 0) / 10);
+      const worth = est(owned.reduce((n, id) => n + t(id), 0));
       rows.push(row(fan([...owned].sort((x, y) => t(y) - t(x))), `${plural(owned.length)} to convert`, `≈ ${worth.toLocaleString('en-US')} ${TOKEN}`, viewNow() === 'credits' ? '' : '<button type="button" class="tk-yact go" data-view="credits" data-all>Convert</button>'));
     }
     for (const x of myStmts)
@@ -689,10 +700,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     // Each fee sits by what it comes out of: the conversion fee under the tokens, the buy fee on the button's ETH.
     // Under the button, what the buy does, and the buy fee it already has in it.
     const n = hasBatch ? b!.out.length : 0;
-    // The conversion fee as the tokens it takes, out of what these Credits' rating pays before it.
-    const convFee = n ? Math.round(b!.out.reduce((a, x) => a + t(x.id), 0) / 10) - b!.tokens : 0;
+    const convFee = n ? feeOn(b!.out.reduce((a, x) => a + t(x.id), 0)) : 0;
     setText('route', route === 'batch' && n ? `Converted to ${TOKEN} when batch fills, minus <button type="button" class="link" id="fee-rate" title="${pct(bpsOf())} conversion fee">${feeAsRate ? `${pct(bpsOf())} conversion fee` : `${whole(convFee)} ${TOKEN} fee`}</button>` : rate);
-    setText('go-note', route === 'batch' && n ? `Buys the ${n === 1 ? 'best-value Credit' : `${n} best-value Credits`} for sale and deposits ${n === 1 ? 'it' : 'them'} in the ${lane().ink < 0 ? 'Mixed' : lane().name} batch, ready to convert to ${TOKEN}.${feeBps ? ` Includes the ${pct(feeBps)} sweep fee.` : ''}` : '');
+    setText('go-note', route === 'batch' && n ? `Buys the ${n === 1 ? 'best-value Credit' : `${n} best-value Credits`} for sale and deposits ${n === 1 ? 'it' : 'them'} in ${curOf(lane()) ? nameOf(lane(), curOf(lane())!) : `a new ${lane().name} batch`}, ready to convert to ${TOKEN}.${feeBps ? ` Includes the ${pct(feeBps)} sweep fee.` : ''}` : '');
     setText('route2', split ? `${whole(leftN)} via Uniswap · instant` : '');
     const label: Record<Route, [string, string]> = {
       pool: ['Uniswap', `Instant${m?.feeBps ? ` · ${pct(m.feeBps)} fee` : ''}`],
@@ -750,7 +760,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
         : short
           ? 'Not enough ETH'
           : route === 'batch'
-            ? `Buy ${plural(b!.out.length)}${split ? ` + ${whole(leftN)} ${sym()}` : ''} · ${ethNum(b!.spent + (split ? left : 0n), 4)} ETH`
+            ? `Buy ${plural(b!.out.length)}${split ? ` + ${whole(leftN)} ${sym()}` : ''} · ${ethNum(b!.spent + (split ? left : 0n), 4, true)} ETH`
             : route === 'pool'
               ? `Get ${whole(poolN)} ${sym()}`
               : route === 'statement'
@@ -802,7 +812,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const mine = [...picks].filter((id) => here.has(id)).map(BigInt);
     const tenths = mine.reduce((a, id) => a + t(id), 0);
     setGet(tenths ? est(tenths) : 0, paletteOf(lane()));
-    setText('route', '');
+    // The conversion fee in tokens, as on Buy.
+    const convFee = feeOn(tenths);
+    setText('route', tenths ? `Converted to ${TOKEN} when batch fills, minus <button type="button" class="link" id="fee-rate" title="${pct(bpsOf())} conversion fee">${feeAsRate ? `${pct(bpsOf())} conversion fee` : `${whole(convFee)} ${TOKEN} fee`}</button>` : '');
     // How many wallet confirmations it takes: 40 Credits a transaction, the open batch's room first, then new batches.
     let txs = 0;
     for (let left = mine.length, room = 80 - (curOf(lane())?.s.count ?? 80); left > 0; txs++) {
@@ -815,18 +827,6 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const all = document.getElementById('pick-all');
     if (all) all.textContent = mine.length ? 'Clear' : 'Select all';
     setText('n-sel', mine.length ? `${mine.length} of your ${ownedHere().length} picked` : `Pick from your ${ownedHere().length}.`);
-    // In Mixed, single-ink Credits picked: say where they'd pay their own color, and offer to move them there.
-    const nudge = document.getElementById('tk-nudge');
-    if (nudge) {
-      const groups = lane().ink < 0 ? LANES.filter((x) => x.ink >= 0).map((x) => ({ x, ids: mine.filter((id) => inkOf(id) === 1 << x.ink) })).filter((g) => g.ids.length).sort((a, b) => b.ids.length - a.ids.length) : [];
-      const g = groups[0];
-      nudge.hidden = !g;
-      if (g) {
-        const one = g.ids.length === 1, c = g.x.name.toLowerCase();
-        nudge.setAttribute('style', inkVar(g.x));
-        nudge.innerHTML = `${one ? 'One is' : `${g.ids.length} are`} ${c} only and could go into a pure ${g.x.name} batch instead. <button type="button" class="link small" id="tk-move" data-to="${g.x.key}">Convert ${one ? 'it' : 'those'} in ${g.x.name}</button>, then come back for the rest.`;
-      }
-    }
     setGo(mine.length ? `Convert ${plural(mine.length)}${trade?.open ? '' : ' · converts when it opens'}` : 'Pick Credits', mine.length > 0);
     showLeft();
     drawSheet();
@@ -835,8 +835,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   function outSync() {
     const n = outHere().filter((p) => outPicks.has(p.id.toString())).length, all = outHere().length;
     const btn = document.getElementById('leave');
-    if (btn && !busy) btn.textContent = n ? `Withdraw ${plural(n)}` : `Withdraw all ${plural(all)}`;
-    setText('n-out', n ? `${n} of ${all} picked` : 'Pick some, or withdraw all.');
+    if (btn && !busy) btn.textContent = n ? `Withdraw ${plural(n)}` : `Withdraw ${all > 1 ? 'all ' : ''}${plural(all)}`;
+    setText('n-out', n ? `${n} of ${all} picked` : all > 1 ? 'Pick some, or withdraw all.' : '');
     showLeft();
     drawSheet();
   }
@@ -982,11 +982,6 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       paint();
     });
     document.getElementById('tk-back')?.addEventListener('click', () => switchLane(LANES.find((x) => x.ink < 0)!.key, owned.filter((id) => !ownedHere().includes(id)).map(String)));
-    // Move the single-ink Credits picked in Mixed to their own color, still picked.
-    document.getElementById('tk-nudge')?.addEventListener('click', (e) => {
-      const to = LANES.find((x) => x.key === (e.target as HTMLElement).closest<HTMLElement>('#tk-move')?.dataset.to);
-      if (to) switchLane(to.key, [...picks].filter((id) => inkOf(id) === 1 << to.ink));
-    });
     const go = document.getElementById('go') as HTMLButtonElement | null;
     go?.addEventListener('click', () => {
       const v = viewNow(), l = lane(), wei = amountIn();
@@ -1071,7 +1066,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     });
     document.getElementById('leave')?.addEventListener('click', (e) =>
       run(e.currentTarget as HTMLElement, 'Withdrawing…', async () => {
-        const out = outHere().filter((p) => !outPicks.size || outPicks.has(p.id.toString()));
+        const picked = outHere().filter((p) => outPicks.has(p.id.toString()));
+        const out = picked.length ? picked : outHere();
         for (const u of new Set(out.map((p) => p.u))) {
           const ids = out.filter((p) => p.u === u).map((p) => p.id);
           for (let i = 0; i < ids.length; i += CHUNK) await send({ address: u.s.address, abi: batchAbi, functionName: 'withdraw', args: [ids.slice(i, i + CHUNK)] }, note);
@@ -1084,6 +1080,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       x.addEventListener('click', () => {
         view = 'out';
         typed = '';
+        outFrom = (x.dataset.batch as Address | undefined) ?? null;
+        outPicks.clear();
         const to = x.dataset.out as Lane['key'];
         if (to !== laneKey) switchLane(to);
         else draw();

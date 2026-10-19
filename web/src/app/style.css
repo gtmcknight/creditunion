@@ -9747,8 +9747,6 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 .tk-form .picker.captioned { max-height: 260px; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 8px; }
 .tk-form .pick { position: relative; }
 .tk-pure { position: absolute; top: 4px; left: 4px; width: 8px; height: 8px; background: var(--c); box-shadow: 0 0 0 1px #fff; }
-.tk-nudge { margin: 10px 0 0; padding: 2px 0 2px 12px; border-left: 2px solid var(--c, var(--fg)); }
-.tk-nudge[hidden] { display: none; }
 .tk-eth { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; border-bottom: 1px solid var(--line-strong); padding-bottom: 6px; }
 .tk-eth:focus-within { border-bottom-color: var(--fg); }
 .tk-eth input { flex: 1; min-width: 0; border: 0; border-radius: 0; box-shadow: none; background: none; padding: 0; height: auto; font: inherit; font-size: 40px; line-height: 1.15; letter-spacing: -0.02em; color: var(--fg); outline: none; }
