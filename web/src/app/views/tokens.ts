@@ -282,6 +282,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   let route: Route | null = null;
   /// Whether the conversion fee reads as its rate (tapped) instead of the tokens it takes.
   let feeAsRate = false;
+  /// Under You get through a batch: the amount is already after the fee (it read as still to come off), then when it converts.
+  const feeLine = (tenthsIn: number) =>
+    `After the <button type="button" class="link" id="fee-rate" title="${pct(bpsOf())} conversion fee">${feeAsRate ? `${pct(bpsOf())} conversion fee` : `${whole(feeOn(tenthsIn))} ${TOKEN} fee`}</button> · converts when the batch fills`;
   /// Statements listed on OpenSea, read once: a whole Statement is a way in when the amount covers one.
   let stmts: ForSale[] = [];
   listings()
@@ -700,8 +703,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     // Each fee sits by what it comes out of: the conversion fee under the tokens, the buy fee on the button's ETH.
     // Under the button, what the buy does, and the buy fee it already has in it.
     const n = hasBatch ? b!.out.length : 0;
-    const convFee = n ? feeOn(b!.out.reduce((a, x) => a + t(x.id), 0)) : 0;
-    setText('route', route === 'batch' && n ? `Converted to ${TOKEN} when batch fills, minus <button type="button" class="link" id="fee-rate" title="${pct(bpsOf())} conversion fee">${feeAsRate ? `${pct(bpsOf())} conversion fee` : `${whole(convFee)} ${TOKEN} fee`}</button>` : rate);
+    setText('route', route === 'batch' && n ? feeLine(b!.out.reduce((a, x) => a + t(x.id), 0)) : rate);
     setText('go-note', route === 'batch' && n ? `Buys the ${n === 1 ? 'best-value Credit' : `${n} best-value Credits`} for sale and deposits ${n === 1 ? 'it' : 'them'} in ${curOf(lane()) ? nameOf(lane(), curOf(lane())!) : `a new ${lane().name} batch`}, ready to convert to ${TOKEN}.${feeBps ? ` Includes the ${pct(feeBps)} sweep fee.` : ''}` : '');
     setText('route2', split ? `${whole(leftN)} via Uniswap · instant` : '');
     const label: Record<Route, [string, string]> = {
@@ -812,9 +814,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const mine = [...picks].filter((id) => here.has(id)).map(BigInt);
     const tenths = mine.reduce((a, id) => a + t(id), 0);
     setGet(tenths ? est(tenths) : 0, paletteOf(lane()));
-    // The conversion fee in tokens, as on Buy.
-    const convFee = feeOn(tenths);
-    setText('route', tenths ? `Converted to ${TOKEN} when batch fills, minus <button type="button" class="link" id="fee-rate" title="${pct(bpsOf())} conversion fee">${feeAsRate ? `${pct(bpsOf())} conversion fee` : `${whole(convFee)} ${TOKEN} fee`}</button>` : '');
+    setText('route', tenths ? feeLine(tenths) : '');
     // How many wallet confirmations it takes: 40 Credits a transaction, the open batch's room first, then new batches.
     let txs = 0;
     for (let left = mine.length, room = 80 - (curOf(lane())?.s.count ?? 80); left > 0; txs++) {
