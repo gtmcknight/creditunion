@@ -1,4 +1,4 @@
-/// Balance's sound, synthesized sample by sample and seeded, so the page and the video play the same sounds; the
+/// Receipt's sound, synthesized sample by sample and seeded, so the page and the video play the same sounds; the
 /// video is mastered to -16 LUFS like the Credit Union films. Two scores, both made from the line itself:
 ///   notes: each letter rings a glass note its inks pick, so a word plays its own tune, the same every time; the
 ///          line resolves on its own chord, the notes it rang most over a low C, rolled up to its last note.

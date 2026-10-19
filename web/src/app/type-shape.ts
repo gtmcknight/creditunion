@@ -1,8 +1,8 @@
-/// Balance's shaping, the same rule the font file runs as OpenType: each word picks one of S printings per
+/// Receipt's shaping, the same rule the font file runs as OpenType: each word picks one of S printings per
 /// letter. Left to right, a letter's state is the state before it stepped through that letter's `next`; right to left,
 /// its printing mixes its state with the printing of the letter after it. A word starts fresh after anything that
 /// isn't a letter in the font (a space, a line break), so a word prints the same wherever it appears.
-export type TypeData = { S: number; start: number; glyphs: Record<string, { px: [number, number][]; variants: number[][]; next: number[] }> };
+export type TypeData = { S: number; start: number; glyphs: Record<string, { w: number; px: [number, number][]; variants: number[][]; next: number[] }> };
 
 function mix(n: number, k: number, code: number, S: number) {
   let h = 2166136261;
@@ -44,10 +44,11 @@ export function printWords(text: string, D: TypeData): (number[] | null)[] {
     let j = i;
     while (j < text.length && inWord(text[j])) j++;
     const word = text.slice(i, j);
-    // Lit cells, row by row across the whole word, each remembered as [letter, index into its px].
+    // Lit cells, row by row across the whole word (the marks over accented capitals first), each remembered as
+    // [letter, index into its px].
     const cells: [number, number][] = [];
-    const rows = Math.max(...[...word].map((c) => Math.max(...D.glyphs[c].px.map(([, y]) => y)))) + 1;
-    for (let y = 0; y < rows; y++)
+    const ys = [...word].flatMap((c) => D.glyphs[c].px.map(([, y]) => y));
+    for (let y = Math.min(...ys); y <= Math.max(...ys); y++)
       for (let l = 0; l < word.length; l++)
         D.glyphs[word[l]].px.map(([x, py], p) => [x, py, p] as const).filter(([, py]) => py === y).sort((a, b) => a[0] - b[0]).forEach(([, , p]) => cells.push([l, p]));
     const n = cells.length;

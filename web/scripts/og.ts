@@ -128,7 +128,7 @@ async function draw() {
 async function fontGround() {
   const { printWords } = await import('../src/app/type-shape.ts');
   const D = JSON.parse(readFileSync(new URL('../src/app/type-data.json', import.meta.url), 'utf8'));
-  const word = 'BALANCE', cell = 20, INKS = [[0, 181, 226], [228, 0, 124], [255, 209, 0], [255, 255, 255]];
+  const word = 'RECEIPT', cell = 20, INKS = [[0, 181, 226], [228, 0, 124], [255, 209, 0], [255, 255, 255]];
   const ink = printWords(word, D);
   const px = new Uint8Array(W * H * 3);
   const left = Math.round((W - (word.length * 6 - 1) * cell) / 2), top = Math.round((H - 7 * cell) / 2) + 16;

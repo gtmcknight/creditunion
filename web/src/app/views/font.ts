@@ -8,7 +8,7 @@ import DATA from '../type-data.json';
 const D = DATA as unknown as TypeData;
 const INK = ['#00b5e2', '#e4007c', '#ffd100'];
 const LINE = 'MADE\nFROM\nACTS\nOF\nTRUST';
-const CHARS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,:;!?\'"-_/()[]{}<>+=*&@#$%^~`|\\…'].filter((c) => c in D.glyphs);
+const CHARS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,:;!?\'"-_/()[]{}<>+×÷=*&@#$%^~`|\\…'].filter((c) => c in D.glyphs);
 /// The film's clock, in video frames: a beat on the empty sheet, then a letter every sixteenth note (112.5 BPM at
 /// 30 fps, so every letter lands on a frame), the line committed an eighth note later, then a hold while it rings.
 const LEAD_F = 16;
@@ -31,19 +31,23 @@ type Paper = 'black' | 'white';
 const kInk = (p: Paper) => (p === 'black' ? '#fff' : '#000');
 /// What apps type for you (smart quotes, dashes, a non-breaking space), as the plain forms the font prints them as.
 const PLAIN: Record<string, string> = { '‘': "'", '’': "'", '“': '"', '”': '"', '–': '-', '—': '-', '−': '-', '\u00a0': ' ' };
-/// Accented letters print as their plain letter, as the font file prints them: É as E, ñ as N, Ø as O.
-const FOLD: Record<string, string> = { Ø: 'O', ø: 'O', Đ: 'D', đ: 'D', Ł: 'L', ł: 'L', Ħ: 'H', ħ: 'H', Ŧ: 'T', ŧ: 'T' };
+/// Letters the font file prints as another: ß as ẞ, Đ as Ð, the comma-below Ș and Ț as Ş and Ţ, two lowercase-only letters
+/// as their capital.
+const SAME: Record<string, string> = { ß: 'ẞ', Đ: 'Ð', đ: 'Ð', Ș: 'Ş', ș: 'Ş', Ț: 'Ţ', ț: 'Ţ', ĸ: 'K', ŉ: 'N' };
+/// Capitals print as themselves, accented ones included; an accented letter the font doesn't draw prints as its plain
+/// letter, as the font file prints it: Ạ as A.
 const plain = (c: string) => {
-  if (PLAIN[c] ?? FOLD[c]) return PLAIN[c] ?? FOLD[c];
+  if (PLAIN[c] ?? SAME[c]) return PLAIN[c] ?? SAME[c];
   const up = c.toUpperCase();
   if (up.length !== 1) return c;
+  if (up in D.glyphs) return up;
   const base = up.normalize('NFD')[0];
   return base in D.glyphs ? base : up;
 };
 /// Upper-cased one UTF-16 unit at a time, so every index in the box is the same index on the sheet.
 const clean = (s: string) => s.slice(0, 280).split('').map(plain).join('');
 
-/// /font: Balance. Type on the sheet you'll download, save it as a video or picture of the typing, get the font.
+/// /font: Receipt. Type on the sheet you'll download, save it as a video or picture of the typing, get the font.
 export function fontPage(app: HTMLElement) {
   const q = new URLSearchParams(location.search).get('t');
   let paper: Paper = 'black';
@@ -54,8 +58,8 @@ export function fontPage(app: HTMLElement) {
   app.innerHTML = `
   <section class="ft">
     <header class="create-head ft-title">
-      <h1>Balance</h1>
-      <p class="create-lede">Drawn from <a href="https://x.com/jackbutcher" target="_blank" rel="noopener">Jack Butcher</a>’s $BALANCE numerals. Each letter’s colors come from the word it’s in.</p>
+      <h1>Receipt</h1>
+      <p class="create-lede">Drawn from <a href="https://x.com/jackbutcher" target="_blank" rel="noopener">Jack Butcher</a>’s $BALANCE lettering. Each letter’s colors come from the word it’s in.</p>
     </header>
     <div class="ft-print">
       <header class="ft-head">
@@ -94,7 +98,7 @@ export function fontPage(app: HTMLElement) {
         </div>
       </div>
       <div class="ft-bar ft-bar-font">
-        <a class="btn primary" href="/type/Balance.zip" download>Download font</a>
+        <a class="btn primary" href="/type/Receipt.zip" download>Download font</a>
         <span class="muted small">Free. OTF, TTF, WOFF and WOFF2.</span>
       </div>
     </div>
@@ -219,7 +223,8 @@ export function fontPage(app: HTMLElement) {
     const r = canvas.getBoundingClientRect();
     const x = ((e.clientX - r.left) / r.width) * canvas.width, y = ((e.clientY - r.top) / r.height) * canvas.height;
     const row = geo.rows.reduce((best, l) => (Math.abs(l.y0 + 4 * geo!.cell - y) < Math.abs(best.y0 + 4 * geo!.cell - y) ? l : best));
-    return row.a + Math.max(0, Math.min(row.b - row.a, Math.round((x - row.left) / (6 * geo.cell))));
+    const gap = (k: number) => Math.abs(row.left + row.xs[k] * geo!.cell - x);
+    return row.a + row.xs.reduce((best, _, k) => (gap(k) < gap(best) ? k : best), 0);
   };
   let anchor = -1;
   t.addEventListener('pointerdown', (e) => {
@@ -330,7 +335,7 @@ export function fontPage(app: HTMLElement) {
     waysTitle.textContent = `“${ch}”, ${D.S} ways`;
     const K = kInk(paper);
     ways.innerHTML = g.variants
-      .map((v) => `<svg viewBox="0 0 5 8" shape-rendering="crispEdges" aria-hidden="true">${g.px.map(([x, y], i) => `<rect x="${x}" y="${y}" width="1" height="1" fill="${v[i] === 3 ? K : INK[v[i]]}"/>`).join('')}</svg>`)
+      .map((v) => `<svg viewBox="0 0 ${g.w} 8" shape-rendering="crispEdges" aria-hidden="true">${g.px.map(([x, y], i) => `<rect x="${x}" y="${y}" width="1" height="1" fill="${v[i] === 3 ? K : INK[v[i]]}"/>`).join('')}</svg>`)
       .join('');
     set.querySelectorAll<HTMLElement>('button').forEach((b) => {
       b.setAttribute('aria-pressed', String(b.dataset.c === ch));
@@ -429,7 +434,15 @@ function layout(text: string): [number, number][] {
   for (let cols = longest; ; cols++) if (wrap(cols).length <= most) return wrap(cols);
 }
 
-type Geometry = { cell: number; rows: { a: number; b: number; left: number; y0: number }[] };
+type Geometry = { cell: number; rows: { a: number; b: number; left: number; y0: number; xs: number[] }[] };
+
+/// Where each character of text[a, b) starts, in cells from the start of its line, then where the line ends. A character
+/// takes its width and a cell of space: 6 cells for most, 8 for the slashes.
+function starts(text: string, a: number, b: number) {
+  const xs = [0];
+  for (let i = a; i < b; i++) xs.push(xs[xs.length - 1] + (D.glyphs[text[i]]?.w ?? 5) + 1);
+  return xs;
+}
 
 /// One sheet: `text` laid out and centred, its first `shown` characters printed, a caret before character `caret`
 /// (none for null) and a selection behind characters `sel` (none for null). Cells are whole pixels, so every pixel of
@@ -440,25 +453,31 @@ function paint(g: CanvasRenderingContext2D, W: number, H: number, text: string, 
   const ink = printWords(part, D);
   g.fillStyle = paper === 'black' ? '#000' : '#fff';
   g.fillRect(0, 0, W, H);
-  // At least 8 columns wide, so a short word doesn't fill the sheet edge to edge.
-  const cols = Math.max(8, ...lines.map(([a, b]) => b - a));
-  const cell = Math.max(1, Math.floor(Math.min((W * 0.8) / (cols * 6 - 1), (H * 0.7) / (lines.length * 11 - 3))));
+  // At least 8 letters wide, so a short word doesn't fill the sheet edge to edge.
+  const spans = lines.map(([a, b]) => starts(text, a, b));
+  const widest = Math.max(8 * 6, ...spans.map((xs) => xs[xs.length - 1])) - 1;
+  const cell = Math.max(1, Math.floor(Math.min((W * 0.8) / widest, (H * 0.7) / (lines.length * 11 - 3))));
   const top = Math.round((H - (lines.length * 11 - 3) * cell) / 2);
   const K = kInk(paper);
-  const rows = lines.map(([a, b], row) => ({ a, b, left: Math.round((W - Math.max(0, (b - a) * 6 - 1) * cell) / 2), y0: top + row * 11 * cell }));
+  const rows = lines.map(([a, b], row) => {
+    const xs = spans[row];
+    return { a, b, xs, left: Math.round((W - Math.max(0, xs[xs.length - 1] - 1) * cell) / 2), y0: top + row * 11 * cell };
+  });
+  // The selection band is a line's pitch tall, two rows above the caps (into the accents' marks) to one below the comma's,
+  // so the bands of lines one above the other meet without overlapping.
   if (sel) {
     g.fillStyle = paper === 'black' ? 'rgba(0, 181, 226, 0.35)' : 'rgba(0, 181, 226, 0.25)';
-    for (const { a, b, left, y0 } of rows) {
+    for (const { a, b, xs, left, y0 } of rows) {
       const from = Math.max(a, sel[0]), to = Math.min(b, sel[1]);
-      if (to > from) g.fillRect(left + (from - a) * 6 * cell - Math.round(cell / 2), y0 - cell, (to - from) * 6 * cell, 10 * cell);
+      if (to > from) g.fillRect(left + xs[from - a] * cell - Math.round(cell / 2), y0 - 2 * cell, (xs[to - a] - xs[from - a]) * cell, 11 * cell);
     }
   }
-  for (const { a, b, left, y0 } of rows)
+  for (const { a, b, xs, left, y0 } of rows)
     for (let i = a; i < Math.min(b, shown); i++) {
       const v = ink[i];
       if (!v) continue;
       const gl = D.glyphs[part[i]];
-      const x0 = left + (i - a) * 6 * cell;
+      const x0 = left + xs[i - a] * cell;
       gl.px.forEach(([x, y], p) => {
         g.fillStyle = v[p] === 3 ? K : INK[v[p]];
         g.fillRect(x0 + x * cell, y0 + y * cell, cell, cell);
@@ -469,7 +488,7 @@ function paint(g: CanvasRenderingContext2D, W: number, H: number, text: string, 
   if (at && caret !== null) {
     g.fillStyle = INK[1];
     const w = Math.max(1, Math.round(cell / 2));
-    g.fillRect(at.left + (caret - at.a) * 6 * cell - Math.round((cell + w) / 2), at.y0 - cell, w, 9 * cell);
+    g.fillRect(at.left + at.xs[caret - at.a] * cell - Math.round((cell + w) / 2), at.y0 - cell, w, 9 * cell);
   }
   return { cell, rows };
 }
@@ -499,5 +518,5 @@ function film(text: string, paper: Paper, sound: 'off' | Style): Sounded {
     buf.copyToChannel(R, 1);
     return buf;
   };
-  return { name: `balance-${text.replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32).toLowerCase() || 'line'}`, length, loop: true, at: length, draw, ...(sound !== 'off' ? { audio } : {}) };
+  return { name: `receipt-${text.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32).toLowerCase() || 'line'}`, length, loop: true, at: length, draw, ...(sound !== 'off' ? { audio } : {}) };
 }
