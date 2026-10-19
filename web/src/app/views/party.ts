@@ -799,7 +799,7 @@ const unsaved = new Set<string>();
 /// The burn contract, when a leave from this union must save its spots first: a picture (by the contract's own
 /// reckoning: orderOf answers), more than one member, and spots not saved as they stand. A leave then opens only the
 /// leaver's spots; unsaved, Credits that joined since the last save would slide into them.
-async function needsSave(union: Address, b: Ctx): Promise<Address | null> {
+export async function needsSave(union: Address, b: { depositors: readonly Address[] }): Promise<Address | null> {
   if (new Set(b.depositors.map((d) => d.toLowerCase())).size < 2) return null;
   const adapter = await burnAdapter();
   if (!adapter || !(await keptSpots(union)) || (await spotsSaved(union))) return null;

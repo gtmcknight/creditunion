@@ -2,9 +2,12 @@ import { parseAbi, type Address } from 'viem';
 import { dice, printGlyph, swatch, weightGlyph } from '../glyphs';
 /// A trait value with the same glyph the create page uses for it, linking to its trait page.
 const traitChip = (href: string, g: string, l: string) => `<a class="vchip" href="${href}">${g}<span>${l}</span></a>`;
-import { creditsAbi, factoryAbi } from '../abi';
+import { batchAbi, creditsAbi, factoryAbi } from '../abi';
+import { bin } from '../bins';
 import { config, pub, send, session } from '../chain';
-import { earlyShare, getBatch, listBatches, ratings, type Listed, type Rated } from '../data';
+import { earlyShare, getBatch, listBatches, ratings, tokenBatches, type Listed, type Rated } from '../data';
+import { converted } from '../tokens';
+import { needsSave } from './party';
 import { hydrate, who } from '../ens';
 import { fitIds, weightOf } from '../fit';
 import { fillGhosts } from '../ghosts';
@@ -50,14 +53,26 @@ export async function credit(app: HTMLElement, raw: string) {
     return;
   }
 
-  // Where it is: a wallet, one of our Credit Unions, or burned into a Statement.
+  // Where it is: a wallet, one of our Credit Unions or $BALANCE batches, or burned into a Statement.
+  const asToken = (b: Awaited<ReturnType<typeof getBatch>>): Listed => ({ ...b, ids: [...b.ids], depositors: [...b.depositors], format: null, token: true });
+  const isBatchOf = (factory: Address | null | undefined, a: Address) =>
+    factory ? (pub.readContract({ address: factory, abi: factoryAbi, functionName: 'isBatch', args: [a] }) as Promise<boolean>).catch(() => false) : Promise.resolve(false);
   let union: Listed | null = null;
   if (owner) {
     union = list.find((b) => same(b.s.address, owner)) ?? null;
-    if (!union && (await pub.readContract({ address: config.factory, abi: factoryAbi, functionName: 'isBatch', args: [owner] }).catch(() => false)))
-      union = await getBatch(owner).catch(() => null);
+    if (!union && (await isBatchOf(config.factory, owner))) union = await getBatch(owner).catch(() => null);
+    if (!union && (await isBatchOf(config.tokenFactory, owner))) union = await getBatch(owner).then(asToken, () => null);
   }
-  const burnedIn = owner ? null : list.find((b) => (b.s.state === 'Auction' || b.s.state === 'Settled') && b.ids.includes(id)) ?? null;
+  const burnedIn = owner
+    ? null
+    : (list.find((b) => (b.s.state === 'Auction' || b.s.state === 'Settled') && b.ids.includes(id)) ??
+      (await tokenBatches().catch(() => [] as Listed[])).find((b) => b.ids.includes(id) && converted(b.s.statement)) ??
+      null);
+  // What a $BALANCE batch pays for it: its rating in the batches' own table, after the fee the batch opened with.
+  const tokenHome = union?.token ? union : burnedIn?.token ? burnedIn : null;
+  const pays = tokenHome
+    ? await bin('scores-live.bin').then((b) => Math.floor(((new Uint16Array(b)[n - 1] ?? 0) / 10) * (1 - tokenHome.s.protocolFeeBps / 10_000)), () => 0)
+    : 0;
   const depositor = union ? union.depositors[union.ids.indexOf(id)] : undefined;
   const mine = !!owner && !union && same(owner, session.account);
   const you = (a?: Address) => (a && same(a, session.account) ? ' <span class="tag you">You</span>' : '');
@@ -69,6 +84,11 @@ export async function credit(app: HTMLElement, raw: string) {
     ? fact('Owner', `<span${union ? ' title="Held by the Credit Union; the depositor can withdraw it until it locks"' : ''}>${who(holder, 'sm', true)}${you(holder)}</span>`)
     : fact('Owner', '<span class="muted">Burned</span>');
   const home = union ?? burnedIn;
+  // Yours to take back from here: deposited by this wallet, in a batch that hasn't locked for its burn.
+  const leaveFrom =
+    union && same(depositor, session.account) && (union.s.state === 'Open' || union.s.state === 'Full' || union.s.state === 'Expired') && union.s.phase !== 'Burnable' && !converted(union.s.statement)
+      ? union
+      : null;
 
   const r = rated.r;
   const inks = r ? maskInks(paletteBit(r.traits.palette)) : [];
@@ -90,7 +110,8 @@ export async function credit(app: HTMLElement, raw: string) {
     <div class="credit-art"><img src="${art(id)}" alt="${title}"></div>
     <div class="batch-side">
       <header><h1>${title}</h1></header>
-      ${home ? homeBar(home, id, burnedIn === home, depositor, you) : ''}
+      ${home ? homeBar(home, id, burnedIn === home, depositor, you, pays) : ''}
+      ${leaveFrom ? '<button type="button" class="btn block credit-leave" id="cr-withdraw">Withdraw to your wallet</button>' : ''}
       <dl class="facts">${where}${traits}</dl>
       <div id="credit-buy" hidden></div>
     </div>
@@ -103,11 +124,29 @@ export async function credit(app: HTMLElement, raw: string) {
     void drawFits(id, r, list, mine);
     if (!mine) void drawBuy(n);
   }
+
+  document.getElementById('cr-withdraw')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget as HTMLButtonElement;
+    btn.disabled = true;
+    btn.textContent = 'Withdrawing…';
+    try {
+      // A picture union whose spots must be saved first: its own page saves them and withdraws in one go.
+      if (leaveFrom && !leaveFrom.token && (await needsSave(leaveFrom.s.address, leaveFrom))) return void (location.href = `/union/${leaveFrom.s.address}`);
+      await send({ address: leaveFrom!.s.address, abi: batchAbi, functionName: 'withdraw', args: [[id]] });
+      toast('Withdrawn. It’s back in your wallet.', 'ok');
+      await credit(app, raw);
+    } catch (err) {
+      toast(errText(err), 'err', 8000);
+      btn.disabled = false;
+      btn.textContent = 'Withdraw to your wallet';
+    }
+  });
 }
 
 /// Where this Credit is when it isn't in a wallet, as a box under its title: a mini sheet of its Credit
 /// Union, then who put it in, its place in line and its share of the sale (Early bird unions pay by position).
-function homeBar(b: Listed, id: bigint, burned: boolean, depositor: Address | undefined, you: (a?: Address) => string) {
+/// A $BALANCE batch pays by rating, not by place: its line says what this Credit becomes (`pays`, after the fee).
+function homeBar(b: Listed, id: bigint, burned: boolean, depositor: Address | undefined, you: (a?: Address) => string, pays = 0) {
   const i = b.ids.indexOf(id);
   const by = depositor ?? (i >= 0 ? b.depositors[i] : undefined);
   const share = b.s.split === 1 && i >= 0 ? earlyShare(i) : 1 / 80;
@@ -119,8 +158,12 @@ function homeBar(b: Listed, id: bigint, burned: boolean, depositor: Address | un
     : `<span class="tag state">Deposited</span> in ${name}${dot}<span class="num">${b.s.count} of 80 in</span>`;
   const paid = b.s.state === 'Settled';
   const sub = [
-    i >= 0 ? `Position ${i + 1}` : '',
-    `${paid ? 'got' : 'gets'} ${(share * 100).toFixed(2).replace(/\.?0+$/, '')}% of the sale`,
+    i >= 0 && !b.token ? `Position ${i + 1}` : '',
+    b.token
+      ? burned
+        ? 'Converted to $BALANCE'
+        : `Becomes ${pays ? `≈ ${pays.toLocaleString('en-US')} ` : ''}$BALANCE`
+      : `${paid ? 'got' : 'gets'} ${(share * 100).toFixed(2).replace(/\.?0+$/, '')}% of the sale`,
     burned && by ? `by ${who(by, 'sm', 'nested')}${you(by)}` : '', // a live Credit's depositor is the Owner row
   ]
     .filter(Boolean)
