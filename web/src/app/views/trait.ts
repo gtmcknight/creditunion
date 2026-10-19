@@ -371,9 +371,9 @@ const SKELS = 24;
 
 /// One Credit tile for every grid of Credits: its art (to its page), then its number and, when listed, its price.
 /// `title`: the art's tooltip (where it is, on a member's page).
-/// `line`: a third line under the price, the value the page is about ("Rating 797.03").
-export const creditCell = (id: number, price = '', { title = '', line = '' } = {}) =>
-  `<div class="cc${price ? ' listed' : ''}" data-id="${id}"><a class="cc-art" href="/credit/${id}"${title ? ` title="${esc(title)}"` : price ? ' title="Tap to pick for a sweep"' : ''}><img src="${editionArt(id)}" alt="Credit #${id}" loading="lazy" decoding="async"></a><span class="cc-cap"><a class="num" href="/credit/${id}">#${id.toLocaleString('en-US')}</a>${price}</span>${line ? `<span class="cc-line num">${line}</span>` : ''}</div>`;
+/// `line`: a third line under the price, the value the page is about ("Rating 797.03"); several, one under another.
+export const creditCell = (id: number, price = '', { title = '', line = '' as string | string[] } = {}) =>
+  `<div class="cc${price ? ' listed' : ''}" data-id="${id}"><a class="cc-art" href="/credit/${id}"${title ? ` title="${esc(title)}"` : price ? ' title="Tap to pick for a sweep"' : ''}><img src="${editionArt(id)}" alt="Credit #${id}" loading="lazy" decoding="async"></a><span class="cc-cap"><a class="num" href="/credit/${id}">#${id.toLocaleString('en-US')}</a>${price}</span>${[line].flat().filter(Boolean).map((l) => `<span class="cc-line num">${l}</span>`).join('')}</div>`;
 
 
 /// The two lists under a time window or range, as tabs: the open Credit Unions that take these Credits, and the

@@ -12,7 +12,7 @@ import { previews } from './views/previews';
 import { activityTicker, live, tickerHtml } from './views/live';
 import { docs } from './views/docs';
 import { balance } from './views/balance';
-import { profile } from './views/profile';
+import { PROFILE_TABS, profile } from './views/profile';
 
 // A tab left open across a deploy asks for chunks the new build removed. Reload once to pick up the new build.
 window.addEventListener('vite:preloadError', (e) => {
@@ -263,14 +263,11 @@ function setLook(l: Look) {
   drawTheme();
 }
 
-/// Your profile's tabs, straight from the account menu.
-const ME_TABS = ['Unions', 'Auctions', 'Credits', 'Activity'] as const;
-
 function drawAccount() {
   const el = document.getElementById('account')!;
   el.innerHTML = session.account
     ? `<div class="acct-wrap"><button type="button" class="btn sm acct" data-nav="me" aria-haspopup="menu" aria-expanded="false">${who(session.account)}</button>
-      <div class="acct-menu" role="menu" hidden>${ME_TABS.map((t) => `<a role="menuitem" href="/member/${session.account}?tab=${t.toLowerCase()}">${t}</a>`).join('')}
+      <div class="acct-menu" role="menu" hidden>${PROFILE_TABS.map((t) => `<a role="menuitem" href="/member/${session.account}?tab=${t.key}">${t.label}</a>`).join('')}
         <div class="acct-foot"><span class="acct-looks" role="group" aria-label="Theme">${LOOKS.map(([k, l]) => `<button type="button" role="menuitemradio" data-look="${k}" aria-checked="${look() === k}" aria-label="${l} theme" title="${l} theme">${LOOK_ICONS[k]}</button>`).join('')}</span>
         <button type="button" role="menuitem" class="acct-off" data-disconnect>Disconnect</button></div></div></div>`
     : `<button class="btn sm" data-connect>Connect</button>`;
