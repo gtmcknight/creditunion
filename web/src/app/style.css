@@ -10073,3 +10073,82 @@ dialog.how .how-tile img.st { height: 84%; }
 .tk-form .tk-lines p { margin: 0; }
 .tk-form > .submit { padding-top: 0; margin-top: 24px; }
 .tk-form .tk-eth { margin-bottom: 0; }
+
+/* /font: Balance. Everything set in the font sits on paper, black by default. Type sizes are multiples of 10px so
+   each of the font's pixels lands on whole screen pixels. One rhythm: 4px inside a heading, 16px from a heading to its
+   box, 8px from a box to its buttons, 24px around the title. */
+@font-face { font-family: 'Balance'; font-display: block; src: url('/type/Balance.woff2') format('woff2'); }
+@font-palette-values --bt-black { font-family: 'Balance'; base-palette: 1; }
+@font-palette-values --bt-white { font-family: 'Balance'; base-palette: 0; }
+/* Two columns, each a heading, its box and its buttons, the rows lined up across: the font file on the left, the
+   sheet on the right, sized so it and its buttons fit a laptop screen. The font's box stretches to the sheet's height. */
+.ft { --sheet: clamp(328px, (100svh - 450px) * 0.8, 520px); display: grid; grid-template-columns: minmax(0, 1fr) var(--sheet); column-gap: 48px; }
+.ft-title { grid-column: 1 / -1; margin: 24px 0 24px; }
+.ft-print, .ft-font { display: grid; grid-row: 2 / span 3; grid-template-rows: subgrid; row-gap: 16px; }
+.ft-print { grid-column: 2; }
+.ft-font { grid-column: 1; }
+.ft-head { display: grid; gap: 4px; align-content: start; }
+.ft-head h2 { margin: 0; font-size: 20px; letter-spacing: -0.01em; }
+.ft-head p { margin: 0; font-size: 15px; line-height: 1.45; text-wrap: pretty; }
+.ft-head a, .ft-title a { color: inherit; }
+@media (max-width: 1060px) {
+  .ft { grid-template-columns: minmax(0, 1fr); }
+  .ft-print, .ft-font { grid-column: 1; grid-row: auto; grid-template-rows: none; }
+  .ft-print { width: min(100%, 520px); }
+  .ft-font { margin-top: 48px; }
+}
+/* Paper, black by default, with a hairline edge drawn over whatever is on it, so it reads as a sheet on any page. */
+.ft-paper { --paper: #000; position: relative; background: var(--paper); color: #fff; border-radius: var(--r-lg); font-family: 'Balance', var(--mono); font-palette: --bt-black; }
+.ft-paper[data-paper='white'] { --paper: #fff; color: #000; font-palette: --bt-white; }
+.ft-paper::after { content: ''; position: absolute; inset: 0; z-index: 3; border-radius: inherit; box-shadow: inset 0 0 0 1px var(--line-strong); pointer-events: none; }
+.ft-sheet { width: 100%; aspect-ratio: 4 / 5; overflow: hidden; }
+.ft-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.ft-input { position: absolute; inset: 0; width: 100%; height: 100%; box-sizing: border-box; margin: 0; padding: 0; border: 0; outline: 0; resize: none; opacity: 0; font-size: 16px; color: transparent; caret-color: transparent; background: transparent; cursor: text; }
+/* The sheet's two settings, top right, one icon each in the header's icon style: sound, then paper. */
+.ft-tools { position: absolute; z-index: 2; top: 8px; right: 8px; display: flex; gap: 4px; }
+.ft-tool { all: unset; width: 44px; height: 44px; display: grid; place-items: center; border-radius: var(--r); color: inherit; opacity: 0.5; cursor: pointer; transition-property: opacity, scale; transition-duration: 150ms; transition-timing-function: var(--ease); }
+.ft-tool svg { width: 20px; height: 20px; }
+.ft-tool[data-on] { opacity: 1; }
+.ft-tool:active { scale: 0.9; }
+@media (hover: hover) { .ft-tool:hover { opacity: 1; } }
+.ft-tool:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; opacity: 1; }
+/* The file you just saved, playing where you typed it; the × goes back to typing. */
+.ft-play { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; object-fit: contain; background: transparent; cursor: pointer; }
+.ft-play[hidden] { display: none; }
+.ft-tool.ft-back, .ft-tool.ft-shared { display: none; }
+.ft-sheet[data-playing] .ft-tool.ft-back, .ft-sheet[data-playing][data-share] .ft-tool.ft-shared { display: grid; opacity: 1; }
+.ft-sheet[data-playing] .ft-tool:not(.ft-back, .ft-shared) { display: none; }
+/* Each column ends on one row of buttons, 8px under its box so it reads as the box's own. */
+.ft-actions { display: grid; gap: 8px; align-content: start; margin-top: -8px; }
+.ft-bar { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.ft-bar .btn { padding: 0 12px; isolation: isolate; font-variant-numeric: tabular-nums; }
+/* A file being made: the button keeps full strength and fills as it goes. */
+.ft-bar .btn.is-busy { pointer-events: none; }
+.ft-bar .btn.is-busy::before { content: ''; position: absolute; inset: 0; z-index: -1; width: calc(var(--p, 0) * 100%); background: color-mix(in srgb, currentColor 14%, transparent); }
+.ft-bar-font { display: flex; align-items: center; gap: 16px; align-self: start; margin-top: -8px; }
+.ft-note { margin: 0; color: var(--err); }
+/* The font's box: every character, and under a hairline the picked one's 32 printings, the same size as the grid. */
+.ft-glyphs { padding: 12px; display: flex; flex-direction: column; gap: 16px; }
+/* The rows spread through whatever height the sheet gives the box, so no band sits empty; on a tight screen they
+   close up rather than push the box past the sheet. */
+.ft-set { display: grid; grid-template-columns: repeat(auto-fill, 48px); grid-auto-rows: 48px; justify-content: space-between; align-content: space-between; }
+.ft-set button { all: unset; width: 48px; height: 100%; max-height: 48px; display: grid; place-items: center; font: 30px/30px 'Balance', var(--mono); font-palette: inherit; cursor: pointer; border-radius: var(--r); transition: scale 150ms var(--ease); }
+.ft-set button:active { scale: 0.92; }
+/* Side by side, the font's box takes exactly the sheet's height (its own contents don't size it), so both boxes end,
+   and both button rows start, on the same line at any window size. */
+@media (min-width: 1061px) {
+  .ft-glyphs { contain: size; }
+  .ft-set { flex: 1 1 0; min-height: 0; grid-auto-rows: minmax(36px, 48px); }
+}
+.ft-set button[aria-pressed='true'] { box-shadow: inset 0 0 0 1px currentColor; }
+.ft-set button:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+/* Lined up with the grid's ink: a letter sits 15px into its 48px cell and its advance leaves 18px on the right. */
+.ft-printings { display: grid; gap: 12px; padding: 12px 18px 2px 15px; border-top: 1px solid color-mix(in srgb, currentColor 18%, transparent); }
+.ft-ways-title { margin: 0; font: 13px/1.4 var(--sans); opacity: 0.6; }
+.ft-ways { display: grid; grid-template-columns: repeat(16, 15px); justify-content: space-between; row-gap: 12px; }
+.ft-ways svg { width: 15px; height: 24px; display: block; }
+@media (max-width: 640px) {
+  .ft-set { grid-template-columns: repeat(auto-fill, 44px); grid-auto-rows: 44px; }
+  .ft-set button { width: 44px; }
+  .ft-ways { grid-template-columns: repeat(8, 15px); }
+}

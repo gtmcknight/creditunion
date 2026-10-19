@@ -96,8 +96,8 @@ const MARK = `<svg viewBox="0 0 9 8" fill="#0a0a0a" shape-rendering="crispEdges"
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
-/// One card: the wall edge to edge, the mark top left and the headline on white bars fitted to each line. Nothing
-/// else. Drawn by Chrome, which sizes each bar to its words.
+/// One card: the wall edge to edge (or, for /font, the font's own name), the mark top left and the headline on white
+/// bars fitted to each line. Nothing else. Drawn by Chrome, which sizes each bar to its words.
 const cards: { name: string; ground: Buffer; title: string[] }[] = [];
 const card = (name: string, ground: Buffer, title: string[]) => cards.push({ name, ground, title });
 
@@ -123,6 +123,28 @@ async function draw() {
   await browser.close();
 }
 
+/// /font's ground: the font's own name printed on black Statement paper with the sheet's rule (each word shuffled into
+/// four even inks), centered, the white ink standing in for black as on the paper. The badge goes over it; no headline.
+async function fontGround() {
+  const { printWords } = await import('../src/app/type-shape.ts');
+  const D = JSON.parse(readFileSync(new URL('../src/app/type-data.json', import.meta.url), 'utf8'));
+  const word = 'BALANCE', cell = 20, INKS = [[0, 181, 226], [228, 0, 124], [255, 209, 0], [255, 255, 255]];
+  const ink = printWords(word, D);
+  const px = new Uint8Array(W * H * 3);
+  const left = Math.round((W - (word.length * 6 - 1) * cell) / 2), top = Math.round((H - 7 * cell) / 2) + 16;
+  [...word].forEach((ch, i) =>
+    D.glyphs[ch].px.forEach(([x, y]: [number, number], p: number) => {
+      const [R, G, B] = INKS[ink[i]![p]];
+      for (let yy = 0; yy < cell; yy++)
+        for (let xx = 0; xx < cell; xx++) {
+          const o = ((top + y * cell + yy) * W + left + (i * 6 + x) * cell + xx) * 3;
+          (px[o] = R), (px[o + 1] = G), (px[o + 2] = B);
+        }
+    }),
+  );
+  return png(px);
+}
+
 mkdirSync(pub('og'), { recursive: true });
 card('home', wall('time', 3), ['Join a Credit Union', 'to make a Statement together.']);
 card('about', wall('density', 3), ['How it works']);
@@ -131,5 +153,6 @@ card('create', wall('time', 5, 40_000), ['Start a Credit Union']);
 card('party', wall('color', 5, 7), ['Join this Credit Union']);
 card('mint', wall('density', 5, 90_000), ['Mint test Credits']);
 card('tokens', wall('pure', 5), ['Credits in,', 'BALANCE out.']);
+card('font', await fontGround(), []);
 
 await draw();

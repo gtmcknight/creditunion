@@ -4,28 +4,29 @@
 import type { Film } from './overprint';
 import { openModal, toast } from './ui';
 
-const PNG = [2160, 2700] as const; // the picture at 2x
+export const PNG = [2160, 2700] as const; // the picture at 2x
 const MP4 = [1080, 1350] as const;
 const GIF = [720, 900] as const;
-const FPS = 30;
+export const FPS = 30;
+const SR = 48_000; // audio samples per second
 const GIF_FPS = 20;
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
-const save = (blob: Blob, name: string) => {
+export const save = (blob: Blob, name: string) => {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 20_000);
 };
-function frame(film: Film, [W, H]: readonly [number, number], t: number, moving: boolean) {
+export function frame(film: Film, [W, H]: readonly [number, number], t: number, moving: boolean) {
   const c = document.createElement('canvas');
   c.width = W;
   c.height = H;
   film.draw(c.getContext('2d')!, W, H, t, moving);
   return c;
 }
-const png = (c: HTMLCanvasElement) => new Promise<Blob>((ok, no) => c.toBlob((b) => (b ? ok(b) : no(new Error('no image'))), 'image/png'));
+export const png = (c: HTMLCanvasElement) => new Promise<Blob>((ok, no) => c.toBlob((b) => (b ? ok(b) : no(new Error('no image'))), 'image/png'));
 
 /// The first H.264 profile this browser can encode at this size, or null.
 async function codec(W: number, H: number) {
@@ -37,14 +38,63 @@ async function codec(W: number, H: number) {
   return null;
 }
 
-/// The film as an MP4: every frame drawn, encoded with WebCodecs and muxed in memory.
-export async function mp4(film: Film, progress: (f: number) => void): Promise<Blob> {
+/// A film that can carry sound: `audio` renders its soundtrack, the film's length, at a sample rate, every sound
+/// `early` seconds ahead of its moment so the encoder's own delay puts it back on the frame.
+export type Sounded = Film & { audio?: (sampleRate: number, early: number) => Promise<AudioBuffer> };
+/// AAC encoders start with 2112 samples of padding that players don't trim from an MP4 like this one.
+const AAC_DELAY = 2112;
+
+/// The first audio codec this browser can encode into an MP4 (AAC where it can, Opus otherwise), or null.
+export async function soundCodec() {
+  if (typeof AudioEncoder === 'undefined') return null;
+  for (const [codec, mux] of [['mp4a.40.2', 'aac'], ['opus', 'opus']] as const)
+    try {
+      if ((await AudioEncoder.isConfigSupported({ codec, sampleRate: SR, numberOfChannels: 2, bitrate: 128_000 })).supported) return { codec, mux };
+    } catch {}
+  return null;
+}
+
+/// The AAC setup bytes an MP4 wants (its AudioSpecificConfig). Chrome's encoder hands them over bare; Safari's wraps
+/// them in a whole ES descriptor (tag 3 holding tag 4 holding tag 5), which written as is leaves a track no player can
+/// open. Walk down to tag 5 and take its bytes.
+function audioConfig(desc: AllowSharedBufferSource | undefined) {
+  if (!desc) return desc;
+  const b = desc instanceof ArrayBuffer || desc instanceof SharedArrayBuffer ? new Uint8Array(desc) : new Uint8Array(desc.buffer, desc.byteOffset, desc.byteLength);
+  if (b[0] !== 0x03) return b;
+  for (let i = 0; i < b.length; ) {
+    const tag = b[i++];
+    let len = 0, byte = 0;
+    do (byte = b[i++]), (len = (len << 7) | (byte & 0x7f));
+    while (byte & 0x80 && i < b.length);
+    if (tag === 0x05) return b.slice(i, i + len);
+    if (tag === 0x03) {
+      // ES_ID, then flags saying which optional fields follow.
+      const flags = b[i + 2];
+      i += 3 + (flags & 0x80 ? 2 : 0);
+      if (flags & 0x40) i += 1 + b[i];
+      if (flags & 0x20) i += 2;
+    } else if (tag === 0x04) i += 13; // object type, stream type, buffer size, max and average bitrate
+    else i += len;
+  }
+  return b;
+}
+
+/// The film as an MP4: every frame drawn, encoded with WebCodecs and muxed in memory, with its soundtrack when it has
+/// one and this browser can encode audio.
+export async function mp4(film: Sounded, progress: (f: number) => void): Promise<Blob> {
   const [W, H] = MP4;
   const c = await codec(W, H);
   if (!c) throw new Error('This browser can’t make video. Try Chrome or Safari.');
   const { Muxer, ArrayBufferTarget } = await import('mp4-muxer');
   const target = new ArrayBufferTarget();
-  const muxer = new Muxer({ target, video: { codec: 'avc', width: W, height: H, frameRate: FPS }, fastStart: 'in-memory', firstTimestampBehavior: 'offset' });
+  const sound = film.audio ? await soundCodec() : null;
+  const muxer = new Muxer({
+    target,
+    video: { codec: 'avc', width: W, height: H, frameRate: FPS },
+    ...(sound ? { audio: { codec: sound.mux, numberOfChannels: 2, sampleRate: SR } } : {}),
+    fastStart: 'in-memory',
+    firstTimestampBehavior: 'offset',
+  });
   let failed: unknown = null;
   const enc = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: (e) => (failed = e) });
   enc.configure({ codec: c, width: W, height: H, bitrate: 10_000_000, framerate: FPS, avc: { format: 'avc' } });
@@ -67,6 +117,28 @@ export async function mp4(film: Film, progress: (f: number) => void): Promise<Bl
   }
   await enc.flush();
   enc.close();
+  if (sound && film.audio) {
+    const buf = await film.audio(SR, sound.mux === 'aac' ? AAC_DELAY / SR : 0);
+    const aenc = new AudioEncoder({
+      output: (chunk, meta) => {
+        const dc = meta?.decoderConfig;
+        muxer.addAudioChunk(chunk, dc ? { ...meta, decoderConfig: { ...dc, description: audioConfig(dc.description) } } : meta);
+      },
+      error: (e) => (failed = e),
+    });
+    aenc.configure({ codec: sound.codec, sampleRate: SR, numberOfChannels: 2, bitrate: 128_000 });
+    const L = buf.getChannelData(0), R = buf.getChannelData(Math.min(1, buf.numberOfChannels - 1));
+    for (let i = 0; i < buf.length; i += 4800) {
+      const n = Math.min(4800, buf.length - i), data = new Float32Array(n * 2);
+      data.set(L.subarray(i, i + n), 0);
+      data.set(R.subarray(i, i + n), n);
+      const a = new AudioData({ format: 'f32-planar', sampleRate: SR, numberOfFrames: n, numberOfChannels: 2, timestamp: Math.round((i * 1e6) / SR), data });
+      aenc.encode(a);
+      a.close();
+    }
+    await aenc.flush();
+    aenc.close();
+  }
   if (failed) throw failed;
   muxer.finalize();
   return new Blob([target.buffer], { type: 'video/mp4' });

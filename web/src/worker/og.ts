@@ -25,6 +25,7 @@ const CARDS: Record<string, Card> = {
   printer: { title: 'Printer · Credit Union', description: 'Turn a picture into a Statement, drawn by Credits you and your friends own and Credits for sale.', image: '/og/create.png' },
   og: { title: 'Link previews · Credit Union', description: 'Every page’s link card.', image: '/og/home.png' },
   tokens: { title: 'BALANCE · Credit Union', description: 'Credits in, BALANCE out. Pick a pure color, C, M, Y or K, or Any for the lowest price.', image: '/og/tokens.png' },
+  font: { title: 'Balance · Credit Union', description: 'A free font drawn from Jack Butcher’s $BALANCE numerals. Each letter’s colors come from the word it’s in.', image: '/og/font.png' },
 };
 
 /// The card for a path, or null for paths that aren't pages.
