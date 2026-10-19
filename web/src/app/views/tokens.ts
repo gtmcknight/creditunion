@@ -62,6 +62,31 @@ function laneOf(s: Summary): Lane | null {
 
 type Union = Awaited<ReturnType<typeof getBatch>>;
 type Listing = { id: string; price: string; source: string; tenths: number };
+
+/// The listings that get the most rating for `wei`, best value first: a 0/1 knapsack over the cost in about 10,000 steps
+/// of the amount, each cost rounded up a step so the set always fits; of two sets with the same rating, the cheaper.
+function mostRating(ls: Listing[], wei: bigint, cost: (x: Listing) => bigint) {
+  const step = wei / 10_000n + 1n, B = Number(wei / step), row = B + 1;
+  const fit = ls.filter((x) => cost(x) <= wei);
+  const units = fit.map((x) => Number((cost(x) + step - 1n) / step));
+  const best = new Float64Array(row), took = new Uint8Array(fit.length * row);
+  fit.forEach((x, i) => {
+    const c = units[i], v = x.tenths * row - c;
+    for (let b = B; b >= c; b--)
+      if (best[b - c] + v > best[b]) {
+        best[b] = best[b - c] + v;
+        took[i * row + b] = 1;
+      }
+  });
+  const out: Listing[] = [];
+  for (let i = fit.length - 1, b = B; i >= 0; i--)
+    if (took[i * row + b]) {
+      out.push(fit[i]);
+      b -= units[i];
+    }
+  out.reverse();
+  return { out, spent: out.reduce((a, x) => a + cost(x), 0n) };
+}
 /// The way a buy goes: BALANCE's Uniswap pool, or Credits swept into a batch.
 type Route = 'pool' | 'batch' | 'statement';
 
@@ -246,18 +271,30 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     }
   };
 
-  /// The cheapest per point of a color that fit the ETH (the Sweeper's fee included), up to `cap` of them.
+  /// The Credits of a color that get the most rating for the ETH (the Sweeper's fee included), up to `cap` of them. First
+  /// the best value down the list while each fits. Many often cost the same per point, so that can stop short with a gap
+  /// none of the next fills; unless Uniswap takes what's left, the set that spends the most of the ETH, when it gets more.
+  let fitMemo: { ls: Listing[]; wei: bigint; cap: number; fee: bigint; r: { out: Listing[]; spent: bigint } } | null = null;
   const fitBudget = (wei: bigint, key: Lane['key'] = laneKey, cap = MAX_BUY) => {
+    const ls = pools.get(key) ?? [];
+    if (fitMemo && fitMemo.ls === ls && fitMemo.wei === wei && fitMemo.cap === cap && fitMemo.fee === feeBps) return fitMemo.r;
+    const cost = (x: Listing) => BigInt(x.price) + (BigInt(x.price) * feeBps) / 10_000n;
     const out: Listing[] = [];
     let spent = 0n;
-    for (const x of pools.get(key) ?? []) {
+    for (const x of ls) {
       if (out.length >= cap) break;
-      const cost = BigInt(x.price) + (BigInt(x.price) * feeBps) / 10_000n;
-      if (spent + cost > wei) continue;
-      spent += cost;
+      if (spent + cost(x) > wei) continue;
+      spent += cost(x);
       out.push(x);
     }
-    return { out, spent };
+    let r = { out, spent };
+    if (out.length && out.length < cap && !poolFor(LANES.find((l) => l.key === key)!)) {
+      const k = mostRating(ls, wei, cost);
+      const sum = (o: Listing[]) => o.reduce((a, x) => a + x.tenths, 0);
+      if (k.out.length <= cap && (sum(k.out) > sum(out) || (sum(k.out) === sum(out) && k.spent < spent))) r = k;
+    }
+    fitMemo = { ls, wei, cap, fee: feeBps, r };
+    return r;
   };
   /// What `wei` gets through a batch: those Credits, what they cost, and the tokens they pay out (our fee off).
   const viaBatch = (wei: bigint, key: Lane['key'] = laneKey, cap = MAX_BUY) => {
