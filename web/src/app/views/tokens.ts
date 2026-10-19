@@ -27,8 +27,10 @@ const CHUNK = 40; // Credits per create/deposit transaction
 const MAX_BUY = 40; // listings per buy (the Worker's quote limit)
 const SHOWN = 400; // the cheapest per point an ETH amount picks from, per color
 const DURATION = 90n * 86400n; // the longest a batch may stay open (BatchFactory.MAX_DURATION)
-/// When $BALANCE opens (the target announced for the launch; set it to the real block's time once it's known).
+/// When $BALANCE starts converting: Jack's launch, 10:20 AM Eastern on October 20 (his auction starts then).
 const OPENS_AT = Date.parse('2026-10-20T14:20:00Z');
+/// When it trades: the end of his auction, a day after it starts.
+const TRADES_PLANNED = OPENS_AT + 86_400_000;
 const TOKEN = '$BALANCE';
 /// ?soon on a local copy: see the before-launch notice even where the stand-in token already trades.
 const previewSoon = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).has('soon'); // always: a fork's stand-in token shows the real name
@@ -643,15 +645,21 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       !account ? '<p class="muted small">Connect to see your $BALANCE, Credits waiting to convert and Statements to redeem.</p>'
         : rows.length ? rows.join('') : '<p class="muted small">Nothing yet. What you buy or convert shows here until it lands.</p>'
     }</aside>`;
+    // Until trading opens: the launch's two moments, in the viewer's own time. The countdown sits on the first.
+    const stepsHtml = () => {
+      const at = (t: number) => new Date(t).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+      const step = (time: string, what: string, more: string) =>
+        `<li class="tk-step"><span class="tk-step-dot" aria-hidden="true"></span><p><b>${time}</b></p><p>${what} <span class="muted">${more}</span></p></li>`;
+      return `<ol class="tk-steps" aria-label="How ${TOKEN} launches">
+        ${step(`${at(OPENS_AT)}<span class="muted" id="tk-left"></span>`, `Your Credits become ${TOKEN}`, 'once your batch fills. Withdraw anytime before.')}
+        ${step(at(TRADES_PLANNED), `${TOKEN} lands in your wallet.`, 'Jack’s contract locks it for everyone until then.')}
+      </ol>`;
+    };
     kept.clear();
     app.innerHTML = `
     <section class="tokens">
       <header class="create-head"><h1>${trade?.open && !previewSoon ? TOKEN : `Get in before ${TOKEN} opens`}</h1><p class="create-lede"><button type="button" class="link" id="tk-how">What is ${TOKEN}?</button></p></header>
-      ${trade?.open && !previewSoon ? '' : `<div class="tk-soon"><span class="tk-dot" aria-hidden="true"></span><div><p><b>Opens ${new Date(OPENS_AT).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}</b><span class="muted" id="tk-left"></span><span class="muted">${(() => {
-        const people = new Set(waiting.flatMap((u) => u.depositors.map((d) => d.toLowerCase()))).size;
-        const credits = waiting.reduce((n, u) => n + u.s.count, 0);
-        return people >= 3 ? ` · ${people} people, ${credits} Credits waiting` : '';
-      })()}</span></p><p class="muted">Credits become ${TOKEN} 80 at a time. Put yours in a batch or buy some here. Withdraw anytime before.</p></div></div>`}
+      ${trade?.open && !previewSoon ? '' : stepsHtml()}
       <div class="tk-layout">
       <section class="tk-card">
         <form class="design-form tk-form" novalidate style="${inkVar(l)}">

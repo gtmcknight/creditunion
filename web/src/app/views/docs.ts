@@ -187,7 +187,12 @@ const sections = (): Section[] => [
     <h3>Paying in, leaving</h3>
     <p>Pay with ETH and the page buys the Credits with the most rating per ETH in your color and puts them in, or convert Credits you hold. You can withdraw yours any time until your batch converts.</p>
     <h3>Converting</h3>
-    <p>Once BALANCE is live, a batch locks the moment its 80th Credit lands, and anyone can convert it. We convert every full batch as soon as we can and pay its members once BALANCE can be transferred. If a payment can’t reach your wallet, claim it from the BALANCE page.</p>
+    <dl class="doc-facts">
+      <div><dt>Now</dt><dd>Put Credits in a batch. You can take them back anytime before it converts.</dd></div>
+      <div><dt>October 20</dt><dd>BALANCE launches with Jack’s auction at 10:20 AM Eastern. Once it’s live, a batch locks the moment its 80th Credit lands and converts: its 80 Credits become a Statement, then BALANCE, held in the batch for its members. Converted Credits can’t be withdrawn.</dd></div>
+      <div><dt>October 21</dt><dd>Trading opens when Jack’s auction ends, about 10:20 AM Eastern, and we send members their BALANCE; if yours isn’t sent, claim it on the BALANCE page. Until then Jack’s BALANCE contract locks it for everyone, us included.</dd></div>
+    </dl>
+    <p>The BALANCE page shows each of these times in your own time zone. Anyone can convert a full batch; we do it as soon as it fills. A converted batch’s Statement stays in the BALANCE contract for good and reads WITHDRAWN. Your first BALANCE also gives your wallet its Balance artwork, an NFT that stays with the wallet and shows what it holds.</p>
     <h3>Fees</h3>
     <p>6% of the BALANCE a batch converts into, set when the batch opens, and 2% on Credits bought through the page.</p>`,
         },
