@@ -119,7 +119,7 @@ const AUCTION_SORTS = [
   ['high', 'Highest price', 'live'],
   ['ending', 'Ending soon', 'live'],
   ['rating', 'Top rated', 'live'],
-  ['value', 'Most rating per ETH', 'live'],
+  ['value', 'Most BALANCE per ETH', 'live'],
   ['recent', 'Recently sold', 'sold'],
   ['top', 'Highest price', 'sold'],
   ['bottom', 'Lowest price', 'sold'],
