@@ -325,15 +325,39 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
+/// A read one request starts and the others in this isolate share while it runs (the union index, the Activity feed).
+/// Its I/O belongs to the request that started it, and Workers cancel that when the request ends, as when its visitor
+/// leaves: the read then never settles, and every request after would wait on it until the isolate is recycled. So
+/// the starter keeps its read going with waitUntil (up to 30 s after it ends), and nobody waits on another request's
+/// read past SHARE_MS from its start: they read for themselves, and the requests after them share that.
+const SHARE_MS = 4_000;
+const LATE = Symbol('late');
+function shared<T>() {
+  let now: { at: number; p: Promise<T> } | null = null;
+  return async (ctx: ExecutionContext, read: () => Promise<T>): Promise<T> => {
+    const s = now;
+    if (s) {
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const late = new Promise<typeof LATE>((ok) => (timer = setTimeout(() => ok(LATE), s.at + SHARE_MS - Date.now())));
+      const v = await Promise.race([s.p, late]).finally(() => clearTimeout(timer));
+      if (v !== LATE) return v;
+      if (now === s) now = null;
+    }
+    const mine = { at: Date.now(), p: read() };
+    now = mine;
+    ctx.waitUntil(mine.p.then(() => {}, () => {}).finally(() => now === mine && (now = null)));
+    return mine.p;
+  };
+}
+
 /// Every Activity row (newest first) with plans' unions left out until they fill. Read once for the site by the
 /// ChainBook (at most every FEED_MS), kept FEED_MS in the colo cache and in this isolate, so /activity.json's slices
 /// never rescan and never parse the whole feed per request. Without the ChainBook, this data center reads it itself.
 let feedMemo: { got: number; at: number; items: Activity[] } | null = null;
-let feedRead: Promise<Activity[]> | null = null;
+const feedRead = shared<Activity[]>();
 async function activityAll(env: Env, url: URL, ctx: ExecutionContext): Promise<Activity[]> {
   if (feedMemo && Date.now() - feedMemo.got < FEED_MS) return feedMemo.items;
-  if (feedRead) return feedRead;
-  const p = (async () => {
+  return feedRead(ctx, async () => {
     const key = new Request(`${url.origin}/activity-all/v2`);
     const hit = await caches.default.match(key);
     const at = Number(hit?.headers.get('x-read-at'));
@@ -355,10 +379,7 @@ async function activityAll(env: Env, url: URL, ctx: ExecutionContext): Promise<A
     const items = JSON.parse(v.body) as Activity[];
     feedMemo = { got: Date.now(), at: v.at, items };
     return items;
-  })();
-  feedRead = p;
-  void p.finally(() => feedRead === p && (feedRead = null)).catch(() => {});
-  return p;
+  });
 }
 
 /// The feed read from the chain: the scan state lives in `store` (the colo cache, or the ChainBook's storage).
@@ -2078,11 +2099,10 @@ async function readParty(env: Env, batch: Address, url?: URL, ctx?: ExecutionCon
 /// (or with it unreachable), this data center reads the chain itself and keeps that 10 s, as before.
 type Index = { at: number; body: string; one?: Map<string, string>; counts?: { liveAuctions: number; burnable: number } };
 let indexMemo: { got: number; v: Index } | null = null;
-let indexRead: Promise<Index> | null = null;
+const indexRead = shared<Index>();
 async function unionIndex(env: Env, url: URL, ctx: ExecutionContext, fresh = false): Promise<Index> {
   if (!fresh && indexMemo && Date.now() - indexMemo.got < INDEX_MS) return indexMemo.v;
-  if (!fresh && indexRead) return indexRead;
-  const p = (async (): Promise<Index> => {
+  const read = async (): Promise<Index> => {
     const key = new Request(`${url.origin}/unions.json/v2`);
     if (!fresh) {
       const hit = await caches.default.match(key);
@@ -2106,12 +2126,8 @@ async function unionIndex(env: Env, url: URL, ctx: ExecutionContext, fresh = fal
     ctx.waitUntil(caches.default.put(key, new Response(v.body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${keep}`, 'x-read-at': String(v.at) } })));
     if (!indexMemo || indexMemo.v.at <= v.at) indexMemo = { got: Date.now(), v };
     return v;
-  })();
-  if (!fresh) {
-    indexRead = p;
-    void p.finally(() => indexRead === p && (indexRead = null)).catch(() => {});
-  }
-  return p;
+  };
+  return fresh ? read() : indexRead(ctx, read);
 }
 /// One union of the index as { at, union }: parsed once per index read, then a lookup.
 function oneUnion(v: Index, addr: string): string {
@@ -2892,6 +2908,8 @@ async function heldByStrategy(env: Env, url: URL, ctx: ExecutionContext): Promis
       .finally(() => {
         strategyRead = null;
       });
+    // Shared while in flight: waitUntil keeps it going if this request's visitor leaves (see shared).
+    ctx.waitUntil(strategyRead.catch(() => {}));
   }
   return strategyRead;
 }
@@ -3246,6 +3264,7 @@ function marketBook(env: Env, url: URL, ctx: ExecutionContext): Promise<{ at: nu
   })();
   bookMemo = { at: Date.now(), book: book_ };
   book_.catch(() => bookMemo?.book === book_ && (bookMemo = null));
+  ctx.waitUntil(book_.catch(() => {})); // shared for 30 s: kept going if this request's visitor leaves (see shared)
   return book_;
 }
 const marketRows = async (env: Env, url: URL, ctx: ExecutionContext) => (await marketBook(env, url, ctx)).rows;
