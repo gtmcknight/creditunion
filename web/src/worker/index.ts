@@ -385,7 +385,9 @@ async function activityItems(env: Env, store: Cache, stateKey: string): Promise<
     readActivity(c as never, store, stateKey, { ...cfg, factory: env.FACTORY, sweeper: hasSweeper(env) ? env.SWEEPER : null }),
     tokens ? readActivity(c as never, store, `${stateKey}/tokens/${tokens.toLowerCase()}/from-deploy`, { ...cfg, from: env.CHAIN_ID === '1' ? TOKEN_ACTIVITY_FROM : cfg.from, factory: tokens, sweeper: tokenSweeper(env) }) : Promise.resolve([]),
   ]);
-  const items = more.length ? [...main, ...more].sort((a, b) => b.block - a.block || b.i - a.i) : main;
+  // A token batch's burn converts it into BALANCE: said so, not as a Statement made.
+  const converts = more.map((x) => (x.kind === 'burned' ? { ...x, kind: 'converted' as const } : x));
+  const items = converts.length ? [...main, ...converts].sort((a, b) => b.block - a.block || b.i - a.i) : main;
   // A plan's union stays out of Activity until it fills.
   const hidden = await hiddenUnions(env);
   const filling = new Set<string>();
@@ -1884,6 +1886,33 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const res = new Response(svg, { headers: { 'content-type': 'image/svg+xml', 'cache-control': 'public, max-age=600', ...svgHeaders } });
     ctx.waitUntil(cache.put(key, res.clone()));
     return res;
+  }
+
+  // /balance-art/<wallet>.json: a wallet's Balance, the artwork BALANCE mints a wallet the first time it receives any
+  // (it never moves), as its contract draws it: { artwork, id, svg }, or id 0 for a wallet without one. The drawing
+  // follows the wallet's BALANCE, so each data center keeps it a minute.
+  const wallet = url.pathname.match(/^\/balance-art\/(0x[0-9a-fA-F]{40})\.json$/);
+  if (wallet) {
+    const cache = caches.default;
+    const key = new Request(`${url.origin}/balance-art/${wallet[1].toLowerCase()}.json`);
+    const hit = await cache.match(key);
+    if (hit) return hit;
+    if (await limited(env.RL_ART, req)) return text('slow down', 429);
+    const reply = (body: object, status = 200) =>
+      new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': status === 200 ? 'public, max-age=60' : 'no-store' } });
+    const token = await tokenOf(env, ctx);
+    const artwork = token ? await artworkOf(env, token, ctx) : null;
+    if (!artwork) return reply({ id: 0 });
+    const c = client(env);
+    try {
+      const id = (await c.readContract({ address: artwork, abi: balanceArtAbi, functionName: 'tokenIdOf', args: [wallet[1] as Address] })) as bigint;
+      const svg = id ? imageOf(await c.readContract({ address: artwork, abi: balanceArtAbi, functionName: 'tokenURI', args: [id] })) : null;
+      const res = reply(id && svg?.includes('<svg') ? { artwork, id: Number(id), svg } : { artwork, id: 0 });
+      ctx.waitUntil(cache.put(key, res.clone()));
+      return res;
+    } catch {
+      return reply({ error: 'Balance unavailable' }, 502);
+    }
   }
 
   // Link cards drawn per party (and made-up ones for /og).
@@ -3428,6 +3457,21 @@ function tokenOf(env: Env, ctx?: ExecutionContext): Promise<Address | null> {
   return tokenKept(ctx, () =>
     client(env)
       .readContract({ address: adapter, abi: tokenAdapterAbi, functionName: 'token' })
+      .then((a) => addrOrNull(a as string))
+      .catch(() => null),
+  );
+}
+/// BALANCE's artwork contract (the token's artwork()), as far as the Worker reads it: which Balance a wallet holds, and
+/// its drawing. Its address never changes once read.
+const balanceArtAbi = [
+  { type: 'function', name: 'tokenIdOf', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'tokenURI', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'string' }] },
+] as const;
+const artworkKept = shared<Address | null>((a) => (a ? Infinity : 60_000));
+function artworkOf(env: Env, token: Address, ctx?: ExecutionContext): Promise<Address | null> {
+  return artworkKept(ctx, () =>
+    client(env)
+      .readContract({ address: token, abi: [{ type: 'function', name: 'artwork', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] }] as const, functionName: 'artwork' })
       .then((a) => addrOrNull(a as string))
       .catch(() => null),
   );

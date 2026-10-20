@@ -18,7 +18,7 @@ import { checkQuote, listedById, type Quote } from '../forsale';
 import { buyListed, listings, type ForSale } from './statements';
 import { registerDeposits } from '../ghosts';
 import { buyCall, inkPalette, launchGate, market as swapMarket, opened, poolPalette, quote as swapQuote, sellCalls } from '../swap';
-import { converted } from '../tokens';
+import { balanceArt, balanceHref, balanceSrc, converted } from '../tokens';
 import { INK } from '../traits';
 import { $$, art, errText, esc, ethNum, openModal, sheet, toast } from '../ui';
 import { loadPalette } from '../wall';
@@ -114,6 +114,8 @@ let view: 'buy' | 'sell' | 'credits' | 'out' = 'buy';
 let outFrom: Address | null = null;
 /// What's typed: ETH to buy with, or the token to sell.
 let typed = '';
+/// Your Credits picked when the page last redrew itself (something moved on chain): picked again if still yours.
+let keptPicks: string[] = [];
 /// The first draw of a visit: holders open on Convert with all theirs picked, everyone else on Buy at 0.1 ETH.
 let landed = false;
 /// Buy on Uniswap even when a batch gets more: you'd rather have it now.
@@ -232,7 +234,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   const pools = new Map<Lane['key'], Listing[]>();
   let feeBps = sweepBps;
   let market: 'loading' | 'ready' | 'none' = sweeps ? 'loading' : 'none';
-  const picks = new Set<string>();
+  const picks = new Set<string>(keptPicks.filter((id) => owned.some((o) => o.toString() === id)));
+  keptPicks = [];
 
   let busy = false;
   /// While a transaction is in flight nothing on the page can change what it's doing: batches, picks, amounts.
@@ -460,7 +463,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const fo = document.getElementById('tk-fo'), fy = document.getElementById('tk-fy'), bn = document.getElementById('tk-bn');
     if (fo) fo.style.width = `${(others / 80) * 100}%`;
     if (fy) fy.style.width = `${(Math.min(yours, 80 - others) / 80) * 100}%`;
-    if (bn) bn.textContent = `${80 - open} of 80`;
+    if (bn) bn.textContent = `${count} of 80`; // what's in it now; the bar and the key show yours about to be
     // What you'll be paid when it fills: your Credits' rating in it (in already and about to be), after the fee.
     const bget = document.getElementById('tk-bget');
     const inTenths = (cur ? mineIn(cur) : []).reduce((n, id) => n + t(id), 0), addTenths = add.reduce((n, id) => n + t(id), 0);
@@ -678,16 +681,15 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       !account ? '<p class="muted small">Connect to see your $BALANCE, Credits waiting to convert and Statements to redeem.</p>'
         : rows.length ? rows.join('') : '<p class="muted small">Nothing yet. What you buy or convert shows here until it lands.</p>'
     }</aside>`;
-    // Until trading opens: the two moments of the launch, in the viewer's own time, the one on now marked. The countdown
-    // sits on the next one to come.
+    // Until trading opens: one line under the headline, what to do now and when BALANCE unlocks, in the viewer's own
+    // time, counting down.
     const stepsHtml = () => {
-      const left = '<span class="muted" id="tk-left"></span>';
-      const step = (on: boolean, time: string, what: string, more: string) =>
-        `<li class="tk-step${on ? ' on' : ''}"><span class="tk-step-dot" aria-hidden="true"></span><p><b>${time}</b></p><p>${what} <span class="muted">${more}</span></p></li>`;
-      return `<ol class="tk-steps" aria-label="How ${TOKEN} launches">
-        ${step(converting, converting ? 'Now, as each batch fills' : `${convertsWhen}${left}`, `Your Credits become ${TOKEN}`, 'once your batch fills. Withdraw anytime before.')}
-        ${step(false, `${when(tradesAt)}${converting ? left : ''}`, `${TOKEN} lands in your wallet.`, 'Jack’s contract locks it for everyone until then.')}
-      </ol>`;
+      const left = '<span id="tk-left"></span>';
+      const unlocks = `Jack’s contract unlocks it for trading ${whenShort(tradesAt)}${converting ? left : ''}.`;
+      const now = converting
+        ? `Convert your Credits into ${TOKEN} now.`
+        : convertsWhen === 'Any minute now' ? 'Converting starts any minute.' : convertsWhen.startsWith('Once') ? `Converting starts once ${TOKEN} is live.` : `Converting starts ${convertsWhen}${left}.`;
+      return `<p class="tk-when"><b>${now}</b> <span class="muted">${unlocks}</span></p>`;
     };
     kept.clear();
     app.innerHTML = `
@@ -706,7 +708,12 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       ${
         made.length
           ? `<section class="tokens-made"><h3>Converted</h3><div class="made-row">${made
-              .map((c) => `<a class="made" href="/statement/${c.sid}"><img src="/statement/${c.sid}.svg" alt="Statement #${c.sid}" loading="lazy" decoding="async"><span class="small"><span class="sw-ink">${swatch(c.lane)}</span>#${c.sid}<span class="muted num"> · ${Number(formatUnits(c.amount, got.decimals)).toLocaleString('en-US', { maximumFractionDigits: 0 })}</span></span></a>`)
+              .map((c) => {
+                const n = Number(formatUnits(c.amount, got.decimals)).toLocaleString('en-US', { maximumFractionDigits: 0 });
+                return c.art
+                  ? `<a class="made" href="${balanceHref(c.art)}" target="_blank" rel="noopener"><img src="${balanceSrc(c.art)}" alt="Balance #${c.art.id}" decoding="async"><span class="small"><span class="sw-ink">${swatch(c.lane)}</span>Balance #${c.art.id}</span></a>`
+                  : `<a class="made" href="/statement/${c.sid}"><img src="/statement/${c.sid}.svg" alt="Statement #${c.sid}" loading="lazy" decoding="async"><span class="small"><span class="sw-ink">${swatch(c.lane)}</span>#${c.sid}<span class="muted num"> · ${n}</span></span></a>`;
+              })
               .join('')}</div></section>`
           : ''
       }
@@ -1356,11 +1363,12 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   if (viewNow() === 'credits' && lane().ink >= 0 && !picks.size) for (const id of ownedHere()) picks.add(id.toString());
   draw();
 
-  // Live: every 20 s, while this page is up and nothing is picked, typed or in flight, look for deposits, withdrawals,
-  // new batches and conversions (anyone's), and draw the page again when something moved.
-  const poll = setInterval(async () => {
-    if (thisRun !== pageRun || !app.isConnected) return clearInterval(poll);
-    if (busy || picks.size || document.hidden || typed.trim()) return;
+  // Live: every 20 s while this page is up, and the moment its tab is shown again, look for deposits, withdrawals,
+  // new batches and conversions (anyone's), and draw the page again when something moved. What's typed and picked
+  // carries over; it waits while a transaction is in flight or the amount is being edited.
+  const check = async () => {
+    if (thisRun !== pageRun || !app.isConnected) return stop();
+    if (busy || document.hidden || document.activeElement?.id === 'amt') return;
     try {
       const read = (u: Union, functionName: 'count' | 'state') => pub.readContract({ address: u.s.address, abi: batchAbi, functionName }) as Promise<bigint | number>;
       const [m, now] = await Promise.all([
@@ -1368,12 +1376,20 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
         Promise.all(waiting.map((u) => Promise.all([read(u, 'count'), read(u, 'state')]))),
       ]);
       const moved = m !== n || now.some(([c, st], i) => Number(c) !== waiting[i].s.count || Number(st) !== STATES.indexOf(waiting[i].s.state));
-      if (moved) {
-        clearInterval(poll);
+      if (moved && thisRun === pageRun && !busy) {
+        stop();
+        keptPicks = [...picks];
         rerun();
       }
     } catch {}
-  }, 20_000);
+  };
+  const poll = setInterval(check, 20_000);
+  const onShow = () => void (!document.hidden && check());
+  document.addEventListener('visibilitychange', onShow);
+  function stop() {
+    clearInterval(poll);
+    document.removeEventListener('visibilitychange', onShow);
+  }
 
   // The market, per color, cheapest per rating point first (the book, else the Any batch's cheapest few). Then, for
   // Mixed with nothing typed, which way REF would go.
@@ -1430,14 +1446,18 @@ async function heldBy(you: Address) {
   }
 }
 
-/// Each converted batch: its Statement, its color, and what it converted into.
+/// Each converted batch: its Statement, its color, what it converted into, and its Balance (the artwork its pocket got
+/// with the BALANCE, which reads the pot until members are paid) when it can be read.
 async function conversions(batches: Union[]) {
   if (!batches.length || !config.tokenAdapter) return [];
   const at = config.tokenAdapter;
   return Promise.all(
     batches.map(async (u) => {
-      const c = (await pub.readContract({ address: at, abi: tokenAdapterAbi, functionName: 'conversionOf', args: [u.s.address] })) as readonly bigint[];
-      return { sid: c[0], amount: c[1], lane: laneOf(u.s)! };
+      const [c, pocket] = await Promise.all([
+        pub.readContract({ address: at, abi: tokenAdapterAbi, functionName: 'conversionOf', args: [u.s.address] }) as Promise<readonly bigint[]>,
+        (pub.readContract({ address: at, abi: tokenAdapterAbi, functionName: 'pocketOf', args: [u.s.address] }) as Promise<Address>).catch(() => null),
+      ]);
+      return { sid: c[0], amount: c[1], lane: laneOf(u.s)!, art: pocket ? await balanceArt(pocket) : null };
     }),
   );
 }

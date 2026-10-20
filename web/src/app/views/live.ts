@@ -7,7 +7,7 @@ import { listBatches } from '../data';
 
 /// /activity.json's rows (worker/activity.ts).
 type Item = {
-  kind: 'started' | 'deposited' | 'withdrew' | 'burned' | 'bid' | 'won' | 'claimed' | 'bought';
+  kind: 'started' | 'deposited' | 'withdrew' | 'burned' | 'converted' | 'bid' | 'won' | 'claimed' | 'bought';
   who: Address;
   union?: Address;
   name?: string;
@@ -50,6 +50,8 @@ function what(x: Item, here = false) {
       return x.intoUnion && !here ? `bought ${credits(n)} into ${u} for ${e}` : `bought ${credits(n)} for ${e}`;
     case 'burned':
       return here ? 'burned 80 Credits into a Statement' : `burned ${u} into a Statement`;
+    case 'converted':
+      return here ? 'converted it into $BALANCE' : `converted ${u} into $BALANCE`;
     case 'bid':
       return here ? `bid ${e}` : `bid ${e} on ${u}`;
     case 'won':

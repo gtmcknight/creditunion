@@ -7,7 +7,7 @@ import { listBatches, myCredits, ratingTotal, tokenBatches, type Listed } from '
 import { hydrate, who } from '../ens';
 import { fillGhosts } from '../ghosts';
 import { market, opened } from '../swap';
-import { converted } from '../tokens';
+import { balanceArt, balanceHref, balanceSrc, converted, type BalanceArt } from '../tokens';
 import { INK } from '../traits';
 import { art, errText, esc, eth, pageHead, same, toast } from '../ui';
 import { fullStatus, mineIn, status } from './lists';
@@ -140,6 +140,8 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
   let held = 0n;
   let owed: { b: Listed; amount: bigint }[] = [];
   let open = false;
+  // The wallet's Balance (its BALANCE artwork), once read: it stands for what's in the wallet.
+  let mineArt: BalanceArt | null = null;
   const whole = (v: bigint) => Number(formatUnits(v, 18)).toLocaleString('en-US', { maximumFractionDigits: 0 });
   const expectedOf = (b: Listed) => Math.floor(([...mineIn(b, account)].reduce((n, id) => n + (paysOf?.[Number(id) - 1] ?? 0), 0) / 10) * (1 - b.s.protocolFeeBps / 10_000));
   const coming = () => inBatches.filter((b) => b.token);
@@ -151,7 +153,11 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
     `<div class="tk-yrow">${pic}<div class="tk-ytext"><b>${title}</b>${sub.filter(Boolean).map((l) => `<span class="muted small">${l}</span>`).join('')}</div>${action}</div>`;
   const plural = (n: number) => `${n} Credit${n === 1 ? '' : 's'}`;
   const balanceHtml = () => {
-    const ins = held > 0n ? row(chip, `${whole(held)} ${TOKEN}`, [own ? 'In your wallet' : 'In their wallet']) : '';
+    const ins = mineArt
+      ? `<div class="made-row"><a class="made" href="${balanceHref(mineArt)}" target="_blank" rel="noopener"><img src="${balanceSrc(mineArt)}" alt="Balance #${mineArt.id}" decoding="async"><span class="small">Balance #${mineArt.id}</span></a></div>`
+      : held > 0n
+        ? row(chip, `${whole(held)} ${TOKEN}`, [own ? 'In your wallet' : 'In their wallet'])
+        : '';
     const rows = [
       ...owed.map((o) =>
         row(
@@ -238,6 +244,10 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
     .then((r) => r.json() as Promise<{ items?: { id: string; rating: number }[] }>)
     .then((j) => (stmts = j.items ?? []), () => (stmts = []))
     .then(redraw);
+  void balanceArt(account).then((a) => {
+    mineArt = a;
+    if (a) redraw();
+  });
   // $BALANCE held and owed: only once the token and the adapter are named (the launch); before that there's none.
   void (async () => {
     const token = config.balance?.token ?? null;

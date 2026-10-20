@@ -5,7 +5,7 @@
 import { parseAbi, type Address, type Hex, type PublicClient } from 'viem';
 
 export type Activity = {
-  kind: 'started' | 'deposited' | 'withdrew' | 'burned' | 'bid' | 'won' | 'claimed' | 'bought';
+  kind: 'started' | 'deposited' | 'withdrew' | 'burned' | 'converted' | 'bid' | 'won' | 'claimed' | 'bought';
   who: Address;
   union?: Address;
   name?: string;
