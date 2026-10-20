@@ -325,27 +325,32 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-/// A read one request starts and the others in this isolate share while it runs (the union index, the Activity feed).
-/// Its I/O belongs to the request that started it, and Workers cancel that when the request ends, as when its visitor
-/// leaves: the read then never settles, and every request after would wait on it until the isolate is recycled. So
-/// the starter keeps its read going with waitUntil (up to 30 s after it ends), and nobody waits on another request's
-/// read past SHARE_MS from its start: they read for themselves, and the requests after them share that.
+/// A read one request starts and the others in this isolate share while it runs (the union index, the Activity feed),
+/// its value then handed out for `keep(value)` ms (by default, not at all). Its I/O belongs to the request that
+/// started it, and Workers cancel that when the request ends, as when its visitor leaves: the read then never
+/// settles, and every request after would wait on it until the isolate is recycled. So the starter keeps its read
+/// going with waitUntil (up to 30 s after it ends), and nobody waits on another request's read past SHARE_MS from its
+/// start: they read for themselves, and the requests after them share that. A caller without `ctx` gets only the limit.
 const SHARE_MS = 4_000;
 const LATE = Symbol('late');
-function shared<T>() {
-  let now: { at: number; p: Promise<T> } | null = null;
-  return async (ctx: ExecutionContext, read: () => Promise<T>): Promise<T> => {
+function shared<T>(keep: (v: T) => number = () => 0) {
+  let now: { at: number; p: Promise<T>; until?: number } | null = null;
+  return async (ctx: ExecutionContext | undefined, read: () => Promise<T>): Promise<T> => {
     const s = now;
-    if (s) {
+    if (s?.until !== undefined) {
+      if (Date.now() < s.until) return s.p;
+    } else if (s) {
       let timer: ReturnType<typeof setTimeout> | null = null;
       const late = new Promise<typeof LATE>((ok) => (timer = setTimeout(() => ok(LATE), s.at + SHARE_MS - Date.now())));
       const v = await Promise.race([s.p, late]).finally(() => clearTimeout(timer));
       if (v !== LATE) return v;
       if (now === s) now = null;
     }
-    const mine = { at: Date.now(), p: read() };
+    const mine: { at: number; p: Promise<T>; until?: number } = { at: Date.now(), p: read() };
     now = mine;
-    ctx.waitUntil(mine.p.then(() => {}, () => {}).finally(() => now === mine && (now = null)));
+    // A failed read is asked again by the next caller.
+    const settled = mine.p.then((v) => void (mine.until = Date.now() + keep(v)), () => void (mine.until = 0));
+    ctx?.waitUntil(settled);
     return mine.p;
   };
 }
@@ -500,7 +505,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   if (url.pathname === '/burns') return Response.json({ ...(await burnsOpen(env)), keeper: keeperOf(env) }, { headers: { 'cache-control': 'public, max-age=15' } });
   if (url.pathname === '/config.json') return Response.json(publicConfig(env), { headers: { 'cache-control': 'public, max-age=60' } });
 
-  if (url.pathname === '/rpc') return rpc(req, env, url);
+  if (url.pathname === '/rpc') return rpc(req, env, url, ctx);
 
   // Every Credit Union with its summary and slots, one cached read for everyone (the lists, profiles, Credit pages).
   // ?union=0x…: just that one, { at, union } (null when the index doesn't have it), which a union page polls instead
@@ -2625,7 +2630,7 @@ async function linkCard(req: Request, env: Env, url: URL, ctx: ExecutionContext,
 
 /// Read-only proxy. Only the methods the app uses, and eth_call only to our contracts, so the paid key
 /// cannot be borrowed for anything else.
-async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
+async function rpc(req: Request, env: Env, url: URL, ctx: ExecutionContext): Promise<Response> {
   if (req.method !== 'POST') return text('POST only', 405);
   if (!sameSite(req)) return text('forbidden', 403);
   if ((req.headers.get('content-type') ?? '').split(';')[0].trim() !== 'application/json') return text('json only', 415);
@@ -2693,7 +2698,7 @@ async function rpc(req: Request, env: Env, url: URL): Promise<Response> {
   // factory's burn contract (a picture's spots), the Statements it mints into (a burned union's format), or a batch
   // the factory made. Every target named before the first malformed call must pass, as when checked in order.
   if (others.size) {
-    const [art, adapter, statements, token] = await Promise.all([artOf(env), assemblerOf(env), statementsOf(env), tokenOf(env)]);
+    const [art, adapter, statements, token] = await Promise.all([artOf(env, undefined, undefined, ctx), assemblerOf(env, ctx), statementsOf(env, ctx), tokenOf(env, ctx)]);
     const rest = [...others.keys()].filter((to) => to !== art && to !== adapter && to !== statements?.toLowerCase() && to !== token?.toLowerCase());
     const ok = await Promise.all(rest.map((to) => isBatch(env, url, to as Address)));
     if (ok.some((x) => !x)) return text('target not allowed', 403);
@@ -3363,7 +3368,7 @@ async function ensOf(env: Env, url: URL, ctx: ExecutionContext, addr: Address, g
 /// A Credits contract's art contract, as Credits itself names it (`art()`): the app asks it for a Credit's traits
 /// (describe) the way a batch does, and /art draws with it. Read once per isolate per Credits contract (the
 /// configured one, and mainnet's for previews); only a well-formed nonzero address is ever returned.
-const artAddrs = new Map<string, Promise<string | null>>();
+const artAddrs = new Map<string, ReturnType<typeof shared<string | null>>>();
 /// Jack's Statements, as far as the Worker reads it: the drawing of one Statement, and how many have been made.
 const statementsAbi = [
   { type: 'function', name: 'statementSVG', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'string' }] },
@@ -3383,46 +3388,42 @@ function statementCount(env: Env, statements: Address, maxMs: number): Promise<n
 /// reached.
 const refused = (e: unknown) => e instanceof BaseError && !!e.walk((x) => x instanceof ContractFunctionRevertedError && !!(x.raw || x.signature));
 /// The factory's burn contract (lowercase), or null until one is active. Read once a minute per isolate; once set it
-/// can never change.
-let assemblerKept: { at: number; addr: Promise<string | null> } | null = null;
-function assemblerOf(env: Env): Promise<string | null> {
-  if (assemblerKept && Date.now() - assemblerKept.at < 60_000) return assemblerKept.addr;
-  const addr = client(env)
-    .readContract({ address: env.FACTORY as Address, abi: factoryAbi, functionName: 'assembler' })
-    .then((a) => (/^0x0{40}$/i.test(a as string) ? null : (a as string).toLowerCase()))
-    .catch(() => null);
-  const entry = { at: Date.now(), addr };
-  assemblerKept = entry;
-  void addr.then((a) => a && (entry.at = Infinity)); // once set it's fixed for good (BatchFactory: AssemblerFixed)
-  return addr;
+/// can never change (BatchFactory: AssemblerFixed). These lookups are shared like the index (see shared): /rpc
+/// awaits them before every call to a union.
+const assemblerKept = shared<string | null>((a) => (a ? Infinity : 60_000));
+function assemblerOf(env: Env, ctx?: ExecutionContext): Promise<string | null> {
+  return assemblerKept(ctx, () =>
+    client(env)
+      .readContract({ address: env.FACTORY as Address, abi: factoryAbi, functionName: 'assembler' })
+      .then((a) => (/^0x0{40}$/i.test(a as string) ? null : (a as string).toLowerCase()))
+      .catch(() => null),
+  );
 }
 
 /// The Statements contract burned unions mint into: the factory's burn contract's statement(). Read once a minute per
 /// isolate; null until a burn contract is active.
-let statementsKept: { at: number; addr: Promise<Address | null> } | null = null;
+const statementsKept = shared<Address | null>(() => 60_000);
 /// The token a token union's Statement converts into (TokenAdapter.token()), for its symbol and balances. A minute.
-let tokenKept: { at: number; addr: Promise<Address | null> } | null = null;
-function tokenOf(env: Env): Promise<Address | null> {
+const tokenKept = shared<Address | null>(() => 60_000);
+function tokenOf(env: Env, ctx?: ExecutionContext): Promise<Address | null> {
   const adapter = addrOrNull(env.TOKEN_ADAPTER);
   if (!adapter) return Promise.resolve(null);
-  if (tokenKept && Date.now() - tokenKept.at < 60_000) return tokenKept.addr;
-  const addr = client(env)
-    .readContract({ address: adapter, abi: tokenAdapterAbi, functionName: 'token' })
-    .then((a) => addrOrNull(a as string))
-    .catch(() => null);
-  tokenKept = { at: Date.now(), addr };
-  return addr;
+  return tokenKept(ctx, () =>
+    client(env)
+      .readContract({ address: adapter, abi: tokenAdapterAbi, functionName: 'token' })
+      .then((a) => addrOrNull(a as string))
+      .catch(() => null),
+  );
 }
-function statementsOf(env: Env): Promise<Address | null> {
-  if (statementsKept && Date.now() - statementsKept.at < 60_000) return statementsKept.addr;
-  const c = client(env);
-  const addr = c
-    .readContract({ address: env.FACTORY as Address, abi: factoryAbi, functionName: 'assembler' })
-    .then((a) => (/^0x0{40}$/i.test(a as string) ? null : c.readContract({ address: a as Address, abi: [{ type: 'function', name: 'statement', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] }] as const, functionName: 'statement' })))
-    .then((a) => (a && /^0x[0-9a-fA-F]{40}$/.test(a) && !/^0x0{40}$/i.test(a) ? (a as Address) : null))
-    .catch(() => null);
-  statementsKept = { at: Date.now(), addr };
-  return addr;
+function statementsOf(env: Env, ctx?: ExecutionContext): Promise<Address | null> {
+  return statementsKept(ctx, () => {
+    const c = client(env);
+    return c
+      .readContract({ address: env.FACTORY as Address, abi: factoryAbi, functionName: 'assembler' })
+      .then((a) => (/^0x0{40}$/i.test(a as string) ? null : c.readContract({ address: a as Address, abi: [{ type: 'function', name: 'statement', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] }] as const, functionName: 'statement' })))
+      .then((a) => (a && /^0x[0-9a-fA-F]{40}$/.test(a) && !/^0x0{40}$/i.test(a) ? (a as Address) : null))
+      .catch(() => null);
+  });
 }
 /// The SVG in a tokenURI's image: the JSON and the image each a data URI, as base64 or as text.
 function imageOf(uri: string): string | null {
@@ -3444,25 +3445,20 @@ function imageOf(uri: string): string | null {
   }
 }
 
-function artOf(env: Env, credits: Address = env.CREDITS, c: ReturnType<typeof client> = client(env)): Promise<string | null> {
+function artOf(env: Env, credits: Address = env.CREDITS, c: ReturnType<typeof client> = client(env), ctx?: ExecutionContext): Promise<string | null> {
   const key = credits.toLowerCase();
-  let at = artAddrs.get(key);
-  if (!at) {
-    const read = c
+  let kept = artAddrs.get(key);
+  // A failed read is retried on the next call rather than remembered.
+  if (!kept) artAddrs.set(key, (kept = shared<string | null>((v) => (v ? Infinity : 0))));
+  return kept(ctx, () =>
+    c
       .readContract({ address: credits, abi: creditsAbi, functionName: 'art' })
       .then((a) => {
         const v = String(a).toLowerCase();
         return /^0x[0-9a-f]{40}$/.test(v) && !/^0x0+$/.test(v) ? v : null;
       })
-      .catch(() => null);
-    at = read;
-    artAddrs.set(key, read);
-    // A failed read is retried on the next call rather than remembered.
-    void read.then((v) => {
-      if (v === null && artAddrs.get(key) === read) artAddrs.delete(key);
-    });
-  }
-  return at;
+      .catch(() => null),
+  );
 }
 
 /// Blocks a landed transaction can hold a buy lock for: about the life of a lock (locks.ts CAP).
