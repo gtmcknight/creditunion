@@ -640,6 +640,39 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
   }
 
+  // /balance's cut of the book: the cheapest Credits per rating point by the live ratings, ranked as /balance ranks
+  // them, and only as many as a buy there can reach (it picks from the cheapest 400; this keeps 800, so the ones it
+  // skips, yours and any already in a batch, never leave it short). Some 15 KB instead of the ~2 MB book, cut from the
+  // same book every time it's served, and kept as long at the edge.
+  if (url.pathname === '/market-top.json') {
+    if (!sameSite(req)) return text('forbidden', 403);
+    const key = new Request(`${url.origin}/market-top.json/v1`);
+    const hit = await caches.default.match(key);
+    if (hit) return hit;
+    try {
+      const whole = await caches.default.match(new Request(`${url.origin}/market.json/v2`));
+      let body = whole ? await whole.text() : null;
+      if (!body && env.MARKET) {
+        const b = book(env);
+        body = (await b.state()).rows ? await b.snapshot() : env.PLANS ? await env.PLANS.get('market', { cacheTtl: 60 }) : null;
+      }
+      if (!body) return Response.json({ error: 'no book yet' }, { status: 503 });
+      const { at, items } = JSON.parse(body) as { at?: number; items?: string[][] };
+      const tenths = await loadScores(env.ASSETS, url.origin, true);
+      const top = (items ?? [])
+        .map((x) => ({ x, t: tenths[Number(x[0]) - 1] ?? 0 }))
+        .filter((r) => r.t > 0)
+        .sort((a, b) => Number((BigInt(a.x[1]) * 1000n) / BigInt(a.t)) - Number((BigInt(b.x[1]) * 1000n) / BigInt(b.t)))
+        .slice(0, 800)
+        .map((r) => r.x);
+      const res = new Response(JSON.stringify({ at, items: top }), { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=30' } });
+      ctx.waitUntil(caches.default.put(key, res.clone()));
+      return res;
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502 });
+    }
+  }
+
   // A Picture union's market, cut for its page (slice.ts): the listings that could draw the Colors in ?pal= (bit c for
   // Colors c), each with its print. Built from the market book as /market.json is, and kept as long at the edge
   // (30 s), so a listing that sells leaves it as soon as it leaves /market.json.

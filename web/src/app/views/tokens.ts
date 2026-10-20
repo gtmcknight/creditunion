@@ -145,10 +145,13 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   }
   const factory = config.tokenFactory;
   const thisRun = ++pageRun;
-  // The market book (the biggest read) starts now, beside the chain reads, so prices are in when the card draws.
-  const bookP = config.tokenSweeper ? fetch('/market.json').then((r) => (r.ok ? (r.json() as Promise<{ at?: number; items?: [string, string, string][] }>) : null)).catch(() => null) : null;
   const asked = new URLSearchParams(location.search).get('color');
   if (asked && LANES.some((l) => l.key === asked)) laneKey = asked as Lane['key'];
+  // The market starts now, beside the chain reads, so prices are in when the card draws: for Mixed, the Worker's cut of
+  // the book (the cheapest per point, all a buy here reaches), else, or if that can't be read, the whole book.
+  type Book = { at?: number; items?: [string, string, string][] };
+  const readBook = (path: string) => fetch(path).then((r) => (r.ok ? (r.json() as Promise<Book>) : null)).catch(() => null);
+  const bookP = config.tokenSweeper ? (laneKey === 'any' ? readBook('/market-top.json').then((b) => (b?.items?.length ? b : readBook('/market.json'))) : readBook('/market.json')) : null;
   if (previewJoined && !joined) joined = { batch: '', lane: laneKey, at: Date.now() };
   // The page’s frame at once (its title, where the launch line goes and the card), filled in as the chain is read.
   app.innerHTML = `<section class="tokens">
