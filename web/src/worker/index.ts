@@ -362,7 +362,7 @@ let feedMemo: { got: number; at: number; items: Activity[] } | null = null;
 const feedRead = shared<Activity[]>();
 async function activityAll(env: Env, url: URL, ctx: ExecutionContext): Promise<Activity[]> {
   if (feedMemo && Date.now() - feedMemo.got < FEED_MS) return feedMemo.items;
-  return feedRead(ctx, async () => {
+  const read = feedRead(ctx, async () => {
     const key = new Request(`${url.origin}/activity-all/v2`);
     const hit = await caches.default.match(key);
     const at = Number(hit?.headers.get('x-read-at'));
@@ -385,6 +385,11 @@ async function activityAll(env: Env, url: URL, ctx: ExecutionContext): Promise<A
     feedMemo = { got: Date.now(), at: v.at, items };
     return items;
   });
+  if (feedMemo && Date.now() - feedMemo.got < FEED_KEEP) {
+    void read.catch(() => {}); // behind the response (shared keeps it going)
+    return feedMemo.items;
+  }
+  return read;
 }
 
 /// The feed read from the chain: the scan state lives in `store` (the colo cache, or the ChainBook's storage).
@@ -2132,7 +2137,13 @@ async function unionIndex(env: Env, url: URL, ctx: ExecutionContext, fresh = fal
     if (!indexMemo || indexMemo.v.at <= v.at) indexMemo = { got: Date.now(), v };
     return v;
   };
-  return fresh ? read() : indexRead(ctx, read);
+  if (fresh) return read();
+  const p = indexRead(ctx, read);
+  if (indexMemo && Date.now() - indexMemo.got < INDEX_KEEP) {
+    void p.catch(() => {}); // behind the response (shared keeps it going)
+    return indexMemo.v;
+  }
+  return p;
 }
 /// One union of the index as { at, union }: parsed once per index read, then a lookup.
 function oneUnion(v: Index, addr: string): string {
@@ -2347,6 +2358,11 @@ async function unionList(env: Env, kept?: Map<string, Indexed>): Promise<Indexed
 const INDEX_MS = 2_000;
 /// How long they keep the Activity feed: about a block.
 const FEED_MS = 10_000;
+/// Past those, this isolate's copy goes out at once while a newer one is read behind the response, up to this old:
+/// a page never waits on a read it can do without. A bid or a deposit then shows a poll later at most; after a
+/// reader's own transaction (`fresh`) the index is read before answering, as before.
+const INDEX_KEEP = 10_000;
+const FEED_KEEP = 60_000;
 /// How often the ChainBook looks for a new block while pages are asking; it reads the index and the feed again on
 /// each one, so a page's read never waits on the chain.
 const LOOP_MS = 2_000;
