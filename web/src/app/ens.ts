@@ -1,5 +1,5 @@
 import { keccak256, type Address } from 'viem';
-import { explorer } from './chain';
+import { config, explorer } from './chain';
 import { esc, short } from './ui';
 
 type Ens = { name: string | null; avatar: string | null };
@@ -14,6 +14,11 @@ export const knownName = (a: Address) => known.get(a.toLowerCase()) ?? a.toLower
 export function ens(a: Address): Promise<Ens> {
   const k = a.toLowerCase();
   let p = memo.get(k);
+  if (!p && k === config?.tokenKeeper?.toLowerCase()) {
+    // Ours, named here rather than by ENS: the keeper that converts full batches, with our mark.
+    known.set(k, KEEPER.name!.toLowerCase());
+    p = Promise.resolve(KEEPER);
+  }
   if (!p) {
     p = new Promise<Ens>((done) => {
       if (!asking) {
@@ -27,6 +32,7 @@ export function ens(a: Address): Promise<Ens> {
   return p;
 }
 let asking: Map<string, (e: Ens) => void> | null = null;
+const KEEPER: Ens = { name: 'Credit Union keeper', avatar: '/favicon.svg' };
 async function ask() {
   const all = asking!;
   asking = null;
@@ -79,7 +85,7 @@ export function hydrate(root: ParentNode = document) {
       n.textContent = r.name;
       n.classList.remove('mono');
     }
-    if (r.avatar && /^(https:\/\/|\/avatar\/)/.test(r.avatar)) {
+    if (r.avatar && /^(https:\/\/|\/avatar\/|\/favicon\.svg$)/.test(r.avatar)) {
       const img = new Image();
       img.alt = '';
       img.onload = () => el.querySelector('img')?.replaceWith(img);

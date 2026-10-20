@@ -86,6 +86,8 @@ interface Env {
   /// Token unions (TokenAdapter's factory, the adapter, that factory's UnionFormats). Empty until deployed.
   TOKEN_FACTORY?: string;
   TOKEN_ADAPTER?: string;
+  /// Our keeper's wallet, which converts full batches and pays members: pages name it as ours.
+  TOKEN_KEEPER?: string;
   TOKEN_FORMATS?: string;
   /// The token factory's own Sweeper (a Sweeper deposits into one factory). Empty until deployed.
   TOKEN_SWEEPER?: string;
@@ -430,6 +432,7 @@ const publicConfig = (env: Env) => ({
   statements: addrOrNull(env.STATEMENTS),
   tokenFactory: addrOrNull(env.TOKEN_FACTORY),
   tokenAdapter: addrOrNull(env.TOKEN_ADAPTER),
+  tokenKeeper: addrOrNull(env.TOKEN_KEEPER),
   tokenFormats: addrOrNull(env.TOKEN_FORMATS),
   tokenSweeper: env.OPENSEA_API_KEY ? tokenSweeper(env) : null,
   balance: balanceConfig(env),

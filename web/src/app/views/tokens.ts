@@ -20,7 +20,7 @@ import { registerDeposits } from '../ghosts';
 import { buyCall, inkPalette, launchGate, market as swapMarket, opened, poolPalette, quote as swapQuote, sellCalls } from '../swap';
 import { balanceArt, balanceHref, balanceSrc, converted, type BalanceArt } from '../tokens';
 import { INK } from '../traits';
-import { $$, art, errText, esc, ethNum, openModal, sheet, toast } from '../ui';
+import { $$, art, errText, esc, ethNum, openModal, same, sheet, toast } from '../ui';
 import { loadPalette } from '../wall';
 
 const CHUNK = 40; // Credits per create/deposit transaction
@@ -31,9 +31,18 @@ const DURATION = 90n * 86400n; // the longest a batch may stay open (BatchFactor
 const OPENS_AT = Date.parse('2026-10-20T14:20:00Z');
 /// When it trades, until his contract names the opening block: the end of his auction, a day after it starts.
 const TRADES_PLANNED = OPENS_AT + 86_400_000;
+/// When it trades, as last worked out from the opening block (12 s a block): kept ten minutes, so every line on the
+/// page says the same minute while blocks tick by.
+let tradesEst: { block: bigint; at: number; made: number } | null = null;
+const tradesFrom = (opensAt: bigint, block: bigint) => {
+  if (!tradesEst || tradesEst.block !== opensAt || Date.now() - tradesEst.made > 600_000) tradesEst = { block: opensAt, at: Date.now() + Number(opensAt - block) * 12_000, made: Date.now() };
+  return tradesEst.at;
+};
 const TOKEN = '$BALANCE';
 /// ?soon on a local copy: see the before-launch notice even where the stand-in token already trades.
-const previewSoon = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).has('soon'); // always: a fork's stand-in token shows the real name
+const previewSoon = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).has('soon');
+/// ?joined on a local copy: see the batch box as it reads right after you join, without a transaction.
+const previewJoined = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).has('joined'); // always: a fork's stand-in token shows the real name
 /// A batch lands later than a swap, so it has to get more than this many times what Uniswap gets to be the way in.
 const BATCH_EDGE = 1.01;
 /// With nothing typed, the page shows the way this much would go.
@@ -116,6 +125,9 @@ let outFrom: Address | null = null;
 let typed = '';
 /// Your Credits picked when the page last redrew itself (something moved on chain): picked again if still yours.
 let keptPicks: string[] = [];
+/// The batch you just bought or converted into (its address, or '' for one your deposit opened) and when: the batch
+/// box says you're in, or that you filled it, until you do something else.
+let joined: { batch: string; lane: string; at: number; shown?: boolean } | null = null;
 /// The first draw of a visit: holders open on Convert with all theirs picked, everyone else on Buy at 0.1 ETH.
 let landed = false;
 /// Buy on Uniswap even when a batch gets more: you'd rather have it now.
@@ -135,11 +147,12 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   const thisRun = ++pageRun;
   const asked = new URLSearchParams(location.search).get('color');
   if (asked && LANES.some((l) => l.key === asked)) laneKey = asked as Lane['key'];
-  // The page's frame at once (its title, where the launch line goes, the card and Yours), filled in as the chain is read.
+  if (previewJoined && !joined) joined = { batch: '', lane: laneKey, at: Date.now() };
+  // The page’s frame at once (its title, where the launch line goes and the card), filled in as the chain is read.
   app.innerHTML = `<section class="tokens">
-      <header class="create-head"><h1>Get ${TOKEN}</h1><p class="create-lede"><span class="link">What is ${TOKEN}?</span></p></header>
+      <header class="create-head"><h1>Get ${TOKEN}${Date.now() < TRADES_PLANNED ? ' before it trades' : ''}</h1></header>
       <p class="tk-when">&nbsp;</p>
-      <div class="tk-layout"><section class="tk-card tk-wait" aria-busy="true"></section><aside class="tk-side"><h2 class="form-title">Yours</h2></aside></div>
+      <div class="tk-layout"><section class="tk-card tk-wait" aria-busy="true"></section></div>
     </section>`;
   const account = session.account;
   // What doesn't wait on the batches starts now, beside them, so the page waits on the slowest read and not on the
@@ -211,14 +224,21 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       : `<a class="made" href="/statement/${c.sid}"><img src="/statement/${c.sid}.svg" alt="Statement #${c.sid}" loading="lazy" decoding="async"><span class="small"><span class="sw-ink">${swatch(c.lane)}</span>#${c.sid}<span class="muted num"> · ${n}</span></span></a>`;
   }
   const paying = !!gate && (gate.opensAt === null || gate.block >= gate.opensAt);
+  /// Until they're paid out: how many members the converted batches hold BALANCE for, and how much, as one line.
+  const madeLine = () => {
+    if (isOpen) return '';
+    const who = new Set(made.flatMap((c) => c.members.map((a) => a.toLowerCase()))).size;
+    const total = made.reduce((n, c) => n + (c.net > 0n ? c.net : 0n), 0n);
+    return who && total ? `<p class="tk-made-line"><span class="num">${who.toLocaleString('en-US')}</span> members have <span class="num">${Number(formatUnits(total, got.decimals)).toLocaleString('en-US', { maximumFractionDigits: 0 })}</span> ${TOKEN} reserved for ${whenShort(tradesAt)}.</p>` : '';
+  };
   /// When trading opens: the opening block's time once the token names it (12 s a block), until then the planned time.
-  const tradesAt = gate?.opensAt != null ? Date.now() + Number(gate.opensAt - gate.block) * 12_000 : TRADES_PLANNED;
+  const tradesAt = gate?.opensAt != null ? tradesFrom(gate.opensAt, gate.block) : (tradesEst?.at ?? TRADES_PLANNED);
   const isOpen = !!trade?.open || paying;
   /// Batches convert (the adapter live, BALANCE taking Statements) but BALANCE doesn't move yet.
   const converting = live && !!gate?.takes && !isOpen;
   const when = (t: number) => new Date(t).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
-  /// The same moment for a short row: "Wed 10:39 AM".
-  const whenShort = (t: number) => new Date(t).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  /// The same moment for a short row: "Wed 10:39 AM", held together (no-break spaces) so a wrap never splits it.
+  const whenShort = (t: number) => new Date(t).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' }).replace(/^(\w+)\s/, '$1\u00a0').replace(/\s([AP]M)$/, '\u202f$1');
   /// When full batches start converting: our adapter's switch-on once the Safe has proposed it (no earlier than BALANCE
   /// going live, which Jack's launch time stands for until it has), else Jack's launch.
   const ours = !live && !!config.tokenAdapter && proposed.toLowerCase() === config.tokenAdapter.toLowerCase();
@@ -373,11 +393,14 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   /// The way the buy typed goes, as last worked out (null: neither way can do it), and, for Mixed with nothing typed,
   /// the way REF would go once both prices are in.
   let route: Route | null = null;
-  /// Whether the conversion fee reads as its rate (tapped) instead of the tokens it takes.
-  let feeAsRate = false;
-  /// Under You get through a batch: the amount is already after the fee (it read as still to come off), then when it converts.
+  /// Whether the fee line is open (tapped): what our fees come to, instead of just that they're in.
+  let feeFlipped = false;
+  /// Under You'll get through a batch: the price is all in (the ETH on the button already has the buy's fee, the amount
+  /// is already after the conversion's), so the line only says so. Tapped, it says what Credit Union keeps.
   const feeLine = (tenthsIn: number) =>
-    `After the <button type="button" class="link" id="fee-rate" title="${pct(bpsOf())} conversion fee">${feeAsRate ? `${pct(bpsOf())} conversion fee` : `${whole(feeOn(tenthsIn))} ${TOKEN} fee`}</button>`;
+    `<button type="button" class="link" id="fee-rate">${feeFlipped ? `${whole(feeOn(tenthsIn))} ${TOKEN} to Credit Union` : 'Fee included'}</button>`;
+  const buyFeeLine = (tenthsIn: number, spent: bigint) =>
+    `<button type="button" class="link" id="fee-rate">${feeFlipped ? `${ethNum((spent * BigInt(feeBps)) / (10_000n + BigInt(feeBps)), 4, true)} ETH + ${whole(feeOn(tenthsIn))} ${TOKEN} to Credit Union` : 'Fees included'}</button>`;
   /// Statements listed on OpenSea, read once: a whole Statement is a way in when the amount covers one.
   let stmts: ForSale[] = [];
   listings()
@@ -390,7 +413,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   const stmtFor = (wei: bigint) =>
     stmts.filter((y) => BigInt(y.price) <= wei).reduce<ForSale | null>((a, y) => (!a || y.rating! / Number(BigInt(y.price)) > a.rating! / Number(BigInt(a.price)) ? y : a), null);
   let st: ForSale | null = null;
-  /// The Statements this wallet holds, each with its rating: the Yours panel offers to redeem them.
+  /// The Statements this wallet holds, each with its rating: the Convert tab offers to redeem them.
   let myStmts: { id: bigint; rating: number; ready?: boolean }[] = [];
   const ST_ABI = parseAbi(['function approve(address,uint256)']);
   const VAULT_ABI = parseAbi(['function quote(uint256) view returns (uint256)', 'function withdraw(uint256,uint256) returns (uint256)']);
@@ -457,6 +480,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     }
     return v === 'buy' && route === 'batch' && plan && amountIn() ? plan.b.out.map((x) => BigInt(x.id)) : [];
   };
+  /// Where the Credits that came in since this batch was last drawn here start: they drop into its sheet.
+  let sheetFresh: number | undefined;
   const drawSheet = () => {
     const cur = curOf(lane());
     const count = cur?.s.count ?? 0;
@@ -469,7 +494,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       if (id !== undefined) {
         if (!kept.has(c)) kept.set(c, { cls: c.className, html: c.innerHTML, ghost: c.dataset.ghost });
         if (c.dataset.id === String(id)) return;
-        c.className = 'cell mine';
+        c.className = 'cell mine adding';
         c.dataset.id = String(id);
         c.removeAttribute('data-ghost');
         c.innerHTML = `<img src="${art(id)}" alt="" loading="lazy" decoding="async">`;
@@ -482,25 +507,34 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
         if (k.ghost) c.dataset.ghost = k.ghost;
       }
     });
-    // Yours (in already, or being added) are outlined; the rest is others' Credits and open paper.
+    // Yours (in already, or about to be) are outlined on the sheet; the line under the count says how many.
     const legend = document.getElementById('tk-legend');
-    const yours = (cur ? mineIn(cur).length : 0) + add.length;
-    // The bar: yours (in already, or about to be), then others' Credits, then open paper, in the key's order.
-    const others = count - (cur ? mineIn(cur).length : 0), open = Math.max(0, 80 - count - add.length);
-    const fo = document.getElementById('tk-fo'), fy = document.getElementById('tk-fy'), bn = document.getElementById('tk-bn');
-    if (fo) fo.style.width = `${(others / 80) * 100}%`;
-    if (fy) fy.style.width = `${(Math.min(yours, 80 - others) / 80) * 100}%`;
-    if (bn) bn.textContent = `${count} of 80`; // what's in it now; the bar and the key show yours about to be
+    const inAlready = cur ? mineIn(cur).length : 0;
+    const buying = viewNow() === 'buy' ? add.length : 0, addingN = viewNow() === 'buy' ? 0 : add.length;
+    // The count is what's left after yours: it comes down as you type or pick, and says so when yours fills it.
+    const left = 80 - count - add.length, fills = add.length > 0 && left <= 0;
+    const togo = fills ? 'You fill it' : `<span class="num">${left}</span> to go`;
+    const togoEl = document.getElementById('tk-togo');
+    if (togoEl && togoEl.innerHTML !== togo) {
+      togoEl.innerHTML = togo;
+      togoEl.classList.remove('tick');
+      void togoEl.offsetWidth; // restart the roll
+      togoEl.classList.add('tick');
+    }
+    if (legend) legend.textContent = [`${count} of 80`, inAlready ? `${inAlready} yours` : '', buying ? `${buying} buying` : '', addingN ? `${addingN} adding` : ''].filter(Boolean).join(' · ');
     // What you'll be paid when it fills: your Credits' rating in it (in already and about to be), after the fee.
     const bget = document.getElementById('tk-bget');
-    const inTenths = (cur ? mineIn(cur) : []).reduce((n, id) => n + t(id), 0), addTenths = add.reduce((n, id) => n + t(id), 0);
-    const yoursTenths = inTenths + addTenths;
-    // With some of yours in already, the total all of yours will pay; otherwise the box above already says it.
-    const inAlready = cur ? mineIn(cur).length : 0;
-    if (bget) bget.textContent = yoursTenths ? 'Converts at 80. Until then, withdraw anytime.' : 'Converts at 80, split by the rating each member put in.';
-    // Credits a buy would bring in aren't anyone's yet (and signed out there's no "you"), so they say buying.
-    const buying = viewNow() === 'buy' ? add.length : 0, mineAll = yours - buying;
-    if (legend) legend.innerHTML = `${mineAll ? `<span><i class="y"></i>${mineAll} yours</span>` : ''}${buying ? `<span><i class="y"></i>${buying} buying</span>` : ''}<span><i class="o"></i>${others} others</span><span><i></i>${open} open</span>`;
+    const yoursTenths = (cur ? mineIn(cur) : []).reduce((n, id) => n + t(id), 0) + add.reduce((n, id) => n + t(id), 0);
+    if (bget)
+      bget.innerHTML =
+        joinedLine(cur) ||
+        (fills
+          ? `It converts right away${isOpen ? ' and pays out' : `. Yours lands ${whenShort(tradesAt)}`}.`
+          : addingN
+              ? `Your ${plural(addingN)} join this batch. At 80 it converts to ${TOKEN}.`
+              : yoursTenths
+                ? `Converts to ${TOKEN} at 80.`
+                : `Converts to ${TOKEN} at 80, split by the rating each member put in.`);
   };
   /// The BALANCE you'd hold after the buy or sale typed, as Jack's artwork draws a wallet: its balance in its colors.
   /// What comes in mixes in by amount; selling never changes your colors.
@@ -538,8 +572,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   };
   const setText = (id: string, html: string) => {
     const el = document.getElementById(id);
-    if (el && el.innerHTML !== html) el.innerHTML = html;
+    if (el && el.innerHTML !== html.replace(/\u00a0/g, '&nbsp;')) el.innerHTML = html; // innerHTML reads a no-break space back as &nbsp;
   };
+  /// The button says what it does. Without a wallet it still does: pressing it connects one (main.ts's data-connect).
   const setGo = (text: string, on: boolean) => {
     const go = document.getElementById('go') as HTMLButtonElement | null;
     if (go && !busy) {
@@ -548,32 +583,29 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     }
   };
 
-  const eta = (blocks: bigint) => {
-    const s = Number(blocks > 0n ? blocks : 0n) * 12;
-    return s < 3600 ? `about ${Math.max(1, Math.round(s / 60))} min` : `about ${Math.round(s / 3600)} h`;
-  };
-  /// Buy · Sell · Convert. Sell shows once the pool's token is named, greyed until its transfers open; Buy only when
-  /// there's a way to buy (a Sweeper or the pool).
+  /// Buy · Sell · Convert. Sell shows once the token trades; Buy only when there's a way to buy (a Sweeper or the pool).
   function tabsHtml() {
     const v = viewNow();
     if (v === 'out') return '';
-    const tab = (k: 'buy' | 'sell' | 'credits', label: string) => {
-      const shut = k === 'sell' && !trade?.open;
-      const when = m && m.opensAt !== null ? `Opens at block ${m.opensAt.toLocaleString('en-US')}${trade ? `, ${eta(m.opensAt - trade.block)} from now` : ''}` : 'Not trading yet';
-      return `<button type="button" role="tab" data-view="${k}" aria-selected="${v === k}"${shut ? ` disabled title="${when}"` : ''}>${label}</button>`;
-    };
+    const tab = (k: 'buy' | 'sell' | 'credits', label: string) => `<button type="button" role="tab" data-view="${k}" aria-selected="${v === k}">${label}</button>`;
     const n = account ? owned.length : 0;
-    return `<div class="subtabs tk-modes" role="tablist" aria-label="Buy, sell or convert">${sweeps || poolOk() ? tab('buy', 'Buy') : ''}${m ? tab('sell', 'Sell') : ''}${tab('credits', n ? `Convert <span class="muted num">${n}</span>` : 'Convert')}</div>`;
+    // Yours to convert, on its tab: your best three Credits fanned as their art, and how many.
+    const fanned = [...owned].sort((x, y) => t(y) - t(x)).slice(0, 3).map((id) => `<img src="${art(id)}" alt="" loading="lazy">`).join('');
+    return `<div class="subtabs tk-modes" role="tablist" aria-label="Buy, sell or convert">${sweeps || poolOk() ? tab('buy', 'Buy') : ''}${m && trade?.open ? tab('sell', 'Sell') : ''}${tab('credits', n ? `<span class="tk-tabfan" aria-hidden="true">${fanned}</span>Convert <span class="num">${n}</span>` : 'Convert')}</div>`;
   }
   /// A token's mark and name, as a chip on the right of a panel: ETH's diamond; $BALANCE as its ink, the batch's colours.
   const ETH_ICON = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M8 1 3.5 8.2 8 10.8l4.5-2.6z" fill="currentColor" opacity=".9"/><path d="M8 11.7 3.5 9.1 8 15l4.5-5.9z" fill="currentColor" opacity=".6"/></svg>';
-  const tokenChip = (eth: boolean) => `<span class="tk-unit">${eth ? ETH_ICON : `<span class="sw-ink tk-coin">${swatch(lane())}</span>`}${eth ? 'ETH' : esc(sym())}</span>`;
+  const tokenChip = (eth: boolean) =>
+    eth
+      ? `<span class="tk-unit">${ETH_ICON}ETH</span>`
+      : `<button type="button" class="tk-unit" data-how title="What is ${TOKEN}?"><span class="sw-ink tk-coin">${swatch(lane())}</span>${esc(sym())}</button>`; // what it is, a tap on its name
   const payHtml = (selling: boolean) => {
     const max = selling
       ? account ? `<span class="tk-bal">You hold <span class="num">${tokAmt(tokenHeld)}</span> <button type="button" class="link small" id="amt-max">Max</button></span>` : ''
       : ethHeld !== null ? `<span class="tk-bal">Wallet <span class="num">${ethNum(ethHeld, 4)}</span> ETH <button type="button" class="link small" id="amt-max">Max</button></span>` : '';
-    // Paying ETH: a few amounts a tap away (about 2, 4 and 20 Credits' worth at today's prices).
-    const quick = selling ? '' : `<span class="tk-quick">${['0.05', '0.1', '0.5'].map((v) => `<button type="button" class="tk-q num" data-amt="${v}" aria-pressed="${typed === v}">${v}</button>`).join('')}</span>`;
+    // Paying ETH: a few amounts a tap away (about 2 and 4 Credits' worth at today's prices), and the amount that fills
+    // the batch once the market's read (0.5 until then, or when one buy can't fill it).
+    const quick = selling ? '' : `<span class="tk-quick">${['0.05', '0.1', '0.5'].map((v, i) => `<button type="button" class="tk-q num" data-amt="${v}"${i === 2 ? ' id="tk-fill"' : ''} aria-pressed="${typed === v}">${v}</button>`).join('')}</span>`;
     // Pay mirrors You get: the title with its quick amounts on one line, then the panel with the amount, its unit,
     // what it's worth and, at the bottom right, your balance with Max (as Uniswap does).
     return `
@@ -585,16 +617,18 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   };
   /// You get, then the way it goes, the other way when it's a real choice, and our fees on this way.
   const getHtml = (selling: boolean) => `
-          <div class="tk-gethead"><h2 class="form-title" id="tk-gettitle">You get</h2>${selling ? '' : colorChip()}</div>
+          <div class="tk-gethead"><h2 class="form-title" id="tk-gettitle">You get</h2>${selling || laneKey === 'any' ? '' : colorChip()}</div>
           <section class="rule">
-            ${selling ? '<div class="tk-get tk-panel"><span class="num tk-out" id="get-eth">0</span>${tokenChip(true)}<span class="tk-usd" id="route"></span></div>' : `<div class="tk-get tk-panel"><span class="tk-getrow"><span class="tk-from" id="get-from"></span><span id="get">${balanceSvg('0', EVEN)}</span></span>${tokenChip(false)}<span class="tk-usd" id="route"></span></div>`}
+            ${selling ? '<div class="tk-get tk-panel"><span class="num tk-out" id="get-eth">0</span>${tokenChip(true)}<span class="tk-usd" id="route"></span></div>' : `<div class="tk-get tk-panel"><span class="tk-getrow"><span id="get">${balanceSvg('0', EVEN)}</span></span>${tokenChip(false)}<span class="tk-usd" id="route"></span></div>`}
             <div class="tk-lines term-desc"><p id="route2"></p><p id="alt"></p><p id="fees"></p></div>
           </section>`;
-  const goHtml = (label: string) => (account ? `<button type="button" class="btn primary block" id="go" disabled>${label}</button>` : '<button type="button" class="btn primary block" data-connect>Connect wallet</button>');
+  const goHtml = (label: string) => `<button type="button" class="btn primary block" id="go"${account ? '' : ' data-connect'} disabled>${label}</button>`;
   const linkHtml = (to: typeof view, text: string) => (text ? `<p class="hint center"><button type="button" class="link small" data-view="${to}">${text}</button></p>` : '');
+  /// Under the button, what takes the worry out of pressing it (filled in as it changes; nothing when there's nothing).
+  const sureHtml = () => '<p class="hint center tk-sure" id="tk-sure"></p>';
   function buyHtml() {
     return `${payHtml(false)}${getHtml(false)}
-          <div id="tk-batch-home">${batchHtml()}</div><div class="submit">${goHtml('Enter an amount')}<p class="hint center small muted" id="go-note"></p></div>`;
+          <div class="submit">${goHtml('Enter an amount')}${sureHtml()}</div>`;
   }
   function creditsHtml() {
     const mineHere = ownedHere();
@@ -607,7 +641,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
           <section class="rule">
             ${
               !account
-                ? '<p class="term-desc">Connect to add Credits you own.</p>'
+                ? '<p class="term-desc"><button type="button" class="link" data-connect>Connect</button> to pick from the Credits you own.</p>'
                 : mineHere.length
                   ? `<p class="tk-sel term-desc"><span id="n-sel">Pick the ones to convert.</span></p>
                      <div class="picker captioned" id="picker">${mineHere.map(pick).join('')}</div>`
@@ -616,7 +650,16 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
             ${account && lane().ink >= 0 && owned.length > mineHere.length ? `<p class="tk-back small"><button type="button" class="link small" id="tk-back">← Back to Mixed</button> for your other ${plural(owned.length - mineHere.length)}</p>` : ''}
           </section>
           ${getHtml(false)}
-          ${batchHtml()}<div class="submit">${goHtml('Pick Credits')}</div>`;
+          <div class="submit">${goHtml('Pick Credits')}${sureHtml()}</div>${stmtsHtml()}`;
+  }
+  /// Statements you hold redeem straight into BALANCE through Jack's contract, each its own button, under the Credits.
+  function stmtsHtml() {
+    if (!account || !myStmts.length) return '';
+    const rows = myStmts.map(
+      (x) =>
+        `<div class="tk-yrow"><span class="tk-yart"><img class="st" src="/statement/${x.id}.svg" alt=""></span><div class="tk-ytext"><b>Statement #${x.id}</b><span class="muted small">${x.rating.toLocaleString('en-US')} ${TOKEN}</span></div>${x.ready ? `<button type="button" class="tk-yact go" data-redeem="${x.id}">Redeem</button>` : `<span class="tk-yact tk-ylater">${Date.now() < OPENS_AT ? whenShort(OPENS_AT) : 'Soon'}</span>`}</div>`,
+    );
+    return `<div class="tk-gethead tk-stmts"><h2 class="form-title">Your Statements</h2></div><section class="rule">${rows.join('')}</section>`;
   }
   function outHtml() {
     const ps = outHere();
@@ -632,17 +675,30 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   /// The batch a buy or a conversion goes into, said plainly above the button: the Credits wait in it, it converts
   /// when the 80th lands, and until then they come back on request.
   function batchHtml() {
-    const l = lane();
-    const count = curOf(l)?.s.count ?? 0;
+    const l = lane(), cur = curOf(l);
+    const count = cur?.s.count ?? 0;
     return `<div class="tk-batch" id="tk-batch"${viaSheet() ? '' : ' hidden'}>
-            <p class="tk-batch-head"><span>${curOf(l) ? nameOf(l, curOf(l)!) : `New ${l.name} batch`}</span><span class="num" id="tk-bn">${count} of 80</span></p>
-            <div class="tk-fill" style="${inkVar(l)}"><i class="y" id="tk-fy" style="width:0"></i><i class="o" id="tk-fo" style="width:${(count / 80) * 100}%"></i></div>
-            <div class="tk-keyrow"><p class="tk-key small num" id="tk-legend"></p><span class="small muted" id="tk-bfee"></span></div>
-            <p class="small muted"><span id="tk-bget">When it fills to 80, it converts to ${TOKEN}, split by the rating each of you put in. Until then, withdraw anytime.</span></p>
+            <div class="tk-mini" id="tk-sheet">${sheet(cur ? cur.ids : [], { mine: new Set(cur ? mineIn(cur).map(String) : []), size: 'sm', fresh: sheetFresh })}</div>
+            <div class="tk-batchinfo">
+              <p class="tk-togo" id="tk-togo"><span class="num">${80 - count}</span> to go</p>
+              <p class="small muted num" id="tk-legend">${count} of 80</p>
+              <p class="small muted" id="tk-bget">${joinedLine(cur) || `Converts to ${TOKEN} at 80, split by the rating each member put in. Until then, withdraw anytime.`}</p>
+              <p class="small muted" id="tk-bfee"></p>
+            </div>
           </div>`;
   }
+  /// After you join: that you're in and when it lands, or that you filled it and it's converting.
+  function joinedLine(cur: Union | null) {
+    if (!joined || joined.lane !== laneKey || Date.now() - joined.at > 30 * 60_000) return '';
+    if (cur && (joined.batch === '' || same(joined.batch, cur.s.address)) && mineIn(cur).length) {
+      const worth = Math.floor((mineIn(cur).reduce((n, id) => n + t(id), 0) / 10) * (1 - cur.s.protocolFeeBps / 10_000));
+      return `<b class="tk-in">You’re in.</b> Your ≈${worth.toLocaleString('en-US')} ${TOKEN} lands when it fills${isOpen ? '' : `, ${whenShort(tradesAt)} at the earliest`}.`;
+    }
+    const filled = all.find((u) => same(u.s.address, joined!.batch));
+    return filled && filled.s.count >= 80 ? `<b class="tk-in">You filled ${esc(filled.s.name || 'it')}.</b> It converts in a moment${isOpen ? ' and pays out' : `; yours lands ${whenShort(tradesAt)}`}.` : '';
+  }
   const sellHtml = () => `${payHtml(true)}${getHtml(true)}
-          <div class="submit">${goHtml('Enter an amount')}</div>`;
+          <div class="submit">${goHtml('Enter an amount')}${sureHtml()}</div>`;
 
   /// Listeners on the document from the last draw, dropped when the page draws again.
   let drawn = new AbortController();
@@ -657,17 +713,18 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     // Credits that came in since this batch was last drawn here drop into the sheet, in order.
     const was = cur ? shown.get(cur.s.address) : undefined;
     const fresh = was !== undefined && was < count ? was : undefined;
+    sheetFresh = fresh;
     if (cur) shown.set(cur.s.address, count);
     // The sheet shows the batch's Credits (their hover cards say whose), and open paper for the rest.
     if (cur) registerDeposits(cur.ids, cur.depositors);
     // The batches yours wait in, by color, oldest first: a full one waiting to convert isn't the one filling now.
     const yourBatches = LANES.flatMap((x) => waiting.filter((u) => laneOf(u.s) === x && mineIn(u).length).reverse());
-    // Yours, under the title: only when there's something (BALANCE held, Credits waiting, a payout to claim).
-    // Yours: what this wallet holds and has waiting, each with the one thing to do about it. Only when there's something.
-    // Three groups, in the order things happen: what's in your wallet to convert, what's deposited in a batch, and the
-    // BALANCE that's yours (held for you until trading opens, or in your wallet).
-    const inWalletRows: string[] = [], depositedRows: string[] = [], balanceRows: string[] = [];
-    // A small picture leads each row: up to three of the Credits fanned, the Statement, or the coin.
+    // Yours, in a box over the card where it's seen first: the BALANCE that's yours (held for you until trading opens,
+    // ready to claim, or in your wallet), then Credits you've put in a batch, what they come to and the way back out.
+    // Credits still in the wallet are the Convert tab's.
+    const left = '<span id="tk-left"></span>';
+    const rows: string[] = [];
+    // A small picture leads each row: up to three of the Credits fanned, or the coin.
     const fan = (ids: readonly bigint[]) => `<span class="tk-yart tk-fan">${ids.slice(0, 3).map((id) => `<img src="${art(id)}" alt="" loading="lazy">`).join('')}</span>`;
     // The coin: the amount in the BALANCE digits (they have no "$"), whole, shrunk to fit its 40px (8 to the advance).
     const coin = (shown: string) => {
@@ -675,70 +732,52 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       return `<span class="tk-yart"><span class="tk-ycoin">${balanceSvg(text, myPal ?? EVEN, Math.min(2, 40 / Math.max(1, text.length * 8 - 1)))}</span></span>`;
     };
     // One shape for every row: its art, a bold line and a grey line under it, and the one action on the right.
-    const row = (artHtml: string, title: string, sub: string | string[], action = '') => `<div class="tk-yrow">${artHtml}<div class="tk-ytext"><b>${title}</b>${[sub].flat().filter(Boolean).map((l) => `<span class="muted small">${l}</span>`).join('')}</div>${action}</div>`;
-    // Until trading opens, BALANCE in a wallet can't move: the row says until when.
-    const inWallet = isOpen ? 'In your wallet' : `In your wallet, locked until ${whenShort(tradesAt)}`;
-    if (m && tokenHeld > 0n) balanceRows.push(row(coin(tokAmt(tokenHeld)), `<span class="num">${tokAmt(tokenHeld)}</span> ${TOKEN}`, inWallet));
-    else if (!m && held && held.amount > 0n) balanceRows.push(row(coin(amount(held.amount)), `<span class="num">${amount(held.amount)}</span> ${TOKEN}`, inWallet));
+    const row = (artHtml: string, title: string, sub: string, action = '') => `<div class="tk-yrow">${artHtml}<div class="tk-ytext"><b>${title}</b>${sub ? `<span class="muted small">${sub}</span>` : ''}</div>${action}</div>`;
+    const bal = m && tokenHeld > 0n ? tokAmt(tokenHeld) : !m && held && held.amount > 0n ? amount(held.amount) : '';
+    if (bal) {
+      rows.push(row(coin(bal), `Your <span class="num">${bal}</span> ${TOKEN}`, isOpen ? 'In your wallet' : `In your wallet, unlocks ${whenShort(tradesAt)}`));
+    }
+    // Owed from a converted batch: claimable once the token's transfers open (the keeper usually pays it first).
+    if (got.claim.length) {
+      const n = `Your <span class="num">${amount(got.amount)}</span> ${TOKEN}`;
+      rows.push(paying ? row(coin(amount(got.amount)), n, 'Ready to claim', '<button type="button" class="tk-yact go" id="claim">Claim</button>') : row(coin(amount(got.amount)), n, `Lands in your wallet ${whenShort(tradesAt)}`));
+    }
     for (const u of yourBatches) {
       const l = laneOf(u.s)!, mine = mineIn(u), p = u.s.phase;
       // What they pay out when it converts, after the fee this batch opened with (the same figure as the batch box).
       const worth = Math.floor((mine.reduce((n, id) => n + t(id), 0) / 10) * (1 - u.s.protocolFeeBps / 10_000));
       // Full: waiting for BALANCE to open, converting (locked), or its hour passed unconverted (withdrawable again).
-      const where = p === 'Open' ? `${u.s.count} of 80 so far` : p === 'Waiting' ? (trade?.open || convertsAt <= Date.now() + 60_000 ? 'Full, converting soon' : `Full, converts ${whenShort(convertsAt)}`) : p === 'Expired' ? 'Full, waiting to convert' : 'Full, converting now';
-      depositedRows.push(
-        row(
-          fan(mine),
-          `${plural(mine.length)} in ${nameOf(l, u)}`,
-          [worth ? `${worth.toLocaleString('en-US')} ${TOKEN} expected` : '', where],
-          p === 'Burnable' ? '' : `<button type="button" class="tk-yact quiet" data-out="${l.key}" data-batch="${u.s.address}">Withdraw</button>`,
-        ),
-      );
+      const where = p === 'Open' ? `${u.s.count} of 80 so far` : p === 'Waiting' ? (trade?.open || convertsAt <= Date.now() + 60_000 ? 'full, converting soon' : `full, converts ${whenShort(convertsAt)}`) : p === 'Expired' ? 'full, waiting to convert' : 'full, converting now';
+      rows.push(row(fan(mine), `Your ${plural(mine.length)} in ${nameOf(l, u)}`, [worth ? `≈${worth.toLocaleString('en-US')} ${TOKEN} when it converts` : '', where].filter(Boolean).join(' · '), p === 'Burnable' ? '' : `<button type="button" class="tk-yact quiet" data-out="${l.key}" data-batch="${u.s.address}">Withdraw</button>`));
     }
-    // Credits still in the wallet: what they'd convert into, and the way to do it.
-    if (owned.length) {
-      const worth = est(owned.reduce((n, id) => n + t(id), 0));
-      inWalletRows.push(row(fan([...owned].sort((x, y) => t(y) - t(x))), plural(owned.length), `≈ ${worth.toLocaleString('en-US')} ${TOKEN}`, viewNow() === 'credits' ? '' : '<button type="button" class="tk-yact go" data-view="credits" data-all>Convert</button>'));
-    }
-    for (const x of myStmts)
-      inWalletRows.push(row(`<span class="tk-yart"><img class="st" src="/statement/${x.id}.svg" alt=""></span>`, `Statement #${x.id}`, `${x.rating.toLocaleString('en-US')} ${TOKEN}`, x.ready ? `<button type="button" class="tk-yact go" data-redeem="${x.id}">Redeem</button>` : `<span class="tk-yact tk-ylater">${Date.now() < OPENS_AT ? whenShort(OPENS_AT) : 'Soon'}</span>`));
-    // Owed from a converted batch: claimable once the token's transfers open (the keeper usually pays it first).
-    if (got.claim.length)
-      balanceRows.push(paying ? row(coin(amount(got.amount)), 'Payout ready', `${TOKEN} from a converted batch`, '<button type="button" class="tk-yact go" id="claim">Claim</button>') : row(coin(amount(got.amount)), `<span class="num">${amount(got.amount)}</span> ${TOKEN}`, `Lands in your wallet ${whenShort(tradesAt)}`));
-    // Yours: a sidebar always beside the card, so what you hold and have waiting never hides. Empty, it says so.
-    const wallet = `<aside class="tk-side" aria-label="Yours"><h2 class="form-title">Yours</h2>${
-      !account ? '<p class="muted small">Connect to see your $BALANCE, Credits waiting to convert and Statements to redeem.</p>'
-        : inWalletRows.length + depositedRows.length + balanceRows.length
-          ? ([['In your wallet', inWalletRows], ['Deposited', depositedRows], [TOKEN, balanceRows]] as const).map(([label, list]) => (list.length ? `<h3 class="tk-ygroup">${label}</h3>${list.join('')}` : '')).join('')
-          : '<p class="muted small">Nothing yet. What you buy or convert shows here until it lands.</p>'
-    }</aside>`;
-    // Until trading opens: one line under the headline, what to do now and when BALANCE unlocks, in the viewer's own
-    // time, counting down.
-    const stepsHtml = () => {
-      const left = '<span id="tk-left"></span>';
-      const unlocks = `Jack’s contract unlocks it for trading ${whenShort(tradesAt)}${converting ? left : ''}.`;
-      const now = converting
-        ? `Convert your Credits into ${TOKEN} now.`
-        : convertsWhen === 'Any minute now' ? 'Converting starts any minute.' : convertsWhen.startsWith('Once') ? `Converting starts once ${TOKEN} is live.` : `Converting starts ${convertsWhen}${left}.`;
-      return `<p class="tk-when"><b>${now}</b> <span class="muted">${unlocks}</span></p>`;
-    };
+    const yoursBox = rows.length ? `<section class="tk-yours" aria-label="Yours">${rows.join('')}</section>` : '';
+    // Until trading opens: one line under the headline, why now and when it trades, in the viewer's own time, counting
+    // down (before converting starts, when that does).
+    const stepsHtml = () =>
+      `<p class="tk-when">${
+        converting
+          ? `Trading opens ${whenShort(tradesAt)}${left}.`
+          : convertsWhen === 'Any minute now' ? 'Converting starts any minute.' : convertsWhen.startsWith('Once') ? `Converting starts once ${TOKEN} is live.` : `Converting starts ${convertsWhen}${left}.`
+      }</p>`;
+    const whenLine = isOpen && !previewSoon ? '' : stepsHtml();
     kept.clear();
     app.innerHTML = `
     <section class="tokens">
-      <header class="create-head"><h1>Get ${TOKEN}</h1><p class="create-lede"><button type="button" class="link" id="tk-how">What is ${TOKEN}?</button></p></header>
-      ${isOpen && !previewSoon ? '' : stepsHtml()}
+      <header class="create-head"><h1>Get ${TOKEN}${isOpen && !previewSoon ? '' : ' before it trades'}</h1></header>
+      ${whenLine}
       <div class="tk-layout">
       <section class="tk-card">
+        ${yoursBox}
         <form class="design-form tk-form" novalidate style="${inkVar(l)}">
           ${tabsHtml()}
           ${v === 'sell' ? sellHtml() : v === 'credits' ? creditsHtml() : v === 'out' ? outHtml() : buyHtml()}
         </form>
       </section>
-      ${wallet}
+      <div class="tk-right"><div id="tk-batch-home">${v === 'buy' || v === 'credits' ? batchHtml() : ''}</div></div>
       </div>
       ${
         made.length
-          ? `<section class="tokens-made"><h3>Converted</h3><div class="made-row">${made.map(madeTile).join('')}</div></section>`
+          ? `<section class="tokens-made"><h3>Converted</h3>${madeLine()}<div class="made-row">${made.map(madeTile).join('')}</div></section>`
           : ''
       }
     </section>`;
@@ -746,6 +785,11 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     bind();
     prices();
     paint();
+    // Just joined: the batch comes into view once (on a phone it's under the button), yours in it.
+    if (joined && !joined.shown && !previewJoined && Date.now() - joined.at < 60_000) {
+      joined.shown = true;
+      document.getElementById('tk-batch')?.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    }
   }
 
   /// Everything that follows from what's typed or picked, for the view that's open.
@@ -802,7 +846,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       route === 'batch' ? withBatch : route === 'pool' ? poolN : route === 'statement' ? stN : 0,
       split ? (batchPal.map((v, i) => (v * b!.tokens + pPal[i] * leftN) / withBatch) as Palette) : route === 'pool' || (!route && way === 'pool') ? pPal : batchPal,
     );
-    // The rate first (what a BALANCE costs on this way), then how it arrives.
+    // What a BALANCE costs on the pool's way or a Statement's (a batch's line says its fees are in), then how it arrives.
     const gets = route === 'batch' ? withBatch : route === 'pool' ? poolN : route === 'statement' ? stN : 0;
     const paid = route === 'statement' ? BigInt(st!.price) : route === 'batch' ? b!.spent + (split ? left : 0n) : wei;
     const per = paid && gets ? Number(formatUnits(paid, 18)) / gets : 0;
@@ -810,17 +854,31 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     setText('amt-usd', dollars(Number(formatUnits(wei, 18))));
     // Two lines: what each one costs, then how it arrives and what we take on that way.
     setText('tk-gettitle', way === 'batch' || route === 'statement' ? 'You’ll get' : 'You get');
-    // Each fee sits by what it comes out of: the conversion fee under the tokens, the buy fee on the button's ETH.
-    // Under the button, what the buy does, and the buy fee it already has in it.
+    // Our fees in one line under the tokens: a buy's (in the ETH it spends) and the conversion's.
     const n = hasBatch ? b!.out.length : 0;
-    setText('route', route === 'batch' && n ? feeLine(b!.out.reduce((a, x) => a + t(x.id), 0)) : rate);
-    // Through a batch: the Credits it buys, then what they become.
-    const from = document.getElementById('get-from');
-    if (from) from.innerHTML = route === 'batch' && n ? `<span class="tk-yart tk-fan">${b!.out.slice(0, 3).map((x) => `<img src="${art(Number(x.id))}" alt="" loading="lazy">`).join('')}</span><span class="tk-arrow" aria-hidden="true">→</span>` : '';
-    setText('go-note', route === 'batch' && n && feeBps ? `Includes our ${pct(feeBps)} fee.` : '');
+    const tenthsIn = n ? b!.out.reduce((a, x) => a + t(x.id), 0) : 0;
+    // Through a batch, one line under the number: what the ETH does, then that our fees are in (a tap says what they come to).
+    setText('route', route === 'batch' && n ? `Buys ${plural(n)} to convert. ${feeBps ? buyFeeLine(tenthsIn, b!.spent) : feeLine(tenthsIn)}.` : rate);
+    // Fill it: the ETH that buys every open spot, so the batch converts as soon as that lands.
+    const open = 80 - (curOf(lane())?.s.count ?? 0);
+    // Its budget is the open spots' worth of the cheapest Credits per point, fee in, so it fills at the best value
+    // rather than with the highest-rated Credits an unlimited budget would pick.
+    const fillLs = (pools.get(laneKey) ?? []).slice(0, open);
+    let fillCost = 0n;
+    for (const x of fillLs) fillCost += BigInt(x.price);
+    const budget = fillLs.length >= open ? (fillCost * (10_000n + BigInt(feeBps))) / 10_000n : 0n;
+    const fill = open > 0 && open <= MAX_BUY && sweeps && market === 'ready' && budget ? viaBatch(budget, laneKey, capOf(lane())) : null;
+    const chip = document.getElementById('tk-fill');
+    if (chip) {
+      const amt = fill && fill.out.length >= open ? ethNum(fill.spent, 4, true) : '0.5';
+      chip.dataset.amt = amt;
+      chip.textContent = amt === '0.5' ? '0.5' : 'Fill it';
+      chip.title = amt === '0.5' ? '' : `${amt} ETH buys the ${open} open spots, so it converts right away`;
+      chip.setAttribute('aria-pressed', String(typed === amt));
+    }
     setText('route2', split ? `${whole(leftN)} via Uniswap · instant` : '');
     const label: Record<Route, [string, string]> = {
-      pool: ['Uniswap', `Instant${m?.feeBps ? ` · ${pct(m.feeBps)} fee` : ''}`],
+      pool: ['Uniswap', 'Instant'],
       batch: ['Credits', `In a ${lane().name} batch, lands when it fills`],
       statement: [st ? `Statement #${st.id}` : 'Statement', `On OpenSea · redeems when ${TOKEN} opens`],
     };
@@ -841,13 +899,13 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     setText(
       'fees',
       way === 'batch'
-        ? `${split ? `${whole(b!.tokens)} ${lands().toLowerCase()}${m!.feeBps ? ` · ${pct(m!.feeBps)} on the swap` : ''}` : ''}`
+        ? `${split ? `${whole(b!.tokens)} ${lands().toLowerCase()}` : ''}`
         : wei && ways.length > 1
           ? ''
           : route === 'statement'
           ? `Bought on OpenSea · uses ${ethNum(BigInt(st!.price), 3)} of your ${ethNum(wei, 3)} ETH`
           : way === 'pool'
-          ? `Instant via Uniswap${m!.feeBps ? ` · ${pct(m!.feeBps)} fee` : ''}`
+          ? 'Instant via Uniswap'
           : '',
     );
     setText('tk-bfee', '');
@@ -875,9 +933,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
         : short
           ? 'Not enough ETH'
           : route === 'batch'
-            ? `Buy ${plural(b!.out.length)}${split ? ` + ${whole(leftN)} ${sym()}` : ''} · ${ethNum(b!.spent + (split ? left : 0n), 4, true)} ETH`
+            ? `Get ${sym()}`
             : route === 'pool'
-              ? `Get ${whole(poolN)} ${sym()}`
+              ? `Get ${sym()}`
               : route === 'statement'
                 ? `Buy Statement #${st!.id} · ${ethNum(BigInt(st!.price), 3)} ETH`
               : sweeps && market === 'loading'
@@ -887,6 +945,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
                   : 'No price right now',
       !!wei && !short && !!route,
     );
+    setText('tk-sure', route === 'batch' && !split && n > 0 && n < 80 - (curOf(lane())?.s.count ?? 0) ? 'Withdraw anytime before the batch fills.' : '');
     showLeft();
     if (viaSheet()) drawSheet();
     else drawHolding(route === 'pool' ? poolN : 0, pPal);
@@ -897,7 +956,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const amt = amountIn();
     const run = ++quoteRun;
     setText('route', '');
-    setText('fees', `Instant via Uniswap${m!.feeBps ? ` · ${pct(m!.feeBps)} fee` : ''}`);
+    setText('fees', 'Instant via Uniswap');
     showLeft();
     drawHolding(-Number(formatUnits(amt > tokenHeld ? tokenHeld : amt, m!.decimals)), null);
     const out = (v: bigint) => {
@@ -928,6 +987,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const tenths = mine.reduce((a, id) => a + t(id), 0);
     setGet(tenths ? est(tenths) : 0, paletteOf(lane()));
     setText('route', tenths ? feeLine(tenths) : '');
+    setText('tk-gettitle', 'You’ll get');
     // How many wallet confirmations it takes: 40 Credits a transaction, the open batch's room first, then new batches.
     let txs = 0;
     for (let left = mine.length, room = 80 - (curOf(lane())?.s.count ?? 80); left > 0; txs++) {
@@ -936,11 +996,12 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       room = room > 0 ? room - take : 80 - take;
     }
     setText('fees', '');
+    setText('tk-sure', mine.length && mine.length < 80 - (curOf(lane())?.s.count ?? 0) ? 'Withdraw anytime before the batch fills.' : '');
     setText('tk-bfee', txs > 1 ? `${txs} confirmations` : '');
     const all = document.getElementById('pick-all');
     if (all) all.textContent = mine.length ? 'Clear' : 'Select all';
     setText('n-sel', mine.length ? `${mine.length} of your ${ownedHere().length} picked` : `Pick from your ${ownedHere().length}.`);
-    setGo(mine.length ? `Convert ${plural(mine.length)}${trade?.open || converting ? '' : ' · converts when it opens'}` : 'Pick Credits', mine.length > 0);
+    setGo(!account ? 'Convert my Credits' : mine.length ? `Convert ${plural(mine.length)}${trade?.open || converting ? '' : ' · converts when it opens'}` : 'Pick Credits', !account || mine.length > 0);
     showLeft();
     drawSheet();
   }
@@ -1040,7 +1101,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     });
     document.getElementById('route')?.addEventListener('click', (e) => {
       if (!(e.target as HTMLElement).closest('#fee-rate')) return;
-      feeAsRate = !feeAsRate;
+      feeFlipped = !feeFlipped;
       paint();
     });
     document.getElementById('amt-line')?.addEventListener('click', (e) => {
@@ -1097,6 +1158,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     document.getElementById('tk-back')?.addEventListener('click', () => switchLane(LANES.find((x) => x.ink < 0)!.key, owned.filter((id) => !ownedHere().includes(id)).map(String)));
     const go = document.getElementById('go') as HTMLButtonElement | null;
     go?.addEventListener('click', () => {
+      if (!account) return; // its data-connect opens the wallet; the page draws again once one connects
       const v = viewNow(), l = lane(), wei = amountIn();
       if (v === 'sell')
         return run(
@@ -1136,7 +1198,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
           go,
           'Buying…',
           async () => {
+            const into = curOf(l)?.s.address ?? '';
             const spent = await buyIn(pickFor(l, wei, capOf(l)), approved as boolean, l);
+            joined = { batch: into, lane: l.key, at: Date.now() };
             if (!split) return;
             // What the batch left, less what its transaction cost, on Uniswap.
             const bal = await pub.getBalance({ address: account! });
@@ -1146,7 +1210,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
             if (!q) throw new Error('The batch part went through; Uniswap has no price right now. Try the rest again in a moment.');
             await send(await buyCall(m!, left, q.net), note);
           },
-          split ? 'Done. The Uniswap part is in; the batch part lands when it fills.' : 'Done. It lands when the batch fills.',
+          split ? 'Done. The Uniswap part is in; the batch part converts when it fills.' : `Done. Yours lands when the batch fills${isOpen ? '' : `, ${whenShort(tradesAt)} at the earliest`}.`,
         );
       }
       return run(
@@ -1155,6 +1219,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
         async () => {
           const here = new Set(ownedHere().map(String));
           const mine = [...picks].filter((id) => here.has(id)).map(BigInt);
+          const into = curOf(l)?.s.address ?? '';
           const approve = { address: config.credits, abi: creditsAbi, functionName: 'setApprovalForAll', args: [factory, true] } as const;
           if (!approved && (await canBatch())) {
             const [one] = await depositCalls(factory, await openUnion(factory, l, curOf(l)?.s.address), mine, l);
@@ -1164,9 +1229,10 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
             if (!approved) await send(approve, note);
             await depositAll(mine, l, curOf(l)?.s.address);
           }
+          joined = { batch: into, lane: l.key, at: Date.now() };
           picks.clear();
         },
-        'Done. It lands when the batch fills.',
+        `Done. Yours lands when the batch fills${isOpen ? '' : `, ${whenShort(tradesAt)} at the earliest`}.`,
       );
     });
     document.getElementById('out-picker')?.addEventListener('click', (e) => {
@@ -1188,9 +1254,13 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
         outPicks.clear();
       }, 'Withdrawn. They’re back in your wallet.'),
     );
-    // From the line under the title: to the color your Credits wait in, on Withdraw.
-    $$<HTMLButtonElement>('[data-out]', app).forEach((x) =>
-      x.addEventListener('click', () => {
+    // From the line under the title or the batch box: to the color your Credits wait in, on Withdraw. Taken where the
+    // click lands, since the batch box paints its line again as you type.
+    app.addEventListener(
+      'click',
+      (e) => {
+        const x = (e.target as HTMLElement).closest<HTMLElement>('[data-out]');
+        if (!x) return;
         view = 'out';
         typed = '';
         outFrom = (x.dataset.batch as Address | undefined) ?? null;
@@ -1199,7 +1269,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
         if (to !== laneKey) switchLane(to);
         else draw();
         document.querySelector('.tk-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }),
+      },
+      { signal: drawn.signal },
     );
     // Redeem a Statement you hold: approve the token for that one Statement, then withdraw its exact quote.
     $$<HTMLButtonElement>('[data-redeem]', app).forEach((x) =>
@@ -1221,7 +1292,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       ),
     );
     document.getElementById('how-color')?.addEventListener('click', howColor);
-    document.getElementById('tk-how')?.addEventListener('click', howBalance);
+    $$<HTMLElement>('[data-how]', app).forEach((x) => x.addEventListener('click', howBalance));
     const left = document.getElementById('tk-left');
     if (left) {
       const tick = () => {
@@ -1263,7 +1334,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       </div>
       <h4 class="how-ways">Three ways to get it</h4>
       <ol class="how-steps">
-        <li><b>Buy it</b><span class="muted">Pay ETH, get ${TOKEN}. Instant, through Uniswap.</span></li>
+        <li><b>Buy it</b><span class="muted">${isOpen ? `Pay ETH, get ${TOKEN}. Instant, through Uniswap.` : `Pay ETH. It buys Credits into a batch, which turns into ${TOKEN} at 80.`}</span></li>
         <li><b>Convert your Credits</b><span class="muted">Put them in a batch with other holders. At 80 it turns into ${TOKEN}, split by the rating each of you put in. Take them back anytime before it converts.</span></li>
         <li><b>Redeem a Statement</b><span class="muted">Own one? It redeems for its rating in ${TOKEN} once it opens.</span></li>
       </ol>
@@ -1492,11 +1563,13 @@ async function conversions(batches: Union[]) {
   const at = config.tokenAdapter;
   return Promise.all(
     batches.map(async (u) => {
-      const [c, pocket] = await Promise.all([
+      const [c, pocket, members] = await Promise.all([
         pub.readContract({ address: at, abi: tokenAdapterAbi, functionName: 'conversionOf', args: [u.s.address] }) as Promise<readonly bigint[]>,
         (pub.readContract({ address: at, abi: tokenAdapterAbi, functionName: 'pocketOf', args: [u.s.address] }) as Promise<Address>).catch(() => null),
+        (pub.readContract({ address: at, abi: tokenAdapterAbi, functionName: 'membersOf', args: [u.s.address] }) as Promise<readonly Address[]>).catch(() => [] as readonly Address[]),
       ]);
-      return { sid: c[0], amount: c[1], lane: laneOf(u.s)!, pocket, art: (pocket && artKept.get(pocket.toLowerCase())) || null };
+      // What its members share (what it converted into, less our fee and what's set aside, as received() reckons it).
+      return { sid: c[0], amount: c[1], net: c[1] - c[3] - c[4], members, lane: laneOf(u.s)!, pocket, art: (pocket && artKept.get(pocket.toLowerCase())) || null };
     }),
   );
 }

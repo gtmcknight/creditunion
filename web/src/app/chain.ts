@@ -38,6 +38,8 @@ export type Config = {
   /// (TokenAdapter), and that factory's own UnionFormats. Null until the vault exists and they're deployed.
   tokenFactory?: Address | null;
   tokenAdapter?: Address | null;
+  /// Our keeper's wallet: it converts full batches and pays members. Named as ours wherever it shows.
+  tokenKeeper?: Address | null;
   tokenFormats?: Address | null;
   /// The token factory's own Sweeper: buys deposit into token unions through it.
   tokenSweeper?: Address | null;

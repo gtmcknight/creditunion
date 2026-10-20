@@ -92,7 +92,7 @@ export async function balanceNft(app: HTMLElement, raw: string) {
     const [{ rows, fee, feePaid }, gate] = await Promise.all([payoutsOf(batch.b.s.address), token ? launchGate(token).catch(() => null) : Promise.resolve(null)]);
     const opensAt = gate?.opensAt != null ? Date.now() + Number(gate.opensAt - gate.block) * 12_000 : null;
     const open = !!gate && (gate.opensAt === null || gate.block >= gate.opensAt);
-    const when = opensAt ? new Date(opensAt).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+    const when = opensAt ? new Date(opensAt).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' }).replace(/^(\w+)\s/, '$1\u00a0').replace(/\s([AP]M)$/, '\u202f$1') : ''; // held together, so a wrap never splits it
     const status = (paid: boolean) => (paid ? 'Paid' : open ? 'Ready to claim' : when ? `Pays ${when}` : 'Pays when trading opens');
     const you = session.account;
     // Before anyone's paid, every row would say the same: the time goes in the heading once instead.

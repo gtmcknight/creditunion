@@ -84,11 +84,13 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
   </section>`
     : '';
 
+  // Our keeper's wallet says what it is: otherwise it reads as a member who converted every batch.
+  const keeper = !!config.tokenKeeper && same(account, config.tokenKeeper);
   app.innerHTML = `
   <section class="profile">
     ${pageHead({
       title: who(account, 'lg'),
-      lede: `<span class="mono profile-addr">${account}</span>`,
+      lede: `${keeper ? `It converts full batches into $BALANCE and pays members. It only holds gas.<br>` : ''}<span class="mono profile-addr">${account}</span>`,
       label: 'Member',
       tabs: PROFILE_TABS.map((t) => ({ label: `${t.label} <span class="num muted" id="n-${t.key}"></span>`, attrs: `data-tab="${t.key}"` })),
     })}
@@ -213,7 +215,7 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
   // ?tab= (the account menu's links) opens that tab; otherwise Credits, or $BALANCE for a wallet whose Credits are
   // all on their way to it.
   const asked = PROFILE_TABS.find((t) => t.key === new URLSearchParams(location.search).get('tab'))?.key;
-  let tab: Tab = asked ?? (!owned.length && coming().length && coming().length === inBatches.length ? 'balance' : 'credits');
+  let tab: Tab = asked ?? (keeper ? 'activity' : !owned.length && coming().length && coming().length === inBatches.length ? 'balance' : 'credits');
   const draw = () => {
     for (const t of PROFILE_TABS) {
       const el = document.getElementById(`n-${t.key}`);

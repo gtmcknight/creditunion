@@ -6,7 +6,7 @@
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/rpc", "/unions.json", "/passes", "/bids/*", "/activity", "/activity.json", "/live", "/ratings", "/edition/*", "/art/*", "/statement/*", "/balance-art/*", "/config.json", "/opensea/*", "/ens", "/ens/*", "/avatar/*", "/owner/*", "/", "/parties", "/about", "/about/*", "/docs", "/docs/*", "/how", "/how/*", "/faq", "/auctions", "/create", "/unions", "/union/*", "/party/*", "/b/*", "/mint", "/og", "/og/party/*", "/og/sample/*", "/me", "/member/*", "/credit/*", "/og/credit/*", "/credits", "/palette", "/palette/*", "/eights", "/eights/*", "/print", "/print/*", "/weight", "/weight/*", "/time", "/rating", "/bits", "/*.bin", "/wall/*", "/plans", "/plans/*", "/pictures/*", "/placed/*", "/allowlist/*", "/market/*", "/statements/*", "/locks/*", "/printer", "/printer/*", "/market.json", "/burns"]
+    "run_worker_first": ["/rpc", "/unions.json", "/passes", "/bids/*", "/activity", "/activity.json", "/live", "/ratings", "/edition/*", "/art/*", "/statement/*", "/balance-art/*", "/balance", "/balances/*", "/config.json", "/opensea/*", "/ens", "/ens/*", "/avatar/*", "/owner/*", "/", "/parties", "/about", "/about/*", "/docs", "/docs/*", "/how", "/how/*", "/faq", "/auctions", "/create", "/unions", "/union/*", "/party/*", "/b/*", "/mint", "/og", "/og/party/*", "/og/sample/*", "/me", "/member/*", "/credit/*", "/og/credit/*", "/credits", "/palette", "/palette/*", "/eights", "/eights/*", "/print", "/print/*", "/weight", "/weight/*", "/time", "/rating", "/bits", "/*.bin", "/wall/*", "/plans", "/plans/*", "/pictures/*", "/placed/*", "/allowlist/*", "/market/*", "/statements/*", "/locks/*", "/printer", "/printer/*", "/market.json", "/burns"]
   },
   // Public config served at /config.json. Secrets (`wrangler secret put <NAME>`): RPC_URL, OPENSEA_API_KEY, and optionally
   // OPENSEA_API_KEY_2 (a spare when the first is rate limited), ENS_RPC, KEEPER_KEY (the keeper's gas-only key).
@@ -31,6 +31,9 @@
     "TOKEN_SWEEPER": "0xA4a4dBFddD6C8cc771F4a013Ccd30494Fc82bC5e",
     // The adapter that converts full batches into BALANCE (the token factory's assembler), and BALANCE itself.
     "TOKEN_ADAPTER": "0xe6492DCCB96D1468302843AEc42Bb39f0FD7BD1D",
+    // Our keeper's wallet (convert-tokens.mjs on the Mac mini): it converts full batches and pays members, gas only.
+    // Pages name it as ours.
+    "TOKEN_KEEPER": "0x42d553DE53063610073b24C68566Db013740DC54",
     "BALANCE_TOKEN": "0x3620540c994433D7B4a628C46d2ED5F92572eA07",
     // BALANCE's pool as its launch liquidity lock (0xC9951Be5…3b93E) names it, its poolId() this key: 0.3%, tick
     // spacing 30, no hook. And our 1% on swaps to the Safe.

@@ -8522,7 +8522,7 @@ dialog.how .small { margin-top: 16px; }
 .picker.captioned { grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 10px; max-height: none; }
 .picker.captioned .pick { aspect-ratio: auto; display: grid; gap: 4px; background: none; }
 .picker.captioned .pick img { aspect-ratio: 1; height: auto; background: #fff; }
-.pick-id { font-size: 11px; color: var(--muted); text-align: center; }
+.pick-id { font-size: 12px; line-height: 15px; color: var(--muted); text-align: center; } /* 15 + the 4 gap = the frame's 19 */
 .picker.captioned .pick[aria-pressed='true']::after { bottom: 19px; }
 /* The Credit hover card: every line the same small size; the number in ink, the rest muted. */
 .slot-tip .credit-card p, .slot-tip .credit-card p.small { font-size: 13px; font-weight: 400; line-height: 20px; }
@@ -9775,7 +9775,13 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 .tk-eth, .tk-get.tk-panel { min-height: 108px; box-sizing: border-box; align-content: center; }
 .tk-ethrow:has(#amt-line:empty) { display: none; }
 .tk-gethead .tk-quick { display: inline-flex; gap: 4px; }
-.tk-gethead .tk-q { height: 26px; padding: 0 8px; font-size: 13px; }
+.tk-gethead .tk-q { height: 28px; min-width: 60px; padding: 0 10px; font-size: 14px; }
+/* A finger gets 44px on the amounts and the tabs; what you see stays the same size. */
+@media (pointer: coarse) {
+  .tk-q, .tk-modes button { position: relative; }
+  .tk-q::after { content: ''; position: absolute; inset: -8px 0; }
+  .tk-modes button::after { content: ''; position: absolute; inset: -6px 0; }
+}
 .design-form .tk-gethead + .rule { padding-top: 0; margin-top: 2px; }
 .tk-form .tk-get.tk-panel { min-height: 108px; }
 /* You get mirrors Pay: the title with the colour on one line, then a panel with the amount left, the unit right and
@@ -9787,6 +9793,8 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 .tk-get.tk-panel .tk-unit { font-size: 15px; }
 .tk-get.tk-panel .tk-usd { grid-column: 1 / -1; font-size: 13px; color: var(--muted); min-height: 1.3em; }
 .tk-get.tk-panel .tk-usd:empty { display: none; }
+/* That our fees are in says it quietly: the muted line, still a tap to see what they come to. */
+.tk-get.tk-panel .tk-usd .link { color: inherit; }
 .tk-q:focus { outline: none; }
 .tk-q:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 .tk-quick { display: inline-flex; gap: 6px; }
@@ -9803,33 +9811,50 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 /* A Balance's colors: each ink's share, side by side. */
 .bn-inks { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 12px; }
 .bn-inks > span { display: inline-flex; align-items: center; gap: 4px; }
-/* Through a batch: the Credits a buy takes, an arrow, then the BALANCE they become. */
+/* The number you’d get, alone on its row; the line under it says how. */
 .tk-get.tk-panel .tk-getrow { grid-column: 1; grid-row: 1; display: flex; align-items: center; gap: 10px; min-width: 0; }
-.tk-from { display: flex; align-items: center; gap: 10px; flex: none; }
-.tk-from:empty { display: none; }
-.tk-from .tk-arrow { color: var(--muted); }
 .tk-get .tk-out { font-size: 28px; line-height: 1.15; letter-spacing: -0.02em; }
 .tk-get .balance-num { display: block; color: #0a0a0a; }
 .tk-modes { margin: 0 0 16px; }
+/* The card's modes as one control across its width, lined up with the panels and the button under it. */
+.tk-form > .tk-modes { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; padding: 2px; border: 1px solid var(--line-strong); border-radius: var(--r); }
+.tk-form > .tk-modes button { justify-content: center; }
 /* One swap-card column: tabs, Pay, You get, the button, then the batch it lands in as one line and a fill bar. */
 .tk-card { width: 100%; max-width: 480px; justify-self: center; margin-top: 24px; }
 .tk-card .tk-form { width: 100%; }
-.tk-batch { margin: 12px 0 4px; display: grid; gap: 10px; }
+/* The batch: the Statement it's making, filling Credit by Credit, beside how far it has to go. */
+.tk-batch { margin: 12px 0 4px; display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 20px; align-items: center; }
 /* The batch reads as a section like Pay and You get: its title row, then the bar, key and line; no box (it's not an input). */
-.tk-batch-head { font-weight: 500; font-size: 16px; }
 .tk-batch[hidden] { display: none; }
 /* Under the picked Credits row: one object with it (no gap, no double border). */
 .tk-batch.attached { margin: -7px 0 0; padding: 4px 12px 14px; color: var(--fg); border-radius: 0 0 var(--r) var(--r); box-shadow: inset 1.5px 0 0 var(--fg), inset -1.5px 0 0 var(--fg), inset 0 -1.5px 0 var(--fg); }
 .tk-ways .tk-way[aria-checked="true"]:has(+ .tk-batch.attached) { border-radius: var(--r) var(--r) 0 0; box-shadow: inset 1.5px 0 0 var(--fg), inset -1.5px 0 0 var(--fg), inset 0 1.5px 0 var(--fg); }
-/* Yours, above the tabs: what this wallet holds and has waiting, one row each with the one thing to do. */
-/* The card and Yours side by side: the swap card on the left, Yours a sidebar on the right that's always there.
-   On phones Yours drops under the card. */
+/* The card and the batch side by side: the swap card on the left, the batch you'd join on the right, a rule between
+   them the height of the taller. On phones the batch drops under the card. */
 .tk-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 56px; margin-top: 24px; align-items: start; }
 .tk-layout .tk-card { margin: 0; max-width: none; }
-.tk-side { display: grid; gap: 0; align-content: start; position: sticky; top: 24px; padding-left: 28px; border-left: 1px solid var(--line); }
-.design-form .tk-side .form-title, .tk-side .form-title { margin: 0 0 12px; padding: 0; border-top: 0; }
-.tk-side > p { margin: 0; }
-@media (max-width: 900px) { .tk-layout { grid-template-columns: minmax(0, 1fr); gap: 40px; } .tk-side { position: static; padding: 24px 0 0; border-left: 0; border-top: 1px solid var(--line); } }
+/* The right column: the batch you'd join, its sheet as the picture and the count as its caption. */
+.tk-right { display: grid; gap: 40px; align-content: start; align-self: stretch; padding-left: 28px; border-left: 1px solid var(--line); }
+.tk-right:not(:has(#tk-batch-home .tk-batch:not([hidden]))) { display: none; }
+#tk-batch-home:not(:has(.tk-batch:not([hidden]))) { display: none; }
+#tk-batch-home .tk-batch { margin: 0; }
+@media (min-width: 901px) {
+  .tk-right #tk-batch-home .tk-batch { grid-template-columns: 1fr; gap: 16px; align-items: start; }
+  .tk-right .tk-mini { width: 240px; }
+}
+@media (max-width: 900px) { .tk-layout { grid-template-columns: minmax(0, 1fr); gap: 24px; } .tk-right { gap: 32px; padding: 0; border-left: 0; } }
+/* Your Credits on the Convert tab: three of them fanned before the word, so the tab reads as yours to tap. */
+.tk-tabfan { display: inline-flex; align-items: center; margin: 0 10px 0 2px; vertical-align: -5px; }
+.tk-tabfan img { width: 18px; height: 18px; background: #fff; box-shadow: 0 0 0 1px var(--img-outline); }
+.tk-tabfan img + img { margin-left: -9px; }
+.tk-tabfan img:nth-child(1) { transform: rotate(-8deg); }
+.tk-tabfan img:nth-child(2) { transform: rotate(3deg); position: relative; }
+.tk-tabfan img:nth-child(3) { transform: rotate(10deg); position: relative; }
+/* Yours, over the card where it's seen first: what's on its way to you and what you've put in, one row each. */
+.tk-yours { margin: 0 0 24px; padding: 4px 16px; border: 1px solid var(--line-strong); border-radius: var(--r); }
+.tk-yours .tk-ytext > span { white-space: normal; text-wrap: pretty; }
+/* Statements you hold, under the Convert button: each redeems on its own. */
+.tk-stmts { margin-top: 32px; }
 .tk-yrow { display: flex; align-items: center; gap: 14px; padding: 10px 0; }
 .tk-ytext { flex: 1; min-width: 0; display: grid; gap: 2px; font-size: 15px; line-height: 1.3; }
 .tk-ytext > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -9842,14 +9867,10 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 .tk-yact.quiet { color: var(--muted); font-size: 13px; }
 /* The card's place while the page reads the chain: its usual height, so nothing moves when it fills. */
 .tk-wait { min-height: 560px; }
-/* Until trading opens: one line under the headline, what to do now and when BALANCE unlocks. No box: one rule under
-   it sets it apart from the rest. */
-.tk-when { width: 100%; margin: 12px 0 0; padding: 0 0 20px; border-bottom: 1px solid var(--line); font-size: 15px; line-height: 1.45; text-wrap: pretty; box-sizing: border-box; }
+/* Until trading opens: one short line tucked under the headline, when BALANCE unlocks. No rule: the card starts the page. */
+.tk-when { width: 100%; margin: 4px 0 0; font-size: 15px; line-height: 1.45; text-wrap: pretty; }
 .tk-when b { font-weight: 500; }
-.tk-when #tk-left { white-space: nowrap; }
-/* Yours, grouped in the order things happen: a quiet name over each group, the first sitting under the title. */
-.tk-ygroup { margin: 18px 0 2px; font-size: 13px; font-weight: 500; color: var(--muted); }
-.tk-side .form-title + .tk-ygroup { margin-top: 6px; }
+#tk-left { white-space: nowrap; }
 .tk-yact:disabled, .tk-ylater { color: var(--muted); text-decoration: none; cursor: default; }
 .tk-yart { flex: none; width: 48px; height: 40px; display: grid; place-items: center; }
 .tk-yart img { display: block; width: 28px; height: 28px; background: #fff; box-shadow: 0 0 0 1px var(--img-outline); }
@@ -9869,23 +9890,34 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 .tk-way:hover { box-shadow: inset 0 0 0 1px var(--fg); }
 .tk-way .num { font-size: 15px; white-space: nowrap; }
 .tk-batch p { margin: 0; }
-.tk-batch-head { display: flex; justify-content: space-between; gap: 10px; font-size: 15px; }
-.tk-fill { height: 8px; background: var(--line); display: flex; }
-.tk-fill i { display: block; height: 100%; transition: width 300ms var(--ease); }
-.tk-fill i.o { background: var(--fg); opacity: 0.35; }
-.tk-fill i.y { background: var(--c, var(--fg)); }
-.tk-keyrow { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.tk-keyrow #tk-bfee { white-space: nowrap; }
-.tk-key { display: flex; gap: 14px; margin: 0; color: var(--muted); }
-.tk-key span { display: inline-flex; align-items: center; gap: 6px; }
-.tk-key i { width: 8px; height: 8px; background: var(--line); display: inline-block; }
-.tk-key i.o { background: var(--fg); opacity: 0.35; }
-.tk-key i.y { background: var(--c, var(--fg)); }
-.tokens .create-head { width: 100%; grid-template-columns: 1fr auto; align-items: baseline; column-gap: 16px; }
+.tk-batchinfo { display: grid; gap: 2px; min-width: 0; }
+.tk-togo { margin: 0 0 6px !important; font-size: 28px; line-height: 1.15; letter-spacing: -0.02em; }
+.tk-in { font-weight: 500; color: var(--fg); }
+/* Grey text inside a filled panel stays readable: a step darker than on the page. */
+.tk-panel, .tk-eth { --muted: color-mix(in srgb, var(--fg) 62%, var(--surface)); }
+#tk-bfee:empty { display: none; }
+/* The count rolls when what you add changes it. */
+.tk-togo .num { display: inline-block; }
+.tk-togo.tick .num, .tk-togo.tick:not(:has(.num)) { animation: tk-tick 220ms cubic-bezier(0.16, 1, 0.3, 1); }
+@keyframes tk-tick { from { opacity: 0.3; transform: translateY(6px); } }
+@media (prefers-reduced-motion: reduce) { @keyframes tk-tick { from { opacity: 0.3; } } }
+
+.tk-mini .sheet .cell.mine::after { content: ''; position: absolute; inset: 0; box-shadow: inset 0 0 0 1px var(--fg); pointer-events: none; }
+.tk-mini .sheet .cell.adding img { opacity: 0.5; }
+.tokens .create-head { width: 100%; margin-top: 24px; }
+.tokens .create-head h1 { text-wrap: balance; }
+/* Under Converted: how many members have how much waiting, before the strip. */
+.tk-made-line { margin: -8px 0 0; font-size: 15px; line-height: 1.45; text-wrap: pretty; }
 .tokens .create-head .create-lede { margin: 0; }
 .tokens .create-head .tk-wallet { grid-column: 1 / -1; }
 .tk-modes button[disabled] { opacity: 0.45; cursor: not-allowed; }
 .tk-form .submit .hint.center { text-align: center; }
+/* The reassurance under the button, quiet; gone when there's nothing to say. */
+.tk-sure { margin: 10px 0 0; font-size: 14px; color: var(--muted); }
+.tk-sure:empty { display: none; }
+/* $BALANCE's chip in a panel opens what it is: a plain label until you hover it. */
+button.tk-unit { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+button.tk-unit:hover { text-decoration: underline; text-underline-offset: 4px; text-decoration-color: var(--line-strong); }
 /* Under You get: the way it goes, the other way when it's a real choice, our fees. Only the lines with something. */
 .tk-lines { display: grid; gap: 2px; margin: 0; }
 .tk-lines p { margin: 0; }
@@ -9919,6 +9951,8 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 .tokens-made { margin-top: 56px; display: grid; gap: 16px; }
 .tokens-made h3 { margin: 0; }
 .made-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 20px 16px; }
+/* On a phone, three across: the strip stays a strip, not two screens of tiles. */
+@media (max-width: 560px) { .made-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 12px; } }
 .made { display: grid; gap: 8px; color: inherit; text-decoration: none; }
 .made img { width: 100%; aspect-ratio: 4 / 5; display: block; background: var(--empty); box-shadow: 0 0 0 1px var(--img-outline); }
 .made > span { display: flex; align-items: center; gap: 6px; }
@@ -9956,8 +9990,5 @@ dialog.how .how-tile img.st { height: 84%; }
 .design-form.tk-form > .rule, .design-form.tk-form .tk-gethead + .rule { padding: 0; margin-top: 10px; gap: 10px; border: 0; }
 .tk-form > .rule > .tk-lines:not(:has(p:not(:empty))) , .tk-form > .rule > .tk-ethrow:has(#amt-line:empty) { display: none; }
 .tk-form .tk-lines p { margin: 0; }
-.tk-form > #tk-batch-home:has(.tk-batch:not([hidden])) { margin-top: 24px; }
-.tk-form #tk-batch-home .tk-batch { margin: 0; }
 .tk-form > .submit { padding-top: 0; margin-top: 24px; }
 .tk-form .tk-eth { margin-bottom: 0; }
-.tk-batch.attached .tk-batch-head { font-size: 14px; font-weight: 400; }
