@@ -7015,6 +7015,20 @@ a.quiet:hover { text-decoration: underline; text-underline-offset: 3px; }
     text-align: left;
   }
 }
+/* The Credits explorer's Buy (the button carries the count and the total): no count beside the slider, and a button
+   wide enough that dragging never moves the row. On phones the slider and the button sit in a bar along the bottom,
+   in reach of a thumb, and the row above them (the count, the sort) scrolls away with the page. */
+.jb-controls .buy-row:has(> .btn) .sweep-range output { display: none; }
+.jb-controls .buy-row > .btn { min-width: 11.5em; }
+@media (max-width: 560px) {
+  .jb-controls:has(.buy-row > .btn) { position: static; box-shadow: none; }
+  .jb-controls .buy-row:has(> .btn) { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; flex-wrap: nowrap; gap: 16px; padding: 12px var(--gutter) calc(12px + env(safe-area-inset-bottom)); background: var(--bg); box-shadow: 0 -1px 0 var(--line); }
+  .jb-controls .buy-row:has(> .btn) .sweep-range { flex: 1 1 auto; min-width: 0; }
+  .jb-controls .buy-row:has(> .btn) .sweep-total { display: none; }
+  .jb-controls .buy-row > .btn { flex: none; }
+  body:has(.jb-controls .buy-row > .btn) { padding-bottom: calc(68px + env(safe-area-inset-bottom)); }
+  body:has(.jb-controls .buy-row > .btn) #toasts { bottom: calc(88px + env(safe-area-inset-bottom)); }
+}
 .sweep-total {
   display: grid;
   min-width: 9em; /* fits "Drag or tap Credits", so the first drag moves nothing */
