@@ -154,7 +154,7 @@ export async function profile(app: HTMLElement, rerender: () => void, member?: A
   const plural = (n: number) => `${n} Credit${n === 1 ? '' : 's'}`;
   const balanceHtml = () => {
     const ins = mineArt
-      ? `<div class="made-row"><a class="made" href="${balanceHref(mineArt)}" target="_blank" rel="noopener"><img src="${balanceSrc(mineArt)}" alt="Balance #${mineArt.id}" decoding="async"><span class="small">Balance #${mineArt.id}</span></a></div>`
+      ? `<div class="made-row"><a class="made" href="${balanceHref(mineArt)}"><img src="${balanceSrc(mineArt)}" alt="Balance #${mineArt.id}" decoding="async"><span class="small">Balance #${mineArt.id}</span></a></div>`
       : held > 0n
         ? row(chip, `${whole(held)} ${TOKEN}`, [own ? 'In your wallet' : 'In their wallet'])
         : '';

@@ -9797,6 +9797,14 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 .tk-get { display: flex; align-items: center; gap: 10px; min-height: 44px; }
 .tk-get #get { display: block; flex: 0 1 auto; min-width: 0; background: #fff; padding: 6px 8px; box-shadow: 0 0 0 1px var(--img-outline); } /* Jack's Balance is drawn on white paper, in any theme */
 .tk-get #get .balance-num { max-width: 100%; height: auto; }
+/* A Balance's colors: each ink's share, side by side. */
+.bn-inks { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 12px; }
+.bn-inks > span { display: inline-flex; align-items: center; gap: 4px; }
+/* Through a batch: the Credits a buy takes, an arrow, then the BALANCE they become. */
+.tk-get.tk-panel .tk-getrow { grid-column: 1; grid-row: 1; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.tk-from { display: flex; align-items: center; gap: 10px; flex: none; }
+.tk-from:empty { display: none; }
+.tk-from .tk-arrow { color: var(--muted); }
 .tk-get .tk-out { font-size: 28px; line-height: 1.15; letter-spacing: -0.02em; }
 .tk-get .balance-num { display: block; color: #0a0a0a; }
 .tk-modes { margin: 0 0 16px; }

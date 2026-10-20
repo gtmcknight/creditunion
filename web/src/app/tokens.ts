@@ -32,7 +32,7 @@ export const balanceArt = (wallet: Address): Promise<BalanceArt | null> =>
     .then((r) => (r.ok ? (r.json() as Promise<Partial<BalanceArt>>) : null))
     .then((j) => (j?.id && j.artwork && j.svg ? (j as BalanceArt) : null), () => null);
 export const balanceSrc = (a: BalanceArt) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(a.svg)}`;
-export const balanceHref = (a: BalanceArt) => `https://opensea.io/item/ethereum/${a.artwork.toLowerCase()}/${a.id}`;
+export const balanceHref = (a: BalanceArt) => `/balances/${a.id}`;
 
 /// Whether a token union's current 80 are rated (TokenAdapter.rate), which its burn needs.
 export const isRated = (union: Address) => pub.readContract({ address: config.tokenAdapter!, abi: tokenAdapterAbi, functionName: 'rated', args: [union] }) as Promise<boolean>;

@@ -1915,6 +1915,41 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     }
   }
 
+  // /balance-art/<id>.json: one Balance as its contract draws and describes it: { artwork, id, owner, svg, attributes },
+  // or 404 for a number not minted yet. Its drawing and numbers follow its wallet's BALANCE: a minute per data center.
+  const nft = url.pathname.match(/^\/balance-art\/(\d{1,7})\.json$/);
+  if (nft) {
+    const cache = caches.default;
+    const key = new Request(`${url.origin}/balance-art/${Number(nft[1])}.json`);
+    const hit = await cache.match(key);
+    if (hit) return hit;
+    if (await limited(env.RL_ART, req)) return text('slow down', 429);
+    const reply = (body: object, status = 200) =>
+      new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': status === 502 ? 'no-store' : 'public, max-age=60' } });
+    const token = await tokenOf(env, ctx);
+    const artwork = token ? await artworkOf(env, token, ctx) : null;
+    if (!artwork) return reply({ id: 0 }, 404);
+    const c = client(env);
+    const id = BigInt(nft[1]);
+    let owner: Address, uri: string;
+    try {
+      [owner, uri] = await Promise.all([
+        c.readContract({ address: artwork, abi: balanceArtAbi, functionName: 'ownerOf', args: [id] }) as Promise<Address>,
+        c.readContract({ address: artwork, abi: balanceArtAbi, functionName: 'tokenURI', args: [id] }) as Promise<string>,
+      ]);
+    } catch (e) {
+      // Not minted: the contract says no. A read that failed isn't kept.
+      if (!refused(e)) return reply({ error: 'Balance unavailable' }, 502);
+      const res = reply({ id: 0 }, 404);
+      ctx.waitUntil(cache.put(key, res.clone()));
+      return res;
+    }
+    const svg = imageOf(uri);
+    const res = svg?.includes('<svg') ? reply({ artwork, id: Number(id), owner, svg, attributes: attributesOf(uri) }) : reply({ error: 'Balance unavailable' }, 502);
+    if (res.status === 200) ctx.waitUntil(cache.put(key, res.clone()));
+    return res;
+  }
+
   // Link cards drawn per party (and made-up ones for /og).
   const drawn = url.pathname.match(/^\/og\/(party|sample)\/([0-9a-zA-Zx]+)\.png$/);
   if (drawn) return linkCard(req, env, url, ctx, drawn[1], drawn[2]);
@@ -3466,6 +3501,7 @@ function tokenOf(env: Env, ctx?: ExecutionContext): Promise<Address | null> {
 const balanceArtAbi = [
   { type: 'function', name: 'tokenIdOf', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'uint256' }] },
   { type: 'function', name: 'tokenURI', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'string' }] },
+  { type: 'function', name: 'ownerOf', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'address' }] },
 ] as const;
 const artworkKept = shared<Address | null>((a) => (a ? Infinity : 60_000));
 function artworkOf(env: Env, token: Address, ctx?: ExecutionContext): Promise<Address | null> {
@@ -3487,6 +3523,22 @@ function statementsOf(env: Env, ctx?: ExecutionContext): Promise<Address | null>
   });
 }
 /// The SVG in a tokenURI's image: the JSON and the image each a data URI, as base64 or as text.
+/// A tokenURI's traits (data: JSON), as plain { trait_type, value } pairs; none when it can't be read.
+function attributesOf(uri: string): { trait_type: string; value: string | number; display_type?: string }[] {
+  try {
+    const m = uri.match(/^data:[^,]*?(;base64)?,([\s\S]*)$/);
+    if (!m) return [];
+    const body = m[1] ? new TextDecoder().decode(Uint8Array.from(atob(m[2]), (ch) => ch.charCodeAt(0))) : decodeURIComponent(m[2]);
+    const list = (JSON.parse(body) as { attributes?: unknown }).attributes;
+    return Array.isArray(list)
+      ? list
+          .filter((a): a is { trait_type: string; value: string | number; display_type?: string } => !!a && typeof a.trait_type === 'string' && (typeof a.value === 'string' || typeof a.value === 'number'))
+          .map((a) => ({ trait_type: a.trait_type.slice(0, 64), value: typeof a.value === 'string' ? a.value.slice(0, 64) : a.value, ...(typeof a.display_type === 'string' ? { display_type: a.display_type.slice(0, 16) } : {}) }))
+      : [];
+  } catch {
+    return [];
+  }
+}
 function imageOf(uri: string): string | null {
   const data = (u: string) => {
     const m = u.match(/^data:[^,]*?(;base64)?,([\s\S]*)$/);

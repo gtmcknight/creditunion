@@ -350,7 +350,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   let feeAsRate = false;
   /// Under You get through a batch: the amount is already after the fee (it read as still to come off), then when it converts.
   const feeLine = (tenthsIn: number) =>
-    `After the <button type="button" class="link" id="fee-rate" title="${pct(bpsOf())} conversion fee">${feeAsRate ? `${pct(bpsOf())} conversion fee` : `${whole(feeOn(tenthsIn))} ${TOKEN} fee`}</button> · converts when the batch fills`;
+    `After the <button type="button" class="link" id="fee-rate" title="${pct(bpsOf())} conversion fee">${feeAsRate ? `${pct(bpsOf())} conversion fee` : `${whole(feeOn(tenthsIn))} ${TOKEN} fee`}</button>`;
   /// Statements listed on OpenSea, read once: a whole Statement is a way in when the amount covers one.
   let stmts: ForSale[] = [];
   listings()
@@ -470,7 +470,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const yoursTenths = inTenths + addTenths;
     // With some of yours in already, the total all of yours will pay; otherwise the box above already says it.
     const inAlready = cur ? mineIn(cur).length : 0;
-    if (bget) bget.textContent = inAlready && add.length ? `When it fills to 80, all ${inAlready + add.length} of yours convert: ≈ ${(est(inTenths) + est(addTenths)).toLocaleString('en-US')} ${TOKEN}. Until then, withdraw anytime.` : yoursTenths ? 'Withdraw anytime before it converts.' : `When it fills to 80, it converts to ${TOKEN}, split by the rating each of you put in. Until then, withdraw anytime.`;
+    if (bget) bget.textContent = yoursTenths ? 'Converts at 80. Until then, withdraw anytime.' : 'Converts at 80, split by the rating each member put in.';
     // Credits a buy would bring in aren't anyone's yet (and signed out there's no "you"), so they say buying.
     const buying = viewNow() === 'buy' ? add.length : 0, mineAll = yours - buying;
     if (legend) legend.innerHTML = `${mineAll ? `<span><i class="y"></i>${mineAll} yours</span>` : ''}${buying ? `<span><i class="y"></i>${buying} buying</span>` : ''}<span><i class="o"></i>${others} others</span><span><i></i>${open} open</span>`;
@@ -560,7 +560,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   const getHtml = (selling: boolean) => `
           <div class="tk-gethead"><h2 class="form-title" id="tk-gettitle">You get</h2>${selling ? '' : colorChip()}</div>
           <section class="rule">
-            ${selling ? '<div class="tk-get tk-panel"><span class="num tk-out" id="get-eth">0</span>${tokenChip(true)}<span class="tk-usd" id="route"></span></div>' : `<div class="tk-get tk-panel"><span id="get">${balanceSvg('0', EVEN)}</span>${tokenChip(false)}<span class="tk-usd" id="route"></span></div>`}
+            ${selling ? '<div class="tk-get tk-panel"><span class="num tk-out" id="get-eth">0</span>${tokenChip(true)}<span class="tk-usd" id="route"></span></div>' : `<div class="tk-get tk-panel"><span class="tk-getrow"><span class="tk-from" id="get-from"></span><span id="get">${balanceSvg('0', EVEN)}</span></span>${tokenChip(false)}<span class="tk-usd" id="route"></span></div>`}
             <div class="tk-lines term-desc"><p id="route2"></p><p id="alt"></p><p id="fees"></p></div>
           </section>`;
   const goHtml = (label: string) => (account ? `<button type="button" class="btn primary block" id="go" disabled>${label}</button>` : '<button type="button" class="btn primary block" data-connect>Connect wallet</button>');
@@ -711,7 +711,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
               .map((c) => {
                 const n = Number(formatUnits(c.amount, got.decimals)).toLocaleString('en-US', { maximumFractionDigits: 0 });
                 return c.art
-                  ? `<a class="made" href="${balanceHref(c.art)}" target="_blank" rel="noopener"><img src="${balanceSrc(c.art)}" alt="Balance #${c.art.id}" decoding="async"><span class="small"><span class="sw-ink">${swatch(c.lane)}</span>Balance #${c.art.id}</span></a>`
+                  ? `<a class="made" href="${balanceHref(c.art)}"><img src="${balanceSrc(c.art)}" alt="Balance #${c.art.id}" decoding="async"><span class="small"><span class="sw-ink">${swatch(c.lane)}</span>Balance #${c.art.id}</span></a>`
                   : `<a class="made" href="/statement/${c.sid}"><img src="/statement/${c.sid}.svg" alt="Statement #${c.sid}" loading="lazy" decoding="async"><span class="small"><span class="sw-ink">${swatch(c.lane)}</span>#${c.sid}<span class="muted num"> · ${n}</span></span></a>`;
               })
               .join('')}</div></section>`
@@ -790,7 +790,10 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     // Under the button, what the buy does, and the buy fee it already has in it.
     const n = hasBatch ? b!.out.length : 0;
     setText('route', route === 'batch' && n ? feeLine(b!.out.reduce((a, x) => a + t(x.id), 0)) : rate);
-    setText('go-note', route === 'batch' && n ? `Buys the ${n === 1 ? 'best-value Credit' : `${n} best-value Credits`} for sale and deposits ${n === 1 ? 'it' : 'them'} in ${curOf(lane()) ? nameOf(lane(), curOf(lane())!) : `a new ${lane().name} batch`}, ready to convert to ${TOKEN}.${feeBps ? ` Includes the ${pct(feeBps)} sweep fee.` : ''}` : '');
+    // Through a batch: the Credits it buys, then what they become.
+    const from = document.getElementById('get-from');
+    if (from) from.innerHTML = route === 'batch' && n ? `<span class="tk-yart tk-fan">${b!.out.slice(0, 3).map((x) => `<img src="${art(Number(x.id))}" alt="" loading="lazy">`).join('')}</span><span class="tk-arrow" aria-hidden="true">→</span>` : '';
+    setText('go-note', route === 'batch' && n && feeBps ? `Includes our ${pct(feeBps)} fee.` : '');
     setText('route2', split ? `${whole(leftN)} via Uniswap · instant` : '');
     const label: Record<Route, [string, string]> = {
       pool: ['Uniswap', `Instant${m?.feeBps ? ` · ${pct(m.feeBps)} fee` : ''}`],

@@ -450,13 +450,15 @@ export const creditsHead = (current: string, value?: string, side = '') => {
       ? '<b>Credits</b>'
       : current === 'statement'
         ? `<a href="/statements">Statements</a><span>/</span><b>${esc(value ?? '')}</b>`
+        : current === 'balances'
+        ? `<a href="/balance">Balance</a><span>/</span><b>${esc(value ?? '')}</b>`
         : !label
         ? `<a href="/credits">Credits</a><span>/</span><b>${esc(value ?? '')}</b>`
         : `<a href="/credits">Credits</a><span>/</span>${value ? `<a href="/${current}">${esc(label)}</a><span>/</span><b>${esc(value)}</b>` : `<b>${esc(label)}</b>`}`;
   const tabs: [string, string][] = [['credits', 'All'], ...sections];
   return `<header class="page-head">
       <nav class="jb-crumb" aria-label="Where">${crumb}</nav>
-      ${current === 'statement' ? '' : `<div class="page-bar"><nav class="subtabs swipe" aria-label="Credits by">${tabs.map(([k, l]) => `<a href="/${k}"${k === current ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</nav>${side ? `<span class="page-side">${side}</span>` : ''}</div>`}
+      ${current === 'statement' || current === 'balances' ? '' : `<div class="page-bar"><nav class="subtabs swipe" aria-label="Credits by">${tabs.map(([k, l]) => `<a href="/${k}"${k === current ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</nav>${side ? `<span class="page-side">${side}</span>` : ''}</div>`}
     </header>`;
 };
 
