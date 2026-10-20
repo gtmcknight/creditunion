@@ -40,6 +40,7 @@ import { idsKey } from '../shared/ids';
 import { keep, type Kept } from './keeper';
 import { pictureMessage, pictureRecord } from '../shared/picture-save';
 import { gzip, pictureRows, rowsOf, wallOf } from './slice';
+import { shared } from './shared';
 
 interface RateLimit {
   limit(o: { key: string }): Promise<{ success: boolean }>;
@@ -324,36 +325,6 @@ export default {
     );
   },
 } satisfies ExportedHandler<Env>;
-
-/// A read one request starts and the others in this isolate share while it runs (the union index, the Activity feed),
-/// its value then handed out for `keep(value)` ms (by default, not at all). Its I/O belongs to the request that
-/// started it, and Workers cancel that when the request ends, as when its visitor leaves: the read then never
-/// settles, and every request after would wait on it until the isolate is recycled. So the starter keeps its read
-/// going with waitUntil (up to 30 s after it ends), and nobody waits on another request's read past SHARE_MS from its
-/// start: they read for themselves, and the requests after them share that. A caller without `ctx` gets only the limit.
-const SHARE_MS = 4_000;
-const LATE = Symbol('late');
-function shared<T>(keep: (v: T) => number = () => 0) {
-  let now: { at: number; p: Promise<T>; until?: number } | null = null;
-  return async (ctx: ExecutionContext | undefined, read: () => Promise<T>): Promise<T> => {
-    const s = now;
-    if (s?.until !== undefined) {
-      if (Date.now() < s.until) return s.p;
-    } else if (s) {
-      let timer: ReturnType<typeof setTimeout> | null = null;
-      const late = new Promise<typeof LATE>((ok) => (timer = setTimeout(() => ok(LATE), s.at + SHARE_MS - Date.now())));
-      const v = await Promise.race([s.p, late]).finally(() => clearTimeout(timer));
-      if (v !== LATE) return v;
-      if (now === s) now = null;
-    }
-    const mine: { at: number; p: Promise<T>; until?: number } = { at: Date.now(), p: read() };
-    now = mine;
-    // A failed read is asked again by the next caller.
-    const settled = mine.p.then((v) => void (mine.until = Date.now() + keep(v)), () => void (mine.until = 0));
-    ctx?.waitUntil(settled);
-    return mine.p;
-  };
-}
 
 /// Every Activity row (newest first) with plans' unions left out until they fill. Read once for the site by the
 /// ChainBook (at most every FEED_MS), kept FEED_MS in the colo cache and in this isolate, so /activity.json's slices
@@ -2036,35 +2007,25 @@ function countsOf(v: Index): { liveAuctions: number; burnable: number } {
   return v.counts;
 }
 /// The burn contract once it's on (it can never change after), else what's proposed: read once a minute until then.
-let burnKept: { at: number; v: Promise<NonNullable<Facts['burn']>> } | null = null;
+const burnKept = shared<NonNullable<Facts['burn']>>((b) => (b.assembler ? Infinity : 60_000));
 function burnState(env: Env): Promise<NonNullable<Facts['burn']>> {
-  if (burnKept && Date.now() - burnKept.at < 60_000) return burnKept.v;
   const c = client(env);
   const read = (functionName: 'assembler' | 'pendingAssembler' | 'pendingUntil') => c.readContract({ address: env.FACTORY as Address, abi: factoryAbi, functionName });
   const zero = (a: unknown) => /^0x0{40}$/i.test(String(a));
   // A failed read throws (the page then goes without), never reads as "not on".
-  const v = read('assembler').then(async (assembler) => {
-    if (!zero(assembler)) return { assembler: assembler as Address, pending: null, until: 0 };
-    const [pending, until] = await Promise.all([read('pendingAssembler'), read('pendingUntil')]);
-    return { assembler: null, pending: zero(pending) ? null : (pending as Address), until: Number(until) };
-  });
-  const entry = { at: Date.now(), v };
-  burnKept = entry;
-  v.then((b) => b.assembler && (entry.at = Infinity), () => burnKept === entry && (burnKept = null));
-  return v;
+  return burnKept(undefined, () =>
+    read('assembler').then(async (assembler) => {
+      if (!zero(assembler)) return { assembler: assembler as Address, pending: null, until: 0 };
+      const [pending, until] = await Promise.all([read('pendingAssembler'), read('pendingUntil')]);
+      return { assembler: null, pending: zero(pending) ? null : (pending as Address), until: Number(until) };
+    }),
+  );
 }
 /// The Sweeper's fee on each buy, a few minutes old at most (the buy reads it again before it sends).
-let feeKept: { at: number; v: Promise<number> } | null = null;
+const feeKept = shared<number>(() => 5 * 60_000);
 function sweeperFeeOf(env: Env): Promise<number | undefined> {
   if (!publicConfig(env).sweeper) return Promise.resolve(undefined);
-  if (feeKept && Date.now() - feeKept.at < 5 * 60_000) return feeKept.v;
-  const v = client(env)
-    .readContract({ address: env.SWEEPER, abi: sweeperAbi, functionName: 'feeBps' })
-    .then(Number);
-  const entry = { at: Date.now(), v };
-  feeKept = entry;
-  v.catch(() => feeKept === entry && (feeKept = null));
-  return v;
+  return feeKept(undefined, () => client(env).readContract({ address: env.SWEEPER, abi: sweeperAbi, functionName: 'feeBps' }).then(Number));
 }
 
 /// What a Credit's card shows, from the edition's packed traits and score table.
@@ -2572,27 +2533,18 @@ const rulesOf = (f: Filter) => ({
 
 /// Whether rating rules are checked against LiveRatings: for a union, the table it opened with (fixed for good); with
 /// none, the factory's table now (what a union opened now would use). The original table is env.RATINGS.
-const unionTables = new Map<string, Promise<boolean>>();
-let factoryTable: { at: number; p: Promise<boolean> } | null = null;
+const unionTables = new Map<string, ReturnType<typeof shared<boolean>>>();
+const factoryTable = shared<boolean>(() => 60_000);
 async function liveTable(env: Env, union?: Address): Promise<boolean> {
   const original = (env.RATINGS ?? '').toLowerCase();
   const isLive = (a: unknown) => !!original && String(a).toLowerCase() !== original;
   if (union) {
     const k = union.toLowerCase();
-    let p = unionTables.get(k);
-    if (!p) {
-      p = client(env).readContract({ address: union, abi: [{ type: 'function', name: 'ratings', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] }], functionName: 'ratings' }).then(isLive);
-      unionTables.set(k, p);
-      p.catch(() => unionTables.delete(k));
-    }
-    return p.catch(() => false);
+    let table = unionTables.get(k);
+    if (!table) unionTables.set(k, (table = shared<boolean>(() => Infinity)));
+    return table(undefined, () => client(env).readContract({ address: union, abi: [{ type: 'function', name: 'ratings', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] }], functionName: 'ratings' }).then(isLive)).catch(() => false);
   }
-  if (!factoryTable || Date.now() - factoryTable.at > 60_000) {
-    const p = client(env).readContract({ address: env.FACTORY as Address, abi: factoryAbi, functionName: 'ratings' }).then(isLive);
-    factoryTable = { at: Date.now(), p };
-    p.catch(() => (factoryTable = null));
-  }
-  return factoryTable.p.catch(() => false);
+  return factoryTable(undefined, () => client(env).readContract({ address: env.FACTORY as Address, abi: factoryAbi, functionName: 'ratings' }).then(isLive)).catch(() => false);
 }
 
 /// Every Credit the rules let in, in Credit order.
@@ -3422,12 +3374,12 @@ const statementsAbi = [
 ] as const;
 /// How many Statements have been made (supply()), read at most once per `maxMs` per isolate; null when it can't be
 /// read (a contract without it), and then nothing is ruled out.
-let countKept: { at: number; of: Address; n: Promise<number | null> } | null = null;
+const countKept = new Map<string, ReturnType<typeof shared<number | null>>>();
 function statementCount(env: Env, statements: Address, maxMs: number): Promise<number | null> {
-  if (countKept && countKept.of === statements && Date.now() - countKept.at < maxMs) return countKept.n;
-  const n = client(env).readContract({ address: statements, abi: statementsAbi, functionName: 'supply' }).then(Number, () => null);
-  countKept = { at: Date.now(), of: statements, n };
-  return n;
+  const k = `${statements.toLowerCase()}:${maxMs}`;
+  let count = countKept.get(k);
+  if (!count) countKept.set(k, (count = shared<number | null>(() => maxMs)));
+  return count(undefined, () => client(env).readContract({ address: statements, abi: statementsAbi, functionName: 'supply' }).then(Number, () => null));
 }
 /// Whether a read failed because the contract reverted with a reason (a custom error, say), not because it couldn't be
 /// reached.

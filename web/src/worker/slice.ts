@@ -5,21 +5,17 @@
 ///
 /// Layout, little-endian: u32 edition size, u32 rows; then each row's u32 id (ascending), u32 price in gwei (0 for a
 /// Credit not for sale), u8 traits and 32 bytes of print. The app reads it back in picture.ts (sliceBase).
+import { shared } from './shared';
 
-/// wall.bin, read once per isolate.
-let walls: Promise<Uint8Array> | null = null;
+/// wall.bin, read once per isolate (shared: a read cut off with its request is read again).
+const walls = shared<Uint8Array>(() => Infinity);
 export function wallOf(assets: Fetcher, origin: string): Promise<Uint8Array> {
-  walls ??= assets
-    .fetch(new Request(`${origin}/wall.bin`))
-    .then(async (r) => {
+  return walls(undefined, () =>
+    assets.fetch(new Request(`${origin}/wall.bin`)).then(async (r) => {
       if (!r.ok) throw new Error('wall.bin missing');
       return new Uint8Array(await r.arrayBuffer());
-    })
-    .catch((e) => {
-      walls = null;
-      throw e;
-    });
-  return walls;
+    }),
+  );
 }
 
 /// The rows for `ids` with their prices (gwei), ids ascending.

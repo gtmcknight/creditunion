@@ -5,6 +5,7 @@
 /// included); public/wall.bin's registered grid (scripts/wall.ts) is the fallback when the chain can't be read.
 import { MIXES, type Rect } from './print';
 import { eightsName } from '../shared/trait';
+import { shared } from './shared';
 
 const W = 1200, H = 630;
 
@@ -19,21 +20,18 @@ type Glyph = { adv: number; x: number; y: number; w: number; h: number; a: Uint8
 type Face = Map<number, Glyph>;
 type Assets = { cells: Uint8Array; faces: Face[] };
 
-let assets: Promise<Assets> | null = null;
+/// wall.bin and the glyphs, read once per isolate (shared: a read cut off with its request is read again).
+const assets = shared<Assets>(() => Infinity);
 function load(fetcher: Fetcher, origin: string): Promise<Assets> {
-  assets ??= Promise.all(
-    ['/wall.bin', '/og/font.bin'].map(async (p) => {
-      const r = await fetcher.fetch(new Request(origin + p));
-      if (!r.ok) throw new Error(`${p} missing`);
-      return new Uint8Array(await r.arrayBuffer());
-    }),
-  )
-    .then(([cells, font]) => ({ cells, faces: parseFont(font) }))
-    .catch((e) => {
-      assets = null;
-      throw e;
-    });
-  return assets;
+  return assets(undefined, () =>
+    Promise.all(
+      ['/wall.bin', '/og/font.bin'].map(async (p) => {
+        const r = await fetcher.fetch(new Request(origin + p));
+        if (!r.ok) throw new Error(`${p} missing`);
+        return new Uint8Array(await r.arrayBuffer());
+      }),
+    ).then(([cells, font]) => ({ cells, faces: parseFont(font) })),
+  );
 }
 
 function parseFont(b: Uint8Array): Face[] {

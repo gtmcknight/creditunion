@@ -1,39 +1,30 @@
 /// Design-time matcher: how many Credits in the frozen edition satisfy a set of rules, and a few examples.
-/// Reads public/edition-traits.bin (one packed Uint32 per Credit; layout in scripts/edition.ts).
+/// Reads public/edition-traits.bin (one packed Uint32 per Credit; layout in scripts/edition.ts). Each file is read once
+/// per isolate (shared: a read cut off with its request is read again).
+import { shared } from './shared';
 
-let table: Promise<Uint32Array> | null = null;
+const table = shared<Uint32Array>(() => Infinity);
 /// Rating rule tables (score ×10 by id − 1): scores.bin is the Ratings contract unions opened with first; scores-live.bin
 /// is LiveRatings (the Statements contract's scores, cut to tenths), for unions opened once the factory uses it.
-const scores = new Map<string, Promise<Uint16Array>>();
+const scores = { 'scores.bin': shared<Uint16Array>(() => Infinity), 'scores-live.bin': shared<Uint16Array>(() => Infinity) };
 
 export async function loadScores(assets: Fetcher, origin: string, live = false) {
   const f = live ? 'scores-live.bin' : 'scores.bin';
-  let p = scores.get(f);
-  if (!p) {
-    p = assets.fetch(new Request(`${origin}/${f}`)).then(async (r) => {
+  return scores[f](undefined, () =>
+    assets.fetch(new Request(`${origin}/${f}`)).then(async (r) => {
       if (!r.ok) throw new Error(`${f} missing`);
       return new Uint16Array(await r.arrayBuffer());
-    });
-    scores.set(f, p);
-    p.catch(() => scores.delete(f));
-  }
-  return p;
+    }),
+  );
 }
 
 export async function load(assets: Fetcher, origin: string) {
-  if (!table) {
-    table = assets
-      .fetch(new Request(`${origin}/edition-traits.bin`))
-      .then(async (r) => {
-        if (!r.ok) throw new Error('edition-traits.bin missing');
-        return new Uint32Array(await r.arrayBuffer());
-      })
-      .catch((e) => {
-        table = null;
-        throw e;
-      });
-  }
-  return table;
+  return table(undefined, () =>
+    assets.fetch(new Request(`${origin}/edition-traits.bin`)).then(async (r) => {
+      if (!r.ok) throw new Error('edition-traits.bin missing');
+      return new Uint32Array(await r.arrayBuffer());
+    }),
+  );
 }
 
 /// Sets, one bit per accepted value, 0 = any (same encoding as Batch.Filter).
@@ -56,36 +47,26 @@ export type Rules = {
   bitsTo?: number;
 };
 
-let marks: Promise<Uint16Array> | null = null;
+const marks = shared<Uint16Array>(() => Infinity);
 /// Each Credit's Bits (public/bits.bin, scripts/wall.ts).
 function loadBits(assets: Fetcher, origin: string) {
-  marks ??= assets
-    .fetch(new Request(`${origin}/bits.bin`))
-    .then(async (r) => {
+  return marks(undefined, () =>
+    assets.fetch(new Request(`${origin}/bits.bin`)).then(async (r) => {
       if (!r.ok) throw new Error('bits.bin missing');
       return new Uint16Array(await r.arrayBuffer());
-    })
-    .catch((e) => {
-      marks = null;
-      throw e;
-    });
-  return marks;
+    }),
+  );
 }
 
-let times: Promise<Uint32Array> | null = null;
+const times = shared<Uint32Array>(() => Infinity);
 /// When each Credit's payment landed (public/times.bin, scripts/wall.ts), for Payment Time windows in seconds.
 function loadTimes(assets: Fetcher, origin: string) {
-  times ??= assets
-    .fetch(new Request(`${origin}/times.bin`))
-    .then(async (r) => {
+  return times(undefined, () =>
+    assets.fetch(new Request(`${origin}/times.bin`)).then(async (r) => {
       if (!r.ok) throw new Error('times.bin missing');
       return new Uint32Array(await r.arrayBuffer());
-    })
-    .catch((e) => {
-      times = null;
-      throw e;
-    });
-  return times;
+    }),
+  );
 }
 
 /// A test for one Credit against the rules, from the frozen edition (no chain reads).

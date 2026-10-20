@@ -7,51 +7,45 @@
 import { decodeFunctionResult, encodeFunctionData, type Address } from 'viem';
 import { creditsAbi } from '../app/abi';
 import { rate, type Edition, type Rating } from '../shared/credits';
+import { shared } from './shared';
 
-let edition: Promise<Edition> | null = null;
+/// edition.bin, and below the score tables: read once per isolate (shared: a read cut off with its request is read again).
+const edition = shared<Edition>(() => Infinity);
 const MAINNET_CREDITS = '0x97630aa70ab14ed9883b41dafccbc11349723043';
 
 /// Jack's scores (ten-thousandths, by id − 1), each one's rank (1 + Credits scored strictly higher), and the rule table.
-let table: Promise<{ score: Uint32Array; rank: Uint32Array; rule: Uint16Array }> | null = null;
+const table = shared<{ score: Uint32Array; rank: Uint32Array; rule: Uint16Array }>(() => Infinity);
 export async function loadTable(assets: Fetcher, origin: string) {
-  if (!table) {
-    table = (async () => {
-      const [a, b] = await Promise.all(['credit-score.bin', 'scores.bin'].map(async (f) => {
-        const r = await assets.fetch(new Request(`${origin}/${f}`));
-        if (!r.ok) throw new Error(`${f} missing`);
-        return r.arrayBuffer();
-      }));
-      const score = new Uint32Array(a);
-      const sorted = Uint32Array.from(score).sort();
-      const rank = new Uint32Array(score.length);
-      for (let i = 0; i < score.length; i++) {
-        let lo = 0, hi = sorted.length; // first index above score[i]
-        while (lo < hi) { const m = (lo + hi) >> 1; if (sorted[m] <= score[i]) lo = m + 1; else hi = m; }
-        rank[i] = sorted.length - lo + 1;
-      }
-      return { score, rank, rule: new Uint16Array(b) };
-    })();
-    table.catch(() => (table = null));
-  }
-  return table;
+  return table(undefined, async () => {
+    const [a, b] = await Promise.all(['credit-score.bin', 'scores.bin'].map(async (f) => {
+      const r = await assets.fetch(new Request(`${origin}/${f}`));
+      if (!r.ok) throw new Error(`${f} missing`);
+      return r.arrayBuffer();
+    }));
+    const score = new Uint32Array(a);
+    const sorted = Uint32Array.from(score).sort();
+    const rank = new Uint32Array(score.length);
+    for (let i = 0; i < score.length; i++) {
+      let lo = 0, hi = sorted.length; // first index above score[i]
+      while (lo < hi) { const m = (lo + hi) >> 1; if (sorted[m] <= score[i]) lo = m + 1; else hi = m; }
+      rank[i] = sorted.length - lo + 1;
+    }
+    return { score, rank, rule: new Uint16Array(b) };
+  });
 }
 
 async function loadEdition(assets: Fetcher, origin: string): Promise<Edition> {
-  if (!edition) {
-    edition = (async () => {
-      const res = await assets.fetch(new Request(`${origin}/edition.bin`));
-      if (!res.ok) throw new Error('edition.bin missing');
-      const buf = await res.arrayBuffer();
-      const len = new DataView(buf).getUint32(0, true);
-      const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, len))) as { n: number; tails: Edition['tails']; counts: Edition['counts'] };
-      const rsBytes = (buf.byteLength - 4 - len) / (8 + 4);
-      const rs = new Float64Array(buf.slice(4 + len, 4 + len + rsBytes * 8));
-      const below = new Uint32Array(buf.slice(4 + len + rsBytes * 8));
-      return { n: meta.n, tails: meta.tails, counts: meta.counts, rs, below };
-    })();
-    edition.catch(() => (edition = null));
-  }
-  return edition;
+  return edition(undefined, async () => {
+    const res = await assets.fetch(new Request(`${origin}/edition.bin`));
+    if (!res.ok) throw new Error('edition.bin missing');
+    const buf = await res.arrayBuffer();
+    const len = new DataView(buf).getUint32(0, true);
+    const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, len))) as { n: number; tails: Edition['tails']; counts: Edition['counts'] };
+    const rsBytes = (buf.byteLength - 4 - len) / (8 + 4);
+    const rs = new Float64Array(buf.slice(4 + len, 4 + len + rsBytes * 8));
+    const below = new Uint32Array(buf.slice(4 + len + rsBytes * 8));
+    return { n: meta.n, tails: meta.tails, counts: meta.counts, rs, below };
+  });
 }
 
 export type Rated = Rating & { id: string; seed: string; paidAt: number; rule: number };
