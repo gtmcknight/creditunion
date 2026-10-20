@@ -3,8 +3,8 @@
 /// (waiting for your return if the tab is in the background), "(Outbid)" in the tab's title meanwhile, and a system
 /// notification there if you turned them on after a bid.
 import type { Address } from 'viem';
-import { onTx, session } from './chain';
-import { indexedOne, listBatches, recentBatches, type Listed } from './data';
+import { config, onTx, session } from './chain';
+import { indexedOne, listBatches, liveAuctions, recentBatches, type Listed } from './data';
 import { esc, eth, same, toast } from './ui';
 
 const SEEN = 'cu-outbid-seen'; // union → the high bid you were told about
@@ -57,7 +57,7 @@ onTx(() => (bids = null));
 function bidOn(me: Address): Promise<Map<string, number>> {
   if (bids && bids.who === me.toLowerCase() && Date.now() - bids.at < BIDS_MS) return bids.p;
   type Row = { kind: string; union?: string; time?: number };
-  const p = fetch(`/activity.json?member=${me}&limit=1000`)
+  const p = fetch(`/activity.json?member=${me}&kind=bid&limit=1000`)
     .then((x) => x.json() as Promise<{ items?: Row[] }>)
     .then((r) => {
       const last = new Map<string, number>();
@@ -85,6 +85,13 @@ async function unionsNow(addrs: string[]): Promise<Listed[]> {
   if (addrs.length > ONE_BY_ONE) return pick(await listBatches().catch(() => [] as Listed[]));
   return (await Promise.all(addrs.map((a) => indexedOne(a as Address)))).filter((b): b is NonNullable<typeof b> => !!b);
 }
+/// No auction live, as the page knows it (a union list read here lately, else the Worker's count from under two minutes
+/// ago): nobody can be outbid, so there's nothing to read. Unknown, it looks.
+function noAuctions() {
+  const list = recentBatches();
+  if (list) return liveAuctions(list) === 0;
+  return config?.liveAuctions === 0 && Date.now() - (config.factsAt ?? 0) < 2 * 60_000;
+}
 /// After your own bid the feed can show it a few seconds before the union list does: no "outbid" until both caught up.
 const GRACE = 90;
 
@@ -92,7 +99,7 @@ const GRACE = 90;
 let looked = { who: '', at: 0 };
 export async function checkOutbid() {
   const me = watched();
-  if (!me) return;
+  if (!me || noAuctions()) return;
   if (looked.who === me.toLowerCase() && Date.now() - looked.at < 5_000) return;
   looked = { who: me.toLowerCase(), at: Date.now() };
   const mine = await bidOn(me);
