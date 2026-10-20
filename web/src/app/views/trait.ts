@@ -81,13 +81,12 @@ export async function traitPage(app: HTMLElement, kind: string, raw: string) {
       .then((b) => (scoreOf = new Uint32Array(b)))
       .catch(() => {});
 
-  const start = t ? `/create?${t.kind}=${encodeURIComponent(t.slug)}` : '/create';
   // How many, from the counts built into the page (no wait, so the line never shifts); the unions link, which
   // does wait, comes last on the line.
   const count = !t ? facts.n : t.kind === 'palette' ? (facts.palette.find(([p]) => p === t.name)?.[1] ?? 0) : facts[t.kind][t.v - 1] ?? 0;
   app.innerHTML = `
   <section class="trait-page jb">
-    ${creditsHead(kind, t?.name, `<a class="jb-link" id="jb-unions" href="/unions${t ? `?${t.kind}=${encodeURIComponent(t.slug)}` : ''}" hidden></a><a class="jb-link" href="${start}">Start a Credit Union${t ? ' for them' : ''}</a>`)}
+    ${creditsHead(kind, t?.name)}
     ${
       all
         ? ''
@@ -103,17 +102,6 @@ export async function traitPage(app: HTMLElement, kind: string, raw: string) {
     <div class="trait-grid" id="trait-grid"></div>
     <button type="button" class="btn block" id="trait-more" hidden>Show more</button>
   </section>`;
-
-  // Open Credit Unions that take these Credits: a count that links to them on /unions.
-  void listBatches()
-    .then((list) => {
-      const open = list.filter((b) => (t ? takes(b, t) : b.s.state === 'Open'));
-      const a = document.getElementById('jb-unions') as HTMLAnchorElement | null;
-      if (!a || !open.length) return;
-      a.textContent = t ? `${open.length} open Credit ${open.length === 1 ? 'Union takes' : 'Unions take'} them` : `${open.length} open Credit ${open.length === 1 ? 'Union' : 'Unions'}`;
-      a.hidden = false;
-    })
-    .catch(() => {});
 
   // Market: only the Credits for sale, in the chosen order, and how many there are.
   const saleN = (n: number) => {
