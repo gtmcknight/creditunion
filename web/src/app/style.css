@@ -9842,6 +9842,9 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 .tk-when { width: 100%; max-width: 876px; justify-self: center; margin: 12px 0 0; padding: 0 0 20px; border-bottom: 1px solid var(--line); font-size: 15px; line-height: 1.45; text-wrap: pretty; box-sizing: border-box; }
 .tk-when b { font-weight: 500; }
 .tk-when #tk-left { white-space: nowrap; }
+/* Yours, grouped in the order things happen: a quiet name over each group, the first sitting under the title. */
+.tk-ygroup { margin: 18px 0 2px; font-size: 13px; font-weight: 500; color: var(--muted); }
+.tk-side .form-title + .tk-ygroup { margin-top: 6px; }
 .tk-yact:disabled, .tk-ylater { color: var(--muted); text-decoration: none; cursor: default; }
 .tk-yart { flex: none; width: 48px; height: 40px; display: grid; place-items: center; }
 .tk-yart img { display: block; width: 28px; height: 28px; background: #fff; box-shadow: 0 0 0 1px var(--img-outline); }

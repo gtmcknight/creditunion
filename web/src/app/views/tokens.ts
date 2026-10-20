@@ -637,7 +637,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const yourBatches = LANES.flatMap((x) => waiting.filter((u) => laneOf(u.s) === x && mineIn(u).length).reverse());
     // Yours, under the title: only when there's something (BALANCE held, Credits waiting, a payout to claim).
     // Yours: what this wallet holds and has waiting, each with the one thing to do about it. Only when there's something.
-    const rows: string[] = [];
+    // Three groups, in the order things happen: what's in your wallet to convert, what's deposited in a batch, and the
+    // BALANCE that's yours (held for you until trading opens, or in your wallet).
+    const inWalletRows: string[] = [], depositedRows: string[] = [], balanceRows: string[] = [];
     // A small picture leads each row: up to three of the Credits fanned, the Statement, or the coin.
     const fan = (ids: readonly bigint[]) => `<span class="tk-yart tk-fan">${ids.slice(0, 3).map((id) => `<img src="${art(id)}" alt="" loading="lazy">`).join('')}</span>`;
     // The coin: the amount in the BALANCE digits (they have no "$"), whole, shrunk to fit its 40px (8 to the advance).
@@ -649,15 +651,15 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const row = (artHtml: string, title: string, sub: string | string[], action = '') => `<div class="tk-yrow">${artHtml}<div class="tk-ytext"><b>${title}</b>${[sub].flat().filter(Boolean).map((l) => `<span class="muted small">${l}</span>`).join('')}</div>${action}</div>`;
     // Until trading opens, BALANCE in a wallet can't move: the row says until when.
     const inWallet = isOpen ? 'In your wallet' : `In your wallet, locked until ${whenShort(tradesAt)}`;
-    if (m && tokenHeld > 0n) rows.push(row(coin(tokAmt(tokenHeld)), `<span class="num">${tokAmt(tokenHeld)}</span> ${TOKEN}`, inWallet));
-    else if (!m && held && held.amount > 0n) rows.push(row(coin(amount(held.amount)), `<span class="num">${amount(held.amount)}</span> ${TOKEN}`, inWallet));
+    if (m && tokenHeld > 0n) balanceRows.push(row(coin(tokAmt(tokenHeld)), `<span class="num">${tokAmt(tokenHeld)}</span> ${TOKEN}`, inWallet));
+    else if (!m && held && held.amount > 0n) balanceRows.push(row(coin(amount(held.amount)), `<span class="num">${amount(held.amount)}</span> ${TOKEN}`, inWallet));
     for (const u of yourBatches) {
       const l = laneOf(u.s)!, mine = mineIn(u), p = u.s.phase;
       // What they pay out when it converts, after the fee this batch opened with (the same figure as the batch box).
       const worth = Math.floor((mine.reduce((n, id) => n + t(id), 0) / 10) * (1 - u.s.protocolFeeBps / 10_000));
       // Full: waiting for BALANCE to open, converting (locked), or its hour passed unconverted (withdrawable again).
       const where = p === 'Open' ? `${u.s.count} of 80 so far` : p === 'Waiting' ? (trade?.open || convertsAt <= Date.now() + 60_000 ? 'Full, converting soon' : `Full, converts ${whenShort(convertsAt)}`) : p === 'Expired' ? 'Full, waiting to convert' : 'Full, converting now';
-      rows.push(
+      depositedRows.push(
         row(
           fan(mine),
           `${plural(mine.length)} in ${nameOf(l, u)}`,
@@ -669,17 +671,19 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     // Credits still in the wallet: what they'd convert into, and the way to do it.
     if (owned.length) {
       const worth = est(owned.reduce((n, id) => n + t(id), 0));
-      rows.push(row(fan([...owned].sort((x, y) => t(y) - t(x))), `${plural(owned.length)} to convert`, `≈ ${worth.toLocaleString('en-US')} ${TOKEN}`, viewNow() === 'credits' ? '' : '<button type="button" class="tk-yact go" data-view="credits" data-all>Convert</button>'));
+      inWalletRows.push(row(fan([...owned].sort((x, y) => t(y) - t(x))), plural(owned.length), `≈ ${worth.toLocaleString('en-US')} ${TOKEN}`, viewNow() === 'credits' ? '' : '<button type="button" class="tk-yact go" data-view="credits" data-all>Convert</button>'));
     }
     for (const x of myStmts)
-      rows.push(row(`<span class="tk-yart"><img class="st" src="/statement/${x.id}.svg" alt=""></span>`, `Statement #${x.id}`, `${x.rating.toLocaleString('en-US')} ${TOKEN}`, x.ready ? `<button type="button" class="tk-yact go" data-redeem="${x.id}">Redeem</button>` : `<span class="tk-yact tk-ylater">${Date.now() < OPENS_AT ? whenShort(OPENS_AT) : 'Soon'}</span>`));
+      inWalletRows.push(row(`<span class="tk-yart"><img class="st" src="/statement/${x.id}.svg" alt=""></span>`, `Statement #${x.id}`, `${x.rating.toLocaleString('en-US')} ${TOKEN}`, x.ready ? `<button type="button" class="tk-yact go" data-redeem="${x.id}">Redeem</button>` : `<span class="tk-yact tk-ylater">${Date.now() < OPENS_AT ? whenShort(OPENS_AT) : 'Soon'}</span>`));
     // Owed from a converted batch: claimable once the token's transfers open (the keeper usually pays it first).
     if (got.claim.length)
-      rows.push(paying ? row(coin(amount(got.amount)), 'Payout ready', `${TOKEN} from a converted batch`, '<button type="button" class="tk-yact go" id="claim">Claim</button>') : row(coin(amount(got.amount)), `<span class="num">${amount(got.amount)}</span> ${TOKEN}`, ['Converted, held for you', `Lands in your wallet ${whenShort(tradesAt)}`]));
+      balanceRows.push(paying ? row(coin(amount(got.amount)), 'Payout ready', `${TOKEN} from a converted batch`, '<button type="button" class="tk-yact go" id="claim">Claim</button>') : row(coin(amount(got.amount)), `<span class="num">${amount(got.amount)}</span> ${TOKEN}`, `Lands in your wallet ${whenShort(tradesAt)}`));
     // Yours: a sidebar always beside the card, so what you hold and have waiting never hides. Empty, it says so.
     const wallet = `<aside class="tk-side" aria-label="Yours"><h2 class="form-title">Yours</h2>${
       !account ? '<p class="muted small">Connect to see your $BALANCE, Credits waiting to convert and Statements to redeem.</p>'
-        : rows.length ? rows.join('') : '<p class="muted small">Nothing yet. What you buy or convert shows here until it lands.</p>'
+        : inWalletRows.length + depositedRows.length + balanceRows.length
+          ? ([['In your wallet', inWalletRows], ['Deposited', depositedRows], [TOKEN, balanceRows]] as const).map(([label, list]) => (list.length ? `<h3 class="tk-ygroup">${label}</h3>${list.join('')}` : '')).join('')
+          : '<p class="muted small">Nothing yet. What you buy or convert shows here until it lands.</p>'
     }</aside>`;
     // Until trading opens: one line under the headline, what to do now and when BALANCE unlocks, in the viewer's own
     // time, counting down.
