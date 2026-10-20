@@ -145,6 +145,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   }
   const factory = config.tokenFactory;
   const thisRun = ++pageRun;
+  // The market book (the biggest read) starts now, beside the chain reads, so prices are in when the card draws.
+  const bookP = config.tokenSweeper ? fetch('/market.json').then((r) => (r.ok ? (r.json() as Promise<{ at?: number; items?: [string, string, string][] }>) : null)).catch(() => null) : null;
   const asked = new URLSearchParams(location.search).get('color');
   if (asked && LANES.some((l) => l.key === asked)) laneKey = asked as Lane['key'];
   if (previewJoined && !joined) joined = { batch: '', lane: laneKey, at: Date.now() };
@@ -291,26 +293,34 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     app.querySelector('.tk-form')?.classList.toggle('busy', on);
     for (const el of $$<HTMLButtonElement | HTMLInputElement>('.tokens button, .tokens input', app)) if (on) el.disabled = true;
   };
-  const run = async (btn: HTMLElement | null, label: string, fn: () => Promise<unknown>, ok: string) => {
+  /// The button in flight: it asks you to confirm in your wallet, and once you have (note), says what's happening.
+  let flying: { btn: HTMLElement; working: string } | null = null;
+  const run = async (btn: HTMLElement | null, working: string, fn: () => Promise<unknown>, ok: string) => {
     lock(true);
     if (btn) {
       btn.setAttribute('disabled', '');
       btn.dataset.label = btn.textContent ?? '';
-      btn.textContent = label;
+      btn.textContent = 'Confirm in your wallet…';
+      flying = { btn, working };
     }
     try {
       await fn();
+      flying = null;
       if (ok) toast(ok, 'ok');
       typed = '';
       rerun();
     } catch (e) {
       // Back to how it was: redrawn, so every control is live again.
+      flying = null;
       busy = false;
       toast(errText(e), 'err', 8000);
       draw();
     }
   };
-  const note = () => toast('Submitted. Waiting for confirmation…', 'info');
+  const note = () => {
+    if (flying?.btn.isConnected) flying.btn.textContent = flying.working;
+    toast('Submitted. Waiting for confirmation…', 'info');
+  };
   const lane = () => LANES.find((l) => l.key === laneKey)!;
   const ownedHere = () => [...owned].filter((id) => fitsLane(lane(), inkOf(id))).sort((a, b) => t(b) - t(a));
   /// Your Credits waiting in this color's batches that can come back now (not in a burn hour), and the ones picked to.
@@ -1196,7 +1206,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
         const split = !!plan?.left;
         return run(
           go,
-          'Buying…',
+          `Buying ${plan ? plural(plan.b.out.length) : 'Credits'}…`,
           async () => {
             const into = curOf(l)?.s.address ?? '';
             const spent = await buyIn(pickFor(l, wei, capOf(l)), approved as boolean, l);
@@ -1215,7 +1225,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       }
       return run(
         go,
-        'Adding…',
+        `Adding ${plural([...picks].filter((id) => ownedHere().some((x) => String(x) === id)).length)}…`,
         async () => {
           const here = new Set(ownedHere().map(String));
           const mine = [...picks].filter((id) => here.has(id)).map(BigInt);
@@ -1471,7 +1481,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
         if (row) row.innerHTML = made.map(madeTile).join('');
       });
 
-  // Live: every 20 s while this page is up, and the moment its tab is shown again, look for deposits, withdrawals,
+  // Live: every block (12 s) while this page is up, and the moment its tab is shown again, look for deposits, withdrawals,
   // new batches and conversions (anyone's), and draw the page again when something moved. What's typed and picked
   // carries over; it waits while a transaction is in flight or the amount is being edited.
   const check = async () => {
@@ -1491,7 +1501,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       }
     } catch {}
   };
-  const poll = setInterval(check, 20_000);
+  const poll = setInterval(check, 12_000);
   const onShow = () => void (!document.hidden && check());
   document.addEventListener('visibilitychange', onShow);
   function stop() {
@@ -1504,7 +1514,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   if (sweeps)
     void (async () => {
       try {
-        const bk = await fetch('/market.json').then((r) => (r.ok ? (r.json() as Promise<{ at?: number; items?: [string, string, string][] }>) : null)).catch(() => null);
+        const bk = await bookP;
         // The book rebuilds every minute. One that stopped for hours lists many orders long gone: then the live scan of
         // the mixed batch's cheapest, and the old book only if that has nothing (a gone order is dropped at quote time).
         const book = (bk?.items ?? []).map(([id, price, source]) => ({ id: String(id), price: String(price), source }));
