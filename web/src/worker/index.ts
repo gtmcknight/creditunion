@@ -2664,7 +2664,10 @@ async function rpc(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
   // Every call in a batch counts against the limit, not just the request (one was charged above).
   if (await limited(env.RL_RPC, req, calls.length - 1)) return text('slow down', 429);
 
-  const allowed = new Set([env.CREDITS, addrOrNull(env.STATEMENTS), env.FACTORY, env.SWEEPER, addrOrNull(env.FORMATS), addrOrNull(env.TOKEN_FACTORY), addrOrNull(env.TOKEN_ADAPTER), addrOrNull(env.TOKEN_FORMATS), tokenSweeper(env), ...swapTargets(env)].map((a) => a?.toLowerCase()).filter(Boolean));
+  // The token the adapter converts into is readable as soon as the adapter is named (balances, its launch gate), not
+  // only once BALANCE_TOKEN is set.
+  const adapterToken = await tokenOf(env, ctx);
+  const allowed = new Set([env.CREDITS, addrOrNull(env.STATEMENTS), env.FACTORY, env.SWEEPER, addrOrNull(env.FORMATS), addrOrNull(env.TOKEN_FACTORY), addrOrNull(env.TOKEN_ADAPTER), addrOrNull(env.TOKEN_FORMATS), tokenSweeper(env), adapterToken, ...swapTargets(env)].map((a) => a?.toLowerCase()).filter(Boolean));
   const clean: { jsonrpc: string; id: unknown; method: string; params: unknown[] }[] = [];
   // Targets outside `allowed`, by the call that first names each. They are checked together below (Credits' art
   // contract once, each batch address once, in parallel), not one call at a time.

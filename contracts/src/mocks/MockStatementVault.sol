@@ -12,15 +12,22 @@ interface ITokenReceiver {
 
 /// NOT A REAL VAULT. A test stand-in for the converter, in the same shape: it is the token, a Statement's owner
 /// approves it for that Statement and calls `withdraw` for what `quote` says (a set amount here), and it can hold every
-/// transfer but its own payouts until a block, as a launch lock would.
+/// transfer but its own payouts until a block, as a launch lock would. Like the real one, it takes Statements only once
+/// it's `ready` and its launch retirement is done (`totalRetired` reaches `launchRetirement`); both hold from the start
+/// unless a test says otherwise.
 contract MockStatementVault is IStatementVault, ERC20 {
     IERC721 public immutable statements;
     uint256 public perStatement;
     /// @notice Before this block nothing moves but this contract's own payouts (0: never locked).
     uint64 public transfersOpenBlock;
     mapping(uint256 statementId => bool) public withdrawn;
+    bool public ready = true;
+    uint256 public launchRetirement;
+    uint256 public totalRetired;
 
     error AlreadyWithdrawn();
+    error RendererNotRegistered();
+    error LaunchSupplyNotFinalized();
     error NotStatementOwner();
     error ScoreChanged(uint256 actual);
     error TransfersLocked(uint64 opensAt);
@@ -36,6 +43,8 @@ contract MockStatementVault is IStatementVault, ERC20 {
     }
 
     function withdraw(uint256 statementId, uint256 expectedAmount) external returns (uint256 amount) {
+        if (!ready) revert RendererNotRegistered();
+        if (totalRetired < launchRetirement) revert LaunchSupplyNotFinalized();
         if (statements.ownerOf(statementId) != msg.sender) revert NotStatementOwner();
         amount = quote(statementId);
         if (amount != expectedAmount) revert ScoreChanged(amount);
@@ -47,6 +56,11 @@ contract MockStatementVault is IStatementVault, ERC20 {
     /// @notice For tests: change what the next Statement pays.
     function setPerStatement(uint256 v) external {
         perStatement = v;
+    }
+
+    /// @notice For tests: the launch gate (renderer registered; how much of the launch retirement is done).
+    function setGate(bool ready_, uint256 retirement, uint256 retired) external {
+        (ready, launchRetirement, totalRetired) = (ready_, retirement, retired);
     }
 
     /// @notice For tests: lock transfers until block `b`, as a launch would.

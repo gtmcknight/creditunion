@@ -350,6 +350,31 @@ contract TokenAdapterTest is Test {
         assertEq(adapter.claimable(address(b), carol), 0);
     }
 
+    /// Until the token takes Statements (its renderer registered, its creator's launch retirement done) a burn reverts
+    /// whole: the Credits stay in the union, unburned, and the same burn converts once the gate opens.
+    function test_NoBurnBeforeTheLaunchGate() public {
+        vm.prank(alice);
+        Batch b = Batch(factory.create("T", noFilter, new uint256[](0), 0, Batch.Arrangement.Deposit, Batch.Split.Equal, 14 days, _range(1, 10), 200, 300, ratingsOf(address(factory))));
+        vm.prank(bob);
+        factory.deposit(address(b), _range(81, 30));
+        vm.prank(carol);
+        factory.deposit(address(b), _range(161, 40));
+        adapter.rate(address(b));
+        ready(b);
+        vault.setGate(false, 0, 0);
+        vm.expectRevert(MockStatementVault.RendererNotRegistered.selector);
+        b.assemble();
+        vault.setGate(true, 2_386, 0);
+        vm.expectRevert(MockStatementVault.LaunchSupplyNotFinalized.selector);
+        b.assemble();
+        assertEq(b.count(), 80, "still whole");
+        for (uint256 i = 1; i <= 10; ++i) assertTrue(_exists(i), "nothing burned");
+        vault.setGate(true, 2_386, 2_386);
+        b.assemble();
+        (, uint256 amount,,,,,) = adapter.conversionOf(address(b));
+        assertEq(amount, PER, "converted once the gate opened");
+    }
+
     /// Rating writes down what each member put in, once; a claim reads that one number.
     function test_RateStoresEachMembersShare() public {
         vm.prank(alice);

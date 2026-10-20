@@ -6,6 +6,10 @@
 // in parts when one call won't fit), but only once the token's transfers open (its transfersOpenBlock, when it has one):
 // until then converted batches wait, and are paid in the first pass after. A batch whose burn hour ran out counts down
 // again (restartCountdown). Converted batches still owing get paid out too.
+// Nothing converts until the token takes Statements from anyone (its renderer registered, its creator's launch
+// retirement done): a burn before that composes the Statement and then reverts at the surrender, ~14M gas for nothing.
+// Once the Safe has proposed the adapter, this also sends activateAssembler when the 30 minutes are up, but only once
+// the token is ready, since a full batch locks the moment the adapter is live.
 // Every transaction is simulated first and only sent if it would succeed, except a burn sent right behind its rating
 // (it can't be simulated until the rating lands; it gets the cap as its gas limit and is charged only what it uses). Each batch is on its own: one that fails is
 // left alone for 5 minutes and the rest carry on; one whose only unpaid members can't receive is left for an hour
@@ -28,7 +32,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { createPublicClient, createWalletClient, encodeFunctionData, http, zeroAddress } from 'viem';
+import { createPublicClient, createWalletClient, encodeFunctionData, http, toFunctionSelector, zeroAddress } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { mainnet } from 'viem/chains';
 import { batchAbi, factoryAbi, tokenAdapterAbi } from '../src/app/abi.ts';
@@ -166,6 +170,26 @@ async function convert(u) {
   log(`    ok: rate ${r1.gasUsed} gas, burn ${r2.gasUsed} gas, ${r1.blockNumber === r2.blockNumber ? 'same block' : `blocks ${r1.blockNumber} and ${r2.blockNumber}`}`);
 }
 
+/// Whether the token takes anyone's Statement now: its renderer is registered (ready()) and its creator's launch
+/// retirement is done (totalRetired() reaches launchRetirement()). A token whose code has no such calls has no such
+/// gate (the fork's test vault); a read that fails throws, so a flaky RPC never counts as ready. Kept once true:
+/// neither can be undone.
+let takes = false;
+async function vaultReady() {
+  if (takes) return true;
+  const t = await token();
+  const code = (await pub.getCode({ address: t.address })) ?? '0x';
+  const has = (sig) => code.includes(toFunctionSelector(sig).slice(2));
+  const gate = ['ready', 'launchRetirement', 'totalRetired'].map((name) => ({ type: 'function', name, stateMutability: 'view', inputs: [], outputs: [{ type: name === 'ready' ? 'bool' : 'uint256' }] }));
+  const call = (functionName) => pub.readContract({ address: t.address, abi: gate, functionName });
+  if (has('ready()') && !(await call('ready'))) return log("the token's renderer isn't registered yet: nothing converts"), false;
+  if (has('launchRetirement()') && has('totalRetired()')) {
+    const [retire, retired] = await Promise.all([call('launchRetirement'), call('totalRetired')]);
+    if (retired < retire) return log("the token's creator hasn't retired the launch supply yet: nothing converts"), false;
+  }
+  return (takes = true);
+}
+
 /// The block the token's transfers open at (0 when it has no lock): until then nothing can be paid out.
 let opensAt;
 async function transfersOpen() {
@@ -213,7 +237,14 @@ const resting = new Map();
 
 async function pass() {
   const assembler = await pub.readContract({ address: FACTORY, abi: factoryAbi, functionName: 'assembler' });
-  if (assembler === zeroAddress) return log('the adapter is not active yet: nothing converts');
+  if (assembler === zeroAddress) {
+    const [pending, until] = await Promise.all(['pendingAssembler', 'pendingUntil'].map((functionName) => pub.readContract({ address: FACTORY, abi: factoryAbi, functionName })));
+    if (pending.toLowerCase() !== ADAPTER.toLowerCase()) return log(pending === zeroAddress ? 'the adapter is not proposed yet: nothing converts' : `the factory's pending adapter is ${pending}, not ${ADAPTER}: nothing sent`);
+    const left = Number(until) - Number((await pub.getBlock()).timestamp);
+    if (left > 0) return log(`the adapter goes live in ${Math.ceil(left / 60)} min`);
+    if (!(await vaultReady())) return;
+    return tx(FACTORY, factoryAbi, 'activateAssembler');
+  }
   const base = (await pub.getBlock()).baseFeePerGas ?? 0n;
   if (base > BigInt(Math.round(Number(opt['max-gwei']) * 1e9))) return log(`base fee ${Number(base) / 1e9} gwei is over --max-gwei ${opt['max-gwei']}: waiting`);
   const n = await pub.readContract({ address: FACTORY, abi: factoryAbi, functionName: 'batchCount' });
@@ -235,10 +266,12 @@ async function pass() {
       if (state !== 1) continue; // only full batches convert
       if (p === 'Countdown') log(`${u} locks in ${Number(lockAt) - now} s`);
       if (p === 'Expired') {
+        if (!(await vaultReady())) continue; // its members can leave until it can really convert
         log(`${u} missed its hour: counting down again`);
         await tx(u, batchAbi, 'restartCountdown');
       }
       if (p === 'Burnable') {
+        if (!(await vaultReady())) break; // nothing can convert yet: the rest wait too
         const w = await worthConverting(u);
         if (!w.ok) {
           log(`${u} waiting: ${w.line}`);

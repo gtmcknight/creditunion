@@ -3,7 +3,8 @@
 /// An overprinted Statement has a row of views of how it was made over its frame (overprint.ts); under it, the format
 /// row with Play and Share; Expand sits in the frame's corner. Layer n is pages 1..n printed together, in the
 /// contract's historyOf order. Beside it, the facts (and for a single page, its 80 Credits).
-import { parseAbi, type Address } from 'viem';
+import { formatUnits, parseAbi, type Address } from 'viem';
+import { tokenAdapterAbi } from '../abi';
 import { config, pub, session } from '../chain';
 import { listBatches, type Listed } from '../data';
 import { glyph, pickRow, seedsOf } from '../directions';
@@ -29,6 +30,15 @@ const ABI = parseAbi([
   'function composedFrom(uint256) view returns (uint32[80])',
 ]);
 const fact = (k: string, v: string) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
+const RECEIPT = parseAbi(['function receipts(uint256) view returns (address holder, uint256 amount)']);
+/// The BALANCE a Statement was converted into (its receipt in the BALANCE contract, which keeps the Statement for
+/// good), or null: not converted, or no BALANCE yet.
+async function convertedInto(id: bigint): Promise<bigint | null> {
+  const token = config.balance?.token ?? (config.tokenAdapter ? ((await pub.readContract({ address: config.tokenAdapter, abi: tokenAdapterAbi, functionName: 'token' })) as Address) : null);
+  if (!token) return null;
+  const [, amount] = await pub.readContract({ address: token, abi: RECEIPT, functionName: 'receipts', args: [id] });
+  return amount > 0n ? amount : null;
+}
 const rating = (score: bigint) => Number(score / 10_000n).toLocaleString();
 const VIEW_KEY = 'statement-view';
 const icon = (d: string) => `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.25" d="${d}"/></svg>`;
@@ -63,13 +73,14 @@ export async function statement(app: HTMLElement, raw: string, rerender: () => v
   // Everything that waits on nothing goes out at once: its own reads, its whole history (the contract stops at its
   // length, so asking for more is safe) and the unions. OpenSea's listings don't hold the page up: Buy fills in.
   const sale = fetch('/market/statements.json').then((r) => r.json() as Promise<{ items?: ForSale[] }>).catch(() => ({}) as { items?: ForSale[] });
-  const [owner, score, format, length, history, list] = await Promise.all([
+  const [owner, score, format, length, history, list, converted] = await Promise.all([
     read<Address>('ownerOf'),
     read<bigint>('creditScoreOf'),
     read<number>('formatOf'),
     read<bigint>('historyLength'),
     read<readonly bigint[]>('historyOf', [id, 0n, 1024n]),
     listBatches().catch(() => [] as Listed[]),
+    convertedInto(id).catch(() => null),
   ]);
   const title = `Statement #${n.toLocaleString()}`;
   // A page overprinted onto another is burned (no owner), but its record and drawing stay readable.
@@ -88,9 +99,14 @@ export async function statement(app: HTMLElement, raw: string, rerender: () => v
   const os = `https://opensea.io/item/ethereum/${at.toLowerCase()}/${n}`;
   const layers = pages.length > 1;
   const own = (DIRECTIONS[format ?? 0] ?? 'Issued') as Direction;
+  // A converted single page opens on what it reads now, its WITHDRAWN page (the image); a format from the row draws
+  // its ink in that format instead.
+  const withdrawn = converted !== null && !layers;
 
   const facts = [
-    burned ? fact('Owner', '<span class="muted">Overprinted onto another Statement</span>') : fact('Owner', atAuction ? `<a href="/union/${union!.s.address}">At auction</a>` : `${who(owner!, 'sm', true)}${mine ? ' <span class="tag you">You</span>' : ''}`),
+    converted !== null ? fact('Owner', `<a href="/balance">Converted to $BALANCE</a>${burned ? ' <span class="muted">· then overprinted onto another Statement</span>' : ''}`) : '',
+    converted !== null ? fact('Converted into', `<span class="num">${Number(formatUnits(converted, 18)).toLocaleString('en-US', { maximumFractionDigits: 2 })}</span> $BALANCE`) : '',
+    converted !== null ? '' : burned ? fact('Owner', '<span class="muted">Overprinted onto another Statement</span>') : fact('Owner', atAuction ? `<a href="/union/${union!.s.address}">At auction</a>` : `${who(owner!, 'sm', true)}${mine ? ' <span class="tag you">You</span>' : ''}`),
     union ? fact('Made by', `<a href="/union/${union.s.address}">${esc(union.s.name || 'Untitled')}</a> <span class="muted">· a Credit Union</span>`) : '',
     score != null ? fact('Rating', `<span class="num">${rating(score)}</span>`) : '',
     fname ? fact('Format', esc(fname)) : '',
@@ -112,7 +128,7 @@ export async function statement(app: HTMLElement, raw: string, rerender: () => v
   <section class="batch credit-page">
     <div class="st-col">
       ${top}
-      <div class="credit-art st-page-art statement-host">
+      <div class="credit-art st-page-art statement-host${withdrawn ? ' st-withdrawn' : ''}">
         ${statementArt(id)}
         <canvas class="st-view" aria-label="${layers ? 'How it was made' : 'The Statement'}"></canvas>
         <button type="button" class="st-expand" data-act="expand" aria-label="Expand" title="Expand (F)">${EXPAND}</button>
@@ -136,7 +152,7 @@ export async function statement(app: HTMLElement, raw: string, rerender: () => v
     const btn = app.querySelector<HTMLButtonElement>('[data-buy]');
     btn?.addEventListener('click', () => void buyListed(btn, listing, rerender));
   });
-  void mount(app, pages, own);
+  void mount(app, pages, own, withdrawn);
 }
 
 /// Every page in historyOf order, with the tree around it: what it went onto, its own Credits and rating.
@@ -175,7 +191,7 @@ const creditGrid = (p: Page) =>
 /// The views, the row of them over the frame and the format row under it (and the keys: A all formats, Space play,
 /// F expand, S share; the Statement's and Cells' arrows move through pages and cells). A Statement of one page has
 /// the Statement and its formats only.
-async function mount(app: HTMLElement, pages: Page[], own: Direction) {
+async function mount(app: HTMLElement, pages: Page[], own: Direction, withdrawn = false) {
   const host = app.querySelector<HTMLElement>('.st-page-art')!;
   const layers = pages.length > 1;
   const ids = [...new Set(pages.flatMap((p) => p.from))];
@@ -218,7 +234,7 @@ async function mount(app: HTMLElement, pages: Page[], own: Direction) {
     const k = views.scene.key, shown = k === 'formats' ? back : k;
     for (const b of app.querySelectorAll<HTMLElement>('[data-view]')) b.setAttribute('aria-checked', String(k !== 'formats' && b.dataset.view === shown));
     // The format row: what's picked, and greyed, what this view can't draw in.
-    const on = k === 'formats' ? 'All' : (book.picked ?? own), can = views.scene.formats();
+    const on = k === 'formats' ? 'All' : withdrawn ? '' : (book.picked ?? own), can = views.scene.formats();
     for (const b of bar.querySelectorAll<HTMLButtonElement>('[data-pick]')) {
       b.setAttribute('aria-checked', String(b.dataset.pick === on));
       b.disabled = !!can && b.dataset.pick !== 'All' && !can.includes(b.dataset.pick as Direction);
@@ -246,6 +262,10 @@ async function mount(app: HTMLElement, pages: Page[], own: Direction) {
   };
   /// A format from the row: its own goes back to the way it was made; from All formats, back to the view you were on.
   const format = (d: Direction) => {
+    if (withdrawn) {
+      withdrawn = false;
+      host.classList.remove('st-withdrawn');
+    }
     book.picked = d === own ? null : d;
     if (views.scene.key === 'formats') choose(back);
     else views.draw();

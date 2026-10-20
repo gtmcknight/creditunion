@@ -9616,6 +9616,7 @@ a.whale-name:hover { text-decoration: underline; text-underline-offset: 3px; }
 .st-page-art .st-view { position: absolute; inset: 0; z-index: 2; display: block; width: 100%; height: 100%; }
 .st-page-art .st-layer { image-rendering: pixelated; }
 .st-view { touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.st-page-art.st-withdrawn .st-view { visibility: hidden; } /* a converted page shows its WITHDRAWN image until a format is picked */
 .st-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 2px; min-height: 36px; font-size: 14px; }
 .st-top { display: flex; align-items: center; min-height: 36px; font-size: 14px; }
 /* The two rows' labels share a width, so their glyphs line up in columns. */

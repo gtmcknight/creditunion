@@ -30,6 +30,27 @@ export async function market(): Promise<Market | null> {
   return { token: b.token, key: ethPool(b.token, b.pool), decimals: Number.isInteger(d) && d >= 0 && d <= 36 ? d : 18, symbol: String(symbol).slice(0, 16), feeBps: b.feeTo ? b.feeBps : 0, feeTo: b.feeTo, opensAt };
 }
 
+const gateAbi = [
+  { type: 'function', name: 'ready', stateMutability: 'view', inputs: [], outputs: [{ type: 'bool' }] },
+  { type: 'function', name: 'launchRetirement', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'totalRetired', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
+] as const;
+
+/// BALANCE as its launch stands: whether it takes anyone's Statement yet (its renderer registered with Statements and
+/// its creator's launch supply retired; until both, a conversion or a redeem reverts, though its quote answers), and
+/// the block its transfers open at (null: no lock). A read that fails counts as not yet.
+export async function launchGate(token: Address): Promise<{ takes: boolean; opensAt: bigint | null; block: bigint }> {
+  const read = <T,>(functionName: 'ready' | 'launchRetirement' | 'totalRetired') => pub.readContract({ address: token, abi: gateAbi, functionName }) as Promise<T>;
+  const [ready, retire, retired, opensAt, block] = await Promise.all([
+    read<boolean>('ready').catch(() => false),
+    read<bigint>('launchRetirement').catch(() => null),
+    read<bigint>('totalRetired').catch(() => null),
+    pub.readContract({ address: token, abi: lockAbi, functionName: 'transfersOpenBlock' }).then(BigInt).catch(() => null),
+    pub.getBlockNumber(),
+  ]);
+  return { takes: ready && retire !== null && retired !== null && retired >= retire, opensAt, block };
+}
+
 /// Whether the token can move yet, and the block it opens at.
 export async function opened(m: Market): Promise<{ open: boolean; block: bigint }> {
   const block = await pub.getBlockNumber();

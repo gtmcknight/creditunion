@@ -28,7 +28,17 @@
     "FORMATS": "0x16deCDa20c9164CcfDB4BE189557aDc4614aAedC",
     "TOKEN_FACTORY": "0x1Ea4b73dE4e946bc58A9A477a7291abe7D7417C1",
     "TOKEN_FORMATS": "0xF3bf99F0a28c4Fc0cf77eB4480F5d0f87d782a25",
-    "TOKEN_SWEEPER": "0xA4a4dBFddD6C8cc771F4a013Ccd30494Fc82bC5e"
+    "TOKEN_SWEEPER": "0xA4a4dBFddD6C8cc771F4a013Ccd30494Fc82bC5e",
+    // The adapter that converts full batches into BALANCE (the token factory's assembler), and BALANCE itself.
+    "TOKEN_ADAPTER": "0xe6492DCCB96D1468302843AEc42Bb39f0FD7BD1D",
+    "BALANCE_TOKEN": "0x3620540c994433D7B4a628C46d2ED5F92572eA07",
+    // BALANCE's pool as its launch liquidity lock (0xC9951Be5…3b93E) names it, its poolId() this key: 0.3%, tick
+    // spacing 30, no hook. And our 1% on swaps to the Safe.
+    "BALANCE_POOL_FEE": "3000",
+    "BALANCE_POOL_TICK_SPACING": "30",
+    "BALANCE_POOL_HOOKS": "0x0000000000000000000000000000000000000000",
+    "SWAP_FEE_BPS": "100",
+    "SWAP_FEE_TO": "0xFE4761e66C2A37492871d30d0e83bcBC454A7C10"
   },
   // creditunion.party, eighty.fun and eighty.rhps.fun are old names kept so their links still work. A fork puts its own domain here.
   "routes": [
