@@ -1,3 +1,4 @@
+import './timeouts';
 import type { Address } from 'viem';
 import { chain, config, connect, disconnect, loadConfig, onSession, restore, session, wallets } from './chain';
 import { party } from './views/party';
