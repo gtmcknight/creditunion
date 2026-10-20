@@ -2388,6 +2388,26 @@ export class ChainBook extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS kept (k TEXT PRIMARY KEY, v TEXT)`);
+    // A restart (every deploy) hands out the last index and feed while its first reads run, rather than every page
+    // waiting on a full read of the chain.
+    this.index = this.saved('index');
+    this.feed = this.saved('feed');
+  }
+  /// The last index or feed, kept in this object's storage when read; only a recent one (an object idle for long
+  /// reads before answering, as before).
+  private saved(k: 'index' | 'feed'): { at: number; body: string } | null {
+    const row = this.ctx.storage.sql.exec(`SELECT v FROM kept WHERE k = ?`, `last:${k}`).toArray()[0];
+    if (!row) return null;
+    const v = String(row.v), cut = v.indexOf(':'), at = Number(v.slice(0, cut));
+    return Date.now() - at < 10 * 60_000 ? { at, body: v.slice(cut + 1) } : null;
+  }
+  private save(k: 'index' | 'feed', v: { at: number; body: string }) {
+    // A row holds 2 MB; past that (or failing) a restart reads before answering, as before. Never fails the read.
+    try {
+      if (v.body.length < 1_800_000) this.ctx.storage.sql.exec(`INSERT INTO kept (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v`, `last:${k}`, `${v.at}:${v.body}`);
+    } catch (e) {
+      console.warn('[chain] not saved', k, safeError(e));
+    }
   }
 
   /// Keep the loop going while pages ask (it stops five minutes after the last ask, and the next ask starts it).
@@ -2440,6 +2460,7 @@ export class ChainBook extends DurableObject<Env> {
     const unions = await unionList(this.env, this.kept);
     this.kept = new Map(unions.map((u) => [u.address.toLowerCase(), u]));
     this.index = { at, body: toJson({ at: Math.floor(at / 1000), unions }) };
+    this.save('index', this.index);
   }
 
   /// Every Activity row as a JSON array (newest first, plans' unions left out until they fill), read at most `maxMs`
@@ -2469,6 +2490,7 @@ export class ChainBook extends DurableObject<Env> {
     const at = Date.now();
     const items = await activityItems(this.env, this.store(), `activity-state/${this.env.FACTORY.toLowerCase()}`);
     this.feed = { at, body: JSON.stringify(items) };
+    this.save('feed', this.feed);
   }
 
   /// A union's fitting listings (scanFor), scanned at most once per `maxMs` for the whole site, whoever asks. A scan up
