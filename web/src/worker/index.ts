@@ -327,21 +327,20 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 /// Every Activity row (newest first) with plans' unions left out until they fill. Read once for the site by the
-/// ChainBook (at most every FEED_MS), kept FEED_MS in the colo cache and in this isolate, so /activity.json's slices
-/// never rescan and never parse the whole feed per request. Without the ChainBook, this data center reads it itself.
+/// ChainBook, fresh for FEED_MS in this isolate and this data center (the colo cache), then read again behind the
+/// response while a copy up to FEED_KEEP old goes out, so /activity.json's slices never rescan and never parse the
+/// whole feed per request. Without the ChainBook, this data center reads it itself.
 let feedMemo: { got: number; at: number; items: Activity[] } | null = null;
 const feedRead = shared<Activity[]>();
 async function activityAll(env: Env, url: URL, ctx: ExecutionContext): Promise<Activity[]> {
   if (feedMemo && Date.now() - feedMemo.got < FEED_MS) return feedMemo.items;
+  // This data center's copy, when another isolate here read one since: `x-got` is when that isolate read it.
+  const key = new Request(`${url.origin}/activity-all/v3`);
+  const hit = await caches.default.match(key);
+  const got = Number(hit?.headers.get('x-got')), at = Number(hit?.headers.get('x-read-at'));
+  if (hit && got && at && (!feedMemo || got > feedMemo.got)) feedMemo = { got, at, items: feedMemo?.at === at ? feedMemo.items : ((await hit.json()) as Activity[]) };
+  if (feedMemo && Date.now() - feedMemo.got < FEED_MS) return feedMemo.items;
   const read = feedRead(ctx, async () => {
-    const key = new Request(`${url.origin}/activity-all/v2`);
-    const hit = await caches.default.match(key);
-    const at = Number(hit?.headers.get('x-read-at'));
-    if (hit && at) {
-      const items = feedMemo?.at === at ? feedMemo.items : ((await hit.json()) as Activity[]);
-      feedMemo = { got: Date.now(), at, items };
-      return items;
-    }
     let v: { at: number; body: string };
     const book = chainBook(env);
     try {
@@ -351,13 +350,15 @@ async function activityAll(env: Env, url: URL, ctx: ExecutionContext): Promise<A
       if (book) console.warn('[chain] feed read here', safeError(e));
       v = { at: Date.now(), body: JSON.stringify(await activityItems(env, caches.default, `${url.origin}/activity-state/${env.FACTORY.toLowerCase()}`)) };
     }
-    ctx.waitUntil(caches.default.put(key, new Response(v.body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${FEED_MS / 1000}`, 'x-read-at': String(v.at) } })));
+    const got = Date.now();
+    ctx.waitUntil(caches.default.put(key, new Response(v.body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${FEED_KEEP / 1000}`, 'x-read-at': String(v.at), 'x-got': String(got) } })));
     const items = JSON.parse(v.body) as Activity[];
-    feedMemo = { got: Date.now(), at: v.at, items };
+    feedMemo = { got, at: v.at, items };
     return items;
   });
+  // A copy up to FEED_KEEP old, this isolate's or this data center's, goes out at once; the read runs behind it.
   if (feedMemo && Date.now() - feedMemo.got < FEED_KEEP) {
-    void read.catch(() => {}); // behind the response (shared keeps it going)
+    void read.catch(() => {}); // shared keeps it going
     return feedMemo.items;
   }
   return read;
@@ -2065,26 +2066,25 @@ async function readParty(env: Env, batch: Address, url?: URL, ctx?: ExecutionCon
 }
 
 /// Every Credit Union, newest first, with its summary (Batch.summary, bigints as { "$n": "…" }) and slots, read by the
-/// ChainBook for the whole site. This isolate keeps it INDEX_MS, then the colo cache, then the ChainBook; `fresh`
-/// (after the reader's own transaction) asks the ChainBook for a read made after this call. Without the ChainBook
-/// (or with it unreachable), this data center reads the chain itself and keeps that 10 s, as before.
+/// ChainBook for the whole site. Fresh for INDEX_MS in this isolate and this data center (the colo cache), then read
+/// again behind the response while a copy up to INDEX_KEEP old goes out; `fresh` (after the reader's own transaction)
+/// asks the ChainBook for a read made after this call. Without the ChainBook (or with it unreachable), this data
+/// center reads the chain itself.
 type Index = { at: number; body: string; one?: Map<string, string>; counts?: { liveAuctions: number; burnable: number } };
 let indexMemo: { got: number; v: Index } | null = null;
 const indexRead = shared<Index>();
 async function unionIndex(env: Env, url: URL, ctx: ExecutionContext, fresh = false): Promise<Index> {
   if (!fresh && indexMemo && Date.now() - indexMemo.got < INDEX_MS) return indexMemo.v;
+  const key = new Request(`${url.origin}/unions.json/v3`);
+  if (!fresh) {
+    // This data center's copy, when another isolate here read one since: `x-got` is when that isolate read it.
+    const hit = await caches.default.match(key);
+    const got = Number(hit?.headers.get('x-got')), at = Number(hit?.headers.get('x-read-at'));
+    if (hit && got && at && (!indexMemo || got > indexMemo.got)) indexMemo = { got, v: indexMemo?.v.at === at ? indexMemo.v : { at, body: await hit.text() } };
+    if (indexMemo && Date.now() - indexMemo.got < INDEX_MS) return indexMemo.v;
+  }
   const read = async (): Promise<Index> => {
-    const key = new Request(`${url.origin}/unions.json/v2`);
-    if (!fresh) {
-      const hit = await caches.default.match(key);
-      const at = Number(hit?.headers.get('x-read-at'));
-      if (hit && at) {
-        const v = indexMemo?.v.at === at ? indexMemo.v : { at, body: await hit.text() };
-        indexMemo = { got: Date.now(), v };
-        return v;
-      }
-    }
-    let v: Index, keep = INDEX_MS / 1000;
+    let v: Index;
     const book = chainBook(env);
     try {
       if (!book) throw new Error('no ChainBook');
@@ -2092,16 +2092,17 @@ async function unionIndex(env: Env, url: URL, ctx: ExecutionContext, fresh = fal
     } catch (e) {
       if (book) console.warn('[chain] index read here', safeError(e));
       v = { at: Date.now(), body: await readUnions(env) };
-      keep = 10;
     }
-    ctx.waitUntil(caches.default.put(key, new Response(v.body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${keep}`, 'x-read-at': String(v.at) } })));
-    if (!indexMemo || indexMemo.v.at <= v.at) indexMemo = { got: Date.now(), v };
+    const got = Date.now();
+    ctx.waitUntil(caches.default.put(key, new Response(v.body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${INDEX_KEEP / 1000}`, 'x-read-at': String(v.at), 'x-got': String(got) } })));
+    if (!indexMemo || indexMemo.v.at <= v.at) indexMemo = { got, v };
     return v;
   };
   if (fresh) return read();
   const p = indexRead(ctx, read);
+  // A copy up to INDEX_KEEP old, this isolate's or this data center's, goes out at once; the read runs behind it.
   if (indexMemo && Date.now() - indexMemo.got < INDEX_KEEP) {
-    void p.catch(() => {}); // behind the response (shared keeps it going)
+    void p.catch(() => {}); // shared keeps it going
     return indexMemo.v;
   }
   return p;
@@ -2319,9 +2320,9 @@ async function unionList(env: Env, kept?: Map<string, Indexed>): Promise<Indexed
 const INDEX_MS = 2_000;
 /// How long they keep the Activity feed: about a block.
 const FEED_MS = 10_000;
-/// Past those, this isolate's copy goes out at once while a newer one is read behind the response, up to this old:
-/// a page never waits on a read it can do without. A bid or a deposit then shows a poll later at most; after a
-/// reader's own transaction (`fresh`) the index is read before answering, as before.
+/// Past those, this isolate's or this data center's copy goes out at once while a newer one is read behind the
+/// response, up to this old: a page never waits on a read it can do without. A bid or a deposit then shows a poll
+/// later at most; after a reader's own transaction (`fresh`) the index is read before answering, as before.
 const INDEX_KEEP = 10_000;
 const FEED_KEEP = 60_000;
 /// How often the ChainBook looks for a new block while pages are asking; it reads the index and the feed again on
