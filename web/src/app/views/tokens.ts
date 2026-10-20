@@ -18,7 +18,7 @@ import { checkQuote, listedById, type Quote } from '../forsale';
 import { buyListed, listings, type ForSale } from './statements';
 import { registerDeposits } from '../ghosts';
 import { buyCall, inkPalette, launchGate, market as swapMarket, opened, poolPalette, quote as swapQuote, sellCalls } from '../swap';
-import { balanceArt, balanceHref, balanceSrc, converted } from '../tokens';
+import { balanceArt, balanceHref, balanceSrc, converted, type BalanceArt } from '../tokens';
 import { INK } from '../traits';
 import { $$, art, errText, esc, ethNum, openModal, sheet, toast } from '../ui';
 import { loadPalette } from '../wall';
@@ -135,8 +135,39 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   const thisRun = ++pageRun;
   const asked = new URLSearchParams(location.search).get('color');
   if (asked && LANES.some((l) => l.key === asked)) laneKey = asked as Lane['key'];
-  app.innerHTML = `<section class="prose"><p class="muted">Loading…</p></section>`;
+  // The page's frame at once (its title, where the launch line goes, the card and Yours), filled in as the chain is read.
+  app.innerHTML = `<section class="tokens">
+      <header class="create-head"><h1>Get ${TOKEN}</h1><p class="create-lede"><span class="link">What is ${TOKEN}?</span></p></header>
+      <p class="tk-when">&nbsp;</p>
+      <div class="tk-layout"><section class="tk-card tk-wait" aria-busy="true"></section><aside class="tk-side"><h2 class="form-title">Yours</h2></aside></div>
+    </section>`;
   const account = session.account;
+  // What doesn't wait on the batches starts now, beside them, so the page waits on the slowest read and not on the
+  // sum of them: your Credits and ETH, the BALANCE pool, and the launch's state.
+  const ownedP = account ? (myCredits(account) as Promise<readonly bigint[]>) : Promise.resolve([] as readonly bigint[]);
+  const approvedP = account ? (pub.readContract({ address: config.credits, abi: creditsAbi, functionName: 'isApprovedForAll', args: [account, factory] }) as Promise<boolean>) : Promise.resolve(false);
+  const heldP = account ? heldBy(account) : Promise.resolve(null);
+  const ethP = account ? pub.getBalance({ address: account }).catch(() => null) : Promise.resolve(null);
+  const marketP = swapMarket().catch(() => null);
+  type Trade = [Awaited<ReturnType<typeof opened>> | null, bigint, Awaited<ReturnType<typeof poolPalette>>, Awaited<ReturnType<typeof inkPalette>> | null];
+  const tradeP: Promise<Trade> = marketP.then((m): Promise<Trade> | Trade =>
+    m
+      ? Promise.all([
+          opened(m).catch(() => null),
+          account ? (pub.readContract({ address: m.token, abi: erc20Abi, functionName: 'balanceOf', args: [account] }) as Promise<bigint>).catch(() => 0n) : Promise.resolve(0n),
+          poolPalette(m),
+          account ? inkPalette(m, account) : Promise.resolve(null),
+        ])
+      : [null, 0n, null, null],
+  );
+  const gateP = marketP
+    .then(async (m) => {
+      const token = m?.token ?? (config.tokenAdapter ? ((await pub.readContract({ address: config.tokenAdapter, abi: tokenAdapterAbi, functionName: 'token' })) as Address) : null);
+      return token ? launchGate(token) : null;
+    })
+    .catch(() => null);
+  const allP = (pub.readContract({ address: factory, abi: factoryAbi, functionName: 'batches', args: [0n, 10_000n] }) as Promise<readonly Address[]>).then((addrs) => Promise.all(addrs.map((a) => getBatch(a))));
+  for (const p of [ownedP, approvedP, tradeP, allP]) p.catch(() => {}); // awaited below; this only keeps an early failure quiet until then
   const [n, assembler, feeNow, scores, inks, sweepBps, proposed, proposedFrom] = await Promise.all([
     pub.readContract({ address: factory, abi: factoryAbi, functionName: 'batchCount' }) as Promise<bigint>,
     pub.readContract({ address: factory, abi: factoryAbi, functionName: 'assembler' }) as Promise<Address>,
@@ -151,8 +182,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   const t = (id: bigint | string) => scores[Number(id) - 1] ?? 0;
   const inkOf = (id: bigint | string) => inks[Number(id) - 1] ?? 0;
   const live = assembler !== zeroAddress && !!config.tokenAdapter;
-  const addrs = n ? ((await pub.readContract({ address: factory, abi: factoryAbi, functionName: 'batches', args: [0n, n] })) as readonly Address[]) : [];
-  const all = (await Promise.all(addrs.map((a) => getBatch(a)))).filter((u) => laneOf(u.s)); // newest first (BatchFactory.batches)
+  const all = (await allP).filter((u) => laneOf(u.s)); // newest first (BatchFactory.batches)
   const done = (u: Union) => converted(u.s.statement);
   const waiting = all.filter((u) => !done(u) && (u.s.state === 'Open' || u.s.state === 'Full' || u.s.state === 'Expired'));
   const mineIn = (u: Union) => (account ? u.ids.filter((_, i) => u.depositors[i].toLowerCase() === account.toLowerCase()) : []);
@@ -160,29 +190,26 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   const pending = waiting.flatMap((u) => mineIn(u).map((id) => ({ id, u })));
   const leavable = pending.filter(({ u }) => u.s.phase !== 'Burnable');
   const [owned, approved, got, made, held, ethHeld] = await Promise.all([
-    account ? (myCredits(account) as Promise<readonly bigint[]>) : Promise.resolve([] as readonly bigint[]),
-    account ? (pub.readContract({ address: config.credits, abi: creditsAbi, functionName: 'isApprovedForAll', args: [account, factory] }) as Promise<boolean>) : Promise.resolve(false),
+    ownedP,
+    approvedP,
     account ? received(all.filter(done), account) : Promise.resolve({ amount: 0n, claim: [] as Address[], symbol: TOKEN, decimals: 18 }),
     conversions(all.filter(done)),
-    account ? heldBy(account) : Promise.resolve(null),
-    account ? pub.getBalance({ address: account }).catch(() => null) : Promise.resolve(null),
+    heldP,
+    ethP,
   ]);
   // BALANCE's pool: the token, whether it can move yet, how much you hold, the colors the pool sells and yours.
-  const m = await swapMarket().catch(() => null);
-  const [trade, tokenHeld, poolPal, myPal] = m
-    ? await Promise.all([
-        opened(m).catch(() => null),
-        account ? (pub.readContract({ address: m.token, abi: erc20Abi, functionName: 'balanceOf', args: [account] }) as Promise<bigint>).catch(() => 0n) : Promise.resolve(0n),
-        poolPalette(m),
-        account ? inkPalette(m, account) : Promise.resolve(null),
-      ])
-    : [null, 0n, null, null];
+  const m = await marketP;
+  const [trade, tokenHeld, poolPal, myPal] = await tradeP;
   // The launch as it stands: whether BALANCE takes Statements yet (conversions and redeems revert until it does) and
   // the block its transfers open at (payouts and claims wait for it).
-  const gate = await (async () => {
-    const token = m?.token ?? (config.tokenAdapter ? ((await pub.readContract({ address: config.tokenAdapter, abi: tokenAdapterAbi, functionName: 'token' })) as Address) : null);
-    return token ? launchGate(token) : null;
-  })().catch(() => null);
+  const gate = await gateP;
+  /// A converted batch's tile: its Balance (the pot until payout) once read, its Statement until then.
+  function madeTile(c: (typeof made)[number]) {
+    const n = Number(formatUnits(c.amount, got.decimals)).toLocaleString('en-US', { maximumFractionDigits: 0 });
+    return c.art
+      ? `<a class="made" href="${balanceHref(c.art)}"><img src="${balanceSrc(c.art)}" alt="Balance #${c.art.id}" decoding="async"><span class="small"><span class="sw-ink">${swatch(c.lane)}</span>Balance #${c.art.id}</span></a>`
+      : `<a class="made" href="/statement/${c.sid}"><img src="/statement/${c.sid}.svg" alt="Statement #${c.sid}" loading="lazy" decoding="async"><span class="small"><span class="sw-ink">${swatch(c.lane)}</span>#${c.sid}<span class="muted num"> · ${n}</span></span></a>`;
+  }
   const paying = !!gate && (gate.opensAt === null || gate.block >= gate.opensAt);
   /// When trading opens: the opening block's time once the token names it (12 s a block), until then the planned time.
   const tradesAt = gate?.opensAt != null ? Date.now() + Number(gate.opensAt - gate.block) * 12_000 : TRADES_PLANNED;
@@ -698,7 +725,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     kept.clear();
     app.innerHTML = `
     <section class="tokens">
-      <header class="create-head"><h1>${isOpen && !previewSoon ? TOKEN : `Get in before ${TOKEN} ${converting ? 'trades' : 'opens'}`}</h1><p class="create-lede"><button type="button" class="link" id="tk-how">What is ${TOKEN}?</button></p></header>
+      <header class="create-head"><h1>Get ${TOKEN}</h1><p class="create-lede"><button type="button" class="link" id="tk-how">What is ${TOKEN}?</button></p></header>
       ${isOpen && !previewSoon ? '' : stepsHtml()}
       <div class="tk-layout">
       <section class="tk-card">
@@ -711,14 +738,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       </div>
       ${
         made.length
-          ? `<section class="tokens-made"><h3>Converted</h3><div class="made-row">${made
-              .map((c) => {
-                const n = Number(formatUnits(c.amount, got.decimals)).toLocaleString('en-US', { maximumFractionDigits: 0 });
-                return c.art
-                  ? `<a class="made" href="${balanceHref(c.art)}"><img src="${balanceSrc(c.art)}" alt="Balance #${c.art.id}" decoding="async"><span class="small"><span class="sw-ink">${swatch(c.lane)}</span>Balance #${c.art.id}</span></a>`
-                  : `<a class="made" href="/statement/${c.sid}"><img src="/statement/${c.sid}.svg" alt="Statement #${c.sid}" loading="lazy" decoding="async"><span class="small"><span class="sw-ink">${swatch(c.lane)}</span>#${c.sid}<span class="muted num"> · ${n}</span></span></a>`;
-              })
-              .join('')}</div></section>`
+          ? `<section class="tokens-made"><h3>Converted</h3><div class="made-row">${made.map(madeTile).join('')}</div></section>`
           : ''
       }
     </section>`;
@@ -1369,6 +1389,16 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   // Your Credits in a pure color open with yours of that ink picked, however you got here (its card, or a ?color= link).
   if (viewNow() === 'credits' && lane().ink >= 0 && !picks.size) for (const id of ownedHere()) picks.add(id.toString());
   draw();
+  // Each converted batch's Balance, read once the page is up: its tile turns from the Statement into it.
+  for (const c of made)
+    if (c.pocket && !c.art)
+      void balanceArt(c.pocket).then((a) => {
+        if (!a || thisRun !== pageRun) return;
+        artKept.set(c.pocket!.toLowerCase(), a);
+        c.art = a;
+        const row = app.querySelector('.tokens-made .made-row');
+        if (row) row.innerHTML = made.map(madeTile).join('');
+      });
 
   // Live: every 20 s while this page is up, and the moment its tab is shown again, look for deposits, withdrawals,
   // new batches and conversions (anyone's), and draw the page again when something moved. What's typed and picked
@@ -1453,8 +1483,10 @@ async function heldBy(you: Address) {
   }
 }
 
-/// Each converted batch: its Statement, its color, what it converted into, and its Balance (the artwork its pocket got
-/// with the BALANCE, which reads the pot until members are paid) when it can be read.
+/// Each converted batch's Balances, once read (they only change when a batch is paid out, which redraws the page).
+const artKept = new Map<string, BalanceArt>();
+/// Each converted batch: its Statement, its color, what it converted into, its pocket, and its Balance (the artwork its
+/// pocket got with the BALANCE, which reads the pot until members are paid) when this visit has read it before.
 async function conversions(batches: Union[]) {
   if (!batches.length || !config.tokenAdapter) return [];
   const at = config.tokenAdapter;
@@ -1464,7 +1496,7 @@ async function conversions(batches: Union[]) {
         pub.readContract({ address: at, abi: tokenAdapterAbi, functionName: 'conversionOf', args: [u.s.address] }) as Promise<readonly bigint[]>,
         (pub.readContract({ address: at, abi: tokenAdapterAbi, functionName: 'pocketOf', args: [u.s.address] }) as Promise<Address>).catch(() => null),
       ]);
-      return { sid: c[0], amount: c[1], lane: laneOf(u.s)!, art: pocket ? await balanceArt(pocket) : null };
+      return { sid: c[0], amount: c[1], lane: laneOf(u.s)!, pocket, art: (pocket && artKept.get(pocket.toLowerCase())) || null };
     }),
   );
 }

@@ -9837,6 +9837,8 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 .tk-yact.go { text-decoration: none; padding: 0 12px; height: 32px; border-radius: var(--r); background: var(--fg); color: var(--bg); font-weight: 500; }
 .tk-yact.go:hover { opacity: 0.88; }
 .tk-yact.quiet { color: var(--muted); font-size: 13px; }
+/* The card's place while the page reads the chain: its usual height, so nothing moves when it fills. */
+.tk-wait { min-height: 560px; }
 /* Until trading opens: one line under the headline, what to do now and when BALANCE unlocks. No box: one rule under
    it sets it apart from the rest. */
 .tk-when { width: 100%; max-width: 876px; justify-self: center; margin: 12px 0 0; padding: 0 0 20px; border-bottom: 1px solid var(--line); font-size: 15px; line-height: 1.45; text-wrap: pretty; box-sizing: border-box; }
