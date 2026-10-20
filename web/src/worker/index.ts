@@ -329,37 +329,46 @@ export default {
 /// Every Activity row (newest first) with plans' unions left out until they fill. Read once for the site by the
 /// ChainBook, fresh for FEED_MS in this isolate and this data center (the colo cache), then read again behind the
 /// response while a copy up to FEED_KEEP old goes out, so /activity.json's slices never rescan and never parse the
-/// whole feed per request. Without the ChainBook, this data center reads it itself.
-let feedMemo: { got: number; at: number; items: Activity[] } | null = null;
-const feedRead = shared<Activity[]>();
-async function activityAll(env: Env, url: URL, ctx: ExecutionContext): Promise<Activity[]> {
-  if (feedMemo && Date.now() - feedMemo.got < FEED_MS) return feedMemo.items;
+/// whole feed per request. Without the ChainBook, this data center reads it itself. Two small parts of it are kept the
+/// same way (feedParts), so the asks every page makes never read the whole feed: `recent`, the newest rows (the bar on
+/// every page, /activity's first page), and `bids`, every bid (the outbid alert, bid counts).
+type FeedPart = 'all' | 'recent' | 'bids';
+/// Rows in the `recent` part: /activity's page, one more so a slice of it knows if there's more.
+const RECENT_ROWS = 100;
+const feedParts = (items: Activity[]) => ({ recent: JSON.stringify(items.slice(0, RECENT_ROWS + 1)), bids: JSON.stringify(items.filter((x) => x.kind === 'bid')) });
+const feedMemo: Record<FeedPart, { got: number; at: number; items: Activity[] } | null> = { all: null, recent: null, bids: null };
+const feedRead: Record<FeedPart, ReturnType<typeof shared<Activity[]>>> = { all: shared(), recent: shared(), bids: shared() };
+async function activityAll(env: Env, url: URL, ctx: ExecutionContext, part: FeedPart = 'all'): Promise<Activity[]> {
+  const memo = feedMemo[part];
+  if (memo && Date.now() - memo.got < FEED_MS) return memo.items;
   // This data center's copy, when another isolate here read one since: `x-got` is when that isolate read it.
-  const key = new Request(`${url.origin}/activity-all/v3`);
+  const key = new Request(`${url.origin}/activity-${part}/v3`);
   const hit = await caches.default.match(key);
   const got = Number(hit?.headers.get('x-got')), at = Number(hit?.headers.get('x-read-at'));
-  if (hit && got && at && (!feedMemo || got > feedMemo.got)) feedMemo = { got, at, items: feedMemo?.at === at ? feedMemo.items : ((await hit.json()) as Activity[]) };
-  if (feedMemo && Date.now() - feedMemo.got < FEED_MS) return feedMemo.items;
-  const read = feedRead(ctx, async () => {
+  if (hit && got && at && (!feedMemo[part] || got > feedMemo[part]!.got)) feedMemo[part] = { got, at, items: feedMemo[part]?.at === at ? feedMemo[part]!.items : ((await hit.json()) as Activity[]) };
+  if (feedMemo[part] && Date.now() - feedMemo[part]!.got < FEED_MS) return feedMemo[part]!.items;
+  const read = feedRead[part](ctx, async () => {
     let v: { at: number; body: string };
     const book = chainBook(env);
     try {
       if (!book) throw new Error('no ChainBook');
-      v = await book.activity(BOOK_MS);
+      v = await book.activity(BOOK_MS, part);
     } catch (e) {
       if (book) console.warn('[chain] feed read here', safeError(e));
-      v = { at: Date.now(), body: JSON.stringify(await activityItems(env, caches.default, `${url.origin}/activity-state/${env.FACTORY.toLowerCase()}`)) };
+      const items = await activityItems(env, caches.default, `${url.origin}/activity-state/${env.FACTORY.toLowerCase()}`);
+      v = { at: Date.now(), body: part === 'all' ? JSON.stringify(items) : feedParts(items)[part] };
     }
     const got = Date.now();
     ctx.waitUntil(caches.default.put(key, new Response(v.body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${FEED_KEEP / 1000}`, 'x-read-at': String(v.at), 'x-got': String(got) } })));
     const items = JSON.parse(v.body) as Activity[];
-    feedMemo = { got, at: v.at, items };
+    feedMemo[part] = { got, at: v.at, items };
     return items;
   });
   // A copy up to FEED_KEEP old, this isolate's or this data center's, goes out at once; the read runs behind it.
-  if (feedMemo && Date.now() - feedMemo.got < FEED_KEEP) {
+  const kept = feedMemo[part];
+  if (kept && Date.now() - kept.got < FEED_KEEP) {
     void read.catch(() => {}); // shared keeps it going
-    return feedMemo.items;
+    return kept.items;
   }
   return read;
 }
@@ -1574,14 +1583,18 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   if (url.pathname === '/live') return Response.redirect(`${url.origin}/activity${url.search}`, 301);
 
   // /activity.json: what wallets have done on the site, newest first (activity.ts), served in slices:
-  //   ?limit=100 (max 1000)  ?after=<tx>:<i>:<kind> (the last row you have)  ?union=0x… or ?member=0x…  ?last  ?bids
-  // The whole list is built at most once per 15 seconds per colo; every slice is cut from it.
+  //   ?limit=100 (max 1000)  ?after=<tx>:<i>:<kind> (the last row you have)  ?union=0x… or ?member=0x…  ?kind=bid
+  //   ?last  ?bids
+  // Every slice is cut from the feed as activityAll keeps it: the newest rows and the bids from their small parts.
   if (url.pathname === '/activity.json') {
     // Local preview without an RPC key: .dev.vars can point this at the live site's feed.
     if (env.ACTIVITY_MIRROR) return fetch(env.ACTIVITY_MIRROR + url.search);
     try {
-      const all = await activityAll(env, url, ctx);
       const q = url.searchParams;
+      const union = q.get('union')?.toLowerCase(), member = q.get('member')?.toLowerCase(), after = q.get('after'), kind = q.get('kind');
+      const limit = Math.min(Math.max(Number(q.get('limit')) || 100, 1), 1000);
+      const part: FeedPart = q.has('bids') || kind === 'bid' ? 'bids' : q.has('last') || union || member || after || kind || limit > RECENT_ROWS ? 'all' : 'recent';
+      const all = await activityAll(env, url, ctx, part);
       // ?last: when each union last took a Credit (a deposit, or a buy straight into it): { union: unix seconds }.
       if (q.has('last')) {
         const last: Record<string, number> = {};
@@ -1594,9 +1607,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         for (const x of all) if (x.kind === 'bid' && x.union) bids[x.union.toLowerCase()] = (bids[x.union.toLowerCase()] ?? 0) + 1;
         return Response.json({ bids }, { headers: { 'cache-control': 'public, max-age=15' } });
       }
-      const union = q.get('union')?.toLowerCase(), member = q.get('member')?.toLowerCase(), after = q.get('after');
-      const limit = Math.min(Math.max(Number(q.get('limit')) || 100, 1), 1000);
       let rows = union ? all.filter((x) => x.union?.toLowerCase() === union) : member ? all.filter((x) => x.who.toLowerCase() === member) : all;
+      if (kind) rows = rows.filter((x) => x.kind === kind);
       if (after) {
         const k = rows.findIndex((x) => `${x.tx}:${x.i}:${x.kind}` === after);
         rows = k < 0 ? [] : rows.slice(k + 1);
@@ -1627,8 +1639,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     if (book) {
       try {
         const of = (items: Activity[]) => items.filter((x) => x.kind === 'bid' && x.union?.toLowerCase() === batch);
-        let rows = of(await activityAll(env, url, ctx));
-        if (named && v !== '0' && rows[0]?.eth !== v) rows = of(JSON.parse((await book.activity(2_000)).body) as Activity[]);
+        let rows = of(await activityAll(env, url, ctx, 'bids'));
+        if (named && v !== '0' && rows[0]?.eth !== v) rows = of(JSON.parse((await book.activity(2_000, 'bids')).body) as Activity[]);
         const whole = !named || v === '0' || rows[0]?.eth === v;
         const out = rows.map((x) => ({ bidder: x.who, amount: x.eth ?? '0', end: 0, block: x.block, tx: x.tx, time: x.time }));
         const res = Response.json({ bids: out }, { headers: { 'cache-control': `public, max-age=${named && whole ? 86400 : 5}` } });
@@ -2343,6 +2355,7 @@ export class ChainBook extends DurableObject<Env> {
   private kept = new Map<string, Indexed>();
   private indexing: Promise<void> | null = null;
   private feed: { at: number; body: string } | null = null;
+  private parts: { recent: string; bids: string } | null = null; // the feed's small parts (feedParts), read with it
   private feeding: Promise<void> | null = null;
   private asked = 0; // when a page last asked: the loop runs while that's recent
   private head = -1n; // the newest block the loop has read the index and the feed at
@@ -2354,6 +2367,7 @@ export class ChainBook extends DurableObject<Env> {
     // waiting on a full read of the chain.
     this.index = this.saved('index');
     this.feed = this.saved('feed');
+    if (this.feed) this.parts = feedParts(JSON.parse(this.feed.body) as Activity[]);
   }
   /// The last index or feed, kept in this object's storage when read; only a recent one (an object idle for long
   /// reads before answering, as before).
@@ -2427,15 +2441,16 @@ export class ChainBook extends DurableObject<Env> {
 
   /// Every Activity row as a JSON array (newest first, plans' unions left out until they fill), read at most `maxMs`
   /// before this call (for a page, the last read while a newer one runs).
-  async activity(maxMs: number): Promise<{ at: number; body: string }> {
+  async activity(maxMs: number, part: FeedPart = 'all'): Promise<{ at: number; body: string }> {
     await this.wake();
     const asked = Date.now();
+    const pick = () => (part === 'all' || !this.parts ? this.feed! : { at: this.feed!.at, body: this.parts[part] });
     // Too old for this caller: read again. A page (BOOK_MS) gets the last copy at once while the read runs, as with
     // the index; only a caller looking for a bid it was just told of (/bids, a few seconds) waits for it.
     if (this.feed && maxMs >= BOOK_MS && asked - this.feed.at > maxMs) {
       this.feeding ??= this.readFeed().finally(() => (this.feeding = null));
       this.feeding.catch(() => {});
-      return this.feed;
+      return pick();
     }
     while (!this.feed || asked - this.feed.at > maxMs) {
       this.feeding ??= this.readFeed().finally(() => (this.feeding = null));
@@ -2446,12 +2461,13 @@ export class ChainBook extends DurableObject<Env> {
         break;
       }
     }
-    return this.feed!;
+    return pick();
   }
   private async readFeed() {
     const at = Date.now();
     const items = await activityItems(this.env, this.store(), `activity-state/${this.env.FACTORY.toLowerCase()}`);
     this.feed = { at, body: JSON.stringify(items) };
+    this.parts = feedParts(items);
     this.save('feed', this.feed);
   }
 
