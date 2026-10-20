@@ -2427,10 +2427,17 @@ export class ChainBook extends DurableObject<Env> {
   }
 
   /// Every Activity row as a JSON array (newest first, plans' unions left out until they fill), read at most `maxMs`
-  /// before this call.
+  /// before this call (for a page, the last read while a newer one runs).
   async activity(maxMs: number): Promise<{ at: number; body: string }> {
     await this.wake();
     const asked = Date.now();
+    // Too old for this caller: read again. A page (BOOK_MS) gets the last copy at once while the read runs, as with
+    // the index; only a caller looking for a bid it was just told of (/bids, a few seconds) waits for it.
+    if (this.feed && maxMs >= BOOK_MS && asked - this.feed.at > maxMs) {
+      this.feeding ??= this.readFeed().finally(() => (this.feeding = null));
+      this.feeding.catch(() => {});
+      return this.feed;
+    }
     while (!this.feed || asked - this.feed.at > maxMs) {
       this.feeding ??= this.readFeed().finally(() => (this.feeding = null));
       try {
