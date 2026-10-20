@@ -64,7 +64,7 @@ export async function balanceNft(app: HTMLElement, raw: string) {
   const mine = !!session.account && same(nft.owner, session.account);
 
   const facts = [
-    fact('Owner', batch ? `<a href="/balance">${esc(batch.b.s.name || 'A batch')}</a> <span class="muted">· a batch, until payout</span>` : `${who(nft.owner, 'sm', true)}${mine ? ' <span class="tag you">You</span>' : ''}`),
+    fact('Owner', batch ? `<a href="/balance">${esc(batch.b.s.name || 'A batch')}</a> <span class="muted">· a batch, until payout</span>` : `<span class="bn-who">${who(nft.owner, 'sm', true)}${mine ? '<span class="tag you">You</span>' : ''}</span>`),
     Number.isFinite(amount) ? fact('Balance', `<span class="num">${amount.toLocaleString('en-US', { maximumFractionDigits: 2 })}</span> $BALANCE`) : '',
     inks.every(Number.isFinite) ? fact('Colors', `<span class="num bn-inks">${inks.map((p, i) => `<span><span class="sw-ink"><i style="background:${INK[i]}"></i></span>${p.toFixed(1)}%</span>`).join('')}</span>`) : '',
     batch ? fact('From', `<a href="/statement/${batch.statementId}">Statement #${batch.statementId}</a>`) : made > 0 ? fact('Converted', `<span class="num">${made}</span> Statement${made === 1 ? '' : 's'}`) : '',
@@ -100,7 +100,7 @@ export async function balanceNft(app: HTMLElement, raw: string) {
     const value = (v: bigint, paid: boolean) => `<span class="num">${bal(v)}</span>${waiting ? '' : ` <span class="muted">· ${status(paid)}</span>`}`;
     el.innerHTML = `<div class="section-head"><h3>Payouts</h3><span class="muted num">${rows.length} member${rows.length === 1 ? '' : 's'}${waiting ? ` · ${when ? `pays ${when}` : 'pays when trading opens'}` : ''}</span></div>
       <dl class="facts">${rows
-        .map((x) => fact(`${who(x.m, 'sm', true)}${you && same(x.m, you) ? ' <span class="tag you">You</span>' : ''}`, value(x.amount, x.paid)))
+        .map((x) => fact(`<span class="bn-who">${who(x.m, 'sm', true)}${you && same(x.m, you) ? '<span class="tag you">You</span>' : ''}</span>`, value(x.amount, x.paid)))
         .join('')}${fee ? fact('<span class="muted">Credit Union’s 6%</span>', value(fee, feePaid)) : ''}</dl>`;
     hydrate(el);
   } catch {
