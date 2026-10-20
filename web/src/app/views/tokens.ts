@@ -945,7 +945,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
                   : 'No price right now',
       !!wei && !short && !!route,
     );
-    setText('tk-sure', route === 'batch' && !split && n > 0 && n < 80 - (curOf(lane())?.s.count ?? 0) ? 'Withdraw anytime before the batch fills.' : '');
+    setText('tk-sure', route === 'batch' && !split && n > 0 && n < 80 - (curOf(lane())?.s.count ?? 0) ? 'Take your Credits back anytime before the batch fills.' : '');
     showLeft();
     if (viaSheet()) drawSheet();
     else drawHolding(route === 'pool' ? poolN : 0, pPal);
@@ -996,7 +996,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       room = room > 0 ? room - take : 80 - take;
     }
     setText('fees', '');
-    setText('tk-sure', mine.length && mine.length < 80 - (curOf(lane())?.s.count ?? 0) ? 'Withdraw anytime before the batch fills.' : '');
+    setText('tk-sure', mine.length && mine.length < 80 - (curOf(lane())?.s.count ?? 0) ? 'Take your Credits back anytime before the batch fills.' : '');
     setText('tk-bfee', txs > 1 ? `${txs} confirmations` : '');
     const all = document.getElementById('pick-all');
     if (all) all.textContent = mine.length ? 'Clear' : 'Select all';
