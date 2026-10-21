@@ -4,7 +4,7 @@ import { chain, config, connect, disconnect, loadConfig, onSession, restore, ses
 import { party } from './views/party';
 import './sheet-paint';
 import { create } from './views/create';
-import { burnHour, lists } from './views/lists';
+import { lists } from './views/lists';
 import { home } from './views/home';
 import { invalidateFit } from './fit';
 import { hydrate, who } from './ens';
@@ -32,15 +32,12 @@ import { credit } from './views/credit';
 import { traitPage } from './views/trait';
 import { timePage } from './views/time';
 import { bitsPage, ratingPage } from './views/scale';
-import { dayAndTime, esc, errText, openModal, timeLeft, toast } from './ui';
+import { dayAndTime, esc, errText, openModal, toast } from './ui';
 import { watchOutbid } from './outbid';
-import { BURNING_FROM, burningOn, burnsAt, listBatches, liveAuctions, me, onBatches, readNotice, recentBatches, type Listed } from './data';
+import { BURNING_FROM, burningOn, burnsAt, me, readNotice } from './data';
 
 const app = document.getElementById('app')!;
 let seq = 0;
-const loadedAt = Date.now();
-// Any page's read of the union list brings the nav's count up to date.
-onBatches((all) => void drawAuctions(pagePath()[0], all));
 
 /// Real paths: / (how it works and live activity), /docs, /statements (Buy) and /unions (Make), /credits, /balance, /create, /union/0x…, /credit/123, /mint, /me,
 /// trait pages /palette/CMYK, /eights/3, /print/slip, /weight/sparse, and /time?from=&to=, /rating, /bits. Pages keep their old
@@ -83,7 +80,6 @@ async function route() {
   const [page, arg] = pagePath();
   const self = page === 'me' || (page === 'member' && !!arg && arg.toLowerCase() === session.account?.toLowerCase());
   siteTicker(page);
-  void drawAuctions(page);
   const current = self ? 'me' : ['party', 'parties', 'auctions', 'statements', 'statement'].includes(page) ? 'statements' : EXPLORER.has(page) ? 'credits' : page === '' ? 'home' : page;
   document.querySelectorAll<HTMLAnchorElement>('[data-nav]').forEach((a) => a.toggleAttribute('aria-current', a.dataset.nav === current));
   document.querySelectorAll<HTMLAnchorElement>('#account [data-nav]').forEach((a) =>
@@ -183,51 +179,6 @@ async function drawNotice() {
   const lead = ahead ? `Starting ${dayAndTime(at)}, full Unions become Statements and go up for auction.` : n ? 'Any minute now, full Unions become Statements and go up for auction.' : 'Full Unions become Statements and go up for auction soon.';
   el.innerHTML = `<span><strong>${lead}</strong> <a href="/docs#burning">How it works</a></span>`;
   el.hidden = false;
-}
-
-/// The bar above the header, only for a full union in its hour to convert (burnBar); live auctions get no bar or nav
-/// count (the Statements page's Auction tab counts them).
-async function drawAuctions(page: string, list: Listed[] | null = recentBatches()) {
-  // Counted from the union list when a page here just read it; else as the page came (the Worker's count, under two
-  // minutes old, early in the visit). The list is read for it otherwise, and whenever a full union may be in its hour
-  // to convert (config.burnable): the bar below names that union.
-  const given = config.liveAuctions !== undefined && !config.burnable && Date.now() - (config.factsAt ?? 0) < 2 * 60_000 && Date.now() - loadedAt < 2 * 60_000;
-  const all = list ?? (given ? null : await listBatches().catch(() => null));
-  const live = all ? liveAuctions(all) : config.liveAuctions;
-  if (live === undefined) return;
-  await readNotice();
-  const el = document.getElementById('notice');
-  if (!el || !burningOn || (el.innerHTML && !el.classList.contains('auctions-bar'))) return;
-  el.classList.add('auctions-bar');
-  if (burnBar(el, all ?? [], page)) return; // no list: the page's facts say no union is near its hour to convert
-  // Live auctions get no bar of their own: the count beside Statements says it.
-  el.innerHTML = '';
-  el.hidden = true;
-}
-
-/// While a full union is in its hour to convert, the bar says so instead: which one and how long is left, linked to
-/// its Convert button. Nobody is paid to press it, so someone has to see it. Several at once: how many, and the list.
-/// Not on the union's own page, which says it already. Ticks until the hour ends, then the bar goes back to auctions.
-let barTick: ReturnType<typeof setInterval> | undefined;
-function burnBar(el: HTMLElement, all: Listed[], page: string) {
-  clearInterval(barTick);
-  const ready = all.filter(({ s }) => burnHour(s)).sort((x, y) => x.s.deadline - y.s.deadline);
-  if (!ready.length) return false;
-  const one = ready.length === 1 ? ready[0].s : null;
-  el.innerHTML = one
-    ? `<span><strong>Anyone can convert <a href="/union/${one.address}?convert">${esc(one.name || 'Untitled')}</a> to a Statement, <span class="num" data-bar-ends>${timeLeft(one.deadline)}</span> left.</strong></span>`
-    : `<span><strong>Anyone can convert ${ready.length} Unions to Statements now.</strong> <a href="/unions/full">See them</a></span>`;
-  el.hidden = !!one && location.pathname.toLowerCase() === `/union/${one.address.toLowerCase()}`;
-  if (one) {
-    const n = el.querySelector<HTMLElement>('[data-bar-ends]')!;
-    barTick = setInterval(() => {
-      if (!n.isConnected) return clearInterval(barTick);
-      if (Date.now() / 1000 < one.deadline) return void (n.textContent = timeLeft(one.deadline));
-      clearInterval(barTick);
-      void drawAuctions(page);
-    }, 1000);
-  }
-  return true;
 }
 
 /// Phone browsers have no wallet inside them: open this page in a wallet's own browser instead.
