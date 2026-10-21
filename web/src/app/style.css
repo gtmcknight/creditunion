@@ -10018,6 +10018,16 @@ button.tk-unit:hover { text-decoration: underline; text-underline-offset: 4px; t
 @media (max-width: 560px) { .made-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 12px; } }
 .made { display: grid; gap: 8px; color: inherit; text-decoration: none; }
 .made img { width: 100%; aspect-ratio: 4 / 5; display: block; background: var(--empty); box-shadow: 0 0 0 1px var(--img-outline); }
+/* A paid-out batch: its 80 Credits as a sheet, painted on one canvas (sheet-paint.ts). */
+.made > .made-art { position: relative; display: block; box-shadow: 0 0 0 1px var(--img-outline); }
+/* Paid out: half the size of a Statement tile, so the whole run of batches reads at a glance. */
+.made-row.paid { grid-template-columns: repeat(auto-fill, minmax(66px, 1fr)); gap: 16px 10px; }
+.made-row.paid .made { gap: 6px; }
+.made-row.paid .made > span { font-size: 12px; gap: 4px; }
+.made-row.paid .made > span.muted { font-size: 11px; }
+.made-row.paid .sw-ink svg, .made-row.paid .sw-ink img { width: 10px; height: 10px; }
+@media (max-width: 560px) { .made-row.paid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px 8px; } }
+.made > .made + .muted, .made > span.muted { margin-top: -6px; }
 .made > span { display: flex; align-items: center; gap: 6px; }
 /* How color works: four steps, each the real thing (a Credit, a Statement, BALANCE on white paper) and one line. */
 dialog.how-color { width: min(560px, calc(100vw - 2 * var(--gutter))); }

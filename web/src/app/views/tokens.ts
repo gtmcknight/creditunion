@@ -229,6 +229,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   /// A converted batch's tile: its Balance (the pot until payout) once read, its Statement until then.
   function madeTile(c: (typeof made)[number]) {
     const n = Number(formatUnits(c.amount, got.decimals)).toLocaleString('en-US', { maximumFractionDigits: 0 });
+    // Paid out: its Balance shows the pot (empty now) and its Statement reads WITHDRAWN, so the batch is its 80 Credits.
+    if (isOpen) return `<a class="made" href="/statement/${c.sid}" title="${Number(formatUnits(c.net, got.decimals)).toLocaleString('en-US', { maximumFractionDigits: 0 })} ${TOKEN} to ${c.members.length} members"><div class="made-art">${sheet(c.ids, { size: 'sm', painted: true })}</div><span class="small"><span class="sw-ink">${swatch(c.lane)}</span><span class="num">${Number(formatUnits(c.net, got.decimals)).toLocaleString('en-US', { maximumFractionDigits: 0 })}</span></span><span class="small muted">${c.members.length === 1 ? '1 member' : `${c.members.length} members`}</span></a>`;
     return c.art
       ? `<a class="made" href="${balanceHref(c.art)}"><img src="${balanceSrc(c.art)}" alt="Balance #${c.art.id}" decoding="async"><span class="small"><span class="sw-ink">${swatch(c.lane)}</span>Balance #${c.art.id}</span></a>`
       : `<a class="made" href="/statement/${c.sid}"><img src="/statement/${c.sid}.svg" alt="Statement #${c.sid}" loading="lazy" decoding="async"><span class="small"><span class="sw-ink">${swatch(c.lane)}</span>#${c.sid}<span class="muted num"> · ${n}</span></span></a>`;
@@ -236,10 +238,13 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   const paying = !!gate && (gate.opensAt === null || gate.block >= gate.opensAt);
   /// Until they're paid out: how many members the converted batches hold BALANCE for, and how much, as one line.
   const madeLine = () => {
-    if (isOpen) return '';
     const who = new Set(made.flatMap((c) => c.members.map((a) => a.toLowerCase()))).size;
     const total = made.reduce((n, c) => n + (c.net > 0n ? c.net : 0n), 0n);
-    return who && total ? `<p class="tk-made-line"><span class="num">${who.toLocaleString('en-US')}</span> members have <span class="num">${Number(formatUnits(total, got.decimals)).toLocaleString('en-US', { maximumFractionDigits: 0 })}</span> ${TOKEN} reserved for ${whenShort(tradesAt)}.</p>` : '';
+    const tot = Number(formatUnits(total, got.decimals)).toLocaleString('en-US', { maximumFractionDigits: 0 });
+    if (!who || !total) return '';
+    return isOpen
+      ? `<p class="tk-made-line"><span class="num">${who.toLocaleString('en-US')}</span> members have converted <span class="num">${(made.length * 80).toLocaleString('en-US')}</span> Credits into <span class="num">${tot}</span> ${TOKEN}.</p>`
+      : `<p class="tk-made-line"><span class="num">${who.toLocaleString('en-US')}</span> members have <span class="num">${tot}</span> ${TOKEN} reserved for ${whenShort(tradesAt)}.</p>`;
   };
   /// When trading opens: the opening block's time once the token names it (12 s a block), until then the planned time.
   const tradesAt = gate?.opensAt != null ? tradesFrom(gate.opensAt, gate.block) : (tradesEst?.at ?? TRADES_PLANNED);
@@ -798,7 +803,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       </div>
       ${
         made.length
-          ? `<section class="tokens-made"><h3>Converted</h3>${madeLine()}<div class="made-row">${made.map(madeTile).join('')}</div></section>`
+          ? `<section class="tokens-made"><h3>${isOpen ? 'Paid out' : 'Converted'}</h3>${madeLine()}<div class="made-row${isOpen ? ' paid' : ''}">${made.map(madeTile).join('')}</div></section>`
           : ''
       }
     </section>`;
@@ -1495,8 +1500,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   if (viewNow() === 'credits' && lane().ink >= 0 && !picks.size) for (const id of ownedHere()) picks.add(id.toString());
   draw();
   // Each converted batch's Balance, read once the page is up: its tile turns from the Statement into it.
+  // (Not once trading opens: paid out, a Balance shows its empty pot, and the tile is the batch's Credits instead.)
   for (const c of made)
-    if (c.pocket && !c.art)
+    if (!isOpen && c.pocket && !c.art)
       void balanceArt(c.pocket).then((a) => {
         if (!a || thisRun !== pageRun) return;
         artKept.set(c.pocket!.toLowerCase(), a);
@@ -1508,6 +1514,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   // Live: every block (12 s) while this page is up, and the moment its tab is shown again, look for deposits, withdrawals,
   // new batches and conversions (anyone's), and draw the page again when something moved. What's typed and picked
   // carries over; it waits while a transaction is in flight or the amount is being edited.
+  const drawnAt = Date.now();
   const check = async () => {
     if (thisRun !== pageRun || !app.isConnected) return stop();
     if (busy || document.hidden || document.activeElement?.id === 'amt') return;
@@ -1520,8 +1527,18 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       // Yours paid out, or trading opened since this draw (so "Lands in your wallet" turns into what it is now).
       const owedNow = account && got.claim.length ? await Promise.all(got.claim.map((u) => pub.readContract({ address: config.tokenAdapter!, abi: tokenAdapterAbi, functionName: 'claimable', args: [u, account] }) as Promise<bigint>)) : [];
       const opened = !paying && !!gate?.opensAt && (await pub.getBlockNumber()) >= gate.opensAt;
-      const moved = m !== n || owedNow.some((v) => v === 0n) || opened || now.some(([c, st], i) => Number(c) !== waiting[i].s.count || Number(st) !== STATES.indexOf(waiting[i].s.state));
-      if (moved && thisRun === pageRun && !busy) {
+      // What changes what you see (a new batch, one filling or converting, yours paid, trading open) draws the page
+      // again. Someone else's deposit only moves a count: that's said in place, and the page draws again for it at
+      // most once a minute (the sheet's new Credits come with that draw), so it doesn't flash while you read.
+      const big = m !== n || owedNow.some((v) => v === 0n) || opened || now.some(([, st], i) => Number(st) !== STATES.indexOf(waiting[i].s.state));
+      const counts = now.some(([c], i) => Number(c) !== waiting[i].s.count);
+      if (!big && !counts) return;
+      if (!big && Date.now() - drawnAt < 60_000) {
+        now.forEach(([c], i) => (waiting[i].s.count = Number(c)));
+        paint();
+        return;
+      }
+      if (thisRun === pageRun && !busy) {
         stop();
         keptPicks = [...picks];
         rerun();
@@ -1606,7 +1623,7 @@ async function conversions(batches: Union[]) {
         (pub.readContract({ address: at, abi: tokenAdapterAbi, functionName: 'membersOf', args: [u.s.address] }) as Promise<readonly Address[]>).catch(() => [] as readonly Address[]),
       ]);
       // What its members share (what it converted into, less our fee and what's set aside, as received() reckons it).
-      return { sid: c[0], amount: c[1], net: c[1] - c[3] - c[4], members, lane: laneOf(u.s)!, pocket, art: (pocket && artKept.get(pocket.toLowerCase())) || null };
+      return { sid: c[0], amount: c[1], net: c[1] - c[3] - c[4], members, lane: laneOf(u.s)!, pocket, ids: u.ids, art: (pocket && artKept.get(pocket.toLowerCase())) || null };
     }),
   );
 }
