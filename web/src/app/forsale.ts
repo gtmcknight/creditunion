@@ -44,7 +44,8 @@ export const minEth = (wei: bigint) => ethNum(wei, 3, true);
 export const sourceMark = (id: string | number, source: Source, url?: string) =>
   `<a class="src" href="${esc(url ?? '#')}" target="_blank" rel="noopener" title="Credit #${id} on ${SOURCES[source].name}"><img class="src" src="${SOURCES[source].icon}" alt="${SOURCES[source].name}"></a>`;
 
-export type Listed = { id: string; price: string; source: Source; url?: string; hash?: string; protocol?: string; listingId?: string };
+/// `score`: the Credit's score, as the book's listings carry it (what it converts to).
+export type Listed = { id: string; price: string; source: Source; url?: string; hash?: string; protocol?: string; listingId?: string; score?: number };
 
 /// The most one buy takes, on every Buy (the worker's quote allows as many).
 export const MAX_SWEEP = 32;
@@ -304,8 +305,17 @@ const listedUrl = (where: ListedWhere, cursor: string) => {
 const early = new Map<string, Promise<Response>>();
 export function prefetchListed(where: ListedWhere) {
   const u = listedUrl(where, '');
-  if (!early.has(u)) early.set(u, fetch(u));
+  if (early.has(u)) return;
+  // The page may have come with it (/credits' HTML carries its first page).
+  const seed = document.getElementById('seed-listed');
+  if (seed?.dataset.url === u && seed.textContent) {
+    early.set(u, Promise.resolve(new Response(seed.textContent, { headers: { 'content-type': 'application/json' } })));
+    seed.remove(); // once: a later visit to the page reads afresh
+  } else early.set(u, fetch(u));
 }
+/// Each listed Credit's score, as its listing came (see Listed).
+const scores = new Map<string, number>();
+export const listedScore = (id: number | string) => scores.get(String(id));
 export function listedPager(where: ListedWhere = {}) {
   const items: Listed[] = []; // the grid's order, just-bought included
   const sale: Sale = { ls: [], preview: true, byId: new Map(), all: items, mine: new Set() };
@@ -336,6 +346,7 @@ export function listedPager(where: ListedWhere = {}) {
           seen.add(l.source);
           if (!sourceShown(l)) continue;
           items.push(l);
+          if (l.score !== undefined) scores.set(l.id, l.score);
           sale.byId.set(l.id, l);
           sale.ls.push(l);
         }

@@ -1,7 +1,6 @@
 import { conversionFeeBps, hasLayout, layoutSlot, listBatches, type Listed } from '../data';
-import { YOURS, listedPager, prefetchListed, live, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepWaiting, type Listed as Listing } from '../forsale';
+import { YOURS, listedPager, listedScore, prefetchListed, live, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepWaiting, type Listed as Listing } from '../forsale';
 import { hydrate } from '../ens';
-import { bin } from '../bins';
 import { editionArt, fillGhosts } from '../ghosts';
 import { dice, printGlyph, swatch, weightGlyph } from '../glyphs';
 import { EIGHTS_TOP, TRAIT_KINDS, eightsName, parseTrait, traitPath, type TraitKind, type TraitValue } from '../../shared/trait';
@@ -74,20 +73,13 @@ export async function traitPage(app: HTMLElement, kind: string, raw: string) {
   // Credit shows its rating there.
   let order: Where['order'] = all ? readOrder() : undefined;
   if (all) keepOrder(order);
-  let scoreOf = new Uint32Array(0);
   let feeBps = 0;
-  // /credits: its listings start now, beside the ratings and the fee its tiles need, and the page shows at once.
+  // /credits: its listings start now (or came with the page), beside the fee its tiles need, and the page shows at
+  // once. Each listing carries its score.
   if (all) prefetchListed({ order });
-  const ready = !all
-    ? Promise.resolve()
-    : Promise.all([
-      bin('credit-score.bin')
-        .then((b) => (scoreOf = new Uint32Array(b)))
-        .catch(() => {}),
-      conversionFeeBps().then((b) => (feeBps = b)),
-    ]);
+  const ready = all ? conversionFeeBps().then((b) => void (feeBps = b)) : Promise.resolve();
   // What a Credit converts to: one $BALANCE a rating point, less the conversion fee.
-  const balanceOf = (id: number) => Math.floor((scoreOf[id - 1] / 10_000) * (1 - feeBps / 10_000));
+  const balanceOf = (score: number) => Math.floor((score / 10_000) * (1 - feeBps / 10_000));
 
   // How many, from the counts built into the page (no wait, so the line never shifts); the unions link, which
   // does wait, comes last on the line.
@@ -115,7 +107,7 @@ export async function traitPage(app: HTMLElement, kind: string, raw: string) {
     const el = document.getElementById('sale-n');
     if (el) el.textContent = all ? `${n.toLocaleString()} for sale` : `${n.toLocaleString()} ${n === 1 ? 'Credit' : 'Credits'} listed`;
   };
-  const grid = buyGrid(app, { trait: saleKey, order }, async () => ({ ids: [], total: 0 }), all ? (id) => (scoreOf[id - 1] ? `${balanceOf(id).toLocaleString('en-US')} $BALANCE` : '') : undefined, saleN);
+  const grid = buyGrid(app, { trait: saleKey, order }, async () => ({ ids: [], total: 0 }), all ? (id) => { const sc = listedScore(id); return sc ? `${balanceOf(sc).toLocaleString('en-US')} $BALANCE` : ''; } : undefined, saleN);
   bindSort(app, (k) => {
     const next = k === 'cheap' ? undefined : (k as Where['order']);
     if (next === order) return;

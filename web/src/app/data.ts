@@ -285,6 +285,7 @@ let feeP: Promise<number> | null = null;
 const FEE_KEY = 'cu-fee-bps';
 export const conversionFeeBps = () => {
   if (feeP) return feeP;
+  if (typeof config.tokenFee === 'number') return (feeP = Promise.resolve(config.tokenFee)); // written into the page
   const read = config.tokenFactory
     ? (pub.readContract({ address: config.tokenFactory, abi: factoryAbi, functionName: 'protocolFeeBps' }) as Promise<bigint>).then(Number).then((b) => {
         try {

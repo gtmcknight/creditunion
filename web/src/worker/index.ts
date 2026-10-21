@@ -286,7 +286,7 @@ function sameSite(req: Request) {
 export { BuyLocks } from './locks';
 export { MarketBook } from './market';
 
-export default {
+const handler = {
   async fetch(req, env, ctx): Promise<Response> {
     setSpareKey(env.OPENSEA_API_KEY_2);
     const url = new URL(req.url);
@@ -327,6 +327,7 @@ export default {
     );
   },
 } satisfies ExportedHandler<Env>;
+export default handler;
 
 /// Every Activity row (newest first) with plans' unions left out until they fill. Read once for the site by the
 /// ChainBook, fresh for FEED_MS in this isolate and this data center (the colo cache), then read again behind the
@@ -1351,15 +1352,16 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
           // ?order=value: the most rating per ETH first (the Statements contract's score over the price).
           // ?order=rating: the highest rated first.
           const order = url.searchParams.get('order');
+          // Each listing carries its Credit's score, so a page can say what it converts to without the score table.
+          const sc = (await loadTable(env.ASSETS, url.origin)).score;
           if (order === 'value' || order === 'rating') {
-            const sc = (await loadTable(env.ASSETS, url.origin)).score;
             const s = (r: (typeof pass)[number]) => sc[Number(r[0]) - 1] ?? 0;
             const v = (r: (typeof pass)[number]) => (order === 'rating' ? s(r) : s(r) / Number(BigInt(r[1]) / 1_000_000_000n || 1n));
             pass.sort((a, b) => v(b) - v(a));
           }
           const items = pass.slice(bookCur, bookCur + LISTED_CHUNK).map((r) => {
             const l: Listing = r[2] === 'opensea' ? { id: r[0], price: r[1], source: 'opensea', hash: r[3], protocol: r[4] } : { id: r[0], price: r[1], source: r[2] as Listing['source'], ...(r[3] ? { listingId: r[3] } : {}) };
-            return { ...l, url: listingUrl(env, true, l) };
+            return { ...l, url: listingUrl(env, true, l), score: sc[Number(r[0]) - 1] ?? 0 };
           });
           const next = bookCur + LISTED_CHUNK < pass.length ? btoa(JSON.stringify({ b: bookCur + LISTED_CHUNK })) : null;
           return Response.json({ items, next, preview: false, total: new Set(pass.map((r) => r[0])).size, sources: sourcesOf(env, pass.map((r) => ({ source: r[2] }))) }, { headers: { 'cache-control': 'no-store' } });
@@ -2052,7 +2054,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const shell = await env.ASSETS.fetch(new Request(new URL('/', url), req));
     // The Printer is unlisted: nothing links to it, and search engines leave it out.
     const unlisted = /^\/printer(\/|$)/.test(url.pathname) ? '\n  <meta name="robots" content="noindex, nofollow">' : '';
-    if (shell.ok && (shell.headers.get('content-type') ?? '').includes('text/html')) return withCard(shell, card, url, bootHead(env, url, await pageFacts(env, url, ctx)) + unlisted);
+    const [facts, seed] = await Promise.all([pageFacts(env, url, ctx), url.pathname === '/credits' ? creditsSeed(env, url, ctx) : '']);
+    if (shell.ok && (shell.headers.get('content-type') ?? '').includes('text/html')) return withCard(shell, card, url, bootHead(env, url, facts) + seed + unlisted);
     return shell;
   }
 
@@ -2063,9 +2066,25 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
 const LISTS = /^\/(unions|parties|auctions|me|member|credit|credits|palette|eights|print|weight|time|rating|bits|og|create)(\/|$)/;
 /// Into every page's head: the app's config, so the first draw doesn't wait on /config.json, and on pages that
 /// list Credit Unions a preload of the union index. `facts` (pageFacts) ride along when there's a read of them.
+/// /credits' first page of listings in its own HTML (most $BALANCE per ETH, the default order), so its tiles draw as
+/// soon as the app runs, and their art asked for as the page arrives. Left out when the book is slow to answer: the
+/// page reads it itself then, as before.
+const SEED_URL = '/opensea/listed?order=value';
+async function creditsSeed(env: Env, url: URL, ctx: ExecutionContext): Promise<string> {
+  const res = await Promise.race([
+    handler.fetch(new Request(url.origin + SEED_URL), env, ctx).catch(() => null),
+    new Promise<null>((r) => setTimeout(() => r(null), 400)),
+  ]);
+  if (!res?.ok) return '';
+  const body = await res.text();
+  const ids = ((JSON.parse(body) as { items?: { id: string }[] }).items ?? []).slice(0, 24).map((x) => x.id);
+  const credits = env.CREDITS.toLowerCase();
+  return `\n  <script type="application/json" id="seed-listed" data-url="${SEED_URL}">${body.replace(/</g, '\\u003c')}</script>${ids.map((id) => `\n  <link rel="preload" href="/art/${credits}/${Number(id)}.svg" as="image">`).join('')}`;
+}
+
 function bootHead(env: Env, url: URL, facts?: Facts | null) {
   const config = `<script type="application/json" id="config">${JSON.stringify({ ...publicConfig(env), ...facts }).replace(/</g, '\\u003c')}</script>`;
-  return LISTS.test(url.pathname) ? `${config}\n  <link rel="preload" href="/unions.json" as="fetch" crossorigin="anonymous">` : config;
+  return LISTS.test(url.pathname) && url.pathname !== '/credits' ? `${config}\n  <link rel="preload" href="/unions.json" as="fetch" crossorigin="anonymous">` : config;
 }
 
 /// What every page shows of the chain that seldom changes, written into the page with its config so no visit reads it
@@ -2074,7 +2093,7 @@ function bootHead(env: Env, url: URL, facts?: Facts | null) {
 /// Read behind the response once a copy is FACTS_MS old; a copy up to FACTS_KEEP old is still handed out (this
 /// isolate's, else the colo's), so a page never waits on the chain for it. With none (a new isolate in a quiet data
 /// center), a page goes without, and the app reads what it needs itself, as before.
-type Facts = { burn?: { assembler: Address | null; pending: Address | null; until: number }; sweeperFee?: number; liveAuctions?: number; burnable?: number; factsAt?: number };
+type Facts = { burn?: { assembler: Address | null; pending: Address | null; until: number }; sweeperFee?: number; tokenFee?: number; liveAuctions?: number; burnable?: number; factsAt?: number };
 const FACTS_MS = 15_000;
 const FACTS_KEEP = 10 * 60_000;
 let factsMemo: { got: number; v: Facts } | null = null;
@@ -2098,12 +2117,13 @@ async function pageFacts(env: Env, url: URL, ctx: ExecutionContext): Promise<Fac
 }
 async function readFacts(env: Env, url: URL, ctx: ExecutionContext): Promise<Facts> {
   const factsAt = Date.now();
-  const [burn, sweeperFee, counts] = await Promise.all([
+  const [burn, sweeperFee, tokenFee, counts] = await Promise.all([
     burnState(env).catch(() => undefined),
     sweeperFeeOf(env).catch(() => undefined),
+    tokenFeeOf(env).catch(() => undefined),
     unionIndex(env, url, ctx).then(countsOf).catch(() => undefined),
   ]);
-  return { ...(burn ? { burn } : {}), ...(sweeperFee !== undefined ? { sweeperFee } : {}), ...(counts ? { ...counts, factsAt } : {}) };
+  return { ...(burn ? { burn } : {}), ...(sweeperFee !== undefined ? { sweeperFee } : {}), ...(tokenFee !== undefined ? { tokenFee } : {}), ...(counts ? { ...counts, factsAt } : {}) };
 }
 /// From the index, counted once per read of it: auctions open for bids (Batch.State.Auction, the clock not run out),
 /// and full unions counting down to their hour to convert or in it (Phase Countdown or Burnable), which the site bar
@@ -2140,6 +2160,14 @@ const feeKept = shared<number>(() => 5 * 60_000);
 function sweeperFeeOf(env: Env): Promise<number | undefined> {
   if (!publicConfig(env).sweeper) return Promise.resolve(undefined);
   return feeKept(undefined, () => client(env).readContract({ address: env.SWEEPER, abi: sweeperAbi, functionName: 'feeBps' }).then(Number));
+}
+
+/// The fee a new $BALANCE batch takes off its rating (bps), a few minutes old at most.
+const tokenFeeKept = shared<number>(() => 5 * 60_000);
+function tokenFeeOf(env: Env): Promise<number | undefined> {
+  const f = addrOrNull(env.TOKEN_FACTORY);
+  if (!f) return Promise.resolve(undefined);
+  return tokenFeeKept(undefined, () => client(env).readContract({ address: f, abi: factoryAbi, functionName: 'protocolFeeBps' }).then(Number));
 }
 
 /// What a Credit's card shows, from the edition's packed traits and score table.
