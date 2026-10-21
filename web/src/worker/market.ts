@@ -37,6 +37,17 @@ export class MarketBook extends DurableObject<Env> {
   private put(r: Row) {
     this.sql.exec(`INSERT INTO listings (id, price, source, a, b, seller, until) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET price = excluded.price, source = excluded.source, a = excluded.a, b = excluded.b, seller = excluded.seller, until = excluded.until`, ...r);
   }
+  /// Every row now in the book, by Credit id. Rewriting only what changed keeps Durable Object row writes (billed per
+  /// row) to the handful of listings that actually moved, not all ~14,000 every few minutes.
+  private rowsBy(where = '1 = 1'): Map<string, Row> {
+    const m = new Map<string, Row>();
+    for (const r of this.sql.exec(`SELECT * FROM listings WHERE ${where}`).toArray())
+      m.set(String(r.id), [String(r.id), String(r.price), String(r.source), String(r.a), String(r.b), String(r.seller), Number(r.until)]);
+    return m;
+  }
+  private same(a: Row | undefined, b: Row) {
+    return !!a && a.every((x, i) => String(x) === String(b[i]));
+  }
   private changed() {
     this.v++;
     this.setMeta('updated', Date.now());
@@ -63,8 +74,10 @@ export class MarketBook extends DurableObject<Env> {
   /// The hourly rebuild: the whole book at once.
   async replaceAll(rows: Row[], cursor: number) {
     this.ctx.storage.transactionSync(() => {
-      this.sql.exec(`DELETE FROM listings`);
-      for (const r of rows) this.put(r);
+      const had = this.rowsBy();
+      const next = new Map(rows.map((r) => [r[0], r] as const));
+      for (const id of had.keys()) if (!next.has(id)) this.sql.exec(`DELETE FROM listings WHERE id = ?`, id);
+      for (const r of next.values()) if (!this.same(had.get(r[0]), r)) this.put(r);
       this.setMeta('built', Date.now());
       if (!this.meta('cursor')) this.setMeta('cursor', cursor);
     });
@@ -75,10 +88,17 @@ export class MarketBook extends DurableObject<Env> {
   /// listing of the same Credit stays.
   async setExtras(rows: Row[]) {
     this.ctx.storage.transactionSync(() => {
-      this.sql.exec(`DELETE FROM listings WHERE source IN ('fwa', 'strategy')`);
-      for (const r of rows) {
-        const had = this.sql.exec(`SELECT price FROM listings WHERE id = ?`, r[0]).toArray()[0];
-        if (!had || BigInt(String(had.price)) > BigInt(r[1])) this.put(r);
+      const had = this.rowsBy(`source IN ('fwa', 'strategy')`);
+      const next = new Map<string, Row>();
+      for (const r of rows) { const o = next.get(r[0]); if (!o || BigInt(o[1]) > BigInt(r[1])) next.set(r[0], r); } // listed twice: the cheaper stays
+      for (const id of had.keys()) if (!next.has(id)) this.sql.exec(`DELETE FROM listings WHERE id = ?`, id);
+      for (const r of next.values()) {
+        if (this.same(had.get(r[0]), r)) continue;
+        if (!had.has(r[0])) {
+          const os = this.sql.exec(`SELECT price FROM listings WHERE id = ?`, r[0]).toArray()[0]; // a cheaper OpenSea listing stays
+          if (os && BigInt(String(os.price)) <= BigInt(r[1])) continue;
+        }
+        this.put(r);
       }
     });
     this.changed();
