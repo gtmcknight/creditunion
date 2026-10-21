@@ -35,11 +35,12 @@
     // Pages name it as ours.
     "TOKEN_KEEPER": "0x42d553DE53063610073b24C68566Db013740DC54",
     "BALANCE_TOKEN": "0x3620540c994433D7B4a628C46d2ED5F92572eA07",
-    // BALANCE's pool as its launch liquidity lock (0xC9951Be5…3b93E) names it, its poolId() this key: 0.3%, tick
-    // spacing 30, no hook. And our 1% on swaps to the Safe.
+    // BALANCE's pool: 0.3%, tick spacing 30, hooked by Uniswap's launch strategy (0x2EEF0e2a…5CA000). Someone opened
+    // the hookless key first (block 26,239,755, at a junk price), so the launch migrates into this fallback instead of
+    // the hookless pool its liquidity lock (0xC9951Be5…3b93E) names. And our 1% on swaps to the Safe.
     "BALANCE_POOL_FEE": "3000",
     "BALANCE_POOL_TICK_SPACING": "30",
-    "BALANCE_POOL_HOOKS": "0x0000000000000000000000000000000000000000",
+    "BALANCE_POOL_HOOKS": "0x2EEF0e2a9a652d755AccAD95a24541A98B5CA000",
     "SWAP_FEE_BPS": "100",
     "SWAP_FEE_TO": "0xFE4761e66C2A37492871d30d0e83bcBC454A7C10"
   },
