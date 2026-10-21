@@ -38,6 +38,8 @@ import { BURNING_FROM, burningOn, burnsAt, me, readNotice } from './data';
 
 const app = document.getElementById('app')!;
 let seq = 0;
+/// The page that failed and was given one more try, so a second failure says so instead of trying forever.
+let retried: string | null = null;
 
 /// Real paths: / (how it works and live activity), /docs, /statements (Buy) and /unions (Make), /credits, /balance, /create, /union/0x…, /credit/123, /mint, /me,
 /// trait pages /palette/CMYK, /eights/3, /print/slip, /weight/sparse, and /time?from=&to=, /rating, /bits. Pages keep their old
@@ -134,7 +136,15 @@ async function route() {
     else if (page === 'parties' || page === 'auctions') await lists(app, page);
     else if (page === 'statements') await lists(app, 'auctions');
     else home(app);
+    retried = null;
   } catch (e) {
+    // A read that failed while the node was busy (our key over its limit, the public node refusing a big batch):
+    // once, a moment later, before saying so.
+    if (run === seq && retried !== location.href) {
+      retried = location.href;
+      setTimeout(() => run === seq && route(), 1_500);
+      return;
+    }
     if (run === seq) app.innerHTML = `<section class="prose"><h1>Something went wrong</h1><p class="error">${esc(errText(e))}</p></section>`;
   }
   if (run !== seq) return;
