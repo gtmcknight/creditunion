@@ -8552,19 +8552,6 @@ dialog.how .small { margin-top: 16px; }
 .faq-page .faq { margin: 8px 0 0; max-width: 720px; }
 @media (min-width: 900px) { .faq-page .faq { max-width: 720px; } }
 
-/* Activity → Leaderboard: rank, who, Credits in unions now, how many unions. */
-.board { list-style: none; margin: 0; padding: 0; max-width: 880px; }
-.board-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto 96px; align-items: center; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); font-size: 14px; }
-.board-row .board-who, .board-row .board-who * { font-size: 14px; }
-.board-row:last-child { border-bottom: 1px solid var(--line); }
-.board-row.mine { background: var(--raised, transparent); }
-.board-rank { color: var(--muted); }
-.board-who { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.board-n { text-align: right; }
-.board-u { text-align: right; }
-.board-note { margin-top: 12px; }
-@media (max-width: 480px) { .board-row { grid-template-columns: 28px minmax(0, 1fr) auto; } .board-u { display: none; } }
-.live-list[hidden] { display: none; }
 .btn.live-more { display: block; margin: 20px auto 0; }
 .live-row[hidden] { display: none; }
 .site-tick { width: 100%; max-width: var(--max); margin: 0 auto; padding: 0 var(--gutter); }

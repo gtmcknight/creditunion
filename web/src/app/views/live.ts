@@ -3,7 +3,6 @@ import { onReturn } from '../visible';
 import { explorer, session } from '../chain';
 import { hydrate, who } from '../ens';
 import { art, esc, eth, pageHead, same } from '../ui';
-import { listBatches } from '../data';
 
 /// /activity.json's rows (worker/activity.ts).
 type Item = {
@@ -149,19 +148,11 @@ function row(x: Item, o: { here?: boolean; who?: boolean } = {}) {
 /// /activity: every deposit, withdrawal, buy, new union, burn, bid, sale and claim, newest first. New rows slide in at
 /// the top every 20 seconds; if you've scrolled down, the page holds still under you.
 export async function live(app: HTMLElement) {
-  const board = new URLSearchParams(location.search).get('tab') === 'leaderboard';
+  // The old Leaderboard tab's link lands here too.
+  if (location.search.includes('tab=')) history.replaceState(null, '', '/activity');
   app.innerHTML = `<section class="home">
-    ${pageHead({
-      title: 'Activity',
-      lede: 'Everything wallets do on Credit Union, as it happens.',
-      tabs: [
-        { label: 'Activity', attrs: 'data-tab="activity"', current: !board },
-        { label: 'Leaderboard', attrs: 'data-tab="leaderboard"', current: board },
-      ],
-      label: 'Show',
-    })}
-    <ol class="live-list" id="live-list"${board ? ' hidden' : ''}><li class="muted live-empty">Loading…</li></ol>
-    <div id="leaderboard"${board ? '' : ' hidden'}><p class="muted">Loading…</p></div>
+    ${pageHead({ title: 'Activity', lede: 'Everything wallets do on Credit Union, as it happens.' })}
+    <ol class="live-list" id="live-list"><li class="muted live-empty">Loading…</li></ol>
   </section>`;
   const list = app.querySelector<HTMLOListElement>('#live-list')!;
   const seen = new Set<string>();
@@ -173,7 +164,7 @@ export async function live(app: HTMLElement) {
   more.hidden = true;
   list.after(more);
   let hasMore = false;
-  const page = () => (more.hidden = list.hidden || !hasMore);
+  const page = () => (more.hidden = !hasMore);
   more.addEventListener('click', async () => {
     const last = list.querySelector<HTMLElement>('.live-row:last-child')?.dataset.key;
     if (!last) return;
@@ -191,18 +182,6 @@ export async function live(app: HTMLElement) {
     more.disabled = false;
     page();
   });
-  const boardEl = app.querySelector<HTMLElement>('#leaderboard')!;
-  let boardDrawn = false;
-  const show = (tab: string) => {
-    app.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
-    list.hidden = tab !== 'activity';
-    boardEl.hidden = tab !== 'leaderboard';
-    page();
-    history.replaceState(null, '', tab === 'leaderboard' ? '/activity?tab=leaderboard' : '/activity');
-    if (tab === 'leaderboard' && !boardDrawn) (boardDrawn = true), void leaderboard(boardEl);
-  };
-  app.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) => b.addEventListener('click', () => show(b.dataset.tab!)));
-  if (board) (boardDrawn = true), void leaderboard(boardEl);
   const load = async (first: boolean) => {
     let items: Item[];
     try {
@@ -245,41 +224,6 @@ export async function live(app: HTMLElement) {
     if (document.visibilityState === 'visible') void load(false);
   }, POLL);
   onReturn(() => load(false), () => list.isConnected);
-}
-
-/// Leaderboard: who has the most Credits in Credit Unions right now, across every union (from the union index:
-/// a Credit counts for whoever deposited it, until they take it out).
-async function leaderboard(el: HTMLElement) {
-  let unions;
-  try {
-    unions = await listBatches();
-  } catch {
-    el.innerHTML = '<p class="muted">Couldn’t load the leaderboard. Try again in a minute.</p>';
-    return;
-  }
-  const by = new Map<string, { who: Address; credits: number; unions: Set<string> }>();
-  for (const u of unions)
-    for (const d of u.depositors) {
-      const k = d.toLowerCase();
-      const r = by.get(k) ?? { who: d, credits: 0, unions: new Set<string>() };
-      r.credits++;
-      r.unions.add(u.s.address.toLowerCase());
-      by.set(k, r);
-    }
-  const rows = [...by.values()].sort((a, b) => b.credits - a.credits || b.unions.size - a.unions.size);
-  if (!el.isConnected) return;
-  if (!rows.length) return void (el.innerHTML = '<p class="muted">Nothing yet.</p>');
-  const mine = session.account ? rows.findIndex((r) => same(r.who, session.account!)) : -1;
-  const line = (r: (typeof rows)[number], i: number) => `<li class="board-row${i === mine ? ' mine' : ''}">
-      <span class="board-rank num">${i + 1}</span>
-      <span class="board-who">${who(r.who, 'sm', true)}${i === mine ? '<span class="tag you">You</span>' : ''}</span>
-      <span class="board-n num">${r.credits} ${r.credits === 1 ? 'Credit' : 'Credits'}</span>
-      <span class="board-u num muted">${r.unions.size} ${r.unions.size === 1 ? 'union' : 'unions'}</span>
-    </li>`;
-  const TOP = 50;
-  el.innerHTML = `<ol class="board">${rows.slice(0, TOP).map(line).join('')}${mine >= TOP ? line(rows[mine], mine) : ''}</ol>
-    <p class="small muted board-note">${rows.length} depositors · Credits in Credit Unions now, across every union</p>`;
-  hydrate(el);
 }
 
 /// The ticker's markup (homepage under the hero, /unions under the lede); activityTicker fills it.
