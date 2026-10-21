@@ -9886,11 +9886,10 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 /* The right column: the batch you'd join, its sheet as the picture and the count as its caption. */
 .tk-right { display: grid; gap: 40px; align-content: start; align-self: stretch; padding-left: 28px; border-left: 1px solid var(--line); }
 .tk-right:not(:has(#tk-batch-home .tk-batch:not([hidden]))):not(:has(.pc:not(:empty):not([hidden]))) { display: none; }
-/* The price, atop the right column: now (or under the pointer), its change over the range, the line, the ranges. */
+/* The market cap, atop the right column: now (or under the pointer), its change over the range, the line, the ranges. */
 .pc:empty { display: none; }
-.pc-head { display: grid; grid-template-columns: 1fr auto; align-items: baseline; column-gap: 12px; row-gap: 2px; margin-bottom: 14px; }
-.pc-mc { font-size: 13px; color: var(--muted); white-space: nowrap; }
-.pc-mc .num { color: var(--fg); }
+.pc-head { display: grid; grid-template-columns: auto 1fr; align-items: baseline; column-gap: 8px; row-gap: 2px; margin-bottom: 14px; }
+.pc-label { font-size: 13px; color: var(--muted); }
 .pc-change { grid-column: 1 / -1; }
 .pc-price { font-size: 28px; line-height: 1.1; letter-spacing: -0.02em; }
 .pc-change { font-size: 13px; color: var(--muted); }

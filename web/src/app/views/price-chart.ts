@@ -1,5 +1,5 @@
-/// $BALANCE's price for /balance's right column: the price now (or where the pointer is) and its change over the range
-/// shown, the line, and the ranges its history has reached (the Worker's /market/balance-price.json, a point a minute
+/// $BALANCE's price for /balance's right column: its market cap now (or where the pointer is) and its change over the
+/// range shown, the line, and the ranges its history has reached (the Worker's /market/balance-price.json, a point a minute
 /// from the pool's swaps). Kept between the page's redraws, so a redraw shows it at once; read again each minute
 /// while the page is up.
 
@@ -15,7 +15,8 @@ let readAt = 0;
 let picked = '';
 let reading: Promise<void> | null = null;
 
-/// A $BALANCE price in dollars: four decimals under $1, as the chart and You get's "each" both write it.
+/// A $BALANCE price in dollars, four decimals under $1: You get's "each", and the chart's number while the supply
+/// can't be read.
 export const usdPrice = (v: number) => `$${v >= 1 ? v.toFixed(2) : v >= 0.01 ? v.toFixed(4) : v.toPrecision(3)}`;
 /// A market cap to three figures: $5.78M.
 const cap = (v: number) => {
@@ -54,21 +55,21 @@ export function priceChart(host: HTMLElement) {
     const line = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p[0]).toFixed(1)} ${y(p[1]).toFixed(1)}`).join(' ');
     const [lx, ly] = [x(t1), y(pts[pts.length - 1][1])];
     host.innerHTML = `
-      <div class="pc-head"><span class="pc-price num"></span><span class="pc-mc"></span><span class="pc-change"></span></div>
-      <svg class="pc-line" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="$BALANCE price, ${SINCE[range]}">
+      <div class="pc-head"><span class="pc-price num"></span><span class="pc-label"></span><span class="pc-change"></span></div>
+      <svg class="pc-line" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="$BALANCE market cap, ${SINCE[range]}">
         <line class="pc-base" x1="0" x2="${W}" y1="${y(pts[0][1]).toFixed(1)}" y2="${y(pts[0][1]).toFixed(1)}"/>
         <path d="${line}"/>
         <line class="pc-hair" y1="0" y2="${H}" style="display: none"/>
         <circle class="pc-dot" cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="3"/>
       </svg>
       ${ranges.length > 1 ? `<div class="pc-ranges">${ranges.map((r) => `<button type="button" data-range="${r}"${r === range ? ' aria-pressed="true"' : ''}>${r}</button>`).join('')}</div>` : ''}`;
-    const price = host.querySelector<HTMLElement>('.pc-price')!, change = host.querySelector<HTMLElement>('.pc-change')!, mc = host.querySelector<HTMLElement>('.pc-mc')!;
+    const price = host.querySelector<HTMLElement>('.pc-price')!, change = host.querySelector<HTMLElement>('.pc-change')!;
+    // The market cap: the price times every $BALANCE there is, as DexScreener counts it.
+    host.querySelector<HTMLElement>('.pc-label')!.textContent = data.supply ? 'market cap' : '';
     const dot = host.querySelector<SVGCircleElement>('.pc-dot')!, hair = host.querySelector<SVGLineElement>('.pc-hair')!;
     const head = (i: number | null) => {
       const p = pts[i ?? pts.length - 1];
-      price.textContent = usdPrice(p[1]);
-      // The price times every $BALANCE there is, as DexScreener counts it.
-      mc.innerHTML = data?.supply ? `<span class="num">${cap(p[1] * data.supply)}</span> market cap` : '';
+      price.textContent = data?.supply ? cap(p[1] * data.supply) : usdPrice(p[1]);
       if (i === null) {
         const pct = ((p[1] - pts[0][1]) / pts[0][1]) * 100;
         change.textContent = `${pct >= 0 ? '+' : '−'}${Math.abs(pct).toFixed(1)}% ${SINCE[range]}`;
