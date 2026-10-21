@@ -185,8 +185,8 @@ async function drawNotice() {
   el.hidden = false;
 }
 
-/// Live auctions, for people who live on Unions: counted beside Auctions in the nav, and once burning is on, the bar
-/// above the header says so on every page but Auctions itself.
+/// The bar above the header, only for a full union in its hour to convert (burnBar); live auctions get no bar or nav
+/// count (the Statements page's Auction tab counts them).
 async function drawAuctions(page: string, list: Listed[] | null = recentBatches()) {
   // Counted from the union list when a page here just read it; else as the page came (the Worker's count, under two
   // minutes old, early in the visit). The list is read for it otherwise, and whenever a full union may be in its hour
@@ -195,15 +195,14 @@ async function drawAuctions(page: string, list: Listed[] | null = recentBatches(
   const all = list ?? (given ? null : await listBatches().catch(() => null));
   const live = all ? liveAuctions(all) : config.liveAuctions;
   if (live === undefined) return;
-  const a = document.querySelector<HTMLAnchorElement>('.main-nav [data-nav="statements"]');
-  if (a) a.innerHTML = live ? `Statements <span class="nav-count num" aria-label="${live} live auctions">${live}</span>` : 'Statements';
   await readNotice();
   const el = document.getElementById('notice');
   if (!el || !burningOn || (el.innerHTML && !el.classList.contains('auctions-bar'))) return;
   el.classList.add('auctions-bar');
   if (burnBar(el, all ?? [], page)) return; // no list: the page's facts say no union is near its hour to convert
-  el.innerHTML = `<span><strong>${live === 1 ? '1 Statement is' : `${live} Statements are`} up for auction.</strong> <a href="/statements">See them</a></span>`;
-  el.hidden = !live || page === 'auctions' || page === 'statements';
+  // Live auctions get no bar of their own: the count beside Statements says it.
+  el.innerHTML = '';
+  el.hidden = true;
 }
 
 /// While a full union is in its hour to convert, the bar says so instead: which one and how long is left, linked to

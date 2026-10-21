@@ -5937,6 +5937,10 @@ dialog.eligible::backdrop {
   color: var(--err);
   text-decoration-color: currentColor;
 }
+/* Start a Credit Union: what 80 at once does, before the button that does it. */
+.heads-up { margin: 0 0 12px; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: var(--r); font-size: 14px; line-height: 1.45; }
+.heads-up strong { font-weight: 600; }
+.heads-up[hidden] { display: none; }
 .gate-warn {
   margin: 0 0 10px;
   padding: 10px 12px;

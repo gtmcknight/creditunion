@@ -1174,7 +1174,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   if (url.pathname === '/statements/lives.json') {
     if (req.method !== 'GET' || !sameSite(req)) return text('forbidden', 403);
     const ids = (url.searchParams.get('ids') ?? '').split(',');
-    if (ids.length > 64 || ids.some((x) => !/^\d{1,7}$/.test(x))) return text('bad request', 400);
+    if (ids.length > 128 || ids.some((x) => !/^\d{1,7}$/.test(x))) return text('bad request', 400); // a Statement has 80 pages
     const key = new Request(`${url.origin}/statements/lives-cache/v1/${ids.join('.')}`);
     const hit = await caches.default.match(key);
     if (hit) return hit;
@@ -1240,8 +1240,18 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const hit = await caches.default.match(key);
     if (hit) return hit;
     try {
-      const r = (await (await fetch('https://api.coinbase.com/v2/prices/ETH-USD/spot', { signal: AbortSignal.timeout(5_000) })).json()) as { data?: { amount?: string } };
-      const usd = Number(r.data?.amount);
+      // Coinbase's spot price, else Chainlink's ETH/USD feed on mainnet (Coinbase's API has gone stale before).
+      const coinbase = async () => {
+        const r = (await (await fetch('https://api.coinbase.com/v2/prices/ETH-USD/spot', { signal: AbortSignal.timeout(5_000) })).json()) as { data?: { amount?: string } };
+        const usd = Number(r.data?.amount);
+        if (!(usd > 0)) throw new Error('no rate');
+        return usd;
+      };
+      const chainlink = async () => {
+        const [, answer] = (await mainClient(env).readContract({ address: ETH_USD_FEED, abi: FEED_ABI, functionName: 'latestRoundData' })) as readonly [bigint, bigint, bigint, bigint, bigint];
+        return Number(answer) / 1e8;
+      };
+      const usd = await coinbase().catch(chainlink);
       if (!(usd > 0)) throw new Error('no rate');
       const res = Response.json({ usd, at: Date.now() }, { headers: { 'cache-control': 'public, max-age=300' } });
       ctx.waitUntil(caches.default.put(key, res.clone()));
@@ -2906,6 +2916,9 @@ async function sweeperFor(env: Env, batch: Address): Promise<Address> {
   if (t && sw && (await client(env).readContract({ address: t, abi: factoryAbi, functionName: 'isBatch', args: [batch] }).catch(() => false))) return sw;
   return env.SWEEPER;
 }
+/// Chainlink's ETH/USD price feed on mainnet (8 decimals).
+const ETH_USD_FEED = '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419' as Address;
+const FEED_ABI = parseAbi(['function latestRoundData() view returns (uint80, int256, uint256, uint256, uint80)']);
 const addrOrNull = (a?: string) => (a && /^0x[0-9a-fA-F]{40}$/.test(a) && !/^0x0+$/.test(a) ? (a as Address) : null);
 /// Mainnet reads (FWA). ENS_RPC when set; publicnode otherwise, which (unlike drpc's free tier) honours an eth_call's
 /// gas price, needed to price FWA's randomness fee.

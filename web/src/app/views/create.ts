@@ -213,7 +213,7 @@ export async function create(app: HTMLElement) {
   // The page draws at once, signed out too: the layouts, the rules and the preview need no wallet, only Start does.
   // Your Credits come in when the wallet answers (the Deposit picker says so meanwhile), the factory's numbers (the
   // minimum to open, the fees, the score table) behind them; Start waits for both.
-  app.innerHTML = `<header class="create-head"><h1>Start a Credit Union</h1><p class="create-lede">Set the rules, add your Credits, invite everyone. At 80 they burn into a Statement and everyone in splits the sale.</p></header>`;
+  app.innerHTML = `<header class="create-head"><h1>Start a Credit Union</h1><p class="create-lede">Set the rules, add your Credits, invite everyone. At 80 they burn into one Statement, it’s sold at auction, and everyone in splits the sale.</p></header>`;
   let account = session.account;
   const readOf = (a: Address) => {
     const read = Promise.all([myCredits(a), isApproved(a)]);
@@ -276,7 +276,7 @@ export async function create(app: HTMLElement) {
 
   // Title and one line across the top; under them the sheet (match count below it) and the form start level.
   app.innerHTML = `
-  <header class="create-head"><h1>Start a Credit Union</h1><p class="create-lede">Set the rules, add your Credits, invite everyone. At 80 they burn into a Statement and everyone in splits the sale. <a href="/">How it works →</a></p></header>
+  <header class="create-head"><h1>Start a Credit Union</h1><p class="create-lede">Set the rules, add your Credits, invite everyone. At 80 they burn into one Statement, it’s sold at auction, and everyone in splits the sale. <a href="/docs#how">How it works →</a></p></header>
   <section class="design">
     <div class="design-preview dir-host">
       <div id="preview">${sheet([])}</div>${directionCanvas}
@@ -399,6 +399,7 @@ export async function create(app: HTMLElement) {
 
 
       <div class="submit">
+        <p class="heads-up" id="heads-up" hidden></p>
         <p class="gate-warn" id="warn" hidden></p>
         <button class="btn primary block" id="go" disabled>Start Credit Union</button>
         <p class="hint" id="why"></p>
@@ -624,6 +625,7 @@ export async function create(app: HTMLElement) {
   const startLabel = () => {
     if (mazeOn()) return 'Maze unions coming soon'; // buying all 80 at once isn't ready yet: the preview is there to play with
     const b = buying().length;
+    if (picks.size + b >= 80 && !picturing()) return `Start and auction ${picks.size + b} Credits`; // fills at once: it says where they go
     if (b && picks.size) return `Buy ${b} and start with ${picks.size + b} Credits`;
     if (b) return `Buy ${b} and start Credit Union`;
     return picks.size ? `Start Credit Union with ${picks.size} ${picks.size === 1 ? 'Credit' : 'Credits'}` : 'Start Credit Union';
@@ -743,7 +745,11 @@ export async function create(app: HTMLElement) {
     const warn = document.getElementById('warn')!;
     warn.textContent = reason;
     warn.hidden = !reason;
-    why.innerHTML = `${n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions. ` : ''}Free to start a Credit Union. ${picturing() && buyToStart ? 'Yours can come back out while you’re its only member.' : 'Withdraw your Credits anytime until it fills and locks.'}<br>${factoryIn ? `${protocolBps / 100}% protocol fee, only if it sells. ` : ''}Unofficial and experimental.`;
+    // 80 at once fills it on the spot: before Start, what happens to them, and where to go for $BALANCE instead.
+    const heads = document.getElementById('heads-up')!;
+    heads.innerHTML = n >= 80 && !reason ? '<strong>These 80 fill it right away.</strong> Five minutes later they lock, then burn into one Statement that goes to auction with no minimum price. Want $BALANCE for your Credits instead? <a href="/balance">Convert on Balance →</a>' : '';
+    heads.hidden = !heads.innerHTML;
+    why.innerHTML = `${n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions. ` : ''}Free to start a Credit Union. ${picturing() && buyToStart ? 'Yours can come back out while you’re its only member.' : 'Withdraw your Credits anytime until it fills and locks.'} At 80 it burns into a Statement and goes to auction.<br>${factoryIn ? `${protocolBps / 100}% protocol fee, only if it sells. ` : ''}Unofficial and experimental.`;
     // Signed out, Start is the one thing that asks to connect; the design stays as it is while the wallet does.
     const connectFirst = !account && !mazeOn();
     go.type = connectFirst ? 'button' : 'submit';

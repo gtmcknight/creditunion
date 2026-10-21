@@ -321,6 +321,13 @@ export function listedPager(where: ListedWhere = {}) {
   const sale: Sale = { ls: [], preview: true, byId: new Map(), all: items, mine: new Set() };
   const seen = new Set<Source>();
   let cursor: string | null = '';
+  // Reads refused in a row (slow down, or the Worker failing): each waits longer before the next, and the fourth ends
+  // the paging for this visit, so a page that walks every listing (a range) never asks again and again at once.
+  let fails = 0;
+  const failed = async () => {
+    if (++fails >= 4) cursor = null;
+    else await new Promise((r) => setTimeout(r, 1500 * 2 ** fails));
+  };
   const self = {
     items,
     sale,
@@ -335,9 +342,16 @@ export function listedPager(where: ListedWhere = {}) {
         const pre = early.get(u);
         early.delete(u);
         const res = await (pre ?? fetch(u));
-        if (!res.ok) break;
+        if (!res.ok) {
+          await failed();
+          break;
+        }
         const d = (await res.json()) as { items?: Listed[]; next?: string | null; preview?: boolean; sources?: Source[]; error?: string; total?: number };
-        if (d.error) break;
+        if (d.error) {
+          await failed();
+          break;
+        }
+        fails = 0;
         sale.preview = !!d.preview;
         if (typeof d.total === 'number') self.total = d.total;
         for (const src of d.sources ?? []) if (src in SOURCES) seen.add(src);

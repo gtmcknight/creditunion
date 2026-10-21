@@ -481,10 +481,11 @@ function auctionTable(items: Listed[], stage: 'live' | 'upcoming' | 'sold') {
 }
 
 const PARTY_STATES = new Set(['Open', 'Full', 'Expired']);
-const STAGES = [['live', 'For sale'], ['sold', 'Sold'], ['multibid', 'Multibid']] as const;
+// Multibid has no tab: only an outbid alert opens it (/statements/multibid).
+const STAGES = [['live', 'For sale'], ['auction', 'Auction'], ['sold', 'Sold'], ['multibid', 'Multibid']] as const;
 type Stage = (typeof STAGES)[number][0];
-/// For sale is what you can bid on now; an auction whose clock ran out is sold, waiting for anyone to settle it.
-const stageOf = (b: Listed): Stage => (b.s.state === 'Settled' || (b.s.highBid && Date.now() / 1000 >= b.s.auctionEnd) ? 'sold' : 'live');
+/// Auction is what you can bid on here now; an auction whose clock ran out is sold, waiting for anyone to settle it.
+const stageOf = (b: Listed): Stage => (b.s.state === 'Settled' || (b.s.highBid && Date.now() / 1000 >= b.s.auctionEnd) ? 'sold' : 'auction');
 /// Buy's unions: at auction or sold. Full ones waiting to burn are Make's (its Full view).
 const isSale = (b: Listed) => b.s.state === 'Auction' || b.s.state === 'Settled';
 
@@ -755,17 +756,19 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         void fillGhosts(el);
         return;
       }
-      const liveNow = list.filter((b) => stageOf(b) === 'live'), sold = list.filter((b) => stageOf(b) === 'sold');
-      // For sale: the unions at auction and OpenSea's listings, one list (a Statement at auction here isn't listed).
-      const forSale: Sale[] = [...liveNow.map((b): Sale => ({ b })), ...(sales ?? []).filter((x) => !liveNow.some((b) => b.s.statementId.toString() === x.id)).map((x): Sale => ({ x }))];
-      const nLive = document.getElementById('n-live'), nSold = document.getElementById('n-sold');
-      if (nLive) nLive.textContent = sales === null && !forSale.length ? '' : String(forSale.length);
+      const liveNow = list.filter((b) => stageOf(b) === 'auction'), sold = list.filter((b) => stageOf(b) === 'sold');
+      // For sale: OpenSea's listings (a Statement at auction here isn't listed); Auction: the unions at auction here.
+      const forSale: Sale[] = (sales ?? []).filter((x) => !liveNow.some((b) => b.s.statementId.toString() === x.id)).map((x): Sale => ({ x }));
+      const atAuction: Sale[] = liveNow.map((b): Sale => ({ b }));
+      const nLive = document.getElementById('n-live'), nAuction = document.getElementById('n-auction'), nSold = document.getElementById('n-sold');
+      if (nLive) nLive.textContent = sales === null ? '' : String(forSale.length);
+      if (nAuction) nAuction.textContent = String(atAuction.length);
       if (nSold) nSold.textContent = String(sold.length);
       const pick: Stage = stage ?? 'live';
       app.querySelectorAll<HTMLElement>('[data-stage-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.stageTab === pick)));
-      // Multibid is for live auctions: with none, the tab steps out (unless you're on it, say from an outbid alert).
+      // Multibid shows only while you're on it (an outbid alert's link).
       const mb = app.querySelector<HTMLElement>('[data-stage-tab="multibid"]');
-      if (mb) mb.hidden = !liveNow.length && pick !== 'multibid';
+      if (mb) mb.hidden = pick !== 'multibid';
       const overBtn = app.querySelector<HTMLElement>('#overprints');
       if (overBtn) {
         overBtn.hidden = pick !== 'live';
@@ -782,14 +785,15 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         return;
       }
       // This tab's orders in the menu.
-      const order = auctionSort(pick);
+      const sortStage = pick === 'auction' ? 'live' : pick; // Auction sorts as For sale does
+      const order = auctionSort(sortStage);
       shownStage = pick;
       app.querySelectorAll<HTMLElement>('.sort-menu [data-sort]').forEach((o) => {
-        o.hidden = o.dataset.stage !== pick;
-        o.setAttribute('aria-selected', String(o.dataset.stage === pick && o.dataset.sort === order));
+        o.hidden = o.dataset.stage !== sortStage;
+        o.setAttribute('aria-selected', String(o.dataset.stage === sortStage && o.dataset.sort === order));
       });
       const label = app.querySelector('.sort-label');
-      if (label) label.textContent = AUCTION_SORTS.find(([k, , st]) => k === order && st === pick)?.[1] ?? '';
+      if (label) label.textContent = AUCTION_SORTS.find(([k, , st]) => k === order && st === sortStage)?.[1] ?? '';
       const table = pick === 'sold' && auctionView === 'table';
       app.querySelector<HTMLElement>('.sort-pick')?.classList.toggle('idle', table);
       vp?.querySelectorAll<HTMLElement>('[data-auction-view]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.auctionView === auctionView)));
@@ -802,11 +806,13 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
           .catch(() => {})
           .finally(() => (totaling = false));
       };
-      if (pick === 'live') {
-        const shown = sortSales(overprints ? forSale.filter((x) => x.x && (x.x.pages ?? 1) > 1) : forSale, order);
+      if (pick === 'live' || pick === 'auction') {
+        const pool = pick === 'auction' ? atAuction : forSale;
+        const shown = sortSales(overprints && pick === 'live' ? pool.filter((x) => x.x && (x.x.pages ?? 1) > 1) : pool, order);
         needTotals(liveNow);
         let html: string;
         if (shown.length) html = `<div class="grid">${shown.map((x) => (x.b ? card(x.b, undefined, 'yours', totalOf(x.b)) : listingCard(x.x, made))).join('')}</div>`;
+        else if (pick === 'auction') html = '<p class="muted">No Statements at auction right now.</p>';
         else if (sales === null) html = '<p class="muted">Reading listings…</p>';
         else if (overprints) {
           // No overprint for sale: a few standing ones to look at, read once.
@@ -967,7 +973,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
         opts.forEach((x) => x.setAttribute('aria-selected', String(x === o)));
         pick.querySelector('.sort-label')!.textContent = o.textContent;
         try {
-          localStorage.setItem(tab === 'parties' ? 'cu-sort' : `cu-auction-sort-${shownStage}`, o.dataset.sort!);
+          localStorage.setItem(tab === 'parties' ? 'cu-sort' : `cu-auction-sort-${shownStage === 'auction' ? 'live' : shownStage}`, o.dataset.sort!);
         } catch {}
         open(false);
         btn.focus();
