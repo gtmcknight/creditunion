@@ -9891,7 +9891,7 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 .pc-head { display: grid; grid-template-columns: auto 1fr; align-items: baseline; column-gap: 8px; row-gap: 2px; margin-bottom: 14px; }
 .pc-label { font-size: 13px; color: var(--muted); }
 .pc-change { grid-column: 1 / -1; }
-.pc-price { font-size: 28px; line-height: 1.1; letter-spacing: -0.02em; }
+.pc-price { font-size: 28px; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .pc-change { font-size: 13px; color: var(--muted); }
 .pc-change.up { color: var(--ok); }
 .pc-change.down { color: var(--err); }
@@ -9900,6 +9900,10 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 .pc-base { stroke: var(--line-strong); stroke-dasharray: 2 4; vector-effect: non-scaling-stroke; }
 .pc-hair { stroke: var(--line-strong); vector-effect: non-scaling-stroke; }
 .pc-dot { fill: var(--fg); }
+/* The live dot's pulse, as on Liveline: a ring that swells and fades every two seconds. */
+.pc-pulse { fill: var(--fg); transform-box: fill-box; transform-origin: center; animation: pc-pulse 2s var(--ease) infinite; pointer-events: none; }
+@keyframes pc-pulse { from { transform: scale(1); opacity: 0.35; } to { transform: scale(4); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .pc-pulse { display: none; } }
 .pc-ranges { display: flex; gap: 18px; margin-top: 12px; }
 .pc-ranges button { border: 0; background: none; padding: 4px 0; font: inherit; font-size: 13px; color: var(--muted); cursor: pointer; }
 .pc-ranges button[aria-pressed="true"] { color: var(--fg); font-weight: 500; }

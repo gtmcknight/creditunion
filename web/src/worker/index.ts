@@ -1272,7 +1272,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const hit = await caches.default.match(key);
     if (hit) return hit;
     try {
-      const res = Response.json(await priceChart(env, ctx), { headers: { 'cache-control': 'public, max-age=20' } });
+      const res = Response.json(await priceChart(env, ctx), { headers: { 'cache-control': 'public, max-age=10' } }); // the chart reads each block
       ctx.waitUntil(caches.default.put(key, res.clone()));
       return res;
     } catch (e) {
