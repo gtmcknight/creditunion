@@ -5937,6 +5937,18 @@ dialog.eligible::backdrop {
   color: var(--err);
   text-decoration-color: currentColor;
 }
+/* Make: the two ways to a Statement, side by side, then the open unions. */
+.make-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0 28px; }
+@media (max-width: 560px) { .make-choice { grid-template-columns: 1fr; } }
+.make-opt { display: grid; gap: 6px; padding: 18px 20px; border: 1px solid var(--line-strong); border-radius: var(--r); color: var(--fg); text-decoration: none; transition: border-color 140ms var(--ease); }
+.make-opt:hover { border-color: var(--fg); }
+.make-opt strong { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+.make-opt span { font-size: 15px; line-height: 1.45; color: var(--muted); }
+/* /make: your Credits to pick from, taller than a form's picker. */
+.make-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.make-head h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.make-picker { max-height: 360px; margin-bottom: 16px; }
+.make-empty { margin: 0 0 16px; }
 /* Start a Credit Union: what 80 at once does, before the button that does it. */
 .heads-up { margin: 0 0 12px; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: var(--r); font-size: 14px; line-height: 1.45; }
 .heads-up strong { font-weight: 600; }

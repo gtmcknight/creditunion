@@ -557,7 +557,7 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
   // Statements has two halves, one heading: Buy (at auction here, or listed on OpenSea) and Make (the Credit Unions).
   const head =
     tab === 'parties'
-      ? ['Make', 'Each Credit Union pools Credits toward 80. Join with ones that fit, and leave anytime before it fills.']
+      ? ['Make', 'Burn 80 Credits into a Statement on your own, or pool toward 80 in a Credit Union.']
       : ['Buy', 'Every Statement you can get right now: at auction here, 24 hours from the first bid, or listed on OpenSea.'];
   // One small menu, not a second row of tabs: a sort glyph and the current order; the choices drop down under it.
   const cur = sortKey();
@@ -580,7 +580,15 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
           ? [{ label: 'Open <span class="num muted" id="n-all"></span>', attrs: 'data-view="all"' }, { label: 'Can join <span class="num muted" id="n-invited"></span>', attrs: 'data-view="invited"' }, { label: 'Joined <span class="num muted" id="n-yours"></span>', attrs: 'data-view="yours"' }, { label: 'Full <span class="num muted" id="n-filled"></span>', attrs: 'data-view="filled"' }]
           : STAGES.map(([k, l]) => ({ label: k === 'multibid' ? l : `${l} <span class="num muted" id="n-${k}"></span>`, attrs: `data-stage-tab="${k}"` })),
       tools: views + over + sort,
-      action: tab === 'parties' ? '<a class="btn primary" href="/create">Start a Credit Union</a>' : '<button type="button" class="btn" id="how-auctions">How it works</button>',
+      // Make: the two ways to a Statement lead, then the Credit Unions open to join.
+      action: tab === 'parties' ? undefined : '<button type="button" class="btn" id="how-auctions">How it works</button>',
+      under:
+        tab === 'parties'
+          ? `<div class="make-choice">
+      <a class="make-opt" href="/make"><strong>Make one yourself</strong><span>Have 80 Credits? Burn them into a Statement you keep.</span></a>
+      <a class="make-opt" href="/create"><strong>Start a Credit Union</strong><span>Pool Credits with others. At 80 it’s auctioned and everyone splits the sale.</span></a>
+    </div>`
+          : undefined,
       label: 'Show',
     })}
     <div id="batches"><p class="muted">Loading…</p></div>

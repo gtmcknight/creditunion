@@ -747,7 +747,7 @@ export async function create(app: HTMLElement) {
     warn.hidden = !reason;
     // 80 at once fills it on the spot: before Start, what happens to them, and where to go for $BALANCE instead.
     const heads = document.getElementById('heads-up')!;
-    heads.innerHTML = n >= 80 && !reason ? '<strong>These 80 fill it right away.</strong> Five minutes later they lock, then burn into one Statement that goes to auction with no minimum price. Want $BALANCE for your Credits instead? <a href="/balance">Convert on Balance →</a>' : '';
+    heads.innerHTML = n >= 80 && !reason ? '<strong>These 80 fill it right away.</strong> Five minutes later they lock, then burn into one Statement that goes to auction with no minimum price. Want a Statement you keep, no auction? <a href="/make">Make one yourself →</a>' : '';
     heads.hidden = !heads.innerHTML;
     why.innerHTML = `${n > CHUNK ? `${Math.ceil(n / CHUNK)} transactions. ` : ''}Free to start a Credit Union. ${picturing() && buyToStart ? 'Yours can come back out while you’re its only member.' : 'Withdraw your Credits anytime until it fills and locks.'} At 80 it burns into a Statement and goes to auction.<br>${factoryIn ? `${protocolBps / 100}% protocol fee, only if it sells. ` : ''}Unofficial and experimental.`;
     // Signed out, Start is the one thing that asks to connect; the design stays as it is while the wallet does.

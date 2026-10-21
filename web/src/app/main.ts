@@ -120,6 +120,7 @@ async function route() {
     else if (page === 'me') await profile(app, route);
     else if (page === 'member' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await profile(app, route, arg as Address);
     else if (page === 'create') await create(app);
+    else if (page === 'make') await (await import('./views/make')).make(app);
     else if (page === 'printer' && (!arg || arg === 'mine' || /^[A-Za-z0-9]{10}$/.test(arg))) await printer(app, arg, route);
     else if (page === 'credit') await credit(app, arg ?? '');
     else if (page === 'lab') await (await import('./views/lab')).lab(app);
