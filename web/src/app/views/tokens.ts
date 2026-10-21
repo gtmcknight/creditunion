@@ -893,7 +893,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const fill = open > 0 && open <= MAX_BUY && sweeps && market === 'ready' && budget ? viaBatch(budget, laneKey, capOf(lane())) : null;
     const chip = document.getElementById('tk-fill');
     if (chip) {
-      const amt = fill && fill.out.length >= open ? ethNum(fill.spent, 4, true) : '0.5';
+      // Only while Credits are the better way in: when Uniswap is, that ETH would buy there and fill nothing.
+      const amt = fill && fill.out.length >= open && restWay() === 'batch' ? ethNum(fill.spent, 4, true) : '0.5';
       chip.dataset.amt = amt;
       chip.textContent = amt === '0.5' ? '0.5' : 'Fill it';
       chip.title = amt === '0.5' ? '' : `${amt} ETH buys the ${open} open spots, so it converts right away`;
