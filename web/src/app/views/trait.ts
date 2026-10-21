@@ -1,7 +1,6 @@
 import { hasLayout, layoutSlot, listBatches, type Listed } from '../data';
 import { YOURS, listedPager, listedScore, prefetchListed, live, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepWaiting, type Listed as Listing } from '../forsale';
 import { hydrate } from '../ens';
-import { fmtScore } from '../../shared/credits';
 import { editionArt, fillGhosts } from '../ghosts';
 import { dice, printGlyph, swatch, weightGlyph } from '../glyphs';
 import { EIGHTS_TOP, TRAIT_KINDS, eightsName, parseTrait, traitPath, type TraitKind, type TraitValue } from '../../shared/trait';
@@ -103,7 +102,7 @@ export async function traitPage(app: HTMLElement, kind: string, raw: string) {
     const el = document.getElementById('sale-n');
     if (el) el.textContent = all ? `${n.toLocaleString()} for sale` : `${n.toLocaleString()} ${n === 1 ? 'Credit' : 'Credits'} listed`;
   };
-  const grid = buyGrid(app, { trait: saleKey, order }, async () => ({ ids: [], total: 0 }), all ? (id) => { const sc = listedScore(id); return sc ? `Rating ${fmtScore(sc / 10_000)}` : ''; } : undefined, saleN);
+  const grid = buyGrid(app, { trait: saleKey, order }, async () => ({ ids: [], total: 0 }), all ? (id) => { const sc = listedScore(id); return sc ? `Rating ${Math.round(sc / 10_000).toLocaleString('en-US')}` : ''; } : undefined, saleN);
   bindSort(app, (k) => {
     const next = k === 'cheap' ? undefined : (k as Where['order']);
     if (next === order) return;
