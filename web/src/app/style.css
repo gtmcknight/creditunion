@@ -9885,7 +9885,22 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 .tk-layout .tk-card { margin: 0; max-width: none; }
 /* The right column: the batch you'd join, its sheet as the picture and the count as its caption. */
 .tk-right { display: grid; gap: 40px; align-content: start; align-self: stretch; padding-left: 28px; border-left: 1px solid var(--line); }
-.tk-right:not(:has(#tk-batch-home .tk-batch:not([hidden]))) { display: none; }
+.tk-right:not(:has(#tk-batch-home .tk-batch:not([hidden]))):not(:has(.pc:not(:empty))) { display: none; }
+/* The price, atop the right column: now (or under the pointer), its change over the range, the line, the ranges. */
+.pc:empty { display: none; }
+.pc-head { display: grid; gap: 2px; margin-bottom: 14px; }
+.pc-price { font-size: 28px; line-height: 1.1; letter-spacing: -0.02em; }
+.pc-change { font-size: 13px; color: var(--muted); }
+.pc-change.up { color: var(--ok); }
+.pc-change.down { color: var(--err); }
+.pc-line { display: block; width: 100%; height: 150px; overflow: visible; touch-action: pan-y; cursor: crosshair; }
+.pc-line path { fill: none; stroke: var(--fg); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.pc-base { stroke: var(--line-strong); stroke-dasharray: 2 4; vector-effect: non-scaling-stroke; }
+.pc-hair { stroke: var(--line-strong); vector-effect: non-scaling-stroke; }
+.pc-dot { fill: var(--fg); }
+.pc-ranges { display: flex; gap: 18px; margin-top: 12px; }
+.pc-ranges button { border: 0; background: none; padding: 4px 0; font: inherit; font-size: 13px; color: var(--muted); cursor: pointer; }
+.pc-ranges button[aria-pressed="true"] { color: var(--fg); font-weight: 500; }
 #tk-batch-home:not(:has(.tk-batch:not([hidden]))) { display: none; }
 #tk-batch-home .tk-batch { margin: 0; }
 @media (min-width: 901px) {

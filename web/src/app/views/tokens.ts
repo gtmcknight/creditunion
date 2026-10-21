@@ -16,6 +16,7 @@ import { bin } from '../bins';
 import { getBatch, myCredits, shareOf, STATES, tokenIndex, type Payout, type Summary } from '../data';
 import { checkQuote, listedById, type Quote } from '../forsale';
 import { buyListed, listings, type ForSale } from './statements';
+import { priceChart } from './price-chart';
 import { registerDeposits } from '../ghosts';
 import { buyCall, inkPalette, launchGate, market as swapMarket, opened, poolPalette, quote as swapQuote, sellCalls } from '../swap';
 import { balanceArt, balanceHref, balanceSrc, converted, type BalanceArt } from '../tokens';
@@ -806,7 +807,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
           ${v === 'sell' ? sellHtml() : v === 'credits' ? creditsHtml() : v === 'out' ? outHtml() : buyHtml()}
         </form>
       </section>
-      <div class="tk-right"><div id="tk-batch-home">${v === 'buy' || v === 'credits' ? batchHtml() : ''}</div></div>
+      <div class="tk-right">${isOpen ? '<div class="pc" id="tk-chart"></div>' : ''}<div id="tk-batch-home">${v === 'buy' || v === 'credits' ? batchHtml() : ''}</div></div>
       </div>
       ${
         made.length
@@ -818,6 +819,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     bind();
     prices();
     paint();
+    // Trading: the price, atop the right column (on a phone, under the button).
+    const chartHost = document.getElementById('tk-chart');
+    if (chartHost) priceChart(chartHost);
     // Just joined: the batch comes into view once (on a phone it's under the button), yours in it.
     if (joined && !joined.shown && !previewJoined && Date.now() - joined.at < 60_000) {
       joined.shown = true;

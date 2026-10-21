@@ -15,8 +15,8 @@
 /// Every response carries the security headers in `secure()` (headers.ts; the build copies them into _headers for
 /// what the asset layer serves on its own).
 import { DurableObject } from 'cloudflare:workers';
-import { ETH, PERMIT2, UNIVERSAL_ROUTER, V4_QUOTER } from '../shared/v4swap';
-import { BaseError, ContractFunctionRevertedError, ccipRequest, createPublicClient, decodeFunctionData, fallback, hexToBytes, http, type Address, type Hex, parseAbi, parseAbiItem } from 'viem';
+import { ETH, PERMIT2, POOL_MANAGER, UNIVERSAL_ROUTER, V4_QUOTER } from '../shared/v4swap';
+import { BaseError, ContractFunctionRevertedError, ccipRequest, createPublicClient, decodeFunctionData, encodeAbiParameters, fallback, hexToBytes, http, keccak256, parseAbiParameters, toHex, type Address, type Hex, parseAbi, parseAbiItem } from 'viem';
 import { mainnet } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { normalize } from 'viem/ens';
@@ -310,6 +310,8 @@ const handler = {
   async scheduled(_event, env, ctx) {
     // The market book, kept live each minute (keepMarket).
     ctx.waitUntil(keepMarket(env, ctx).catch((e) => console.error('[market] update failed', safeError(e))));
+    // $BALANCE's price in its pool, each minute, for the chart on /balance.
+    ctx.waitUntil(recordPrice(env).catch((e) => console.error('[price] record failed', safeError(e))));
     // What 1 BALANCE costs, once an hour, for the chart on /balance.
     if (new Date(_event.scheduledTime).getUTCMinutes() === 0) ctx.waitUntil(recordBalance(env).catch((e) => console.error('[balance] record failed', safeError(e))));
     // The keeper runs every 5 minutes, as before.
@@ -1254,20 +1256,23 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     const hit = await caches.default.match(key);
     if (hit) return hit;
     try {
-      // Coinbase's spot price, else Chainlink's ETH/USD feed on mainnet (Coinbase's API has gone stale before).
-      const coinbase = async () => {
-        const r = (await (await fetch('https://api.coinbase.com/v2/prices/ETH-USD/spot', { signal: AbortSignal.timeout(5_000) })).json()) as { data?: { amount?: string } };
-        const usd = Number(r.data?.amount);
-        if (!(usd > 0)) throw new Error('no rate');
-        return usd;
-      };
-      const chainlink = async () => {
-        const [, answer] = (await mainClient(env).readContract({ address: ETH_USD_FEED, abi: FEED_ABI, functionName: 'latestRoundData' })) as readonly [bigint, bigint, bigint, bigint, bigint];
-        return Number(answer) / 1e8;
-      };
-      const usd = await coinbase().catch(chainlink);
-      if (!(usd > 0)) throw new Error('no rate');
+      const usd = await ethUsd(env);
       const res = Response.json({ usd, at: Date.now() }, { headers: { 'cache-control': 'public, max-age=300' } });
+      ctx.waitUntil(caches.default.put(key, res.clone()));
+      return res;
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
+  }
+  // $BALANCE's price in its pool since the first trade, for the chart on /balance: the cron's record (a point a
+  // minute) cut to each range, and the pool's price now.
+  if (url.pathname === '/market/balance-price.json') {
+    if (!sameSite(req)) return text('forbidden', 403);
+    const key = new Request(`${url.origin}/market/balance-price.json/v1`);
+    const hit = await caches.default.match(key);
+    if (hit) return hit;
+    try {
+      const res = Response.json(await priceChart(env, ctx), { headers: { 'cache-control': 'public, max-age=20' } });
       ctx.waitUntil(caches.default.put(key, res.clone()));
       return res;
     } catch (e) {
@@ -2549,6 +2554,114 @@ async function recordBalance(env: Env) {
   const points = (await env.PLANS.get(BALANCE_KEY).catch(() => null).then((r) => (r ? (JSON.parse(r) as BalancePoint[]) : [])));
   points.push([Math.floor(Date.now() / 1000), q.stmt, q.cred]);
   await env.PLANS.put(BALANCE_KEY, JSON.stringify(points.slice(-BALANCE_POINTS)));
+}
+
+/// ETH in USD: Coinbase's spot price, else Chainlink's ETH/USD feed on mainnet (Coinbase's API has gone stale before).
+async function ethUsd(env: Env): Promise<number> {
+  const coinbase = async () => {
+    const r = (await (await fetch('https://api.coinbase.com/v2/prices/ETH-USD/spot', { signal: AbortSignal.timeout(5_000) })).json()) as { data?: { amount?: string } };
+    const usd = Number(r.data?.amount);
+    if (!(usd > 0)) throw new Error('no rate');
+    return usd;
+  };
+  const chainlink = async () => {
+    const [, answer] = (await mainClient(env).readContract({ address: ETH_USD_FEED, abi: FEED_ABI, functionName: 'latestRoundData' })) as readonly [bigint, bigint, bigint, bigint, bigint];
+    return Number(answer) / 1e8;
+  };
+  const usd = await coinbase().catch(chainlink);
+  if (!(usd > 0)) throw new Error('no rate');
+  return usd;
+}
+
+/// $BALANCE's price in its pool, read from the PoolManager's Swap logs (the price after each swap is its
+/// sqrtPriceX96): each minute's last swap is that minute's point, [minute, ETH per BALANCE, USD at that minute's ETH
+/// price]. A point a minute for two days, then one an hour. The cron brings it up to date each minute, in KV; a read
+/// that finds it over 3 minutes old (the cron failing, or a local dev server, which runs none) brings it up to date
+/// behind its answer.
+const priceKey = (id: Hex) => `balance-price/${id}`; // a record per pool, should Buy and Sell ever move to another
+const SWAP_TOPIC: Hex = '0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f'; // Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)
+const PRICE_FROM = 26_241_566; // mainnet: the block the auction's ETH and BALANCE went into the pool, its first trades
+const STATE_VIEW: Address = '0x7fFE42C4a5DEeA5b0feC41C94C136Cf115597227'; // Uniswap v4's pool reader, mainnet
+const stateViewAbi = parseAbi(['function getSlot0(bytes32 poolId) view returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee)']);
+type PricePoint = [number, number, number];
+type PriceRecord = { block: number; at: number; points: PricePoint[] };
+/// The pool Buy and Sell use (balanceConfig): its id, as the PoolManager names it in its logs.
+function balancePoolId(env: Env): Hex | null {
+  const b = balanceConfig(env);
+  return b ? keccak256(encodeAbiParameters(parseAbiParameters('address, address, uint24, int24, address'), [ETH, b.token, b.pool.fee, b.pool.tickSpacing, b.pool.hooks])) : null;
+}
+/// ETH per BALANCE at a sqrtPriceX96 (ETH is the pool's currency0; both have 18 decimals).
+const ethPer = (sqrtPriceX96: bigint) => 1 / (Number(sqrtPriceX96) / 2 ** 96) ** 2;
+const sig = (v: number) => Number(v.toPrecision(6));
+async function recordPrice(env: Env) {
+  const id = balancePoolId(env);
+  if (!env.PLANS || !id) return;
+  const c = client(env);
+  const head = Number(await c.getBlockNumber());
+  const raw = await env.PLANS.get(priceKey(id)).catch(() => null);
+  const rec: PriceRecord = raw ? (JSON.parse(raw) as PriceRecord) : { block: (env.CHAIN_ID === '1' ? PRICE_FROM : head - 7_200) - 1, at: 0, points: [] };
+  if (head <= rec.block) return;
+  const usd = await ethUsd(env); // none this minute: the next run reads these blocks again
+  const byMinute = new Map(rec.points.map((p) => [p[0], p]));
+  const stamps = new Map<number, number>();
+  // 2,000 blocks a call (a busy hour is ~4 swaps a block) and 20,000 a run: a long gap catches up over a few minutes.
+  const until = Math.min(head, rec.block + 20_000);
+  for (let from = rec.block + 1; from <= until; from += 2_000) {
+    const to = Math.min(until, from + 1_999);
+    const logs = (await c.request({ method: 'eth_getLogs', params: [{ address: POOL_MANAGER, topics: [SWAP_TOPIC, id], fromBlock: toHex(from), toBlock: toHex(to) }] } as never)) as { data: Hex; blockNumber: Hex; blockTimestamp?: Hex }[];
+    for (const l of logs) {
+      const block = Number(l.blockNumber);
+      // Most RPCs say each log's block time; for one that doesn't, the block is read once.
+      let t = l.blockTimestamp ? Number(l.blockTimestamp) : stamps.get(block);
+      if (t === undefined) stamps.set(block, (t = Number((await c.getBlock({ blockNumber: BigInt(block) })).timestamp)));
+      const eth = ethPer(BigInt(`0x${l.data.slice(2 + 128, 2 + 192)}`));
+      const minute = t - (t % 60);
+      byMinute.set(minute, [minute, sig(eth), sig(eth * usd)]);
+    }
+  }
+  // Two days a minute at a time, then each hour's last minute.
+  const cut = Math.floor(Date.now() / 1000) - 2 * 86_400;
+  const hours = new Map<number, PricePoint>();
+  const points: PricePoint[] = [];
+  for (const p of [...byMinute.values()].sort((a, b) => a[0] - b[0])) (p[0] < cut ? hours.set(p[0] - (p[0] % 3600), p) : points.push(p));
+  await env.PLANS.put(priceKey(id), JSON.stringify({ block: until, at: Date.now(), points: [...hours.values(), ...points] } satisfies PriceRecord));
+}
+const priceCatchUp = shared<void>(() => 30_000); // at most every 30 s per isolate
+/// ETH in USD as the chart prices now: read once a minute per isolate.
+const ethUsdKept = shared<number>(() => 60_000);
+/// The chart's data: the record cut to each range history has reached (1H a point a minute, 1D every 5, 1W every hour,
+/// All in at most 300), each [unix seconds, USD], and the pool's price now (null if it can't be read).
+async function priceChart(env: Env, ctx: ExecutionContext) {
+  const id = balancePoolId(env);
+  const raw = env.PLANS && id ? await env.PLANS.get(priceKey(id), { cacheTtl: 60 }) : null;
+  const rec = raw ? (JSON.parse(raw) as PriceRecord) : null;
+  if (id && (!rec || Date.now() - rec.at > 180_000)) {
+    const p = priceCatchUp(ctx, () => recordPrice(env));
+    if (rec) ctx.waitUntil(p.catch(() => {}));
+    else await p.catch(() => {}); // the first read of all waits for it
+  }
+  const all = rec?.points ?? (env.PLANS && id ? ((JSON.parse((await env.PLANS.get(priceKey(id))) ?? 'null') as PriceRecord | null)?.points ?? []) : []);
+  const now = Math.floor(Date.now() / 1000);
+  const every = (pts: PricePoint[], step: number) => {
+    const out = new Map<number, [number, number]>();
+    for (const p of pts) out.set(p[0] - (p[0] % step), [p[0], p[2]]);
+    return [...out.values()];
+  };
+  const first = all[0]?.[0] ?? now;
+  const span = now - first;
+  const within = (s: number) => all.filter((p) => p[0] >= now - s);
+  const ranges: Record<string, [number, number][]> = {};
+  if (span > 3600) ranges['1H'] = every(within(3600), 60);
+  if (span > 86_400) ranges['1D'] = every(within(86_400), 300);
+  if (span > 7 * 86_400) ranges['1W'] = every(within(7 * 86_400), 3600);
+  ranges.All = every(all, Math.max(60, Math.ceil(span / 300 / 60) * 60));
+  let price: { eth: number; usd: number } | null = null;
+  try {
+    const [sq] = id ? await client(env).readContract({ address: STATE_VIEW, abi: stateViewAbi, functionName: 'getSlot0', args: [id] }) : [0n];
+    const usd = sq ? await ethUsdKept(ctx, () => ethUsd(env)) : 0;
+    if (sq && usd) price = { eth: sig(ethPer(sq)), usd: sig(ethPer(sq) * usd) };
+  } catch {}
+  return { at: Date.now(), first, price, ranges };
 }
 
 async function readUnions(env: Env): Promise<string> {
