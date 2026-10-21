@@ -640,7 +640,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   const getHtml = (selling: boolean) => `
           <div class="tk-gethead"><h2 class="form-title" id="tk-gettitle">You get</h2>${selling || laneKey === 'any' ? '' : colorChip()}</div>
           <section class="rule">
-            ${selling ? '<div class="tk-get tk-panel"><span class="num tk-out" id="get-eth">0</span>${tokenChip(true)}<span class="tk-usd" id="route"></span></div>' : `<div class="tk-get tk-panel"><span class="tk-getrow"><span id="get">${balanceSvg('0', EVEN)}</span></span>${tokenChip(false)}<span class="tk-usd" id="route"></span></div>`}
+            ${selling ? `<div class="tk-get tk-panel"><span class="num tk-out" id="get-eth">0</span>${tokenChip(true)}<span class="tk-usd" id="route"></span></div>` : `<div class="tk-get tk-panel"><span class="tk-getrow"><span id="get">${balanceSvg('0', EVEN)}</span></span>${tokenChip(false)}<span class="tk-usd" id="route"></span></div>`}
             <div class="tk-lines term-desc"><p id="route2"></p><p id="alt"></p><p id="fees"></p></div>
           </section>`;
   const goHtml = (label: string) => `<button type="button" class="btn primary block" id="go"${account ? '' : ' data-connect'} disabled>${label}</button>`;
@@ -917,11 +917,15 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const row = document.querySelector<HTMLElement>('.tk-way[data-route="batch"]');
     if (box) box.classList.toggle('attached', !!row && route === 'batch');
     if (box && row && route === 'batch') row.after(box);
+    // Our slice of a swap is taken from what comes out, so the amount shown is already after it; tapped, what it is.
+    const poolFee = poolN && m ? (poolN * m.feeBps) / (10_000 - m.feeBps) : 0;
     setText(
       'fees',
       way === 'batch'
         ? `${split ? `${whole(b!.tokens)} ${lands().toLowerCase()}` : ''}`
-        : wei && ways.length > 1
+        : way === 'pool' && route === 'pool'
+          ? `Instant via Uniswap · <button type="button" class="link" id="fee-rate">${feeFlipped && poolFee ? `${whole(poolFee)} ${TOKEN} to Credit Union` : 'Fees included'}</button>`
+          : wei && ways.length > 1
           ? ''
           : route === 'statement'
           ? `Bought on OpenSea · uses ${ethNum(BigInt(st!.price), 3)} of your ${ethNum(wei, 3)} ETH`
@@ -997,6 +1001,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const q = await swapQuote(m!, false, amt);
     if (run !== quoteRun || !app.isConnected) return;
     setText('amt-line', q ? '' : 'No price right now.');
+    // The ETH shown is after our slice; tapped, the slice.
+    if (q && q.out > q.net) setText('fees', `Instant via Uniswap · <button type="button" class="link" id="fee-rate">${feeFlipped ? `${ethNum(q.out - q.net, 4, true)} ETH to Credit Union` : 'Fees included'}</button>`);
     out(q?.net ?? 0n);
     if (!short) setGo(q ? `Sell ${tokAmt(amt)} ${sym()}` : 'No price', !!q);
   }
@@ -1120,11 +1126,12 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       $$<HTMLButtonElement>('.tk-q', app).forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.amt === typed.trim())));
       paint();
     });
-    document.getElementById('route')?.addEventListener('click', (e) => {
-      if (!(e.target as HTMLElement).closest('#fee-rate')) return;
-      feeFlipped = !feeFlipped;
-      paint();
-    });
+    for (const id of ['route', 'fees'])
+      document.getElementById(id)?.addEventListener('click', (e) => {
+        if (!(e.target as HTMLElement).closest('#fee-rate')) return;
+        feeFlipped = !feeFlipped;
+        paint();
+      });
     document.getElementById('amt-line')?.addEventListener('click', (e) => {
       const min = (e.target as HTMLElement).closest<HTMLElement>('#amt-min')?.dataset.amt;
       if (!min || !amt) return;
@@ -1143,7 +1150,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     );
     document.getElementById('amt-max')?.addEventListener('click', () => {
       if (!amt) return;
-      if (viewNow() === 'sell') typed = formatUnits(tokenHeld, m!.decimals);
+      // Down to 4 places, so it fits the box; what's left behind is under 0.0001.
+      if (viewNow() === 'sell') typed = formatUnits(tokenHeld, m!.decimals).replace(/(\.\d{4})\d+$/, '$1');
       else {
         if (ethHeld === null) return;
         const v = ethHeld > GAS_KEEP ? ethHeld - GAS_KEEP : 0n;
