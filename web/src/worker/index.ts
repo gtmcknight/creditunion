@@ -310,8 +310,9 @@ const handler = {
   async scheduled(_event, env, ctx) {
     // The market book, kept live each minute (keepMarket).
     ctx.waitUntil(keepMarket(env, ctx).catch((e) => console.error('[market] update failed', safeError(e))));
-    // $BALANCE's price in its pool, each minute, for the chart on /balance.
-    ctx.waitUntil(recordPrice(env).catch((e) => console.error('[price] record failed', safeError(e))));
+    // $BALANCE's price in its pool, every 5 minutes (288 writes a day, in any plan's KV limit), for the chart on
+    // /balance; each read of the chart adds the swaps since.
+    if (new Date(_event.scheduledTime).getUTCMinutes() % 5 === 0) ctx.waitUntil(recordPrice(env).catch((e) => console.error('[price] record failed', safeError(e))));
     // What 1 BALANCE costs, once an hour, for the chart on /balance.
     if (new Date(_event.scheduledTime).getUTCMinutes() === 0) ctx.waitUntil(recordBalance(env).catch((e) => console.error('[balance] record failed', safeError(e))));
     // The keeper runs every 5 minutes, as before.
@@ -2575,9 +2576,9 @@ async function ethUsd(env: Env): Promise<number> {
 
 /// $BALANCE's price in its pool, read from the PoolManager's Swap logs (the price after each swap is its
 /// sqrtPriceX96): each minute's last swap is that minute's point, [minute, ETH per BALANCE, USD at that minute's ETH
-/// price]. A point a minute for two days, then one an hour. The cron brings it up to date each minute, in KV; a read
-/// that finds it over 3 minutes old (the cron failing, or a local dev server, which runs none) brings it up to date
-/// behind its answer.
+/// price]. A point a minute for two days, then one an hour. The cron brings it up to date every 5 minutes, in KV; a
+/// read that finds it over 12 minutes old (the cron failing, or a local dev server, which runs none) brings it up to
+/// date behind its answer.
 const priceKey = (id: Hex) => `balance-price/${id}`; // a record per pool, should Buy and Sell ever move to another
 const SWAP_TOPIC: Hex = '0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f'; // Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)
 const PRICE_FROM = 26_241_566; // mainnet: the block the auction's ETH and BALANCE went into the pool, its first trades
@@ -2593,11 +2594,11 @@ const ethPer = (sqrtPriceX96: bigint) => 1 / (Number(sqrtPriceX96) / 2 ** 96) **
 const sig = (v: number) => Number(v.toPrecision(6));
 /// The pool's swaps in blocks [from, to] into `byMinute`, each minute's last as its point, priced at `usd` per ETH:
 /// 2,000 blocks a call (a busy hour is ~4 swaps a block).
-async function swapMinutes(c: ReturnType<typeof client>, id: Hex, from: number, to: number, usd: number, byMinute: Map<number, PricePoint>) {
+async function swapMinutes(c: ReturnType<typeof client>, id: Hex, from: number, to: number | 'latest', usd: number, byMinute: Map<number, PricePoint>) {
   const stamps = new Map<number, number>();
-  for (let a = from; a <= to; a += 2_000) {
-    const b = Math.min(to, a + 1_999);
-    const logs = (await c.request({ method: 'eth_getLogs', params: [{ address: POOL_MANAGER, topics: [SWAP_TOPIC, id], fromBlock: toHex(a), toBlock: toHex(b) }] } as never)) as { data: Hex; blockNumber: Hex; blockTimestamp?: Hex }[];
+  for (let a = from; to === 'latest' ? a === from : a <= to; a += 2_000) {
+    const b = to === 'latest' ? 'latest' : toHex(Math.min(to, a + 1_999));
+    const logs = (await c.request({ method: 'eth_getLogs', params: [{ address: POOL_MANAGER, topics: [SWAP_TOPIC, id], fromBlock: toHex(a), toBlock: b }] } as never)) as { data: Hex; blockNumber: Hex; blockTimestamp?: Hex }[];
     for (const l of logs) {
       const block = Number(l.blockNumber);
       // Most RPCs say each log's block time; for one that doesn't, the block is read once.
@@ -2642,7 +2643,7 @@ async function priceChart(env: Env, ctx: ExecutionContext) {
   const token = balanceConfig(env)?.token ?? null;
   const raw = env.PLANS && id ? await env.PLANS.get(priceKey(id), { cacheTtl: 60 }) : null;
   const rec = raw ? (JSON.parse(raw) as PriceRecord) : null;
-  if (id && (!rec || Date.now() - rec.at > 180_000)) {
+  if (id && (!rec || Date.now() - rec.at > 720_000)) {
     const p = priceCatchUp(ctx, () => recordPrice(env));
     if (rec) ctx.waitUntil(p.catch(() => {}));
     else await p.catch(() => {}); // the first read of all waits for it
@@ -2650,11 +2651,12 @@ async function priceChart(env: Env, ctx: ExecutionContext) {
   const kept = rec ?? (env.PLANS && id ? (JSON.parse((await env.PLANS.get(priceKey(id))) ?? 'null') as PriceRecord | null) : null);
   const c = client(env);
   const usd = await ethUsdKept(ctx, () => ethUsd(env)).catch(() => 0);
-  // The swaps since: an hour at most (past that the record is catching up).
+  // The swaps since, in one log read to the latest block: an hour's worth at most (past that the record is catching
+  // up), reckoned from the record's age at 12 s a block, so no block number is read first.
   const byMinute = new Map((kept?.points ?? []).map((p) => [p[0], p]));
   if (id && kept && usd) {
-    const head = Number(await c.getBlockNumber().catch(() => 0n));
-    if (head > kept.block) await swapMinutes(c, id, Math.max(kept.block + 1, head - 300), head, usd, byMinute).catch(() => {});
+    const behind = Math.ceil((Date.now() - kept.at) / 12_000);
+    await swapMinutes(c, id, kept.block + 1 + Math.max(0, behind - 300), 'latest', usd, byMinute).catch(() => {});
   }
   const all = [...byMinute.values()].sort((a, b) => a[0] - b[0]);
   const now = Math.floor(Date.now() / 1000);
