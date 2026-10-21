@@ -1,5 +1,5 @@
 import { conversionFeeBps, hasLayout, layoutSlot, listBatches, type Listed } from '../data';
-import { YOURS, listedPager, live, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepWaiting, type Listed as Listing } from '../forsale';
+import { YOURS, listedPager, prefetchListed, live, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepWaiting, type Listed as Listing } from '../forsale';
 import { hydrate } from '../ens';
 import { bin } from '../bins';
 import { editionArt, fillGhosts } from '../ghosts';
@@ -76,8 +76,11 @@ export async function traitPage(app: HTMLElement, kind: string, raw: string) {
   if (all) keepOrder(order);
   let scoreOf = new Uint32Array(0);
   let feeBps = 0;
-  if (all)
-    await Promise.all([
+  // /credits: its listings start now, beside the ratings and the fee its tiles need, and the page shows at once.
+  if (all) prefetchListed({ order });
+  const ready = !all
+    ? Promise.resolve()
+    : Promise.all([
       bin('credit-score.bin')
         .then((b) => (scoreOf = new Uint32Array(b)))
         .catch(() => {}),
@@ -121,8 +124,9 @@ export async function traitPage(app: HTMLElement, kind: string, raw: string) {
     keepOrder(order);
     void grid.start({ trait: saleKey, order });
   });
-  // Not awaited: the page shows at once (the router fades it in when this returns), the grid filling in behind.
-  void grid.start();
+  // Not awaited: the page shows at once (the router fades it in when this returns), the grid filling in behind once
+  // the tiles' ratings are in.
+  void ready.then(() => grid.start());
 }
 
 /// The Buy row's markup: the heading, the sort menu (when `sort` is given) and Sweep beside it, then the grid and

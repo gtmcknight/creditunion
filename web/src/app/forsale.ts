@@ -290,7 +290,23 @@ export const YOURS = '<span class="cc-price yours">Yours</span>';
 /// Every Credit listed anywhere (of one trait, `palette/K`, or within rules like { minScore, maxScore }), cheapest first, paged in from /opensea/listed as asked
 /// for. A Credit listed more than once keeps its cheapest. `sale.ls` is the same list, for Sweep. Marketplaces hidden
 /// this visit are left out; `seen` is every marketplace with Credits listed (as the Worker says), hidden or not.
-export function listedPager(where: { trait?: string; rules?: Record<string, number>; order?: 'value' | 'rating' } = {}) {
+type ListedWhere = { trait?: string; rules?: Record<string, number>; order?: 'value' | 'rating' };
+const listedUrl = (where: ListedWhere, cursor: string) => {
+  const qs = new URLSearchParams();
+  if (where.trait) qs.set('trait', where.trait);
+  if (where.rules) qs.set('rules', JSON.stringify(where.rules));
+  if (where.order) qs.set('order', where.order);
+  if (cursor) qs.set('c', cursor);
+  return `/opensea/listed?${qs}`;
+};
+/// First pages asked for early (a page starts its listings while its other files load): each read once, by the pager
+/// that asks for the same page.
+const early = new Map<string, Promise<Response>>();
+export function prefetchListed(where: ListedWhere) {
+  const u = listedUrl(where, '');
+  if (!early.has(u)) early.set(u, fetch(u));
+}
+export function listedPager(where: ListedWhere = {}) {
   const items: Listed[] = []; // the grid's order, just-bought included
   const sale: Sale = { ls: [], preview: true, byId: new Map(), all: items, mine: new Set() };
   const seen = new Set<Source>();
@@ -305,12 +321,10 @@ export function listedPager(where: { trait?: string; rules?: Record<string, numb
     /// Pages in until at least `n` are in hand, or there are no more (at most `calls` requests).
     async fill(n: number, most = 20) {
       for (let calls = 0; items.length < n && cursor !== null && calls < most; calls++) {
-        const qs = new URLSearchParams();
-        if (where.trait) qs.set('trait', where.trait);
-        if (where.rules) qs.set('rules', JSON.stringify(where.rules));
-        if (where.order) qs.set('order', where.order);
-        if (cursor) qs.set('c', cursor);
-        const res = await fetch(`/opensea/listed?${qs}`);
+        const u = listedUrl(where, cursor);
+        const pre = early.get(u);
+        early.delete(u);
+        const res = await (pre ?? fetch(u));
         if (!res.ok) break;
         const d = (await res.json()) as { items?: Listed[]; next?: string | null; preview?: boolean; sources?: Source[]; error?: string; total?: number };
         if (d.error) break;

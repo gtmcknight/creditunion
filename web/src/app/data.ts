@@ -280,12 +280,25 @@ export async function getBatch(a: Address) {
 }
 
 /// The fee a new $BALANCE batch takes off its rating (bps), read once a visit: 0 where there's no token factory or
-/// the read fails.
+/// the read fails. The last one read answers at once (it rarely changes) while the chain is read again behind it.
 let feeP: Promise<number> | null = null;
-export const conversionFeeBps = () =>
-  (feeP ??= config.tokenFactory
-    ? (pub.readContract({ address: config.tokenFactory, abi: factoryAbi, functionName: 'protocolFeeBps' }) as Promise<bigint>).then(Number, () => 0)
-    : Promise.resolve(0));
+const FEE_KEY = 'cu-fee-bps';
+export const conversionFeeBps = () => {
+  if (feeP) return feeP;
+  const read = config.tokenFactory
+    ? (pub.readContract({ address: config.tokenFactory, abi: factoryAbi, functionName: 'protocolFeeBps' }) as Promise<bigint>).then(Number).then((b) => {
+        try {
+          localStorage.setItem(FEE_KEY, String(b));
+        } catch {}
+        return b;
+      }, () => 0)
+    : Promise.resolve(0);
+  let known: string | null = null;
+  try {
+    known = localStorage.getItem(FEE_KEY);
+  } catch {}
+  return (feeP = known !== null ? Promise.resolve(Number(known)) : read);
+};
 
 /// Every token batch ($BALANCE), newest first, read from the token factory: they aren't in the union index.
 export async function tokenBatches(): Promise<Listed[]> {

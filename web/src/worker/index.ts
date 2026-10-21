@@ -1343,7 +1343,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     if (hasSweeper(env) && env.MARKET && bookCur !== null) {
       try {
         const bk = await marketBook(env, url, ctx);
-        if (bk.rows.length && Date.now() - bk.at < 5 * 60_000) {
+        // A book a while behind still beats OpenSea's own pages (which can't sort by value); buying re-reads each order.
+        if (bk.rows.length && Date.now() - bk.at < 30 * 60_000) {
           const ok = trait ? await predicate(env.ASSETS, url.origin, trait.rules) : rules ? await predicate(env.ASSETS, url.origin, rules) : () => true;
           // An OpenSea row without its order can't be bought through the Sweeper: left out.
           const pass = bk.rows.filter((r) => ok(Number(r[0])) && (r[2] !== 'opensea' || (r[3] && r[4])));
