@@ -140,6 +140,8 @@ let chosen: Route | null = null;
 /// The colors of BALANCE with no history yet: an even mix.
 const EVEN: Palette = [0.25, 0.25, 0.25, 0.25];
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/// The wallet and how many converted batches still owed it at the last draw: a draw that finds none owed says it's paid.
+let owedLast: { who: string; n: number } | null = null;
 
 export async function tokensPage(app: HTMLElement, rerun: () => void) {
   if (!config.tokenFactory) {
@@ -265,6 +267,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   const feeOn = (tenthsIn: number) => Math.round(((tenthsIn / 10) * bpsOf()) / 10_000);
   const yoursT = pending.reduce((a, p) => a + t(p.id), 0);
   const amount = (v: bigint) => Number(formatUnits(v, got.decimals)).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  // Paid out since the last draw (the keeper pays at the opening): say so, once.
+  if (account && owedLast?.who === account.toLowerCase() && owedLast.n > 0 && !got.claim.length && got.amount > 0n) toast(`Paid. Your ${amount(got.amount)} ${TOKEN} is in your wallet.`, 'ok', 10_000);
+  owedLast = account ? { who: account.toLowerCase(), n: got.claim.length } : null;
   /// Whether ETH can buy Credits into a batch here (the token factory's Sweeper).
   const sweeps = !!config.tokenSweeper;
   // Per color: the batch filling (the fullest open one) and how many are full.
@@ -1499,7 +1504,10 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
         pub.readContract({ address: factory, abi: factoryAbi, functionName: 'batchCount' }) as Promise<bigint>,
         Promise.all(waiting.map((u) => Promise.all([read(u, 'count'), read(u, 'state')]))),
       ]);
-      const moved = m !== n || now.some(([c, st], i) => Number(c) !== waiting[i].s.count || Number(st) !== STATES.indexOf(waiting[i].s.state));
+      // Yours paid out, or trading opened since this draw (so "Lands in your wallet" turns into what it is now).
+      const owedNow = account && got.claim.length ? await Promise.all(got.claim.map((u) => pub.readContract({ address: config.tokenAdapter!, abi: tokenAdapterAbi, functionName: 'claimable', args: [u, account] }) as Promise<bigint>)) : [];
+      const opened = !paying && !!gate?.opensAt && (await pub.getBlockNumber()) >= gate.opensAt;
+      const moved = m !== n || owedNow.some((v) => v === 0n) || opened || now.some(([c, st], i) => Number(c) !== waiting[i].s.count || Number(st) !== STATES.indexOf(waiting[i].s.state));
       if (moved && thisRun === pageRun && !busy) {
         stop();
         keptPicks = [...picks];
