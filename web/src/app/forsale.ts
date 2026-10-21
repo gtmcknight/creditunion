@@ -1,6 +1,7 @@
 import { sweeperAbi } from './abi';
 import { config, pub, send, session } from './chain';
 import { editionArt } from './ghosts';
+import { sweepSound } from './sound';
 import { creditCell } from './views/trait';
 import { boughtToast, errText, esc, eth, ethNum, rangeHtml, setRange, toast } from './ui';
 
@@ -430,10 +431,17 @@ export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement, 
     go.textContent = picked.size ? `Buy ${picked.size} · ${eth(sum + (sum * bps) / 10_000n)}` : signedOut ? 'Connect to buy' : 'Buy';
     if (!sale.preview && config.sweeper) go.disabled = !picked.size && !signedOut;
   };
+  // Each drag or tap that changes the count sounds it (sound.ts).
+  let heard = picked.size;
+  const sound = () => {
+    sweepSound(picked.size, heard, most());
+    heard = picked.size;
+  };
   range.addEventListener('input', () => {
     picked.clear();
     for (const l of sale.ls.slice(0, Number(range.value))) picked.add(l.id);
     mark();
+    sound();
   });
   // A listed Credit's square picks or unpicks it; its number still opens its page. The slider follows the count.
   grid.addEventListener('click', (e) => {
@@ -450,6 +458,7 @@ export function sweepControls(host: HTMLElement, sale: Sale, grid: HTMLElement, 
       add.forEach((x) => picked.add(x));
     }
     mark();
+    sound();
   });
   mark();
   // `fee()`: the fee the total shows; `setFee` when the Sweeper's changed.

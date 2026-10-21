@@ -279,6 +279,14 @@ export async function getBatch(a: Address) {
   return { s: toSummary(a, s as Record<string, unknown>), ids: slots[0], depositors: slots[1] };
 }
 
+/// The fee a new $BALANCE batch takes off its rating (bps), read once a visit: 0 where there's no token factory or
+/// the read fails.
+let feeP: Promise<number> | null = null;
+export const conversionFeeBps = () =>
+  (feeP ??= config.tokenFactory
+    ? (pub.readContract({ address: config.tokenFactory, abi: factoryAbi, functionName: 'protocolFeeBps' }) as Promise<bigint>).then(Number, () => 0)
+    : Promise.resolve(0));
+
 /// Every token batch ($BALANCE), newest first, read from the token factory: they aren't in the union index.
 export async function tokenBatches(): Promise<Listed[]> {
   const f = config.tokenFactory;

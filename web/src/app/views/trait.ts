@@ -1,8 +1,7 @@
-import { hasLayout, layoutSlot, listBatches, type Listed } from '../data';
+import { conversionFeeBps, hasLayout, layoutSlot, listBatches, type Listed } from '../data';
 import { YOURS, listedPager, live, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepWaiting, type Listed as Listing } from '../forsale';
 import { hydrate } from '../ens';
 import { bin } from '../bins';
-import { fmtScore } from '../../shared/credits';
 import { editionArt, fillGhosts } from '../ghosts';
 import { dice, printGlyph, swatch, weightGlyph } from '../glyphs';
 import { EIGHTS_TOP, TRAIT_KINDS, eightsName, parseTrait, traitPath, type TraitKind, type TraitValue } from '../../shared/trait';
@@ -76,16 +75,22 @@ export async function traitPage(app: HTMLElement, kind: string, raw: string) {
   let order: Where['order'] = all ? readOrder() : undefined;
   if (all) keepOrder(order);
   let scoreOf = new Uint32Array(0);
+  let feeBps = 0;
   if (all)
-    await bin('credit-score.bin')
-      .then((b) => (scoreOf = new Uint32Array(b)))
-      .catch(() => {});
+    await Promise.all([
+      bin('credit-score.bin')
+        .then((b) => (scoreOf = new Uint32Array(b)))
+        .catch(() => {}),
+      conversionFeeBps().then((b) => (feeBps = b)),
+    ]);
+  // What a Credit converts to: one $BALANCE a rating point, less the conversion fee.
+  const balanceOf = (id: number) => Math.floor((scoreOf[id - 1] / 10_000) * (1 - feeBps / 10_000));
 
   // How many, from the counts built into the page (no wait, so the line never shifts); the unions link, which
   // does wait, comes last on the line.
   const count = !t ? facts.n : t.kind === 'palette' ? (facts.palette.find(([p]) => p === t.name)?.[1] ?? 0) : facts[t.kind][t.v - 1] ?? 0;
   app.innerHTML = `
-  <section class="trait-page jb">
+  <section class="trait-page jb${all ? ' jb-deals' : ''}">
     ${creditsHead(kind, t?.name)}
     ${
       all
@@ -95,8 +100,7 @@ export async function traitPage(app: HTMLElement, kind: string, raw: string) {
             .join('')}</nav>`
     }
     <div class="jb-controls">
-      <p class="jb-buy jb-count num"><b id="sale-n">Credits listed</b></p>
-      ${all ? `<div class="jb-sorter">${sortMenu(CREDIT_ORDERS, order ?? 'cheap')}</div>` : ''}
+      ${all ? `<div class="jb-sorter">${sortMenu(CREDIT_ORDERS, order ?? 'cheap')}${filterMenu()}</div>` : '<p class="jb-buy jb-count num"><b id="sale-n">Credits listed</b></p>'}
       <div class="jb-sweep" id="sale-act"></div>
     </div>
     <div class="trait-grid" id="trait-grid"></div>
@@ -106,9 +110,9 @@ export async function traitPage(app: HTMLElement, kind: string, raw: string) {
   // Market: only the Credits for sale, in the chosen order, and how many there are.
   const saleN = (n: number) => {
     const el = document.getElementById('sale-n');
-    if (el) el.textContent = `${n.toLocaleString()} ${n === 1 ? 'Credit' : 'Credits'} listed`;
+    if (el) el.textContent = all ? `${n.toLocaleString()} for sale` : `${n.toLocaleString()} ${n === 1 ? 'Credit' : 'Credits'} listed`;
   };
-  const grid = buyGrid(app, { trait: saleKey, order }, async () => ({ ids: [], total: 0 }), all ? (id) => (scoreOf[id - 1] ? `Rating ${fmtScore(scoreOf[id - 1] / 10_000)}` : '') : undefined, saleN);
+  const grid = buyGrid(app, { trait: saleKey, order }, async () => ({ ids: [], total: 0 }), all ? (id) => (scoreOf[id - 1] ? `${balanceOf(id).toLocaleString('en-US')} $BALANCE` : '') : undefined, saleN);
   bindSort(app, (k) => {
     const next = k === 'cheap' ? undefined : (k as Where['order']);
     if (next === order) return;
@@ -150,7 +154,7 @@ export async function unionsLink(app: HTMLElement, test: (b: Listed) => boolean,
 /// and #trait-more inside `app`.
 export type Where = { trait?: string; rules?: Record<string, number>; order?: 'value' | 'rating' };
 /// How listed Credits are ordered (/credits, /rating, /bits).
-const CREDIT_ORDERS = [['cheap', 'Lowest price'], ['rating', 'Top rated'], ['value', 'Most BALANCE per ETH']] as const;
+const CREDIT_ORDERS = [['value', 'Most $BALANCE for your ETH'], ['cheap', 'Lowest price'], ['rating', 'Top rated']] as const;
 const ORDER_KEY = 'cu-credits-order';
 /// The order from the page's URL (?order=value|rating|cheap, so a sorted page is a permalink), else the one last
 /// picked, else most BALANCE per ETH (BALANCE pays by rating, so that's the price that matters). From the URL, it's
@@ -428,14 +432,21 @@ function valuesOf(kind: TraitKind): TraitValue[] {
 /// a breadcrumb (Credits / Palette / C, or Credits / #123 on a Credit's page), at the h1's size and place, then the
 /// sections as the same tabs, the current one lit (none on a Credit's page). `value`: the crumb's end.
 /// `side`: a link at the right end of the trait tabs (Start a Credit Union).
+// Filter closes on a tap anywhere else.
+document.addEventListener('pointerdown', (e) => {
+  document.querySelectorAll('details.filter-pick[open]').forEach((d) => d.contains(e.target as Node) || d.removeAttribute('open'));
+});
+// Rating first after All: it's what a Credit pays, and the most-opened section.
+const creditSections = (): [string, string][] => [['rating', 'Rating'], ...TRAIT_KINDS.map((k): [string, string] => [k, valuesOf(k)[0].label]), ['time', 'Time'], ['bits', 'Bits']];
+/// /credits' Filter, beside its sort: the Credits by rating, trait, time or bits, each its own page.
+const filterMenu = () => `<details class="filter-pick"><summary>Filter</summary><nav aria-label="Filter Credits">${creditSections().map(([k, l]) => `<a href="/${k}">${l}</a>`).join('')}</nav></details>`;
 export const creditsHead = (current: string, value?: string, side = '') => {
-  // Rating first after All: it's what a Credit pays, and the most-opened section.
-  const sections: [string, string][] = [['rating', 'Rating'], ...TRAIT_KINDS.map((k): [string, string] => [k, valuesOf(k)[0].label]), ['time', 'Time'], ['bits', 'Bits']];
+  const sections = creditSections();
   const label = sections.find(([k]) => k === current)?.[1] ?? '';
   // Credits (with its trait tabs); a Statement's page sits under Statements, where it's for sale.
   const crumb =
     current === 'credits'
-      ? '<b>Credits</b>'
+      ? '<b>Credits</b><span class="jb-total num" id="sale-n"></span>'
       : current === 'statement'
         ? `<a href="/statements">Statements</a><span>/</span><b>${esc(value ?? '')}</b>`
         : current === 'balances'
@@ -444,9 +455,10 @@ export const creditsHead = (current: string, value?: string, side = '') => {
         ? `<a href="/credits">Credits</a><span>/</span><b>${esc(value ?? '')}</b>`
         : `<a href="/credits">Credits</a><span>/</span>${value ? `<a href="/${current}">${esc(label)}</a><span>/</span><b>${esc(value)}</b>` : `<b>${esc(label)}</b>`}`;
   const tabs: [string, string][] = [['credits', 'All'], ...sections];
+  const bar = `<nav class="subtabs swipe" aria-label="Credits by">${tabs.map(([k, l]) => `<a href="/${k}"${k === current ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</nav>`;
   return `<header class="page-head">
       <nav class="jb-crumb" aria-label="Where">${crumb}</nav>
-      ${current === 'statement' || current === 'balances' ? '' : `<div class="page-bar"><nav class="subtabs swipe" aria-label="Credits by">${tabs.map(([k, l]) => `<a href="/${k}"${k === current ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</nav>${side ? `<span class="page-side">${side}</span>` : ''}</div>`}
+      ${current === 'statement' || current === 'balances' ? '' : current === 'credits' ? '' : `<div class="page-bar">${bar}${side ? `<span class="page-side">${side}</span>` : ''}</div>`}
     </header>`;
 };
 
