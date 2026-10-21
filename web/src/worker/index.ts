@@ -310,9 +310,9 @@ const handler = {
   async scheduled(_event, env, ctx) {
     // The market book, kept live each minute (keepMarket).
     ctx.waitUntil(keepMarket(env, ctx).catch((e) => console.error('[market] update failed', safeError(e))));
-    // $BALANCE's price in its pool, every 5 minutes (288 writes a day, in any plan's KV limit), for the chart on
-    // /balance; each read of the chart adds the swaps since.
-    if (new Date(_event.scheduledTime).getUTCMinutes() % 5 === 0) ctx.waitUntil(recordPrice(env).catch((e) => console.error('[price] record failed', safeError(e))));
+    // $BALANCE's price in its pool, each minute (1,440 KV writes a day: Workers Paid includes a million a month), for
+    // the chart on /balance; each read of the chart adds the swaps since.
+    ctx.waitUntil(recordPrice(env).catch((e) => console.error('[price] record failed', safeError(e))));
     // What 1 BALANCE costs, once an hour, for the chart on /balance.
     if (new Date(_event.scheduledTime).getUTCMinutes() === 0) ctx.waitUntil(recordBalance(env).catch((e) => console.error('[balance] record failed', safeError(e))));
     // The keeper runs every 5 minutes, as before.
@@ -2576,9 +2576,9 @@ async function ethUsd(env: Env): Promise<number> {
 
 /// $BALANCE's price in its pool, read from the PoolManager's Swap logs (the price after each swap is its
 /// sqrtPriceX96): each minute's last swap is that minute's point, [minute, ETH per BALANCE, USD at that minute's ETH
-/// price]. A point a minute for two days, then one an hour. The cron brings it up to date every 5 minutes, in KV; a
-/// read that finds it over 12 minutes old (the cron failing, or a local dev server, which runs none) brings it up to
-/// date behind its answer.
+/// price]. A point a minute for two days, then one an hour. The cron brings it up to date each minute, in KV; a read
+/// that finds it over 3 minutes old (the cron failing, or a local dev server, which runs none) brings it up to date
+/// behind its answer.
 const priceKey = (id: Hex) => `balance-price/${id}`; // a record per pool, should Buy and Sell ever move to another
 const SWAP_TOPIC: Hex = '0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f'; // Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)
 const PRICE_FROM = 26_241_566; // mainnet: the block the auction's ETH and BALANCE went into the pool, its first trades
@@ -2643,7 +2643,7 @@ async function priceChart(env: Env, ctx: ExecutionContext) {
   const token = balanceConfig(env)?.token ?? null;
   const raw = env.PLANS && id ? await env.PLANS.get(priceKey(id), { cacheTtl: 60 }) : null;
   const rec = raw ? (JSON.parse(raw) as PriceRecord) : null;
-  if (id && (!rec || Date.now() - rec.at > 720_000)) {
+  if (id && (!rec || Date.now() - rec.at > 180_000)) {
     const p = priceCatchUp(ctx, () => recordPrice(env));
     if (rec) ctx.waitUntil(p.catch(() => {}));
     else await p.catch(() => {}); // the first read of all waits for it
