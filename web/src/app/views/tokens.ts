@@ -900,8 +900,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     setText('route2', split ? `${whole(leftN)} via Uniswap · instant` : '');
     const label: Record<Route, [string, string]> = {
       pool: ['Uniswap', 'Instant'],
-      batch: ['Credits', `In a ${lane().name} batch, lands when it fills`],
-      statement: [st ? `Statement #${st.id}` : 'Statement', `On OpenSea · redeems when ${TOKEN} opens`],
+      batch: ['Credits', `Lands when the ${lane().name} batch fills · ${80 - (curOf(lane())?.s.count ?? 0)} to go`],
+      statement: [st ? `Statement #${st.id}` : 'Statement', `On OpenSea · ${trade?.open ? 'redeems at once' : `redeems when ${TOKEN} opens`}`],
     };
     const box = document.getElementById('tk-batch'), home = document.getElementById('tk-batch-home');
     if (box && home && box.parentElement !== home) home.append(box);
@@ -913,10 +913,12 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
             .join('')}</div>`
         : '',
     );
-    // Picked through Credits with other ways on show: the batch box hangs off the Credits row, joined to it.
+    // Picked through Credits with other ways on show: on a phone the batch box hangs off the Credits row, joined to
+    // it; on a wide screen it stays in the right column, where its sheet has room.
     const row = document.querySelector<HTMLElement>('.tk-way[data-route="batch"]');
-    if (box) box.classList.toggle('attached', !!row && route === 'batch');
-    if (box && row && route === 'batch') row.after(box);
+    const attach = !!row && route === 'batch' && !matchMedia('(min-width: 901px)').matches;
+    if (box) box.classList.toggle('attached', attach);
+    if (box && row && attach) row.after(box);
     // Our slice of a swap is taken from what comes out, so the amount shown is already after it; tapped, what it is.
     const poolFee = poolN && m ? (poolN * m.feeBps) / (10_000 - m.feeBps) : 0;
     setText(

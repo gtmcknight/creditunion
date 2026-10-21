@@ -9888,7 +9888,9 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 /* The batch reads as a section like Pay and You get: its title row, then the bar, key and line; no box (it's not an input). */
 .tk-batch[hidden] { display: none; }
 /* Under the picked Credits row: one object with it (no gap, no double border). */
-.tk-batch.attached { margin: -7px 0 0; padding: 4px 12px 14px; color: var(--fg); border-radius: 0 0 var(--r) var(--r); box-shadow: inset 1.5px 0 0 var(--fg), inset -1.5px 0 0 var(--fg), inset 0 -1.5px 0 var(--fg); }
+.tk-batch.attached { margin: -7px 0 0; padding: 4px 12px 14px; color: var(--fg); border-radius: 0 0 var(--r) var(--r); box-shadow: inset 1.5px 0 0 var(--fg), inset -1.5px 0 0 var(--fg), inset 0 -1.5px 0 var(--fg); grid-template-columns: minmax(0, 1fr); }
+/* Under the row it's only the batch filling: the sheet's picture belongs to the right column. */
+.tk-batch.attached .tk-mini { display: none; }
 .tk-ways .tk-way[aria-checked="true"]:has(+ .tk-batch.attached) { border-radius: var(--r) var(--r) 0 0; box-shadow: inset 1.5px 0 0 var(--fg), inset -1.5px 0 0 var(--fg), inset 0 1.5px 0 var(--fg); }
 /* The card and the batch side by side: the swap card on the left, the batch you'd join on the right, a rule between
    them the height of the taller. On phones the batch drops under the card. */
