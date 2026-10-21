@@ -16,7 +16,7 @@ import { bin } from '../bins';
 import { getBatch, myCredits, shareOf, STATES, tokenIndex, type Payout, type Summary } from '../data';
 import { checkQuote, listedById, type Quote } from '../forsale';
 import { buyListed, listings, type ForSale } from './statements';
-import { priceChart } from './price-chart';
+import { priceChart, usdPrice } from './price-chart';
 import { registerDeposits } from '../ghosts';
 import { buyCall, inkPalette, launchGate, market as swapMarket, opened, poolPalette, quote as swapQuote, sellCalls } from '../swap';
 import { balanceArt, balanceHref, balanceSrc, converted, type BalanceArt } from '../tokens';
@@ -890,7 +890,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const gets = route === 'batch' ? withBatch : route === 'pool' ? poolN : route === 'statement' ? stN : 0;
     const paid = route === 'statement' ? BigInt(st!.price) : route === 'batch' ? b!.spent + (split ? left : 0n) : wei;
     const per = paid && gets ? Number(formatUnits(paid, 18)) / gets : 0;
-    const rate = per ? `${usd ? `$${(per * usd).toPrecision(2)}` : `${per.toPrecision(2)} ETH`} each` : '';
+    // To four decimals, as the chart writes the market price beside it: the gap between them is fees and the price moving.
+    const rate = per ? `${usd ? usdPrice(per * usd) : `${per.toPrecision(3)} ETH`} each` : '';
     setText('amt-usd', dollars(Number(formatUnits(wei, 18))));
     // Two lines: what each one costs, then how it arrives and what we take on that way.
     setText('tk-gettitle', way === 'batch' || route === 'statement' ? 'You’ll get' : 'You get');

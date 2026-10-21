@@ -15,7 +15,8 @@ let readAt = 0;
 let picked = '';
 let reading: Promise<void> | null = null;
 
-const usd = (v: number) => `$${v >= 1 ? v.toFixed(2) : v >= 0.01 ? v.toFixed(4) : v.toPrecision(3)}`;
+/// A $BALANCE price in dollars: four decimals under $1, as the chart and You get's "each" both write it.
+export const usdPrice = (v: number) => `$${v >= 1 ? v.toFixed(2) : v >= 0.01 ? v.toFixed(4) : v.toPrecision(3)}`;
 /// A market cap to three figures: $5.78M.
 const cap = (v: number) => {
   const [d, u] = v >= 1e9 ? [1e9, 'B'] : v >= 1e6 ? [1e6, 'M'] : [1e3, 'K'];
@@ -65,7 +66,7 @@ export function priceChart(host: HTMLElement) {
     const dot = host.querySelector<SVGCircleElement>('.pc-dot')!, hair = host.querySelector<SVGLineElement>('.pc-hair')!;
     const head = (i: number | null) => {
       const p = pts[i ?? pts.length - 1];
-      price.textContent = usd(p[1]);
+      price.textContent = usdPrice(p[1]);
       // The price times every $BALANCE there is, as DexScreener counts it.
       mc.innerHTML = data?.supply ? `<span class="num">${cap(p[1] * data.supply)}</span> market cap` : '';
       if (i === null) {
