@@ -149,6 +149,8 @@ export function errText(e: unknown): string {
 }
 
 const ERRORS: Record<string, string> = {
+  ExecutionFailed: 'The price moved. Try again.',
+  V4TooLittleReceived: 'The price moved. Try again.',
   TooFewToOpen: 'Not enough Credits to open a Credit Union.',
   WrongState: 'The Credit Union is not in the right state for that.',
   WrongPhase: 'Not right now. Burning works only in the hour after the 5-minute countdown, and Credits can’t be withdrawn during that hour.',

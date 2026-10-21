@@ -47,6 +47,9 @@ const EXACT_IN_SINGLE = [
 
 export const routerAbi = [
   { type: 'function', name: 'execute', stateMutability: 'payable', inputs: [{ name: 'commands', type: 'bytes' }, { name: 'inputs', type: 'bytes[]' }, { name: 'deadline', type: 'uint256' }], outputs: [] },
+  // A failed command comes back wrapped; under a quote's minimum it's V4TooLittleReceived inside.
+  { type: 'error', name: 'ExecutionFailed', inputs: [{ name: 'commandIndex', type: 'uint256' }, { name: 'message', type: 'bytes' }] },
+  { type: 'error', name: 'V4TooLittleReceived', inputs: [{ name: 'minAmountOutReceived', type: 'uint256' }, { name: 'amountReceived', type: 'uint256' }] },
 ] as const;
 
 export const quoterAbi = [

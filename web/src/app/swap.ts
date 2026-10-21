@@ -8,8 +8,10 @@ import { config, pub } from './chain';
 
 export type Market = { token: Address; key: PoolKey; decimals: number; symbol: string; feeBps: number; feeTo: Address | null; opensAt: bigint | null };
 
-/// Most a quote may slip before the swap reverts (1%).
+/// Most a quote may slip before the swap reverts: 1% on a buy, 3% on a sell. A launch-day pool falls fast while
+/// holders sell, and a sell held to 1% mostly reverts, leaving the member holding as the price drops.
 export const SLIPPAGE_BPS = 100n;
+export const SELL_SLIPPAGE_BPS = 300n;
 const APPROVAL_DAYS = 30;
 
 const inkAbi = [{ type: 'function', name: 'inkOf', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'uint256[4]' }] }] as const;
@@ -71,7 +73,7 @@ export async function quote(m: Market, buy: boolean, amountIn: bigint): Promise<
 
 /// 20 minutes from the chain's latest block (not this computer's clock, which can be off, as a fork's is).
 const deadline = async () => (await pub.getBlock()).timestamp + 20n * 60n;
-const floor = (net: bigint) => (net * (10_000n - SLIPPAGE_BPS)) / 10_000n;
+const floor = (net: bigint, bps = SLIPPAGE_BPS) => (net * (10_000n - bps)) / 10_000n;
 
 /// The router call for a buy of `ethIn`, reverting under the quote less slippage.
 export const buyCall = async (m: Market, ethIn: bigint, net: bigint) =>
@@ -88,7 +90,7 @@ export async function sellCalls(m: Market, owner: Address, amountIn: bigint, net
   const calls: { address: Address; abi: readonly unknown[]; functionName: string; args: readonly unknown[] }[] = [];
   if (erc < amountIn) calls.push({ address: m.token, abi: erc20Abi, functionName: 'approve', args: [PERMIT2, maxUint256] } as const);
   if (allowed < amountIn || Number(expires) < now + 60) calls.push({ address: PERMIT2, abi: permit2Abi, functionName: 'approve', args: [m.token, UNIVERSAL_ROUTER, maxUint160, now + APPROVAL_DAYS * 86_400] } as const);
-  calls.push({ address: UNIVERSAL_ROUTER, abi: routerAbi, functionName: 'execute', args: swapArgs({ key: m.key, buy: false, amountIn, minOut: floor(net), feeBps: m.feeBps, feeTo: m.feeTo, deadline: await deadline() }) } as const);
+  calls.push({ address: UNIVERSAL_ROUTER, abi: routerAbi, functionName: 'execute', args: swapArgs({ key: m.key, buy: false, amountIn, minOut: floor(net, SELL_SLIPPAGE_BPS), feeBps: m.feeBps, feeTo: m.feeTo, deadline: await deadline() }) } as const);
   return calls;
 }
 
