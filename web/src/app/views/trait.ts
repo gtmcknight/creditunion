@@ -1,6 +1,7 @@
-import { conversionFeeBps, hasLayout, layoutSlot, listBatches, type Listed } from '../data';
+import { hasLayout, layoutSlot, listBatches, type Listed } from '../data';
 import { YOURS, listedPager, listedScore, prefetchListed, live, onSources, priceTag, relist, sourceMarks, sourceShown, sweepControls, sweepWaiting, type Listed as Listing } from '../forsale';
 import { hydrate } from '../ens';
+import { fmtScore } from '../../shared/credits';
 import { editionArt, fillGhosts } from '../ghosts';
 import { dice, printGlyph, swatch, weightGlyph } from '../glyphs';
 import { EIGHTS_TOP, TRAIT_KINDS, eightsName, parseTrait, traitPath, type TraitKind, type TraitValue } from '../../shared/trait';
@@ -73,13 +74,8 @@ export async function traitPage(app: HTMLElement, kind: string, raw: string) {
   // Credit shows its rating there.
   let order: Where['order'] = all ? readOrder() : undefined;
   if (all) keepOrder(order);
-  let feeBps = 0;
-  // /credits: its listings start now (or came with the page), beside the fee its tiles need, and the page shows at
-  // once. Each listing carries its score.
+  // /credits: its listings start now (or came with the page), each with its Credit's score, and the page shows at once.
   if (all) prefetchListed({ order });
-  const ready = all ? conversionFeeBps().then((b) => void (feeBps = b)) : Promise.resolve();
-  // What a Credit converts to: one $BALANCE a rating point, less the conversion fee.
-  const balanceOf = (score: number) => Math.floor((score / 10_000) * (1 - feeBps / 10_000));
 
   // How many, from the counts built into the page (no wait, so the line never shifts); the unions link, which
   // does wait, comes last on the line.
@@ -107,7 +103,7 @@ export async function traitPage(app: HTMLElement, kind: string, raw: string) {
     const el = document.getElementById('sale-n');
     if (el) el.textContent = all ? `${n.toLocaleString()} for sale` : `${n.toLocaleString()} ${n === 1 ? 'Credit' : 'Credits'} listed`;
   };
-  const grid = buyGrid(app, { trait: saleKey, order }, async () => ({ ids: [], total: 0 }), all ? (id) => { const sc = listedScore(id); return sc ? `${balanceOf(sc).toLocaleString('en-US')} $BALANCE` : ''; } : undefined, saleN);
+  const grid = buyGrid(app, { trait: saleKey, order }, async () => ({ ids: [], total: 0 }), all ? (id) => { const sc = listedScore(id); return sc ? `Rating ${fmtScore(sc / 10_000)}` : ''; } : undefined, saleN);
   bindSort(app, (k) => {
     const next = k === 'cheap' ? undefined : (k as Where['order']);
     if (next === order) return;
@@ -116,9 +112,8 @@ export async function traitPage(app: HTMLElement, kind: string, raw: string) {
     keepOrder(order);
     void grid.start({ trait: saleKey, order });
   });
-  // Not awaited: the page shows at once (the router fades it in when this returns), the grid filling in behind once
-  // the tiles' ratings are in.
-  void ready.then(() => grid.start());
+  // Not awaited: the page shows at once (the router fades it in when this returns), the grid filling in behind.
+  void grid.start();
 }
 
 /// The Buy row's markup: the heading, the sort menu (when `sort` is given) and Sweep beside it, then the grid and

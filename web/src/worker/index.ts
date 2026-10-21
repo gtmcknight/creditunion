@@ -2093,7 +2093,7 @@ function bootHead(env: Env, url: URL, facts?: Facts | null) {
 /// Read behind the response once a copy is FACTS_MS old; a copy up to FACTS_KEEP old is still handed out (this
 /// isolate's, else the colo's), so a page never waits on the chain for it. With none (a new isolate in a quiet data
 /// center), a page goes without, and the app reads what it needs itself, as before.
-type Facts = { burn?: { assembler: Address | null; pending: Address | null; until: number }; sweeperFee?: number; tokenFee?: number; liveAuctions?: number; burnable?: number; factsAt?: number };
+type Facts = { burn?: { assembler: Address | null; pending: Address | null; until: number }; sweeperFee?: number; liveAuctions?: number; burnable?: number; factsAt?: number };
 const FACTS_MS = 15_000;
 const FACTS_KEEP = 10 * 60_000;
 let factsMemo: { got: number; v: Facts } | null = null;
@@ -2117,13 +2117,12 @@ async function pageFacts(env: Env, url: URL, ctx: ExecutionContext): Promise<Fac
 }
 async function readFacts(env: Env, url: URL, ctx: ExecutionContext): Promise<Facts> {
   const factsAt = Date.now();
-  const [burn, sweeperFee, tokenFee, counts] = await Promise.all([
+  const [burn, sweeperFee, counts] = await Promise.all([
     burnState(env).catch(() => undefined),
     sweeperFeeOf(env).catch(() => undefined),
-    tokenFeeOf(env).catch(() => undefined),
     unionIndex(env, url, ctx).then(countsOf).catch(() => undefined),
   ]);
-  return { ...(burn ? { burn } : {}), ...(sweeperFee !== undefined ? { sweeperFee } : {}), ...(tokenFee !== undefined ? { tokenFee } : {}), ...(counts ? { ...counts, factsAt } : {}) };
+  return { ...(burn ? { burn } : {}), ...(sweeperFee !== undefined ? { sweeperFee } : {}), ...(counts ? { ...counts, factsAt } : {}) };
 }
 /// From the index, counted once per read of it: auctions open for bids (Batch.State.Auction, the clock not run out),
 /// and full unions counting down to their hour to convert or in it (Phase Countdown or Burnable), which the site bar
@@ -2160,14 +2159,6 @@ const feeKept = shared<number>(() => 5 * 60_000);
 function sweeperFeeOf(env: Env): Promise<number | undefined> {
   if (!publicConfig(env).sweeper) return Promise.resolve(undefined);
   return feeKept(undefined, () => client(env).readContract({ address: env.SWEEPER, abi: sweeperAbi, functionName: 'feeBps' }).then(Number));
-}
-
-/// The fee a new $BALANCE batch takes off its rating (bps), a few minutes old at most.
-const tokenFeeKept = shared<number>(() => 5 * 60_000);
-function tokenFeeOf(env: Env): Promise<number | undefined> {
-  const f = addrOrNull(env.TOKEN_FACTORY);
-  if (!f) return Promise.resolve(undefined);
-  return tokenFeeKept(undefined, () => client(env).readContract({ address: f, abi: factoryAbi, functionName: 'protocolFeeBps' }).then(Number));
 }
 
 /// What a Credit's card shows, from the edition's packed traits and score table.

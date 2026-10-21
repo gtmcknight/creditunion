@@ -9,11 +9,9 @@ import { earlyShare, getBatch, listBatches, ratings, tokenBatches, type Listed, 
 import { converted } from '../tokens';
 import { needsSave } from './party';
 import { hydrate, who } from '../ens';
-import { fitIds, weightOf } from '../fit';
-import { fillGhosts } from '../ghosts';
+import { weightOf } from '../fit';
 import { maskInks, paletteBit } from '../traits';
 import { art, boughtToast, errText, esc, eth, same, sheet, statementArt, toast, utc } from '../ui';
-import { card } from './lists';
 import { creditsHead } from './trait';
 import { processOf } from '../../shared/credits';
 import { eightsName } from '../../shared/trait';
@@ -117,13 +115,10 @@ export async function credit(app: HTMLElement, raw: string) {
     </div>
   </section>
   ${r ? howMade(seedText(String(seed)), r) : ''}
-  ${owner && !union ? `<section class="credit-fits"><div class="section-head"><h3>Can join</h3><span class="muted num" id="fits-n"></span></div><p class="muted section-sub">Credit Unions that this Credit can join.</p><div id="fits"><p class="muted">Checking open Credit Unions…</p></div></section>` : ''}`;
+`;
   hydrate(app);
 
-  if (owner && !union) {
-    void drawFits(id, r, list, mine);
-    if (!mine) void drawBuy(n);
-  }
+  if (owner && !union && !mine) void drawBuy(n);
 
   document.getElementById('cr-withdraw')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget as HTMLButtonElement;
@@ -217,38 +212,6 @@ function howMade(seed: string, r: Rated) {
       </div>
     </div>
   </section>`;
-}
-
-/// Open Credit Unions that would take this Credit now, by the same rules the rest of the site uses. The owner's
-/// cards open the Credit Union with this Credit already picked.
-async function drawFits(id: bigint, r: Rated | undefined, list: Listed[], mine: boolean) {
-  const el = document.getElementById('fits');
-  if (!el) return;
-  const open = list.filter((b) => b.s.state === 'Open');
-  const fit = await fitIds(open, [id], new Map(r ? [[id.toString(), r]] : [])).catch(() => new Map<Address, bigint[]>());
-  if (!el.isConnected) return;
-  const fits = open.filter((b) => fit.has(b.s.address));
-  document.getElementById('fits-n')!.textContent = fits.length ? String(fits.length) : '';
-  if (!fits.length) {
-    el.innerHTML = `<p class="muted">No open Credit Union takes it right now.</p>`;
-    return;
-  }
-  // The three closest to full first (the ones that will burn soonest); the rest behind one button.
-  fits.sort((a, b) => b.s.count - a.s.count || b.s.filledAt - a.s.filledAt);
-  const draw = (n: number) => {
-    const rest = fits.length - n;
-    el.innerHTML = `<div class="grid">${fits
-      .slice(0, n)
-      .map((b) => {
-        const html = card(b, mine ? [id] : undefined);
-        return mine ? html.replace(`href="/union/${b.s.address}"`, `href="/union/${b.s.address}?pick=${id}"`) : html;
-      })
-      .join('')}</div>${rest > 0 ? `<button type="button" class="btn show-empty" id="fits-more">Show ${rest} more</button>` : ''}`;
-    document.getElementById('fits-more')?.addEventListener('click', () => draw(fits.length));
-    hydrate(el);
-    fillGhosts(el);
-  };
-  draw(3);
 }
 
 const buyAbi = parseAbi(['function sellTargetNFT(uint256 tokenId) payable', 'function buy(uint256 listingId, address recipient) payable']);

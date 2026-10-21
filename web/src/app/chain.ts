@@ -31,8 +31,6 @@ export type Config = {
   /// (factsAt, ms).
   burn?: { assembler: Address | null; pending: Address | null; until: number };
   sweeperFee?: number;
-  /// The fee a new $BALANCE batch takes off its rating (bps), from the page's facts.
-  tokenFee?: number;
   liveAuctions?: number;
   burnable?: number;
   factsAt?: number;
