@@ -592,6 +592,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const s = viaSheet();
     const a = document.getElementById('tk-batch');
     if (a) a.hidden = !s;
+    // Beside a trade on Uniswap (a Buy that goes there, or a Sell), the price; beside one into a batch, its sheet.
+    const c = document.getElementById('tk-chart');
+    if (c) c.hidden = s;
   };
   /// You get, in the colors it comes in, on the panel itself: its black is the text color, so it reads in either theme.
   const setGet = (n: number, pal: Palette) => {

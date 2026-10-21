@@ -4,7 +4,7 @@
 /// while the page is up.
 
 type Point = [number, number]; // unix seconds, USD
-type Data = { at: number; first: number; price: { eth: number; usd: number } | null; ranges: Record<string, Point[]> };
+type Data = { at: number; first: number; price: { eth: number; usd: number } | null; supply: number | null; ranges: Record<string, Point[]> };
 const ORDER = ['1H', '1D', '1W', 'All'];
 const SINCE: Record<string, string> = { '1H': 'past hour', '1D': 'past day', '1W': 'past week', All: 'since open' };
 const H = 150;
@@ -16,6 +16,11 @@ let picked = '';
 let reading: Promise<void> | null = null;
 
 const usd = (v: number) => `$${v >= 1 ? v.toFixed(2) : v >= 0.01 ? v.toFixed(4) : v.toPrecision(3)}`;
+/// A market cap to three figures: $5.78M.
+const cap = (v: number) => {
+  const [d, u] = v >= 1e9 ? [1e9, 'B'] : v >= 1e6 ? [1e6, 'M'] : [1e3, 'K'];
+  return `$${Number((v / d).toPrecision(3))}${u}`;
+};
 const when = (t: number, long: boolean) =>
   new Date(t * 1000).toLocaleString('en-US', long ? { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' } : { hour: 'numeric', minute: '2-digit' });
 
@@ -48,7 +53,7 @@ export function priceChart(host: HTMLElement) {
     const line = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p[0]).toFixed(1)} ${y(p[1]).toFixed(1)}`).join(' ');
     const [lx, ly] = [x(t1), y(pts[pts.length - 1][1])];
     host.innerHTML = `
-      <div class="pc-head"><span class="pc-price num"></span><span class="pc-change"></span></div>
+      <div class="pc-head"><span class="pc-price num"></span><span class="pc-mc"></span><span class="pc-change"></span></div>
       <svg class="pc-line" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="$BALANCE price, ${SINCE[range]}">
         <line class="pc-base" x1="0" x2="${W}" y1="${y(pts[0][1]).toFixed(1)}" y2="${y(pts[0][1]).toFixed(1)}"/>
         <path d="${line}"/>
@@ -56,11 +61,13 @@ export function priceChart(host: HTMLElement) {
         <circle class="pc-dot" cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="3"/>
       </svg>
       ${ranges.length > 1 ? `<div class="pc-ranges">${ranges.map((r) => `<button type="button" data-range="${r}"${r === range ? ' aria-pressed="true"' : ''}>${r}</button>`).join('')}</div>` : ''}`;
-    const price = host.querySelector<HTMLElement>('.pc-price')!, change = host.querySelector<HTMLElement>('.pc-change')!;
+    const price = host.querySelector<HTMLElement>('.pc-price')!, change = host.querySelector<HTMLElement>('.pc-change')!, mc = host.querySelector<HTMLElement>('.pc-mc')!;
     const dot = host.querySelector<SVGCircleElement>('.pc-dot')!, hair = host.querySelector<SVGLineElement>('.pc-hair')!;
     const head = (i: number | null) => {
       const p = pts[i ?? pts.length - 1];
       price.textContent = usd(p[1]);
+      // The price times every $BALANCE there is, as DexScreener counts it.
+      mc.innerHTML = data?.supply ? `<span class="num">${cap(p[1] * data.supply)}</span> market cap` : '';
       if (i === null) {
         const pct = ((p[1] - pts[0][1]) / pts[0][1]) * 100;
         change.textContent = `${pct >= 0 ? '+' : '−'}${Math.abs(pct).toFixed(1)}% ${SINCE[range]}`;
