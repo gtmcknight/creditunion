@@ -279,10 +279,50 @@ export async function getBatch(a: Address) {
   return { s: toSummary(a, s as Record<string, unknown>), ids: slots[0], depositors: slots[1] };
 }
 
-/// Every token batch ($BALANCE), newest first, read from the token factory: they aren't in the union index.
+/// A converted token batch's payout as the adapter has it: conversionOf (statement id, amount, net, the two fees,
+/// whether each fee is paid), its pocket, its members in the order they joined, the rating each put in and whether
+/// they've been paid, and its total rating.
+export type Payout = { of: readonly [bigint, bigint, bigint, bigint, bigint, boolean, boolean]; pocket: Address; members: readonly Address[]; put: readonly bigint[]; claimed: readonly boolean[]; total: bigint };
+export type TokenListed = Listed & { payout?: Payout };
+/// What a payout owes `you` (TokenAdapter.claimable: nothing once paid) and the rating you put in.
+export function shareOf(p: Payout, you: Address) {
+  const j = p.members.findIndex((m) => m.toLowerCase() === you.toLowerCase());
+  const mine = j < 0 ? 0n : p.put[j];
+  return { mine, owed: j < 0 || p.claimed[j] || p.of[1] === 0n || !p.total ? 0n : (p.of[2] * mine) / p.total };
+}
+
+/// Every token batch, newest first, with each converted one's payout, from the Worker's token index
+/// (/token-batches.json, preloaded on /balance: read once for everyone, a few seconds old at most). Null when it can't
+/// be read: then read the chain. After any transaction of ours, the next read asks for one made after it.
+let tokensRead: { at: number; p: Promise<TokenListed[] | null> } | null = null;
+let tokensFresh = false;
+onTx(() => {
+  tokensRead = null;
+  tokensFresh = true;
+});
+export function tokenIndex(): Promise<TokenListed[] | null> {
+  if (!config.tokenFactory) return Promise.resolve(null);
+  if (tokensRead && Date.now() - tokensRead.at < 2_000) return tokensRead.p;
+  const url = tokensFresh ? `/token-batches.json?fresh=${Date.now()}` : '/token-batches.json';
+  tokensFresh = false;
+  const p = fetch(url, { signal: AbortSignal.timeout(15_000) })
+    .then(async (r) => {
+      if (!r.ok) return null;
+      const { batches } = fromJson(await r.text()) as { batches: (Indexed & { payout?: Payout })[] };
+      return batches.map((u): TokenListed => ({ s: toSummary(u.address, u.summary), ids: u.ids.map(BigInt), depositors: u.depositors, format: null, token: true, payout: u.payout }));
+    })
+    .catch(() => null);
+  tokensRead = { at: Date.now(), p };
+  return p;
+}
+
+/// Every token batch ($BALANCE), newest first: from the token index, else read from the token factory (they aren't in
+/// the union index).
 export async function tokenBatches(): Promise<Listed[]> {
   const f = config.tokenFactory;
   if (!f) return [];
+  const ix = await tokenIndex();
+  if (ix) return ix;
   const n = (await pub.readContract({ address: f, abi: factoryAbi, functionName: 'batchCount' })) as bigint;
   if (!n) return [];
   const addrs = (await pub.readContract({ address: f, abi: factoryAbi, functionName: 'batches', args: [0n, n] })) as readonly Address[];

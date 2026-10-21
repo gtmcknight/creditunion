@@ -3,6 +3,7 @@
 ///   /rpc           read-only JSON-RPC proxy to our contracts (and Credits' art) only (keeps the provider key private)
 ///   /unions.json   every Credit Union, summary and slots, read once per block for the whole site (ChainBook);
 ///                  ?union= just one, which a union page polls instead of the chain
+///   /token-batches.json  every token batch ($BALANCE) with its payout, read once for /balance
 ///   /passes        which of a wallet's Credits a Credit Union takes, in one multicall
 ///   /activity.json what wallets have done on the site, newest first (the Activity page)
 ///   /art/...       a Credit's art, read from Jack's art contract once and kept for good in KV (art never changes)
@@ -511,6 +512,19 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       const one = url.searchParams.get('union');
       const body = one ? oneUnion(v, one) : v.body;
       return new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${INDEX_MS / 1000}` } });
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
+  }
+
+  // Every token batch with its payout, one cached read for /balance (and the pages that look a Credit up in a batch).
+  if (url.pathname === '/token-batches.json') {
+    if (req.method !== 'GET' || !sameSite(req)) return text('forbidden', 403);
+    const fresh = url.searchParams.has('fresh'); // after the reader's own transaction: skip the cache
+    if (fresh && (await limited(env.RL_MISC, req))) return text('slow down', 429);
+    try {
+      const v = await tokenIndex(env, url, ctx, fresh);
+      return new Response(v.body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${INDEX_MS / 1000}` } });
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
     }
@@ -2094,7 +2108,9 @@ async function creditsSeed(env: Env, url: URL, ctx: ExecutionContext): Promise<s
 
 function bootHead(env: Env, url: URL, facts?: Facts | null) {
   const config = `<script type="application/json" id="config">${JSON.stringify({ ...publicConfig(env), ...facts }).replace(/</g, '\\u003c')}</script>`;
-  return LISTS.test(url.pathname) && url.pathname !== '/credits' ? `${config}\n  <link rel="preload" href="/unions.json" as="fetch" crossorigin="anonymous">` : config;
+  const preload = (path: string) => `${config}\n  <link rel="preload" href="${path}" as="fetch" crossorigin="anonymous">`;
+  if (url.pathname === '/balance' && env.TOKEN_FACTORY) return preload('/token-batches.json');
+  return LISTS.test(url.pathname) && url.pathname !== '/credits' ? preload('/unions.json') : config;
 }
 
 /// What every page shows of the chain that seldom changes, written into the page with its config so no visit reads it
@@ -2256,6 +2272,123 @@ function oneUnion(v: Index, addr: string): string {
     v.one = new Map(unions.map((u) => [u.address.toLowerCase(), JSON.stringify({ at, union: u })]));
   }
   return v.one.get(addr.toLowerCase()) ?? '{"at":0,"union":null}';
+}
+
+/// Every token batch ($BALANCE), newest first, as /balance reads it on each visit and every block after: each one's
+/// summary and slots, and once it converted, what it converted into (TokenAdapter.conversionOf), its pocket, its
+/// members in the order they joined with the rating each put in and whether they've been paid, and its total rating.
+/// One read for everyone instead of ~300 calls a visit, kept like the union index: fresh for INDEX_MS in this isolate
+/// and this data center, a copy up to INDEX_KEEP old going out while it's read again.
+let tokenMemo: { got: number; v: Index } | null = null;
+const tokenRead = shared<Index>();
+async function tokenIndex(env: Env, url: URL, ctx: ExecutionContext, fresh = false): Promise<Index> {
+  if (!fresh && tokenMemo && Date.now() - tokenMemo.got < INDEX_MS) return tokenMemo.v;
+  const key = new Request(`${url.origin}/token-batches.json/v1`);
+  if (!fresh) {
+    const hit = await caches.default.match(key);
+    const got = Number(hit?.headers.get('x-got')), at = Number(hit?.headers.get('x-read-at'));
+    if (hit && got && at && (!tokenMemo || got > tokenMemo.got)) tokenMemo = { got, v: tokenMemo?.v.at === at ? tokenMemo.v : { at, body: await hit.text() } };
+    if (tokenMemo && Date.now() - tokenMemo.got < INDEX_MS) return tokenMemo.v;
+  }
+  const read = async (): Promise<Index> => {
+    const at = Date.now();
+    const v = { at, body: toJson({ at: Math.floor(at / 1000), batches: await tokenList(env) }) };
+    const got = Date.now();
+    ctx.waitUntil(caches.default.put(key, new Response(v.body, { headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${INDEX_KEEP / 1000}`, 'x-read-at': String(v.at), 'x-got': String(got) } })));
+    if (!tokenMemo || tokenMemo.v.at <= v.at) tokenMemo = { got, v };
+    return v;
+  };
+  if (fresh) return read();
+  const p = tokenRead(ctx, read);
+  if (tokenMemo && Date.now() - tokenMemo.got < INDEX_KEEP) {
+    void p.catch(() => {}); // shared keeps it going
+    return tokenMemo.v;
+  }
+  return p;
+}
+/// A converted batch's payout as the adapter has it: conversionOf as read (statement id, amount, net, the two fees,
+/// whether each fee is paid), its pocket, its members, the rating each put in and whether they've been paid.
+type Payout = { of: readonly unknown[]; pocket: Address; members: readonly Address[]; put: bigint[]; claimed: boolean[]; total: bigint };
+type TokenIndexed = Indexed & { payout?: Payout };
+/// Each token batch's last good read in this isolate, by address. One converted with its fees and every member paid
+/// never changes again (`done`) and isn't read again; any other whose read fails keeps its last good one.
+const batchKept = new Map<string, { b: TokenIndexed; done: boolean }>();
+async function tokenList(env: Env): Promise<TokenIndexed[]> {
+  const factory = addrOrNull(env.TOKEN_FACTORY), adapter = addrOrNull(env.TOKEN_ADAPTER);
+  if (!factory) return [];
+  const c = client(env);
+  type Got = { status: 'success' | 'failure'; result?: unknown };
+  const all = (contracts: { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[] }[], batchSize: number): Promise<Got[]> =>
+    hasMulticall(env)
+      ? (c.multicall({ contracts: contracts as never, allowFailure: true, multicallAddress: MULTICALL3, batchSize }) as Promise<Got[]>)
+      : Promise.all(contracts.map((x) => c.readContract(x as never).then((result): Got => ({ status: 'success', result }), (): Got => ({ status: 'failure' }))));
+  const addrs = (await c.readContract({ address: factory, abi: factoryAbi, functionName: 'batches', args: [0n, 10_000n] })) as readonly Address[];
+  const todo = addrs.filter((a) => !batchKept.get(a.toLowerCase())?.done);
+  // Summary and slots, and the adapter's side (nothing yet for a batch that hasn't converted). batchSize counts
+  // calldata bytes: 1024 is about nine batches a call, each full one's slots ~350k gas.
+  const per = adapter ? 5 : 2;
+  const res = await all(
+    todo.flatMap((a) => [
+      { address: a, abi: batchAbi, functionName: 'summary' },
+      { address: a, abi: batchAbi, functionName: 'slots' },
+      ...(adapter
+        ? [
+            { address: adapter, abi: tokenAdapterAbi, functionName: 'conversionOf', args: [a] },
+            { address: adapter, abi: tokenAdapterAbi, functionName: 'pocketOf', args: [a] },
+            { address: adapter, abi: tokenAdapterAbi, functionName: 'membersOf', args: [a] },
+          ]
+        : []),
+    ]),
+    1024,
+  );
+  const read = new Map<string, TokenIndexed | null>();
+  todo.forEach((address, i) => {
+    const r = res.slice(i * per, (i + 1) * per);
+    if (r.some((x) => x.status !== 'success')) return read.set(address.toLowerCase(), null);
+    const [s, sl, of, pocket, members] = r.map((x) => x.result) as [{ statement: Address }, readonly [readonly bigint[], readonly Address[]], (readonly unknown[] | undefined), (Address | undefined), (readonly Address[] | undefined)];
+    const b: TokenIndexed = { address, summary: s, ids: sl[0].map(Number), depositors: sl[1] };
+    // Converted: its Statement went to the adapter, which paid tokens for it.
+    if (adapter && of && s.statement.toLowerCase() === adapter.toLowerCase() && (of[1] as bigint) > 0n) b.payout = { of, pocket: pocket!, members: members ?? [], put: [], claimed: [], total: 0n };
+    read.set(address.toLowerCase(), b);
+  });
+  // Each member's rating (with the batch's total) and whether they've been paid: 136 bytes a member, ~60 a call.
+  const paying = [...read.values()].filter((b): b is TokenIndexed & { payout: Payout } => !!b?.payout);
+  const mres = await all(
+    paying.flatMap((b) =>
+      b.payout.members.flatMap((m) => [
+        { address: adapter!, abi: tokenAdapterAbi, functionName: 'ratingOf', args: [b.address, m] },
+        { address: adapter!, abi: tokenAdapterAbi, functionName: 'claimed', args: [b.address, m] },
+      ]),
+    ),
+    8_192,
+  );
+  let k = 0;
+  for (const b of paying) {
+    const p = b.payout;
+    let failed = false;
+    for (let j = 0; j < p.members.length; j++, k += 2) {
+      const [r, cl] = [mres[k], mres[k + 1]];
+      if (r.status !== 'success' || cl.status !== 'success') failed = true;
+      const [mine, total] = (r.result ?? [0n, 0n]) as readonly [bigint, bigint];
+      p.put.push(mine);
+      p.claimed.push(cl.result === true);
+      if (total > p.total) p.total = total;
+    }
+    if (failed) read.set(b.address.toLowerCase(), null);
+  }
+  const out = addrs.flatMap((address): TokenIndexed[] => {
+    const a = address.toLowerCase(), kept = batchKept.get(a);
+    if (kept?.done) return [kept.b];
+    const b = read.get(a);
+    if (!b) return kept ? [kept.b] : [];
+    const p = b.payout;
+    batchKept.set(a, { b, done: !!p && p.of[5] === true && p.of[6] === true && p.claimed.every(Boolean) });
+    return [b];
+  });
+  // A batch with no good read, this time or before, would be missing from the page: then none of it is served, and
+  // the page reads the chain itself.
+  if (out.length < addrs.length) throw new Error(`${addrs.length - out.length} token batches could not be read`);
+  return out;
 }
 
 /// A printer plan as stored (plus id, union and createdAt).

@@ -13,7 +13,7 @@ import { batchAbi, creditsAbi, factoryAbi, sweeperAbi, tokenAdapterAbi } from '.
 import { balanceSvg, PURE, type Palette } from '../balance-art';
 import { canBatch, config, pub, send, sendBatch, session } from '../chain';
 import { bin } from '../bins';
-import { getBatch, myCredits, STATES, type Summary } from '../data';
+import { getBatch, myCredits, shareOf, STATES, tokenIndex, type Payout, type Summary } from '../data';
 import { checkQuote, listedById, type Quote } from '../forsale';
 import { buyListed, listings, type ForSale } from './statements';
 import { registerDeposits } from '../ghosts';
@@ -74,7 +74,8 @@ function laneOf(s: Summary): Lane | null {
   return extra ? null : (LANES.find((l) => l.palettes === Number(f.palettes)) ?? null);
 }
 
-type Union = Awaited<ReturnType<typeof getBatch>>;
+/// A token batch, with its payout once it converted when the token index was read (else that's read from the chain).
+type Union = Awaited<ReturnType<typeof getBatch>> & { payout?: Payout };
 type Listing = { id: string; price: string; source: string; tenths: number };
 
 /// The listings that get the most rating for `wei`, best value first: a 0/1 knapsack over the cost in about 10,000 steps
@@ -189,10 +190,14 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       return token ? launchGate(token) : null;
     })
     .catch(() => null);
-  const allP = (pub.readContract({ address: factory, abi: factoryAbi, functionName: 'batches', args: [0n, 10_000n] }) as Promise<readonly Address[]>).then((addrs) => Promise.all(addrs.map((a) => getBatch(a))));
+  // Every batch with its payout: the Worker's token index (one read for everyone), else the chain, batch by batch.
+  const indexP = tokenIndex();
+  const allP: Promise<Union[]> = indexP.then(
+    (ix) => ix ?? (pub.readContract({ address: factory, abi: factoryAbi, functionName: 'batches', args: [0n, 10_000n] }) as Promise<readonly Address[]>).then((addrs) => Promise.all(addrs.map((a) => getBatch(a)))),
+  );
   for (const p of [ownedP, approvedP, tradeP, allP]) p.catch(() => {}); // awaited below; this only keeps an early failure quiet until then
   const [n, assembler, feeNow, scores, inks, sweepBps, proposed, proposedFrom] = await Promise.all([
-    pub.readContract({ address: factory, abi: factoryAbi, functionName: 'batchCount' }) as Promise<bigint>,
+    indexP.then((ix) => (ix ? BigInt(ix.length) : (pub.readContract({ address: factory, abi: factoryAbi, functionName: 'batchCount' }) as Promise<bigint>))),
     pub.readContract({ address: factory, abi: factoryAbi, functionName: 'assembler' }) as Promise<Address>,
     pub.readContract({ address: factory, abi: factoryAbi, functionName: 'protocolFeeBps' }) as Promise<bigint>,
     scoreTable(),
@@ -1519,13 +1524,26 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     if (thisRun !== pageRun || !app.isConnected) return stop();
     if (busy || document.hidden || document.activeElement?.id === 'amt') return;
     try {
+      // From the token index (one read for everyone, a few seconds old at most), else the chain.
+      const ix = await tokenIndex();
+      const inIx = (a: Address) => ix?.find((b) => same(b.s.address, a));
       const read = (u: Union, functionName: 'count' | 'state') => pub.readContract({ address: u.s.address, abi: batchAbi, functionName }) as Promise<bigint | number>;
-      const [m, now] = await Promise.all([
-        pub.readContract({ address: factory, abi: factoryAbi, functionName: 'batchCount' }) as Promise<bigint>,
-        Promise.all(waiting.map((u) => Promise.all([read(u, 'count'), read(u, 'state')]))),
-      ]);
+      const [m, now] = ix
+        ? [BigInt(ix.length), waiting.map((u) => ((b) => [b.count, STATES.indexOf(b.state)] as const)(inIx(u.s.address)?.s ?? u.s))]
+        : await Promise.all([
+            pub.readContract({ address: factory, abi: factoryAbi, functionName: 'batchCount' }) as Promise<bigint>,
+            Promise.all(waiting.map((u) => Promise.all([read(u, 'count'), read(u, 'state')]))),
+          ]);
       // Yours paid out, or trading opened since this draw (so "Lands in your wallet" turns into what it is now).
-      const owedNow = account && got.claim.length ? await Promise.all(got.claim.map((u) => pub.readContract({ address: config.tokenAdapter!, abi: tokenAdapterAbi, functionName: 'claimable', args: [u, account] }) as Promise<bigint>)) : [];
+      const owedNow =
+        account && got.claim.length
+          ? await Promise.all(
+              got.claim.map((u) => {
+                const p = inIx(u)?.payout;
+                return p ? shareOf(p, account).owed : (pub.readContract({ address: config.tokenAdapter!, abi: tokenAdapterAbi, functionName: 'claimable', args: [u, account] }) as Promise<bigint>);
+              }),
+            )
+          : [];
       const opened = !paying && !!gate?.opensAt && (await pub.getBlockNumber()) >= gate.opensAt;
       // What changes what you see (a new batch, one filling or converting, yours paid, trading open) draws the page
       // again. Someone else's deposit only moves a count: that's said in place, and the page draws again for it at
@@ -1617,11 +1635,13 @@ async function conversions(batches: Union[]) {
   const at = config.tokenAdapter;
   return Promise.all(
     batches.map(async (u) => {
-      const [c, pocket, members] = await Promise.all([
-        pub.readContract({ address: at, abi: tokenAdapterAbi, functionName: 'conversionOf', args: [u.s.address] }) as Promise<readonly bigint[]>,
-        (pub.readContract({ address: at, abi: tokenAdapterAbi, functionName: 'pocketOf', args: [u.s.address] }) as Promise<Address>).catch(() => null),
-        (pub.readContract({ address: at, abi: tokenAdapterAbi, functionName: 'membersOf', args: [u.s.address] }) as Promise<readonly Address[]>).catch(() => [] as readonly Address[]),
-      ]);
+      const [c, pocket, members] = u.payout
+        ? [u.payout.of as readonly unknown[] as readonly bigint[], u.payout.pocket, u.payout.members]
+        : await Promise.all([
+            pub.readContract({ address: at, abi: tokenAdapterAbi, functionName: 'conversionOf', args: [u.s.address] }) as Promise<readonly bigint[]>,
+            (pub.readContract({ address: at, abi: tokenAdapterAbi, functionName: 'pocketOf', args: [u.s.address] }) as Promise<Address>).catch(() => null),
+            (pub.readContract({ address: at, abi: tokenAdapterAbi, functionName: 'membersOf', args: [u.s.address] }) as Promise<readonly Address[]>).catch(() => [] as readonly Address[]),
+          ]);
       // What its members share (what it converted into, less our fee and what's set aside, as received() reckons it).
       return { sid: c[0], amount: c[1], net: c[1] - c[3] - c[4], members, lane: laneOf(u.s)!, pocket, ids: u.ids, art: (pocket && artKept.get(pocket.toLowerCase())) || null };
     }),
@@ -1635,6 +1655,10 @@ async function received(batches: Union[], you: Address) {
   const at = config.tokenAdapter;
   const rows = await Promise.all(
     batches.map(async (u) => {
+      if (u.payout) {
+        const { mine, owed } = shareOf(u.payout, you), [, amount, , pFee, cFee] = u.payout.of;
+        return { u: u.s.address, amount: u.payout.total > 0n ? ((amount - pFee - cFee) * mine) / u.payout.total : 0n, owed };
+      }
       const [[mine, total], c, owed] = await Promise.all([
         pub.readContract({ address: at, abi: tokenAdapterAbi, functionName: 'ratingOf', args: [u.s.address, you] }) as Promise<readonly [bigint, bigint]>,
         pub.readContract({ address: at, abi: tokenAdapterAbi, functionName: 'conversionOf', args: [u.s.address] }) as Promise<readonly bigint[]>,
