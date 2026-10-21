@@ -879,7 +879,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const n = hasBatch ? b!.out.length : 0;
     const tenthsIn = n ? b!.out.reduce((a, x) => a + t(x.id), 0) : 0;
     // Through a batch, one line under the number: what the ETH does, then that our fees are in (a tap says what they come to).
-    setText('route', route === 'batch' && n ? `Buys ${plural(n)} to convert. ${feeBps ? buyFeeLine(tenthsIn, b!.spent) : feeLine(tenthsIn)}.` : rate);
+    // Split: the two parts that add up to the number, each with when it arrives, on that one line.
+    const fee = feeBps ? buyFeeLine(tenthsIn, b?.spent ?? 0n) : feeLine(tenthsIn);
+    setText('route', route === 'batch' && n ? (split ? `${whole(b!.tokens)} when the batch fills + ${whole(leftN)} now on Uniswap. ${fee}.` : `Buys ${plural(n)} to convert. ${fee}.`) : rate);
     // Fill it: the ETH that buys every open spot, so the batch converts as soon as that lands.
     const open = 80 - (curOf(lane())?.s.count ?? 0);
     // Its budget is the open spots' worth of the cheapest Credits per point, fee in, so it fills at the best value
@@ -897,7 +899,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       chip.title = amt === '0.5' ? '' : `${amt} ETH buys the ${open} open spots, so it converts right away`;
       chip.setAttribute('aria-pressed', String(typed === amt));
     }
-    setText('route2', split ? `${whole(leftN)} via Uniswap · instant` : '');
+    setText('route2', ''); // a split's Uniswap part is said under the number now
     const label: Record<Route, [string, string]> = {
       pool: ['Uniswap', 'Instant'],
       batch: ['Credits', `Lands when the ${lane().name} batch fills · ${80 - (curOf(lane())?.s.count ?? 0)} to go`],
@@ -924,7 +926,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     setText(
       'fees',
       way === 'batch'
-        ? `${split ? `${whole(b!.tokens)} ${lands().toLowerCase()}` : ''}`
+        ? ''
         : way === 'pool' && route === 'pool'
           ? `Instant via Uniswap · <button type="button" class="link" id="fee-rate">${feeFlipped && poolFee ? `${whole(poolFee)} ${TOKEN} to Credit Union` : 'Fees included'}</button>`
           : wei && ways.length > 1
