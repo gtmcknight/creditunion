@@ -9817,7 +9817,7 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 .tk-eth .tk-bal { grid-column: 2; justify-self: end; font-size: 13px; color: var(--muted); white-space: nowrap; }
 .tk-eth .tk-bal * { font-size: inherit; }
 /* The token on the right of each panel: icon and name, same place in both. */
-.tk-eth .tk-unit, .tk-get.tk-panel .tk-unit { grid-column: 2; grid-row: 1; justify-self: end; display: inline-flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 500; }
+.tk-eth .tk-unit, .tk-get.tk-panel .tk-unit { grid-column: 2; grid-row: 1; justify-self: end; align-self: center; display: inline-flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 500; } /* centered on the number in both panels */
 .tk-unit .sw-ink { flex: none; }
 /* Both panels the same height; both titles the same distance above them. */
 .tk-eth, .tk-get.tk-panel { min-height: 108px; box-sizing: border-box; align-content: center; }
@@ -9851,7 +9851,7 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 .tk-q[aria-pressed="true"] { background: var(--fg); color: var(--bg); box-shadow: none; }
 /* One row at any width: the amount's drawing shrinks before the color chip wraps. */
 .tk-get { display: flex; align-items: center; gap: 10px; min-height: 44px; }
-.tk-get #get { display: block; flex: 0 1 auto; min-width: 0; background: #fff; padding: 6px 8px; box-shadow: 0 0 0 1px var(--img-outline); } /* Jack's Balance is drawn on white paper, in any theme */
+.tk-get #get { display: block; flex: 0 1 auto; min-width: 0; } /* the number on the panel itself, its black the text color (ON_PANEL) */
 .tk-get #get .balance-num { max-width: 100%; height: auto; }
 /* A name with its You tag, centered on one line. */
 .bn-who { display: inline-flex; align-items: center; gap: 8px; }
@@ -9862,7 +9862,7 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 /* The number you’d get, alone on its row; the line under it says how. */
 .tk-get.tk-panel .tk-getrow { grid-column: 1; grid-row: 1; display: flex; align-items: center; gap: 10px; min-width: 0; }
 .tk-get .tk-out { font-size: 28px; line-height: 1.15; letter-spacing: -0.02em; }
-.tk-get .balance-num { display: block; color: #0a0a0a; }
+.tk-get .balance-num { display: block; color: var(--fg); }
 .tk-modes { margin: 0 0 16px; }
 /* The card's modes as one control across its width, lined up with the panels and the button under it. */
 .tk-form > .tk-modes { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; padding: 2px; border: 1px solid var(--line-strong); border-radius: var(--r); }

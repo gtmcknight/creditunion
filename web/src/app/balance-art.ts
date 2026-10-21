@@ -56,8 +56,9 @@ function shuffle<T>(xs: T[], seed: number): T[] {
   return xs;
 }
 
-/// The number as an SVG: one square per lit pixel, `unit` px each.
-export function balanceSvg(text: string, p: Palette, unit = 4, label = text): string {
+/// The number as an SVG: one square per lit pixel, `unit` px each. `inks`: Jack's, unless a page draws one differently
+/// (black as the text color, say, off his white paper).
+export function balanceSvg(text: string, p: Palette, unit = 4, label = text, inks: readonly string[] = INK): string {
   const px: [number, number][] = [];
   [...text].forEach((ch, i) => (G[ch] ?? []).forEach((row, y) => [...row].forEach((v, x) => v === '#' && px.push([i * 8 + x, y]))));
   const w = Math.max(1, text.length * 8 - 1);
@@ -67,7 +68,7 @@ export function balanceSvg(text: string, p: Palette, unit = 4, label = text): st
   if (!total) fills = px.map(() => 'currentColor');
   else {
     const c = counts(px.length, p.map((v) => v / total) as Palette);
-    fills = shuffle(c.flatMap((n, k) => Array<string>(n).fill(INK[k])), [...text].reduce((a, ch) => a * 31 + ch.charCodeAt(0), 7) ^ Math.round(p[0] * 97 + p[1] * 89 + p[2] * 83 + p[3] * 79));
+    fills = shuffle(c.flatMap((n, k) => Array<string>(n).fill(inks[k])), [...text].reduce((a, ch) => a * 31 + ch.charCodeAt(0), 7) ^ Math.round(p[0] * 97 + p[1] * 89 + p[2] * 83 + p[3] * 79));
   }
   const rects = px.map(([x, y], i) => `<rect x="${x}" y="${y}" width="1" height="1" fill="${fills[i]}"/>`).join('');
   return `<svg class="balance-num" viewBox="0 0 ${w} ${h}" width="${w * unit}" height="${h * unit}" shape-rendering="crispEdges" role="img" aria-label="${label}">${rects}</svg>`;

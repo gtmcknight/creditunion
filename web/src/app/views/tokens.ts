@@ -140,6 +140,8 @@ let instant = false;
 let chosen: Route | null = null;
 /// The colors of BALANCE with no history yet: an even mix.
 const EVEN: Palette = [0.25, 0.25, 0.25, 0.25];
+/// Jack's inks with black as the text color: a number drawn on the page's panel rather than on his white paper.
+const ON_PANEL = [INK[0], INK[1], INK[2], 'currentColor'] as const;
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /// The wallet and how many converted batches still owed it at the last draw: a draw that finds none owed says it's paid.
 let owedLast: { who: string; n: number } | null = null;
@@ -590,7 +592,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const a = document.getElementById('tk-batch');
     if (a) a.hidden = !s;
   };
-  /// You get, in the colors it comes in.
+  /// You get, in the colors it comes in, on the panel itself: its black is the text color, so it reads in either theme.
   const setGet = (n: number, pal: Palette) => {
     const get = document.getElementById('get');
     const text = whole(n);
@@ -598,7 +600,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     if (get && get.dataset.sig !== sig) {
       get.dataset.sig = sig;
       get.dataset.n = text;
-      get.innerHTML = balanceSvg(text, pal);
+      get.innerHTML = balanceSvg(text, pal, 4, text, ON_PANEL);
     }
   };
   const setText = (id: string, html: string) => {
@@ -650,7 +652,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   const getHtml = (selling: boolean) => `
           <div class="tk-gethead"><h2 class="form-title" id="tk-gettitle">You get</h2>${selling || laneKey === 'any' ? '' : colorChip()}</div>
           <section class="rule">
-            ${selling ? `<div class="tk-get tk-panel"><span class="num tk-out" id="get-eth">0</span>${tokenChip(true)}<span class="tk-usd" id="route"></span></div>` : `<div class="tk-get tk-panel"><span class="tk-getrow"><span id="get">${balanceSvg('0', EVEN)}</span></span>${tokenChip(false)}<span class="tk-usd" id="route"></span></div>`}
+            ${selling ? `<div class="tk-get tk-panel"><span class="num tk-out" id="get-eth">0</span>${tokenChip(true)}<span class="tk-usd" id="route"></span></div>` : `<div class="tk-get tk-panel"><span class="tk-getrow"><span id="get">${balanceSvg('0', EVEN, 4, '0', ON_PANEL)}</span></span>${tokenChip(false)}<span class="tk-usd" id="route"></span></div>`}
             <div class="tk-lines term-desc"><p id="route2"></p><p id="alt"></p><p id="fees"></p></div>
           </section>`;
   const goHtml = (label: string) => `<button type="button" class="btn primary block" id="go"${account ? '' : ' data-connect'} disabled>${label}</button>`;
