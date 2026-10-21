@@ -6051,6 +6051,10 @@ dialog.eligible::backdrop {
 #picker .pick {
   background: #fff;
 }
+/* With a caption under each (the rating), only the art sits on white; the caption is on the page. */
+#picker.captioned .pick {
+  background: none;
+}
 /* Party picker: a Credit the sheet has no slot left for (after your picks), and the fold of ones that don't fit. */
 #picker .pick.off,
 #picker .pick.full {

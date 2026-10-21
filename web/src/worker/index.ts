@@ -2337,9 +2337,30 @@ async function keepMarket(env: Env, ctx: ExecutionContext) {
     return;
   }
   await b.kick(); // the book's own 10-second loop reads the feed and the chain (market.ts)
+  if (new Date().getUTCMinutes() % 2 === 0 && hasSweeper(env)) ctx.waitUntil(checkTop(env, url).catch((e) => console.warn('[market] top check failed', safeError(e))));
   if (new Date().getUTCMinutes() % 5 === 0) await b.setExtras((await extras(env, url, ctx)).extra.map((e) => [e.id, e.price, e.source, e.listingId ?? '', '', '', 0] as Row));
 }
 
+
+/// The listings people see first (the 24 with the most rating per ETH and the 12 cheapest), checked with OpenSea every
+/// other minute: one cancelled (which the event feed doesn't carry) leaves the book before anyone taps it, not when a
+/// buy fails on it. The fill data read is cached 20 s, so a buy of these right after starts warm.
+async function checkTop(env: Env, url: URL) {
+  const { items } = JSON.parse(await book(env).snapshot()) as { items: string[][] };
+  const sc = (await loadTable(env.ASSETS, url.origin)).score;
+  const os = items.filter((r) => r[2] === 'opensea' && r[3] && r[4]);
+  const per = (r: string[]) => (sc[Number(r[0]) - 1] ?? 0) / Number(BigInt(r[1]) / 1_000_000_000n || 1n);
+  const value = [...os].sort((a, b) => per(b) - per(a)).slice(0, 24);
+  const cheap = [...os].sort((a, b) => (BigInt(a[1]) < BigInt(b[1]) ? -1 : BigInt(a[1]) > BigInt(b[1]) ? 1 : 0)).slice(0, 12);
+  const pick = [...new Map([...value, ...cheap].map((r) => [r[0], r])).values()];
+  const dead: { id: string; hash: string }[] = [];
+  const listings = pick.map((r) => ({ id: r[0], price: r[1], source: 'opensea', hash: r[3], protocol: r[4] }) as Listing);
+  await quote({ key: env.OPENSEA_API_KEY!, sweeper: env.SWEEPER, listings, n: listings.length, origin: url.origin, onDead: (l) => l.hash && dead.push({ id: l.id, hash: l.hash }) }).catch(() => {});
+  if (dead.length) {
+    await book(env).dropOrders(dead);
+    console.log('[market] dropped', dead.length, 'dead at the top');
+  }
+}
 
 /// What 1 BALANCE costs now, in ETH, by each way in: the cheapest Statement for sale per rating point (OpenSea, no
 /// fee), and the 80 listed Credits with the most rating per ETH (what the Sweeper takes, fee in). null where there
