@@ -43,8 +43,11 @@ const TOKEN = '$BALANCE';
 const previewSoon = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).has('soon');
 /// ?joined on a local copy: see the batch box as it reads right after you join, without a transaction.
 const previewJoined = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).has('joined'); // always: a fork's stand-in token shows the real name
-/// A batch lands later than a swap, so it has to get more than this many times what Uniswap gets to be the way in.
+/// A Statement redeems at once but takes two transactions, so it has to get more than this many times what Uniswap gets.
 const BATCH_EDGE = 1.01;
+/// A batch pays out only when it fills, a few minutes when it's the better deal (that's when it fills fast), and a
+/// launch-day price moves in that time, so it has to get 3% more.
+const WAIT_EDGE = 1.03;
 /// With nothing typed, the page shows the way this much would go.
 const REF = parseEther('0.1');
 /// What a batch leaves of the ETH goes to Uniswap when it's at least this much (else it stays in the wallet).
@@ -839,14 +842,14 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const poolN = tok(q), leftN = tok(qLeft);
     const hasBatch = !!b && b.out.length > 0;
     const withBatch = hasBatch ? b!.tokens + leftN : 0;
-    const batchWins = hasBatch && (!poolN || withBatch > poolN * BATCH_EDGE);
+    const batchWins = hasBatch && (!poolN || withBatch > poolN * WAIT_EDGE);
     st = lane().ink < 0 ? stmtFor(wei) : null; // a pure colour comes only through its batch
     const stN = st ? st.rating! : 0;
-    // The ways, each with what it gets. Waiting (a batch to fill, a Statement to redeem) has to beat instant by 1%.
+    // The ways, each with what it gets. A batch has to beat instant by 3%, a Statement by 1%.
     const ways = ([['pool', poolN], ['batch', withBatch], ['statement', stN]] as [Route, number][]).filter(([, n]) => n > 0);
-    // Compared per ETH spent (a Statement may use only part of the amount); instant gets the 1% edge.
+    // Compared per ETH spent (a Statement may use only part of the amount); each way that isn't instant pays its edge.
     const spentOn = (r: Route) => Number(formatUnits(r === 'statement' ? BigInt(st!.price) : r === 'batch' ? b!.spent + left : wei, 18)) || 1;
-    const score = ([r, n]: [Route, number]) => (n / spentOn(r)) * (r === 'pool' ? BATCH_EDGE : 1);
+    const score = ([r, n]: [Route, number]) => n / spentOn(r) / (r === 'batch' ? WAIT_EDGE : r === 'statement' ? BATCH_EDGE : 1);
     const best = ways.length ? ways.reduce((a, x) => (score(x) > score(a) ? x : a))[0] : null;
     route = !wei ? null : chosen && ways.some(([r]) => r === chosen) ? chosen : best;
     void batchWins;
@@ -1540,7 +1543,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
         market = 'ready';
         if (m && trade?.open) {
           const [q, b] = [await swapQuote(m, true, REF), viaBatch(REF, 'any', capOf(LANES[0]))];
-          restMixed = b.out.length && (!q || b.tokens > Number(formatUnits(q.net, m.decimals)) * BATCH_EDGE) ? 'batch' : q ? 'pool' : 'batch';
+          restMixed = b.out.length && (!q || b.tokens > Number(formatUnits(q.net, m.decimals)) * WAIT_EDGE) ? 'batch' : q ? 'pool' : 'batch';
         }
       } catch {
         market = 'none';
