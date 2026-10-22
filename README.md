@@ -55,28 +55,17 @@ Buys and sells through Uniswap on the site use BALANCE's pool and carry a 1% fee
 
 ## How the pieces fit
 
-```
-wallet ──signs──▶ BatchFactory ──clones──▶ Credit Union (a Batch clone)
-  │                    │                     holds the 80 Credits and every bid
-  │                    └─ deposits Credits   assemble() ──▶ StatementAdapter ──▶ Statements (Jack Butcher)
-  │                                                          reads UnionFormats   burns 80, mints 1
-  │                                          auction, settle, split, claim
-  │
-  ├──▶ Sweeper: buys OpenSea listings straight into a Credit Union
-  │
-  ├──signs──▶ token BatchFactory ──clones──▶ $BALANCE batch ──assemble()──▶ TokenAdapter ──▶ TokenPocket
-  │                                                                          Statement in, $BALANCE out, split by rating
-  │
-  └──reads──▶ creditunion.fun ──▶ Worker: /rpc proxy, cached chain reads, listings, art
-                                    └─ keeper, every 5 min: settles ended auctions, retries failed
-                                       payouts, records full pictures' spots. Never burns.
-                                  token keeper (scripts/convert-tokens.mjs): converts full batches, pays members
+```mermaid
+flowchart LR
+  W["Your wallet"] --> CU["Credit Union"] -- "80 Credits burn" --> S1["Statement"] -- "auction" --> E["ETH to members"]
+  W --> BB["$BALANCE batch"] -- "80 Credits burn" --> S2["Statement"] -- "convert" --> T["$BALANCE to members"]
 ```
 
-The contracts hold everything of value and decide every rule. The site and Worker read, cache and help build
-transactions; wallets sign in the browser. The keeper's key holds no role in any contract, so it can only do what
-anyone could. If both go down, the [mirror](mirror/README.md) and Etherscan still bid,
-settle and claim.
+The contracts hold everything of value and decide every rule. Wallets sign every deposit, bid and claim in the
+browser. The Worker behind the site caches chain reads, listings and art. Two keepers settle auctions, retry failed
+payouts and convert full $BALANCE batches; their keys hold no role in any contract, so they can only do what anyone
+could, and neither ever burns. If the site goes down, the [mirror](mirror/README.md) and Etherscan still bid, settle
+and claim.
 
 ## For developers
 
@@ -273,24 +262,31 @@ Ratings follow Jack's published formula (methodology v3.4.0), reproduced in `web
 
 Ethereum mainnet. Factory, Sweeper and Ratings deployed 2026-09-27; the adapter and format picker 2026-10-01; LiveRatings 2026-10-02; the token union factory, its format picker and Sweeper 2026-10-14; `TokenAdapter` with the $BALANCE launch on 2026-10-20. Details in [contracts/DEPLOY.md](contracts/DEPLOY.md).
 
-| | |
+### Credit Union contracts
+
+| Contract | Address |
 |---|---|
 | BatchFactory | [`0xcb06f9076e5fbF3cB052086b1EE7C0F3836aa051`](https://etherscan.io/address/0xcb06f9076e5fbF3cB052086b1EE7C0F3836aa051) |
 | Batch implementation (each Credit Union is a clone) | [`0xd578eC605E60eDD008b415c23B15Eb3483CC6c50`](https://etherscan.io/address/0xd578eC605E60eDD008b415c23B15Eb3483CC6c50) |
 | StatementAdapter (burn) | [`0x6CAEb9953bA8625226345CF39F93541CE53AbFd2`](https://etherscan.io/address/0x6CAEb9953bA8625226345CF39F93541CE53AbFd2) |
 | UnionFormats | [`0x16deCDa20c9164CcfDB4BE189557aDc4614aAedC`](https://etherscan.io/address/0x16deCDa20c9164CcfDB4BE189557aDc4614aAedC) |
 | Sweeper | [`0x7b93309A12e05944Ab821470615983A4A2AC9799`](https://etherscan.io/address/0x7b93309A12e05944Ab821470615983A4A2AC9799) |
-| LiveRatings (Credit Unions opened since Oct 2) | [`0xe27fC60dcE0a9c33743581bfCD72F619DB3612a6`](https://etherscan.io/address/0xe27fC60dcE0a9c33743581bfCD72F619DB3612a6) |
-| Ratings v3.4.0 (earlier Credit Unions) | [`0x61Ca63cDE107CE7e32785c0d89904fE58f9d371d`](https://etherscan.io/address/0x61Ca63cDE107CE7e32785c0d89904fE58f9d371d) |
-| Token union BatchFactory ($BALANCE batches) | [`0x1Ea4b73dE4e946bc58A9A477a7291abe7D7417C1`](https://etherscan.io/address/0x1Ea4b73dE4e946bc58A9A477a7291abe7D7417C1) |
-| Token union UnionFormats | [`0xF3bf99F0a28c4Fc0cf77eB4480F5d0f87d782a25`](https://etherscan.io/address/0xF3bf99F0a28c4Fc0cf77eB4480F5d0f87d782a25) |
-| Token union Sweeper | [`0xA4a4dBFddD6C8cc771F4a013Ccd30494Fc82bC5e`](https://etherscan.io/address/0xA4a4dBFddD6C8cc771F4a013Ccd30494Fc82bC5e) |
+| LiveRatings (unions opened since Oct 2) | [`0xe27fC60dcE0a9c33743581bfCD72F619DB3612a6`](https://etherscan.io/address/0xe27fC60dcE0a9c33743581bfCD72F619DB3612a6) |
+| Ratings v3.4.0 (earlier unions) | [`0x61Ca63cDE107CE7e32785c0d89904fE58f9d371d`](https://etherscan.io/address/0x61Ca63cDE107CE7e32785c0d89904fE58f9d371d) |
+| Token BatchFactory ($BALANCE batches) | [`0x1Ea4b73dE4e946bc58A9A477a7291abe7D7417C1`](https://etherscan.io/address/0x1Ea4b73dE4e946bc58A9A477a7291abe7D7417C1) |
+| Token UnionFormats | [`0xF3bf99F0a28c4Fc0cf77eB4480F5d0f87d782a25`](https://etherscan.io/address/0xF3bf99F0a28c4Fc0cf77eB4480F5d0f87d782a25) |
+| Token Sweeper | [`0xA4a4dBFddD6C8cc771F4a013Ccd30494Fc82bC5e`](https://etherscan.io/address/0xA4a4dBFddD6C8cc771F4a013Ccd30494Fc82bC5e) |
 | TokenAdapter ($BALANCE conversion) | [`0xe6492DCCB96D1468302843AEc42Bb39f0FD7BD1D`](https://etherscan.io/address/0xe6492DCCB96D1468302843AEc42Bb39f0FD7BD1D) |
-| Token keeper (gas only, no role) | [`0x42d553DE53063610073b24C68566Db013740DC54`](https://etherscan.io/address/0x42d553DE53063610073b24C68566Db013740DC54) |
-| $BALANCE (Jack Butcher) | [`0x3620540c994433D7B4a628C46d2ED5F92572eA07`](https://etherscan.io/address/0x3620540c994433D7B4a628C46d2ED5F92572eA07) |
 | Fee recipient and setter (Safe, 2 of 3) | [`0xFE4761e66C2A37492871d30d0e83bcBC454A7C10`](https://etherscan.io/address/0xFE4761e66C2A37492871d30d0e83bcBC454A7C10) |
-| Credits (Jack Butcher) | [`0x97630aA70AB14ed9883B41dAfccBc11349723043`](https://etherscan.io/address/0x97630aA70AB14ed9883B41dAfccBc11349723043) |
-| Statements (Jack Butcher) | [`0x75Edd94b7e49b3bD5C8047b91F165A5e265a069b`](https://etherscan.io/address/0x75Edd94b7e49b3bD5C8047b91F165A5e265a069b) |
+| Token keeper (wallet, gas only, no role) | [`0x42d553DE53063610073b24C68566Db013740DC54`](https://etherscan.io/address/0x42d553DE53063610073b24C68566Db013740DC54) |
+
+### Jack Butcher's official contracts
+
+| Contract | Address |
+|---|---|
+| Credits | [`0x97630aA70AB14ed9883B41dAfccBc11349723043`](https://etherscan.io/address/0x97630aA70AB14ed9883B41dAfccBc11349723043) |
+| Statements | [`0x75Edd94b7e49b3bD5C8047b91F165A5e265a069b`](https://etherscan.io/address/0x75Edd94b7e49b3bD5C8047b91F165A5e265a069b) |
+| $BALANCE | [`0x3620540c994433D7B4a628C46d2ED5F92572eA07`](https://etherscan.io/address/0x3620540c994433D7B4a628C46d2ED5F92572eA07) |
 
 What the Safe can and can't do: [contracts/SAFE.md](contracts/SAFE.md).
 
