@@ -4,20 +4,20 @@
 
 # Credit Union
 
-Credit Union lets holders of Jack Butcher's [Credits](https://jack.art/credits) pool 80 Credits into a Credit Union. At 80 the Credit Union burns them into one Statement, auctions it onchain, and splits the sale among everyone in. Contracts hold the Credits and the ETH: no owner, pause or upgrade. The fee recipient (a multisig) sets fees and the score table for Credit Unions opened afterwards; it can't touch an open one. Live on Ethereum mainnet since September 27, 2026. Burning opened October 1, when Union Jack became Statement #1.
+Credit Union turns Jack Butcher's [Credits](https://jack.art/credits) into $BALANCE and Statements. Put Credits into a batch of 80 (or pay ETH and the site buys them in): at 80 it burns into a Statement, the Statement converts into $BALANCE, and everyone in gets their share by the rating they put in. Or pool 80 in a Credit Union that auctions its Statement and splits the sale. Contracts hold the Credits, ETH and $BALANCE: no owner, pause or upgrade. Live on Ethereum mainnet since September 27, 2026; Union Jack became Statement #1 on October 1, and $BALANCE launched October 20.
 
-**To use it:** open [creditunion.fun](https://creditunion.fun), pick a Credit Union (or start one), and put in Credits you own or buy them through the site. At 80 it burns, auctions, and pays you. The full guide is at [creditunion.fun/docs](https://creditunion.fun/docs). If the site is ever down, [creditunionfun.eth.limo](https://creditunionfun.eth.limo) bids, settles and claims through your own wallet.
+**To use it:** open [creditunion.fun](https://creditunion.fun) and press Get BALANCE, or pick a Credit Union. The full guide is at [creditunion.fun/docs](https://creditunion.fun/docs). If the site is ever down, [creditunionfun.eth.limo](https://creditunionfun.eth.limo) bids, settles and claims through your own wallet.
 
 <table>
-<tr><td width="33%" valign="top"><img src="docs/lifecycle.svg" alt="Start a Credit Union"><br><b>Start a Credit Union</b><br>Pool your Credits with other holders. At 80 they burn into a Statement, and everyone in shares the sale.</td><td width="33%" valign="top"><img src="docs/eligibility.svg" alt="Deposit"><br><b>Deposit</b><br>Pick exactly which Credits get in: any Credit, or only ones with the traits you choose.</td><td width="33%" valign="top"><img src="docs/order.svg" alt="Layout"><br><b>Layout</b><br>Arrange the 80 however you like: in deposit order, by Credit number, or painted into a design.</td></tr>
-<tr><td width="33%" valign="top"><img src="docs/buying.svg" alt="Buy in"><br><b>Buy in</b><br>Buy the cheapest Credits that fit from OpenSea, straight into any Credit Union.</td><td width="33%" valign="top"><img src="docs/exit.svg" alt="Withdrawals"><br><b>Withdrawals</b><br>Withdraw anytime until a full Credit Union locks. If nobody burns it within the hour, it unlocks again.</td><td width="33%" valign="top"><img src="docs/auction.svg" alt="Dividends"><br><b>Dividends</b><br>The Statement goes to auction, and the proceeds are split across its members.</td></tr>
+<tr><td width="33%" valign="top"><img src="docs/balance.svg" alt="Get $BALANCE"><br><b>Get $BALANCE</b><br>A full batch of 80 burns into a Statement, and the Statement becomes $BALANCE, split by the rating each of you put in.</td><td width="33%" valign="top"><img src="docs/colors.svg" alt="Pick a color"><br><b>Pick a color</b><br>Mixed batches take any Credit. C, M, Y and K take one ink only, and pay $BALANCE in that color.</td><td width="33%" valign="top"><img src="docs/union.svg" alt="Make a Statement together"><br><b>Make a Statement together</b><br>Pool 80 in a Credit Union, auction the Statement, and split the sale.</td></tr>
+<tr><td width="33%" valign="top"><img src="docs/shop.svg" alt="Shop Credits"><br><b>Shop Credits</b><br>Every Credit for sale on OpenSea, FWA and CreditStrategy in one list, bought straight into a batch or union.</td><td width="33%" valign="top"><img src="docs/bid.svg" alt="Bid on Statements"><br><b>Bid on Statements</b><br>Bid on live auctions, buy listed Statements, or bid on several at once with Multibid.</td><td width="33%" valign="top"><img src="docs/design.svg" alt="Design it"><br><b>Design it</b><br>Pick who can join and paint the sheet by trait, draw a picture with friends on the Printer, or burn 80 of your own.</td></tr>
 </table>
 
 ## What's on the site
 
 | Page | What you do there |
 |---|---|
-| [Home](https://creditunion.fun) | Every open and full Credit Union; join one or start your own. |
+| [Home](https://creditunion.fun) | What the site does, over a live wall of Credits. |
 | [Credits](https://creditunion.fun/credits) | Shop every Credit for sale (OpenSea, FWA, CreditStrategy) in one list, cheapest first, with each one's rating and the $BALANCE it makes. Browse the edition by Colors, Eights, Print, Weight, payment time and rating. Each Credit has its own page. |
 | [Statements](https://creditunion.fun/statements) | Bid on live auctions, buy Statements listed on OpenSea, or [Multibid](https://creditunion.fun/statements/multibid): bid on several auctions in one step. Each Statement has its own page with its history. |
 | [Balance](https://creditunion.fun/balance) | Buy $BALANCE with ETH by whichever way gets more: Uniswap at once, or a batch of 80 Credits that converts when it fills. Sell it back to the pool. Turn your own Credits into $BALANCE. Each Balance NFT has its own page. |
@@ -54,12 +54,6 @@ $BALANCE is the token Jack's Statements convert into, launched October 20, 2026.
 Buys and sells through Uniswap on the site use BALANCE's pool and carry a 1% fee to the Safe.
 
 ## How the pieces fit
-
-```mermaid
-flowchart LR
-  W["Your wallet"] --> CU["Credit Union"] -- "80 Credits burn" --> S1["Statement"] -- "auction" --> E["ETH to members"]
-  W --> BB["$BALANCE batch"] -- "80 Credits burn" --> S2["Statement"] -- "convert" --> T["$BALANCE to members"]
-```
 
 The contracts hold everything of value and decide every rule. Wallets sign every deposit, bid and claim in the
 browser. The Worker behind the site caches chain reads, listings and art. Two keepers settle auctions, retry failed
