@@ -345,7 +345,7 @@ onSession(() => {
   watchOutbid();
 });
 window.addEventListener('popstate', () => route());
-// Same-site links navigate in place; new tabs, modified clicks and the Worker's own paths load normally.
+// Same-site links navigate in place; new tabs, modified clicks, downloads and the Worker's own paths load normally.
 document.addEventListener('click', (e) => {
   // A link inside a link (a card's creator): its own place, not the card's.
   const inner = (e.target as HTMLElement).closest?.<HTMLElement>('[data-href]');
@@ -356,7 +356,7 @@ document.addEventListener('click', (e) => {
     return;
   }
   const a = (e.target as HTMLElement).closest?.('a');
-  if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || a.target) return;
+  if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || a.target || a.hasAttribute('download')) return;
   const url = new URL(a.href, location.href);
   if (url.origin !== location.origin || /^\/(rpc|ratings|edition|art|opensea|ens|config\.json)/.test(url.pathname)) return;
   e.preventDefault();
