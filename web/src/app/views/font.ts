@@ -98,7 +98,7 @@ export function fontPage(app: HTMLElement) {
         </div>
       </div>
       <div class="ft-bar ft-bar-font">
-        <a class="btn primary" href="/type/Receipt.zip" download>Download font</a>
+        <a class="btn primary" href="/receipt-font.zip" download>Download font</a>
         <span class="muted small">Free. OTF, TTF, WOFF and WOFF2.</span>
       </div>
     </div>
