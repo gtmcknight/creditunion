@@ -2743,6 +2743,11 @@ export const sweeperAbi = [
         "name": "strategy_",
         "type": "address",
         "internalType": "contract ICreditStrategy"
+      },
+      {
+        "name": "cc_",
+        "type": "address",
+        "internalType": "contract ICCCore"
       }
     ],
     "stateMutability": "nonpayable"
@@ -2969,6 +2974,242 @@ export const sweeperAbi = [
       }
     ],
     "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "buyEvery",
+    "inputs": [
+      {
+        "name": "orders",
+        "type": "tuple[]",
+        "internalType": "struct AdvancedOrder[]",
+        "components": [
+          {
+            "name": "parameters",
+            "type": "tuple",
+            "internalType": "struct OrderParameters",
+            "components": [
+              {
+                "name": "offerer",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "zone",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "offer",
+                "type": "tuple[]",
+                "internalType": "struct OfferItem[]",
+                "components": [
+                  {
+                    "name": "itemType",
+                    "type": "uint8",
+                    "internalType": "enum ItemType"
+                  },
+                  {
+                    "name": "token",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "identifierOrCriteria",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "startAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "endAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  }
+                ]
+              },
+              {
+                "name": "consideration",
+                "type": "tuple[]",
+                "internalType": "struct ConsiderationItem[]",
+                "components": [
+                  {
+                    "name": "itemType",
+                    "type": "uint8",
+                    "internalType": "enum ItemType"
+                  },
+                  {
+                    "name": "token",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "identifierOrCriteria",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "startAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "endAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "recipient",
+                    "type": "address",
+                    "internalType": "address payable"
+                  }
+                ]
+              },
+              {
+                "name": "orderType",
+                "type": "uint8",
+                "internalType": "enum OrderType"
+              },
+              {
+                "name": "startTime",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "endTime",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "zoneHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "salt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "conduitKey",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "totalOriginalConsiderationItems",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "numerator",
+            "type": "uint120",
+            "internalType": "uint120"
+          },
+          {
+            "name": "denominator",
+            "type": "uint120",
+            "internalType": "uint120"
+          },
+          {
+            "name": "signature",
+            "type": "bytes",
+            "internalType": "bytes"
+          },
+          {
+            "name": "extraData",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      },
+      {
+        "name": "fwaListings",
+        "type": "tuple[]",
+        "internalType": "struct Sweeper.FWAListing[]",
+        "components": [
+          {
+            "name": "listingId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "price",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "strategyListings",
+        "type": "tuple[]",
+        "internalType": "struct Sweeper.StrategyListing[]",
+        "components": [
+          {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "price",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "ccListings",
+        "type": "tuple[]",
+        "internalType": "struct Sweeper.CCListing[]",
+        "components": [
+          {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "minBought",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxFeeBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "ids",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "cc",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract ICCCore"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -3482,6 +3723,234 @@ export const sweeperAbi = [
     "stateMutability": "payable"
   },
   {
+    "type": "function",
+    "name": "sweepEvery",
+    "inputs": [
+      {
+        "name": "batch",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "orders",
+        "type": "tuple[]",
+        "internalType": "struct AdvancedOrder[]",
+        "components": [
+          {
+            "name": "parameters",
+            "type": "tuple",
+            "internalType": "struct OrderParameters",
+            "components": [
+              {
+                "name": "offerer",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "zone",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "offer",
+                "type": "tuple[]",
+                "internalType": "struct OfferItem[]",
+                "components": [
+                  {
+                    "name": "itemType",
+                    "type": "uint8",
+                    "internalType": "enum ItemType"
+                  },
+                  {
+                    "name": "token",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "identifierOrCriteria",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "startAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "endAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  }
+                ]
+              },
+              {
+                "name": "consideration",
+                "type": "tuple[]",
+                "internalType": "struct ConsiderationItem[]",
+                "components": [
+                  {
+                    "name": "itemType",
+                    "type": "uint8",
+                    "internalType": "enum ItemType"
+                  },
+                  {
+                    "name": "token",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "identifierOrCriteria",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "startAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "endAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "recipient",
+                    "type": "address",
+                    "internalType": "address payable"
+                  }
+                ]
+              },
+              {
+                "name": "orderType",
+                "type": "uint8",
+                "internalType": "enum OrderType"
+              },
+              {
+                "name": "startTime",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "endTime",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "zoneHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "salt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "conduitKey",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "totalOriginalConsiderationItems",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "numerator",
+            "type": "uint120",
+            "internalType": "uint120"
+          },
+          {
+            "name": "denominator",
+            "type": "uint120",
+            "internalType": "uint120"
+          },
+          {
+            "name": "signature",
+            "type": "bytes",
+            "internalType": "bytes"
+          },
+          {
+            "name": "extraData",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      },
+      {
+        "name": "fwaListings",
+        "type": "tuple[]",
+        "internalType": "struct Sweeper.FWAListing[]",
+        "components": [
+          {
+            "name": "listingId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "price",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "strategyListings",
+        "type": "tuple[]",
+        "internalType": "struct Sweeper.StrategyListing[]",
+        "components": [
+          {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "price",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "ccListings",
+        "type": "tuple[]",
+        "internalType": "struct Sweeper.CCListing[]",
+        "components": [
+          {
+            "name": "tokenId",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxPrice",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "minBought",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxFeeBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "ids",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "stateMutability": "payable"
+  },
+  {
     "type": "event",
     "name": "Bought",
     "inputs": [
@@ -3587,6 +4056,11 @@ export const sweeperAbi = [
   {
     "type": "error",
     "name": "FeeTooHigh",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoCC",
     "inputs": []
   },
   {

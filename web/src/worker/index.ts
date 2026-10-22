@@ -92,6 +92,10 @@ interface Env {
   TOKEN_FORMATS?: string;
   /// The token factory's own Sweeper (a Sweeper deposits into one factory). Empty until deployed.
   TOKEN_SWEEPER?: string;
+  /// The $CC engine's Core (cc.artcoins.art), whose controller of the moment sells its pile (read from Core, since
+  /// $CC swaps controllers: V1 then V2). Set only with a SWEEPER and TOKEN_SWEEPER that have sweepEvery and buyEvery:
+  /// every Buy then offers the pile's Credits too.
+  CC_CORE?: string;
   /// BALANCE's Uniswap pool for /tokens Buy and Sell: the token, the pool's fee, tick spacing and hooks (the launch picks
   /// them), and our slice of each swap's output (bps, capped at 5%) and where it goes. Unset: no Buy or Sell.
   BALANCE_TOKEN?: string;
@@ -664,7 +668,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
   // same book every time it's served, and kept as long at the edge.
   if (url.pathname === '/market-top.json') {
     if (!sameSite(req)) return text('forbidden', 403);
-    const key = new Request(`${url.origin}/market-top.json/v1`);
+    const key = new Request(`${url.origin}/market-top.json/v2`);
     const hit = await caches.default.match(key);
     if (hit) return hit;
     try {
@@ -1476,7 +1480,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       ls = b.listings.map((x) => {
         const l = x as Record<string, unknown>;
         const id = String(l.id), price = String(l.price), source = String(l.source);
-        if (!/^\d{1,6}$/.test(id) || !inSupply(Number(id)) || !/^\d{1,30}$/.test(price) || !['opensea', 'fwa', 'strategy'].includes(source)) throw 0;
+        if (!/^\d{1,6}$/.test(id) || !inSupply(Number(id)) || !/^\d{1,30}$/.test(price) || !['opensea', 'fwa', 'strategy', 'cc'].includes(source)) throw 0;
+        if (source === 'cc' && !ccOn(env)) throw 0;
         if (source === 'opensea' && (!/^0x[0-9a-fA-F]{64}$/.test(String(l.hash)) || !/^0x[0-9a-fA-F]{40}$/.test(String(l.protocol)))) throw 0;
         if (source === 'fwa' && !/^\d{1,20}$/.test(String(l.listingId))) throw 0;
         return { id, price, source: source as Listing['source'], hash: l.hash as string | undefined, protocol: l.protocol as string | undefined, listingId: l.listingId as string | undefined };
@@ -1614,7 +1619,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
         strategy ? main.readContract({ address: strategy, abi: strategyAbi, functionName: 'nftForSale', args: [BigInt(id)] }).catch(() => 0n) : 0n,
         fwaListings(env, url, ctx).then((ls) => ls.find((l) => l.id === String(id)) ?? null),
       ]);
+      const cc = await ccOf(env);
+      const pile = cc ? ((await main.readContract({ address: cc.controller, abi: ccAbi, functionName: 'creditPrice', args: [BigInt(id)] }).catch(() => 0n)) as bigint) : 0n;
       const offers: Listing[] = [];
+      if (pile > 0n) offers.push({ id: String(id), price: pile.toString(), source: 'cc' });
       if (os !== null) offers.push({ id: String(id), price: os.price.toString(), source: 'opensea', hash: os.hash, protocol: os.protocol });
       if (held > 0n) offers.push({ id: String(id), price: held.toString(), source: 'strategy' });
       if (fwa) offers.push({ id: String(id), price: fwa.price, source: 'fwa', listingId: fwa.listingId });
@@ -2479,6 +2487,8 @@ async function keepMarket(env: Env, ctx: ExecutionContext) {
   await b.kick(); // the book's own 10-second loop reads the feed and the chain (market.ts)
   if (new Date().getUTCMinutes() % 2 === 0 && hasSweeper(env)) ctx.waitUntil(checkTop(env, url).catch((e) => console.warn('[market] top check failed', safeError(e))));
   if (new Date().getUTCMinutes() % 5 === 0) await b.setExtras((await extras(env, url, ctx)).extra.map((e) => [e.id, e.price, e.source, e.listingId ?? '', '', '', 0] as Row));
+  // The $CC pile in between, every minute: its prices step up ~4% every few minutes, more than a quote allows.
+  else if (ccOn(env)) await b.setPile((await heldByCC(env, url, ctx)).map((e) => [e.id, e.price, 'cc', '', '', '', 0] as Row));
 }
 
 
@@ -3171,6 +3181,26 @@ let rpcCooling = 0;
 /// checks) is the expensive part and the same for everyone, so it is cached briefly and shared while in flight.
 const hasSweeper = (env: Env) => !!env.SWEEPER && !/^0x0+$/.test(env.SWEEPER);
 const tokenSweeper = (env: Env) => addrOrNull(env.TOKEN_SWEEPER);
+/// The $CC engine's sale, when it's a source here: set only once SWEEPER and TOKEN_SWEEPER both have the $CC source
+/// (sweepEvery, buyEvery), so every Buy can take its pile's Credits like any other listing.
+const ccOn = (env: Env) => !!addrOrNull(env.CC_CORE);
+/// Core's controller, read at most every 10 minutes per isolate (a failed read is tried again next time).
+let ccSeller: { at: number; p: Promise<Address | null> } | null = null;
+const ccOf = async (env: Env) => {
+  const core = addrOrNull(env.CC_CORE);
+  if (!core) return null;
+  if (!ccSeller || Date.now() - ccSeller.at > 600_000)
+    ccSeller = { at: Date.now(), p: mainClient(env).readContract({ address: core, abi: ccCoreAbi, functionName: 'controller' }).then((a) => addrOrNull(a as string), () => null) };
+  const controller = await ccSeller.p;
+  if (!controller) ccSeller = null;
+  return controller ? { controller, core } : null;
+};
+const ccAbi = parseAbi(['function creditSaleOn() view returns (bool)', 'function creditPrice(uint256 id) view returns (uint256)']);
+const ccCoreAbi = parseAbi(['function pilePage(uint256 startAfter, uint256 n) view returns (uint256[])', 'function controller() view returns (address)']);
+/// Room on a $CC price: it falls slowly through each Credit's 4-hour sale window but its floor steps up ~4% every few
+/// minutes while their bid climbs (measured 10-20), so a quote is honoured up to 5% above what was shown and the buy
+/// sends that much; the engine charges its price at that moment and refunds the rest.
+const CC_ROOM_BPS = 500n;
 /// The Sweeper that deposits into `batch`: the token factory's for a token union, the first one otherwise.
 async function sweeperFor(env: Env, batch: Address): Promise<Address> {
   const t = addrOrNull(env.TOKEN_FACTORY), sw = tokenSweeper(env);
@@ -3210,6 +3240,19 @@ async function quoteListings(env: Env, url: URL, listings: Listing[], sweeper: A
           ),
       )
     ).filter((l): l is Listing => !!l);
+  // The $CC pile's: priced again now, kept while within CC_ROOM_BPS of what the page showed (the buy sends that room).
+  const cc = await ccOf(env);
+  const ccPicked = listings.filter((l) => l.source === 'cc');
+  const ccLive = cc && ccPicked.length
+    ? (
+        await Promise.all(
+          ccPicked.map(async (l) => {
+            const now = (await main.readContract({ address: cc.controller, abi: ccAbi, functionName: 'creditPrice', args: [BigInt(l.id)] }).catch(() => 0n)) as bigint;
+            return now > 0n && now <= (BigInt(l.price) * (10_000n + CC_ROOM_BPS)) / 10_000n ? { id: l.id, price: now.toString() } : null;
+          }),
+        )
+      ).filter((l): l is { id: string; price: string } => !!l)
+    : [];
   const [fwaLive, strategyLive] = await Promise.all([confirmed('fwa'), confirmed('strategy')]);
   const osPicked = listings.filter((l) => l.source === 'opensea');
   let os = { orders: [] as unknown[], ids: [] as string[], prices: [] as string[], total: '0', expires: null as number | null };
@@ -3218,7 +3261,7 @@ async function quoteListings(env: Env, url: URL, listings: Listing[], sweeper: A
     try {
       os = await quote({ key: env.OPENSEA_API_KEY!, sweeper, listings: osPicked, n: osPicked.length, origin: url.origin, onDead: (l) => l.hash && dead.push({ id: l.id, hash: l.hash }) });
     } catch (e) {
-      if (!fwaLive.length && !strategyLive.length) {
+      if (!fwaLive.length && !strategyLive.length && !ccLive.length) {
         if (dead.length && env.MARKET) await book(env).dropOrders(dead).catch(() => {});
         throw e; // with other listings still good, the quote is those
       }
@@ -3226,16 +3269,16 @@ async function quoteListings(env: Env, url: URL, listings: Listing[], sweeper: A
     // The book forgets what OpenSea just refused, so a sold Credit stops being offered the moment anyone tries it.
     if (dead.length && env.MARKET) await book(env).dropOrders(dead).catch(() => {});
   }
-  if (!os.ids.length && !fwaLive.length && !strategyLive.length) throw Object.assign(new Error('Those listings just sold. Try again.'), { sold: true });
+  if (!os.ids.length && !fwaLive.length && !strategyLive.length && !ccLive.length) throw Object.assign(new Error('Those listings just sold. Try again.'), { sold: true });
   const fwa = fwaLive.map((l) => ({ listingId: l.listingId!, id: l.id, price: l.price }));
   const strategy = strategyLive.map((l) => ({ id: l.id, price: l.price }));
-  const total = [...fwa, ...strategy].reduce((a, l) => a + BigInt(l.price), BigInt(os.total));
-  return { ...os, total: total.toString(), fwa, strategy };
+  const total = [...fwa, ...strategy, ...ccLive].reduce((a, l) => a + BigInt(l.price), BigInt(os.total));
+  return { ...os, total: total.toString(), fwa, strategy, ...(ccLive.length ? { cc: ccLive } : {}) };
 }
 
 /// The marketplaces with any Credit listed right now (OpenSea whenever it's read), in the order the site shows them:
 /// every Buy heading shows the same marks, whatever the first listings happen to be.
-const sourcesOf = (env: Env, extra: { source: string }[]) => [...(env.OPENSEA_API_KEY ? ['opensea'] : []), ...['fwa', 'strategy'].filter((s) => extra.some((e) => e.source === s))];
+const sourcesOf = (env: Env, extra: { source: string }[]) => [...(env.OPENSEA_API_KEY ? ['opensea'] : []), ...['fwa', 'strategy', 'cc'].filter((s) => extra.some((e) => e.source === s))];
 
 /// One page of OpenSea's cheapest listings, cached 15 s: every live grid reads its head again every 20 s, so any
 /// number of people watching one costs OpenSea a call per page every 15 s.
@@ -3253,6 +3296,7 @@ async function bestPageCached(env: Env, url: URL, ctx: ExecutionContext, credits
 function listingUrl(env: Env, live: boolean, l: Pick<Listing, 'id' | 'source'>): string {
   if (l.source === 'strategy') return `https://www.nftstrategy.fun/strategies/${(addrOrNull(env.STRATEGY) ?? '').toLowerCase()}`;
   if (l.source === 'fwa') return 'https://fwa.fun';
+  if (l.source === 'cc') return 'https://cc.artcoins.art';
   return `https://opensea.io/assets/ethereum/${(live ? env.CREDITS : MAINNET_CREDITS).toLowerCase()}/${l.id}`;
 }
 /// A trait as OpenSea's Credits metadata names it, so its listings can be asked for directly.
@@ -3296,8 +3340,8 @@ async function extras(env: Env, url: URL, ctx: ExecutionContext): Promise<{ extr
       fakeOpenSea: os.length ? os : undefined, // none: the real OpenSea listings
     };
   }
-  const [fwa, strategy] = await Promise.all([fwaListings(env, url, ctx), heldByStrategy(env, url, ctx)]);
-  return { extra: [...fwa, ...strategy] };
+  const [fwa, strategy, cc] = await Promise.all([fwaListings(env, url, ctx), heldByStrategy(env, url, ctx), heldByCC(env, url, ctx)]);
+  return { extra: [...fwa, ...strategy, ...cc] };
 }
 
 async function fwaListings(env: Env, url: URL, ctx: ExecutionContext): Promise<Extra[]> {
@@ -3316,6 +3360,54 @@ async function fwaListings(env: Env, url: URL, ctx: ExecutionContext): Promise<E
     console.warn('[fwa] listings unavailable', safeError(e));
     return [];
   }
+}
+
+/// The Credits the $CC engine's pile sells now, each at its price now: its pile in pages, then each price, 40 to a
+/// multicall. Cached 15 s and shared while in flight like the strategy's; a read that fails serves the last good one,
+/// up to an hour old (each buy prices its Credits again first). Nothing while its sale is off.
+let ccRead: Promise<Extra[]> | null = null;
+async function heldByCC(env: Env, url: URL, ctx: ExecutionContext): Promise<Extra[]> {
+  const cc = await ccOf(env);
+  if (!cc) return [];
+  const cache = caches.default;
+  const key = new Request(`${url.origin}/cc/listings/${cc.controller.toLowerCase()}`);
+  const lastGood = new Request(`${url.origin}/cc/listings-last/${cc.controller.toLowerCase()}`);
+  const hit = await cache.match(key);
+  if (hit) return hit.json<Extra[]>();
+  if (!ccRead) {
+    ccRead = (async () => {
+      const main = mainClient(env);
+      if (!(await main.readContract({ address: cc.controller, abi: ccAbi, functionName: 'creditSaleOn' }))) return [];
+      const pile: bigint[] = [];
+      for (let after = 0n; pile.length < 2000; ) {
+        const page = (await main.readContract({ address: cc.core, abi: ccCoreAbi, functionName: 'pilePage', args: [after, 200n] })) as readonly bigint[];
+        pile.push(...page);
+        if (page.length < 200) break;
+        after = page[page.length - 1];
+      }
+      const out: Extra[] = [];
+      for (let i = 0; i < pile.length; i += 40) {
+        const part = pile.slice(i, i + 40);
+        const got = await main.multicall({ contracts: part.map((id) => ({ address: cc.controller, abi: ccAbi, functionName: 'creditPrice', args: [id] }) as const), allowFailure: true });
+        got.forEach((r, k) => r.status === 'success' && (r.result as bigint) > 0n && out.push({ id: String(part[k]), price: String(r.result), source: 'cc' }));
+      }
+      return out;
+    })()
+      .then((out) => {
+        ctx.waitUntil(cache.put(key, Response.json(out, { headers: { 'cache-control': 'public, max-age=15' } })));
+        ctx.waitUntil(cache.put(lastGood, Response.json(out, { headers: { 'cache-control': 'public, max-age=3600' } })));
+        return out;
+      })
+      .catch(async (e) => {
+        console.warn('[cc] pile unavailable', safeError(e));
+        return (await cache.match(lastGood))?.json<Extra[]>() ?? [];
+      })
+      .finally(() => {
+        ccRead = null;
+      });
+    ctx.waitUntil(ccRead.catch(() => {}));
+  }
+  return ccRead;
 }
 
 /// The Credits CreditStrategy has for sale. Reading them is 13 heavy eth_calls, so the result is cached 15 s (as
@@ -3560,7 +3652,7 @@ async function shopExtras(env: Env, url: URL, ctx: ExecutionContext): Promise<{ 
   const bk = devFake(env, url) ? null : await liveBook(env, url, ctx);
   if (!bk) return extras(env, url, ctx);
   const extra: Extra[] = [];
-  for (const r of bk.rows) if (r[2] === 'fwa' || r[2] === 'strategy') extra.push({ id: r[0], price: r[1], source: r[2], ...(r[3] ? { listingId: r[3] } : {}) });
+  for (const r of bk.rows) if (r[2] === 'fwa' || r[2] === 'strategy' || r[2] === 'cc') extra.push({ id: r[0], price: r[1], source: r[2], ...(r[3] ? { listingId: r[3] } : {}) });
   return { extra };
 }
 /// How long the ChainBook keeps a union's scan: a minute. Between scans, what sold drops out (liveBook) and what the

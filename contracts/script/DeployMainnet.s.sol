@@ -7,6 +7,7 @@ import {IRatings} from "../src/Batch.sol";
 import {Ratings} from "../src/Ratings.sol";
 import {RatingsDeploy} from "./DeployRatings.s.sol";
 import {Sweeper} from "../src/Sweeper.sol";
+import {ICCController, ICCCore} from "../src/interfaces/ICCController.sol";
 import {IAssembler} from "../src/interfaces/IAssembler.sol";
 import {ICredits} from "../src/interfaces/ICredits.sol";
 import {ISeaport} from "../src/interfaces/ISeaport.sol";
@@ -47,7 +48,7 @@ contract DeployMainnet is Script {
         BatchFactory factory = new BatchFactory(
             CREDITS, IRatings(ratingsAddr), assembler, setter, feeTo, vm.envOr("PROTOCOL_FEE_BPS", uint256(200)), vm.envOr("CREATOR_FEE_BPS", uint256(0)), 1
         );
-        Sweeper sweeper = new Sweeper(SEAPORT, factory, vm.envOr("SWEEP_FEE_BPS", uint256(200)), FWA_MARKET, CREDIT_STRATEGY);
+        Sweeper sweeper = new Sweeper(SEAPORT, factory, vm.envOr("SWEEP_FEE_BPS", uint256(200)), FWA_MARKET, CREDIT_STRATEGY, ICCCore(address(0)));
         vm.stopBroadcast();
         console.log("RATINGS", ratingsAddr);
         console.log("FACTORY", address(factory));

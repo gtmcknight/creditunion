@@ -9,7 +9,9 @@ The record of what was deployed, from which commit, with what settings. What the
 |---|---|
 | BatchFactory | [`0xcb06f9076e5fbF3cB052086b1EE7C0F3836aa051`](https://etherscan.io/address/0xcb06f9076e5fbF3cB052086b1EE7C0F3836aa051) |
 | Batch implementation (clone source) | [`0xd578eC605E60eDD008b415c23B15Eb3483CC6c50`](https://etherscan.io/address/0xd578eC605E60eDD008b415c23B15Eb3483CC6c50) |
-| Sweeper | [`0x7b93309A12e05944Ab821470615983A4A2AC9799`](https://etherscan.io/address/0x7b93309A12e05944Ab821470615983A4A2AC9799) |
+| Sweeper (Sep 27; retired from the site Oct 22, still works) | [`0x7b93309A12e05944Ab821470615983A4A2AC9799`](https://etherscan.io/address/0x7b93309A12e05944Ab821470615983A4A2AC9799) |
+| Sweeper with $CC's pile as a source (Oct 22, block 26,251,985, `script/DeploySweepers.s.sol`) | [`0x1f353219a4080268f2c8e5ba48880abeb2714b9e`](https://etherscan.io/address/0x1f353219a4080268f2c8e5ba48880abeb2714b9e) |
+| The token factory's Sweeper with $CC (same deploy) | [`0xa93d702e4f9878f8af413049a3428f151fc5a65c`](https://etherscan.io/address/0xa93d702e4f9878f8af413049a3428f151fc5a65c) |
 | Ratings | [`0x61Ca63cDE107CE7e32785c0d89904fE58f9d371d`](https://etherscan.io/address/0x61Ca63cDE107CE7e32785c0d89904fE58f9d371d) (v3.4.0, 122,154 scores in 11 data contracts) |
 | UnionFormats (Oct 1) | [`0x16deCDa20c9164CcfDB4BE189557aDc4614aAedC`](https://etherscan.io/address/0x16deCDa20c9164CcfDB4BE189557aDc4614aAedC) |
 | StatementAdapter, the factory's assembler (Oct 1) | [`0x6CAEb9953bA8625226345CF39F93541CE53AbFd2`](https://etherscan.io/address/0x6CAEb9953bA8625226345CF39F93541CE53AbFd2) |

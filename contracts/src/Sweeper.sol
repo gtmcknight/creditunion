@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {BatchFactory} from "./BatchFactory.sol";
 import {ICredits} from "./interfaces/ICredits.sol";
+import {ICCController, ICCCore} from "./interfaces/ICCController.sol";
 import {ICreditStrategy} from "./interfaces/ICreditStrategy.sol";
 import {IFWAMarket} from "./interfaces/IFWAMarket.sol";
 import {
@@ -17,8 +18,9 @@ import {
 } from "./interfaces/ISeaport.sol";
 
 /// @title Sweeper
-/// @notice One transaction: buy listed Credits on Seaport (OpenSea's exchange), FWA's marketplace and from
-///         CreditStrategy, then deposit them into a batch in the buyer's name (or send them to the buyer's wallet). Pay the listings plus the fee; unused ETH comes back.
+/// @notice One transaction: buy listed Credits on Seaport (OpenSea's exchange), FWA's marketplace, from
+///         CreditStrategy and from the $CC engine's pile, then deposit them into a batch in the buyer's name (or send
+///         them to the buyer's wallet). Pay the listings plus the fee; unused ETH comes back.
 ///         Nothing is held between transactions. No owner, no admin.
 contract Sweeper is ReentrancyGuardTransient {
     uint256 public constant MAX_FEE_BPS = 500;
@@ -33,6 +35,10 @@ contract Sweeper is ReentrancyGuardTransient {
     /// @notice CreditStrategy (nftstrategy.fun), which sells the Credits it holds. Zero where it isn't deployed;
     ///         strategy buys then revert.
     ICreditStrategy public immutable strategy;
+    /// @notice The $CC engine's Core, whose controller of the moment sells the Credits its pile holds (read at each
+    ///         buy, so a controller swap on their side doesn't strand this one). Zero where it isn't deployed; $CC buys
+    ///         then revert.
+    ICCCore public immutable cc;
     BatchFactory public immutable factory;
     ICredits public immutable credits;
     address public immutable feeRecipient;
@@ -54,6 +60,7 @@ contract Sweeper is ReentrancyGuardTransient {
     error NotDelivered(uint256 id);
     error NoStrategy();
     error NotACreditStrategy();
+    error NoCC();
 
     /// @notice One FWA listing to buy, at the price it was quoted. A listing whose price changed has a new id,
     ///         so the old one reads as gone and is skipped.
@@ -68,9 +75,24 @@ contract Sweeper is ReentrancyGuardTransient {
         uint256 price;
     }
 
+    /// @notice One Credit the $CC engine's pile holds, and the most to pay for it: its price moves block to block, so
+    ///         it is bought at the price then and the rest comes back. One sold, out of the pile, with the sale off,
+    ///         or priced above `maxPrice` by then is skipped.
+    struct CCListing {
+        uint256 tokenId;
+        uint256 maxPrice;
+    }
+
     event FeeSet(uint256 feeBps);
 
-    constructor(ISeaport seaport_, BatchFactory factory_, uint256 feeBps_, IFWAMarket fwa_, ICreditStrategy strategy_) {
+    constructor(
+        ISeaport seaport_,
+        BatchFactory factory_,
+        uint256 feeBps_,
+        IFWAMarket fwa_,
+        ICreditStrategy strategy_,
+        ICCCore cc_
+    ) {
         if (feeBps_ > MAX_FEE_BPS) revert FeeTooHigh();
         feeBps = feeBps_;
         emit FeeSet(feeBps_);
@@ -80,6 +102,7 @@ contract Sweeper is ReentrancyGuardTransient {
         credits = factory_.credits();
         if (address(strategy_) != address(0) && strategy_.collection() != address(credits)) revert NotACreditStrategy();
         strategy = strategy_;
+        cc = cc_;
         feeRecipient = factory_.feeRecipient();
         credits.setApprovalForAll(address(factory_), true);
     }
@@ -103,7 +126,7 @@ contract Sweeper is ReentrancyGuardTransient {
         nonReentrant
         returns (uint256[] memory ids)
     {
-        return _sweep(batch, orders, new FWAListing[](0), new StrategyListing[](0), minBought, maxFeeBps);
+        return _sweep(batch, orders, new FWAListing[](0), new StrategyListing[](0), new CCListing[](0), minBought, maxFeeBps);
     }
 
     /// @notice `sweep`, plus listings on FWA's marketplace and Credits CreditStrategy holds. Those are bought first,
@@ -119,7 +142,23 @@ contract Sweeper is ReentrancyGuardTransient {
         uint256 minBought,
         uint256 maxFeeBps
     ) external payable nonReentrant returns (uint256[] memory ids) {
-        return _sweep(batch, orders, fwaListings, strategyListings, minBought, maxFeeBps);
+        return _sweep(batch, orders, fwaListings, strategyListings, new CCListing[](0), minBought, maxFeeBps);
+    }
+
+    /// @notice `sweepAll`, plus Credits the $CC engine's pile holds, each bought at its price then if that is at most
+    ///         its `maxPrice` (one sold, out of the pile, with the sale off or priced higher is skipped like a sold
+    ///         Seaport listing). Bought after FWA and CreditStrategy, before Seaport.
+    /// @param ccListings Credits the $CC engine holds, each with the most to pay for it.
+    function sweepEvery(
+        address batch,
+        AdvancedOrder[] calldata orders,
+        FWAListing[] calldata fwaListings,
+        StrategyListing[] calldata strategyListings,
+        CCListing[] calldata ccListings,
+        uint256 minBought,
+        uint256 maxFeeBps
+    ) external payable nonReentrant returns (uint256[] memory ids) {
+        return _sweep(batch, orders, fwaListings, strategyListings, ccListings, minBought, maxFeeBps);
     }
 
     /// @notice `sweepAll`, without the batch: every Credit bought goes straight to your wallet. Same listings, same
@@ -134,10 +173,35 @@ contract Sweeper is ReentrancyGuardTransient {
         uint256 minBought,
         uint256 maxFeeBps
     ) external payable nonReentrant returns (uint256[] memory ids) {
+        return _buyToWallet(orders, fwaListings, strategyListings, new CCListing[](0), minBought, maxFeeBps);
+    }
+
+    /// @notice `buy`, plus Credits the $CC engine's pile holds (as in `sweepEvery`): every Credit bought goes straight
+    ///         to your wallet.
+    /// @return ids The Credits bought and sent to you, in order.
+    function buyEvery(
+        AdvancedOrder[] calldata orders,
+        FWAListing[] calldata fwaListings,
+        StrategyListing[] calldata strategyListings,
+        CCListing[] calldata ccListings,
+        uint256 minBought,
+        uint256 maxFeeBps
+    ) external payable nonReentrant returns (uint256[] memory ids) {
+        return _buyToWallet(orders, fwaListings, strategyListings, ccListings, minBought, maxFeeBps);
+    }
+
+    function _buyToWallet(
+        AdvancedOrder[] calldata orders,
+        FWAListing[] memory fwaListings,
+        StrategyListing[] memory strategyListings,
+        CCListing[] memory ccListings,
+        uint256 minBought,
+        uint256 maxFeeBps
+    ) internal returns (uint256[] memory ids) {
         uint256 spent;
         uint256 fee;
         uint256 left;
-        (ids, spent, fee, left) = _buyAll(orders, fwaListings, strategyListings, minBought, maxFeeBps);
+        (ids, spent, fee, left) = _buyAll(orders, fwaListings, strategyListings, ccListings, minBought, maxFeeBps);
         uint256 n = ids.length;
         for (uint256 i; i < n; ++i) {
             credits.transferFrom(address(this), msg.sender, ids[i]);
@@ -151,6 +215,7 @@ contract Sweeper is ReentrancyGuardTransient {
         AdvancedOrder[] calldata orders,
         FWAListing[] memory fwaListings,
         StrategyListing[] memory strategyListings,
+        CCListing[] memory ccListings,
         uint256 minBought,
         uint256 maxFeeBps
     ) internal returns (uint256[] memory ids) {
@@ -158,13 +223,13 @@ contract Sweeper is ReentrancyGuardTransient {
         uint256 spent;
         uint256 fee;
         uint256 left;
-        (ids, spent, fee, left) = _buyAll(orders, fwaListings, strategyListings, minBought, maxFeeBps);
+        (ids, spent, fee, left) = _buyAll(orders, fwaListings, strategyListings, ccListings, minBought, maxFeeBps);
         factory.depositFor(batch, ids, msg.sender); // reverts if the batch can't take them all
         emit Swept(msg.sender, batch, ids.length, spent, fee);
         _settle(fee, left);
     }
 
-    /// @dev Buys everything still available into this contract: FWA, then CreditStrategy, then Seaport. Reverts
+    /// @dev Buys everything still available into this contract: FWA, CreditStrategy, $CC, then Seaport. Reverts
     ///      unless at least `minBought` (and at least one) came through and what is left covers the fee.
     /// @return ids What was bought, in order.
     /// @return spent What the listings cost.
@@ -174,16 +239,19 @@ contract Sweeper is ReentrancyGuardTransient {
         AdvancedOrder[] calldata orders,
         FWAListing[] memory fwaListings,
         StrategyListing[] memory strategyListings,
+        CCListing[] memory ccListings,
         uint256 minBought,
         uint256 maxFeeBps
     ) internal returns (uint256[] memory ids, uint256 spent, uint256 fee, uint256 left) {
         if (feeBps > maxFeeBps) revert FeeChanged(feeBps);
         uint256 m = fwaListings.length;
         uint256 s = strategyListings.length;
+        uint256 c = ccListings.length;
         if (m != 0 && address(fwa) == address(0)) revert NoFWA();
         if (s != 0 && address(strategy) == address(0)) revert NoStrategy();
+        if (c != 0 && address(cc) == address(0)) revert NoCC();
 
-        ids = new uint256[](orders.length + m + s);
+        ids = new uint256[](orders.length + m + s + c);
         uint256 bought;
         // What the listings cost: FWA's and the strategy's exact prices (each takes exactly the price or reverts), then Seaport's own
         // record of what it paid out. Never a balance delta, so ETH pushed at this contract by a seller or royalty
@@ -203,6 +271,15 @@ contract Sweeper is ReentrancyGuardTransient {
             if (_buyStrategy(l.tokenId, l.price)) {
                 ids[bought++] = l.tokenId;
                 spent += l.price;
+            }
+        }
+        for (uint256 i; i < c; ++i) {
+            CCListing memory l = ccListings[i];
+            if (l.maxPrice > msg.value - spent) revert Underpaid();
+            (bool got, uint256 paid) = _buyCC(l.tokenId, l.maxPrice);
+            if (got) {
+                ids[bought++] = l.tokenId;
+                spent += paid;
             }
         }
         if (orders.length != 0) {
@@ -255,6 +332,32 @@ contract Sweeper is ReentrancyGuardTransient {
         return true;
     }
 
+    /// @dev One Credit from the $CC engine, to this contract, at its price now if that is at most `maxPrice`; the engine
+    ///      refunds the rest of `maxPrice` here within the call. Skipped (false) if it is sold, out of the pile, the
+    ///      sale is off or paused, or the price is above `maxPrice`. What it cost is this contract's balance before less
+    ///      after: within the call only the engine's refund comes back (its sale cuts go to its artist and operator).
+    function _buyCC(uint256 id, uint256 maxPrice) internal returns (bool, uint256 paid) {
+        if (maxPrice == 0) return (false, 0);
+        // Core's controller now; none (or Core unreadable) skips it like a sold one. A controller that keeps the ETH and
+        // not the Credit fails the delivery check below and reverts the whole buy.
+        address seller;
+        try cc.controller() returns (address c) {
+            seller = c;
+        } catch {
+            return (false, 0);
+        }
+        if (seller == address(0)) return (false, 0);
+        uint256 before = address(this).balance;
+        try ICCController(seller).buyCredit{value: maxPrice}(id) {}
+        catch {
+            return (false, 0);
+        }
+        uint256 after_ = address(this).balance;
+        paid = before > after_ ? before - after_ : 0;
+        if (credits.ownerOf(id) != address(this)) revert NotDelivered(id);
+        return (true, paid);
+    }
+
     /// @dev Seaport's partial-fill path with `value`; appends what filled to `ids` from `bought` on.
     function _buySeaport(AdvancedOrder[] calldata orders, uint256 value, uint256[] memory ids, uint256 bought)
         internal
@@ -301,8 +404,8 @@ contract Sweeper is ReentrancyGuardTransient {
         return listingsTotal + listingsTotal * feeBps / 10_000;
     }
 
-    /// @dev Seaport returns unused ETH here. No ERC721 receiver hook on purpose: Seaport delivers with
-    ///      plain transferFrom, and a safeTransferFrom of a stray NFT here should fail, not strand it.
+    /// @dev Seaport and the $CC engine return unused ETH here. No ERC721 receiver hook on purpose: every source
+    ///      delivers with plain transferFrom, and a safeTransferFrom of a stray NFT here should fail, not strand it.
     receive() external payable {}
 
     function _send(address to, uint256 amount) internal returns (bool ok) {

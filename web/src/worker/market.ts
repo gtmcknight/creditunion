@@ -84,11 +84,24 @@ export class MarketBook extends DurableObject<Env> {
     this.changed();
   }
 
+  /// The $CC engine's pile, read whole every minute (its prices step up a few percent every few minutes): its rows
+  /// replace the old, and a cheaper listing of the same Credit stays.
+  async setPile(rows: Row[]) {
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec(`DELETE FROM listings WHERE source = 'cc'`);
+      for (const r of rows) {
+        const had = this.sql.exec(`SELECT price FROM listings WHERE id = ?`, r[0]).toArray()[0];
+        if (!had || BigInt(String(had.price)) > BigInt(r[1])) this.put(r);
+      }
+    });
+    this.changed();
+  }
+
   /// FWA's and the strategy's listings, read whole every few minutes: theirs replace the old, and a cheaper OpenSea
   /// listing of the same Credit stays.
   async setExtras(rows: Row[]) {
     this.ctx.storage.transactionSync(() => {
-      const had = this.rowsBy(`source IN ('fwa', 'strategy')`);
+      const had = this.rowsBy(`source IN ('fwa', 'strategy', 'cc')`);
       const next = new Map<string, Row>();
       for (const r of rows) { const o = next.get(r[0]); if (!o || BigInt(o[1]) > BigInt(r[1])) next.set(r[0], r); } // listed twice: the cheaper stays
       for (const id of had.keys()) if (!next.has(id)) this.sql.exec(`DELETE FROM listings WHERE id = ?`, id);
@@ -127,13 +140,13 @@ export class MarketBook extends DurableObject<Env> {
   }
 
   /// Credits that moved (a sale anywhere, a transfer, a buy on our site): each seller's OpenSea listing of it is dead,
-  /// and so is FWA's or the strategy's (the next read of theirs puts back one still listed).
+  /// and so is FWA's, the strategy's or the $CC pile's (the next read of theirs puts back one still listed).
   async moved(moves: { id: string; from: string }[]) {
     if (!moves.length) return;
     this.ctx.storage.transactionSync(() => {
       for (const m of moves) {
         this.sql.exec(`DELETE FROM listings WHERE id = ? AND source = 'opensea' AND (seller = ? OR seller = '')`, m.id, m.from);
-        this.sql.exec(`DELETE FROM listings WHERE id = ? AND source IN ('fwa', 'strategy')`, m.id);
+        this.sql.exec(`DELETE FROM listings WHERE id = ? AND source IN ('fwa', 'strategy', 'cc')`, m.id);
       }
     });
     this.changed();

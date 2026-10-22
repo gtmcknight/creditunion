@@ -18,12 +18,12 @@ const OS_FEES = '0x0000a26b00c1f0df003000390027140000faa719';
 
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-export type Source = 'opensea' | 'fwa' | 'strategy';
+export type Source = 'opensea' | 'fwa' | 'strategy' | 'cc';
 /// A listing that fits: on OpenSea (a Seaport order, by hash), on FWA's marketplace (by listing id) or held by
 /// CreditStrategy (by Credit id).
 export type Listing = { id: string; price: string; source: Source; hash?: string; protocol?: string; listingId?: string; seller?: string; until?: number };
 /// A listing off OpenSea handed to the scan, just read on-chain: FWA (with its listing id) or CreditStrategy.
-export type Extra = { id: string; price: string; source: 'fwa' | 'strategy'; listingId?: string };
+export type Extra = { id: string; price: string; source: 'fwa' | 'strategy' | 'cc'; listingId?: string };
 /// A listing as the scan weighs it.
 export type Cand = {
   id: string;

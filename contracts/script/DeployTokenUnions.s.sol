@@ -6,6 +6,7 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {IRatings} from "../src/Batch.sol";
 import {Sweeper} from "../src/Sweeper.sol";
+import {ICCCore} from "../src/interfaces/ICCController.sol";
 import {TokenAdapter, ITokenUnions} from "../src/TokenAdapter.sol";
 import {UnionFormats, IUnionFactory} from "../src/UnionFormats.sol";
 import {IAssembler} from "../src/interfaces/IAssembler.sol";
@@ -49,7 +50,7 @@ contract DeployTokenUnions is Script {
                 CREDITS, ratings, IAssembler(address(0)), setter, feeTo, vm.envOr("PROTOCOL_FEE_BPS", uint256(600)), vm.envOr("CREATOR_FEE_BPS", uint256(0)), 1
             );
             UnionFormats formats = new UnionFormats(IUnionFactory(address(factory)));
-            Sweeper sweeper = new Sweeper(SEAPORT, factory, vm.envOr("SWEEP_FEE_BPS", uint256(200)), FWA_MARKET, CREDIT_STRATEGY);
+            Sweeper sweeper = new Sweeper(SEAPORT, factory, vm.envOr("SWEEP_FEE_BPS", uint256(200)), FWA_MARKET, CREDIT_STRATEGY, ICCCore(vm.envOr("CC_CORE", address(0))));
             console2.log("TOKEN_FACTORY", address(factory));
             console2.log("TOKEN_FORMATS", address(formats));
             console2.log("TOKEN_SWEEPER", address(sweeper));

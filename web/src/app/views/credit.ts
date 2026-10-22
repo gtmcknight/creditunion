@@ -256,7 +256,9 @@ async function drawBuy(n: number) {
 async function drawOffer(el: HTMLElement, n: number, d: Offer & { price: string; source: Source }) {
   const src = SOURCES[d.source];
   const value = BigInt(d.price);
-  const viaSweeper = !d.preview && d.source === 'opensea' && !!d.hash && !!d.protocol && !!config.sweeper;
+  // An OpenSea order, or a Credit in the $CC engine's pile, goes through the Sweeper (buy / buyEvery); FWA's and the
+  // strategy's from their own contracts.
+  const viaSweeper = !d.preview && ((d.source === 'opensea' && !!d.hash && !!d.protocol) || d.source === 'cc') && !!config.sweeper;
   const bps = viaSweeper ? await sweepFee() : 0n;
   if (!el.isConnected) return;
   const inApp = viaSweeper || (!d.preview && !!d.contract && (d.source === 'strategy' || (d.source === 'fwa' && !!d.listingId)));
@@ -291,7 +293,7 @@ async function drawOffer(el: HTMLElement, n: number, d: Offer & { price: string;
   };
   go?.addEventListener('click', async () => {
     if (viaSweeper) {
-      const got = await sweepToWallet([{ id: String(n), price: d.price!, source: 'opensea', hash: d.hash!, protocol: d.protocol! }], go);
+      const got = await sweepToWallet([d.source === 'cc' ? { id: String(n), price: d.price!, source: 'cc' } : { id: String(n), price: d.price!, source: 'opensea', hash: d.hash!, protocol: d.protocol! }], go);
       if (got?.length) done();
       return;
     }

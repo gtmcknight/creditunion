@@ -6,6 +6,7 @@ import {ratingsOf} from "../script/RatingsOf.sol";
 import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {Sweeper} from "../src/Sweeper.sol";
+import {ICCController, ICCCore} from "../src/interfaces/ICCController.sol";
 import {ICreditStrategy} from "../src/interfaces/ICreditStrategy.sol";
 import {IFWAMarket} from "../src/interfaces/IFWAMarket.sol";
 import {IAssembler} from "../src/interfaces/IAssembler.sol";
@@ -30,7 +31,7 @@ contract SweeperStrategyForkTest is Test {
     function setUp() public {
         vm.createSelectFork(vm.envOr("MAINNET_RPC", string("https://ethereum-rpc.publicnode.com")));
         factory = new BatchFactory(CREDITS, IRatings(address(0)), IAssembler(address(0)), address(this), fee, 100, 0, 1);
-        sweeper = new Sweeper(SEAPORT, factory, 100, IFWAMarket(address(0)), STRATEGY);
+        sweeper = new Sweeper(SEAPORT, factory, 100, IFWAMarket(address(0)), STRATEGY, ICCCore(address(0)));
 
         // A real holder opens a test batch with one Credit.
         address creator;
@@ -124,7 +125,7 @@ contract SweeperStrategyForkTest is Test {
     }
 
     function test_NoStrategyReverts() public {
-        Sweeper plain = new Sweeper(SEAPORT, factory, 100, IFWAMarket(address(0)), ICreditStrategy(address(0)));
+        Sweeper plain = new Sweeper(SEAPORT, factory, 100, IFWAMarket(address(0)), ICreditStrategy(address(0)), ICCCore(address(0)));
         (Sweeper.StrategyListing[] memory ls, uint256 total) = _listings(1);
         vm.prank(buyer);
         vm.expectRevert(Sweeper.NoStrategy.selector);
@@ -134,7 +135,7 @@ contract SweeperStrategyForkTest is Test {
     function test_ConstructorRejectsOtherCollections() public {
         vm.mockCall(address(STRATEGY), abi.encodeWithSelector(ICreditStrategy.collection.selector), abi.encode(address(1)));
         vm.expectRevert(Sweeper.NotACreditStrategy.selector);
-        new Sweeper(SEAPORT, factory, 100, IFWAMarket(address(0)), STRATEGY);
+        new Sweeper(SEAPORT, factory, 100, IFWAMarket(address(0)), STRATEGY, ICCCore(address(0)));
     }
 
     // --- buy: from the strategy straight to the buyer's wallet ---

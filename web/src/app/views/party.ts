@@ -8,7 +8,7 @@ import { ens, hydrate, identicon, pct, who } from '../ens';
 import { creditCard, examples, fillGhosts, planGhosts, registerDeposits, registerFilter } from '../ghosts';
 import { gapOf, Guide, inOrder, landing, lockable, planOf, sliceBase, unpackPicture, type Plan, type Stored, OWN_GOOD, runOf } from '../picture';
 import { Room, books, keysOf, noRoomReason, placedKeys, type Books } from '../slots';
-import { MAX_SWEEP, buying, checkQuote, listedById, connectToBuy, live as keepLive, minEth, priceTag, relist, sweepControls, sweepRow, type Listed, type Quote, type Sale, type Source } from '../forsale';
+import { CC_ROOM_BPS, MAX_SWEEP, buying, ccPicks, checkQuote, listedById, connectToBuy, live as keepLive, minEth, priceTag, relist, sweepControls, sweepRow, type Listed, type Quote, type Sale, type Source } from '../forsale';
 import { creditCell, creditSkel } from './trait';
 import { shareButton } from '../share';
 import { directionCanvas, directions, mountDirections, pickedDirection, primeInks, sheetInks, showDirection, viewerPicked, warmInks } from '../directions';
@@ -1454,13 +1454,15 @@ async function drawPicker(
   sync();
 }
 
-const quotedCount = (q: Quote) => q.ids.length + (q.fwa?.length ?? 0) + (q.strategy?.length ?? 0);
-/// What a quote charges for each Credit in it, by id: OpenSea's orders, FWA's listings and CreditStrategy's.
+const quotedCount = (q: Quote) => q.ids.length + (q.fwa?.length ?? 0) + (q.strategy?.length ?? 0) + (q.cc?.length ?? 0);
+/// What a quote charges for each Credit in it, by id: OpenSea's orders, FWA's listings, CreditStrategy's and the $CC
+/// pile's.
 const quotedPrices = (q: Quote) =>
   new Map<string, bigint>([
     ...q.ids.map((id, i) => [id, BigInt(q.prices[i])] as const),
     ...(q.fwa ?? []).map((f) => [f.id, BigInt(f.price)] as const),
     ...(q.strategy ?? []).map((f) => [f.id, BigInt(f.price)] as const),
+    ...(q.cc ?? []).map((f) => [f.id, BigInt(f.price)] as const),
   ]);
 
 /// The Buy grid shows one row. Picking further down (the slider takes the cheapest in order) opens it to the last
@@ -1679,7 +1681,7 @@ async function bindBuy(
       checkQuote(q);
       // All of them or none: one missing would shift the rest of its Colors a slot early.
       if (order) {
-        const have = new Set([...q.ids, ...(q.fwa ?? []).map((f) => f.id), ...(q.strategy ?? []).map((f) => f.id)]);
+        const have = new Set([...q.ids, ...(q.fwa ?? []).map((f) => f.id), ...(q.strategy ?? []).map((f) => f.id), ...(q.cc ?? []).map((f) => f.id)]);
         const sold = picked.map((l) => l.id).filter((id) => !have.has(id));
         if (sold.length) {
           sold.forEach((id) => gone.add(Number(id)));
@@ -1703,8 +1705,11 @@ async function bindBuy(
       // raised fee) stops here: the tiles and total take the new prices, and the next click pays what they show.
       const now = quotedPrices(q);
       const was = new Map(picked.map((l) => [l.id, BigInt(l.price)]));
-      const sub = [...now.keys()].reduce((a, id) => a + (was.get(id) ?? 0n), 0n);
-      const up = [...now].filter(([id, p]) => !was.has(id) || p > was.get(id)!).map(([id]) => id);
+      // A $CC pile price moves block to block: up to CC_ROOM_BPS over what the page showed is the same price.
+      const pileIds = new Set((q.cc ?? []).map((f) => f.id));
+      const shown = (id: string) => (was.get(id) ?? 0n) + (pileIds.has(id) ? ((was.get(id) ?? 0n) * CC_ROOM_BPS) / 10_000n : 0n);
+      const sub = [...now.keys()].reduce((a, id) => a + shown(id), 0n);
+      const up = [...now].filter(([id, p]) => !was.has(id) || p > shown(id)).map(([id]) => id);
       if (up.length || value > sub + (sub * ctl.fee()) / 10_000n) {
         // Relisted higher: the new price, in red. Sold since: off the grid, and out of the picks.
         for (const l of picked) {
@@ -1725,10 +1730,15 @@ async function bindBuy(
       const least = order ? BigInt(quotedCount(q)) : 1n; // a picture's: all or none
       const fwa = (q.fwa ?? []).map((f) => ({ listingId: BigInt(f.listingId), price: BigInt(f.price) }));
       const strategy = (q.strategy ?? []).map((f) => ({ tokenId: BigInt(f.id), price: BigInt(f.price) }));
+      // The $CC pile's go with room on top (refunded): what the wallet is asked for grows by it, fee in.
+      const { pile, room } = ccPicks(q);
+      const sendValue = value + room + (room * fee) / 10_000n + (room ? 1n : 0n);
       await send(
-        fwa.length || strategy.length
-          ? { address: config.sweeper!, abi: sweeperAbi, functionName: 'sweepAll', args: [batch, q.orders, fwa, strategy, least, fee], value }
-          : { address: config.sweeper!, abi: sweeperAbi, functionName: 'sweep', args: [batch, q.orders, least, fee], value },
+        pile.length
+          ? { address: config.sweeper!, abi: sweeperAbi, functionName: 'sweepEvery', args: [batch, q.orders, fwa, strategy, pile, least, fee], value: sendValue }
+          : fwa.length || strategy.length
+            ? { address: config.sweeper!, abi: sweeperAbi, functionName: 'sweepAll', args: [batch, q.orders, fwa, strategy, least, fee], value }
+            : { address: config.sweeper!, abi: sweeperAbi, functionName: 'sweep', args: [batch, q.orders, least, fee], value },
         (h) => {
           txNote(h);
           if (locked) void locks(batch, { op: 'hold', id: lockId, tx: h }); // sent: keep the Colors while it's pending

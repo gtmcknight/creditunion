@@ -6,11 +6,12 @@ import { creditCell } from './views/trait';
 import { boughtToast, errText, esc, eth, ethNum, rangeHtml, setRange, toast } from './ui';
 
 /// Where a listing is: its marketplace's name and mark (Buy tab, Credit pages, For sale rows).
-export type Source = 'opensea' | 'fwa' | 'strategy';
+export type Source = 'opensea' | 'fwa' | 'strategy' | 'cc';
 export const SOURCES: Record<Source, { name: string; icon: string }> = {
   opensea: { name: 'OpenSea', icon: '/sources/opensea.svg' },
   fwa: { name: 'FWA', icon: '/sources/fwa.png' },
   strategy: { name: 'CreditStrategy', icon: '/sources/strategy.svg' },
+  cc: { name: '$CC', icon: '/sources/cc.svg' }, // the $CC engine's pile: /balance only, through the token Sweeper
 };
 
 /// Credits this browser just bought, or found sold on trying. Listings are cached (60 s here, longer at the marketplaces), so a sold Credit
@@ -46,6 +47,16 @@ export const sourceMark = (id: string | number, source: Source, url?: string) =>
 
 /// `score`: the Credit's score, as the book's listings carry it (what it converts to).
 export type Listed = { id: string; price: string; source: Source; url?: string; hash?: string; protocol?: string; listingId?: string; score?: number };
+
+/// Room on a $CC pile price, in bps: its floor steps up ~4% every few minutes while their bid climbs, so a buy sends
+/// this much on top of the quote and the engine charges its price at that moment, refunding the rest (the quote itself
+/// allows up to this much over what the page showed). The Worker's matches.
+export const CC_ROOM_BPS = 500n;
+/// A quote's $CC pile Credits as the Sweeper takes them (each with its most to pay), and the room that adds.
+export function ccPicks(q: Quote) {
+  const pile = (q.cc ?? []).map((f) => ({ tokenId: BigInt(f.id), maxPrice: BigInt(f.price) + (BigInt(f.price) * CC_ROOM_BPS) / 10_000n }));
+  return { pile, room: pile.reduce((a, x, i) => a + x.maxPrice - BigInt(q.cc![i].price), 0n) };
+}
 
 /// The most one buy takes, on every Buy (the worker's quote allows as many).
 export const MAX_SWEEP = 32;
@@ -522,6 +533,8 @@ export type Quote = {
   expires?: number | null;
   fwa?: { listingId: string; id: string; price: string }[];
   strategy?: { id: string; price: string }[];
+  /// The $CC engine's pile: each at its price now; the buy sends CC_ROOM_BPS of room on top (refunded).
+  cc?: { id: string; price: string }[];
   error?: string;
   sold?: string[];
 };
@@ -549,7 +562,7 @@ export function checkQuote(q: Quote) {
     if (!/^\d+$/.test(f.listingId) || !/^\d+$/.test(f.id) || !/^\d+$/.test(f.price)) throw new Error('Bad quote.');
     sum += BigInt(f.price);
   }
-  for (const f of q.strategy ?? []) {
+  for (const f of [...(q.strategy ?? []), ...(q.cc ?? [])]) {
     if (!/^\d+$/.test(f.id) || !/^\d+$/.test(f.price)) throw new Error('Bad quote.');
     sum += BigInt(f.price);
   }
@@ -622,7 +635,7 @@ export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement, on
     }
     if (!r.ok || q.error) throw new Error(q.error ?? 'No price right now.');
     checkQuote(q);
-    const have = new Set([...q.ids, ...(q.fwa ?? []).map((f) => f.id), ...(q.strategy ?? []).map((f) => f.id)]);
+    const have = new Set([...q.ids, ...(q.fwa ?? []).map((f) => f.id), ...(q.strategy ?? []).map((f) => f.id), ...(q.cc ?? []).map((f) => f.id)]);
     const sold = picked.map((l) => l.id).filter((id) => !have.has(id));
     if (sold.length) rememberBought(sold);
     if (sold.length && !whole) gone?.(sold); // the rest still go
@@ -632,26 +645,20 @@ export async function sweepToWallet(picked: Listed[], btn: HTMLButtonElement, on
         throw new Error(`${sold.map((id) => `#${id}`).join(', ')} just sold. The picture picked another for ${sold.length === 1 ? 'its slot' : 'their slots'}: check and buy again.`);
       }
     }
-    const total = BigInt(q.total);
+    const { pile, room } = ccPicks(q);
+    const total = BigInt(q.total) + room;
     const [value, feeBps] = (await Promise.all([
       pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'quote', args: [total] }),
       pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'feeBps' }),
     ])) as [bigint, bigint];
     btn.textContent = 'Confirm in wallet';
+    const fwa = (q.fwa ?? []).map((f) => ({ listingId: BigInt(f.listingId), price: BigInt(f.price) }));
+    const strategy = (q.strategy ?? []).map((f) => ({ tokenId: BigInt(f.id), price: BigInt(f.price) }));
+    const least = whole ? BigInt(picked.length) : 1n;
     const receipt = await send(
-      {
-        address: config.sweeper!,
-        abi: sweeperAbi,
-        functionName: 'buy',
-        args: [
-          q.orders,
-          (q.fwa ?? []).map((f) => ({ listingId: BigInt(f.listingId), price: BigInt(f.price) })),
-          (q.strategy ?? []).map((f) => ({ tokenId: BigInt(f.id), price: BigInt(f.price) })),
-          whole ? BigInt(picked.length) : 1n,
-          feeBps,
-        ],
-        value,
-      },
+      pile.length
+        ? { address: config.sweeper!, abi: sweeperAbi, functionName: 'buyEvery', args: [q.orders, fwa, strategy, pile, least, feeBps], value }
+        : { address: config.sweeper!, abi: sweeperAbi, functionName: 'buy', args: [q.orders, fwa, strategy, least, feeBps], value },
       () => {
         btn.classList.add('busy');
         btn.textContent = 'Buying';

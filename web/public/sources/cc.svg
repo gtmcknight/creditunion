@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <g style="isolation:isolate">
+    <rect x="6" y="6" width="58" height="58" fill="#00a3e0" style="mix-blend-mode:multiply"/>
+    <rect x="36" y="6" width="58" height="58" fill="#e5007e" style="mix-blend-mode:multiply"/>
+    <rect x="36" y="36" width="58" height="58" fill="#ffd400" style="mix-blend-mode:multiply"/>
+  </g>
+</svg>

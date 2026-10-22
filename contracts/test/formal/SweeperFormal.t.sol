@@ -8,6 +8,7 @@ import {FormalSeaport} from "./FormalSeaport.sol";
 import {MockFWAMarket} from "../SweeperFWA.t.sol";
 import {Batch} from "../../src/Batch.sol";
 import {Sweeper} from "../../src/Sweeper.sol";
+import {ICCController, ICCCore} from "../../src/interfaces/ICCController.sol";
 import {ICreditStrategy} from "../../src/interfaces/ICreditStrategy.sol";
 import {IFWAMarket} from "../../src/interfaces/IFWAMarket.sol";
 import {
@@ -53,7 +54,7 @@ contract SweeperFormal is FormalBase {
         seaport = new FormalSeaport();
         fwa = new MockFWAMarket();
         strategy = new FormalStrategy(address(credits));
-        sweeper = new Sweeper(ISeaport(address(seaport)), factory, FEE_BPS, IFWAMarket(address(fwa)), ICreditStrategy(address(strategy)));
+        sweeper = new Sweeper(ISeaport(address(seaport)), factory, FEE_BPS, IFWAMarket(address(fwa)), ICreditStrategy(address(strategy)), ICCCore(address(0)));
         buyer = address(new Wallet());
         seller = address(new Wallet());
         fwaSeller = address(new Wallet());
@@ -237,7 +238,7 @@ contract SweeperFormal is FormalBase {
     /// The Sweeper can't be pointed at a strategy that trades some other collection.
     function check_constructorRejectsOtherStrategy(address collection) public {
         FormalStrategy other = new FormalStrategy(collection);
-        try new Sweeper(ISeaport(address(seaport)), factory, FEE_BPS, IFWAMarket(address(fwa)), ICreditStrategy(address(other))) {
+        try new Sweeper(ISeaport(address(seaport)), factory, FEE_BPS, IFWAMarket(address(fwa)), ICreditStrategy(address(other)), ICCCore(address(0))) {
             assert(collection == address(credits));
         } catch {}
     }

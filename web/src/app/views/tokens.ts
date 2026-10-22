@@ -14,7 +14,7 @@ import { balanceSvg, PURE, type Palette } from '../balance-art';
 import { canBatch, config, pub, send, sendBatch, session } from '../chain';
 import { bin } from '../bins';
 import { getBatch, myCredits, shareOf, STATES, tokenIndex, type Payout, type Summary } from '../data';
-import { checkQuote, listedById, type Quote } from '../forsale';
+import { CC_ROOM_BPS, ccPicks, checkQuote, listedById, type Quote } from '../forsale';
 import { buyListed, listings, type ForSale } from './statements';
 import { priceChart, usdPrice } from './price-chart';
 import { registerDeposits } from '../ghosts';
@@ -1432,7 +1432,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     for (let round = 0; round < 6; round++) {
       const buy = pick();
       if (!buy.length) break;
-      const offers = await listedById(buy.map((x) => x.id), true);
+      // The $CC pile's Credits aren't listed anywhere: they go to the quote as picked, and the Worker prices them now.
+      const pile = buy.filter((x) => x.source === 'cc');
+      const offers = [...(await listedById(buy.filter((x) => x.source !== 'cc').map((x) => x.id), true)), ...pile.map((x) => ({ id: x.id, price: x.price, source: 'cc' as const }))];
       const alive = new Set(offers.map((o) => o.id));
       const gone = buy.filter((x) => !alive.has(x.id)).map((x) => x.id);
       if (gone.length) {
@@ -1465,27 +1467,37 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     // A re-pick after a sold listing can come out longer: never more than the batch has room for.
     const { buy, q } = await quoteLive(into ? () => pick().slice(0, room) : pick, into);
     checkQuote(q);
-    // Never more than the page showed: a Credit relisted higher stops the buy.
-    if (BigInt(q.total) > buy.reduce((a, x) => a + BigInt(x.price), 0n)) throw new Error('Prices moved since this page loaded. Reload, then try again.');
+    // Never more than the page showed: a Credit relisted higher stops the buy. The $CC pile's prices move block to
+    // block, so theirs may come back up to CC_ROOM_BPS higher (the room the buy sends; the engine charges its price then).
+    const shown = buy.reduce((a, x) => a + BigInt(x.price) + (x.source === 'cc' ? (BigInt(x.price) * CC_ROOM_BPS) / 10_000n : 0n), 0n);
+    if (BigInt(q.total) > shown) throw new Error('Prices moved since this page loaded. Reload, then try again.');
+    const { pile, room: room2 } = ccPicks(q);
     const sweeper = config.tokenSweeper!;
     const [value, fee] = (await Promise.all([
-      pub.readContract({ address: sweeper, abi: sweeperAbi, functionName: 'quote', args: [BigInt(q.total)] }),
+      pub.readContract({ address: sweeper, abi: sweeperAbi, functionName: 'quote', args: [BigInt(q.total) + room2] }),
       pub.readContract({ address: sweeper, abi: sweeperAbi, functionName: 'feeBps' }),
     ])) as [bigint, bigint];
     const fwa = (q.fwa ?? []).map((f) => ({ listingId: BigInt(f.listingId), price: BigInt(f.price) }));
     const strategy = (q.strategy ?? []).map((f) => ({ tokenId: BigInt(f.id), price: BigInt(f.price) }));
-    const ids = [...q.ids, ...(q.fwa ?? []).map((f) => f.id), ...(q.strategy ?? []).map((f) => f.id)];
+    const ids = [...q.ids, ...(q.fwa ?? []).map((f) => f.id), ...(q.strategy ?? []).map((f) => f.id), ...(q.cc ?? []).map((f) => f.id)];
     if (ids.length < buy.length) toast(`${buy.length - ids.length} sold before you got to them.`, 'info', 8000);
     if (into) {
       await send(
-        fwa.length || strategy.length
-          ? { address: sweeper, abi: sweeperAbi, functionName: 'sweepAll', args: [into, q.orders, fwa, strategy, 1n, fee], value }
-          : { address: sweeper, abi: sweeperAbi, functionName: 'sweep', args: [into, q.orders, 1n, fee], value },
+        pile.length
+          ? { address: sweeper, abi: sweeperAbi, functionName: 'sweepEvery', args: [into, q.orders, fwa, strategy, pile, 1n, fee], value }
+          : fwa.length || strategy.length
+            ? { address: sweeper, abi: sweeperAbi, functionName: 'sweepAll', args: [into, q.orders, fwa, strategy, 1n, fee], value }
+            : { address: sweeper, abi: sweeperAbi, functionName: 'sweep', args: [into, q.orders, 1n, fee], value },
         note,
       );
       return value;
     }
-    const receipt = await send({ address: sweeper, abi: sweeperAbi, functionName: 'buy', args: [q.orders, fwa, strategy, 1n, fee], value }, note);
+    const receipt = await send(
+      pile.length
+        ? { address: sweeper, abi: sweeperAbi, functionName: 'buyEvery', args: [q.orders, fwa, strategy, pile, 1n, fee], value }
+        : { address: sweeper, abi: sweeperAbi, functionName: 'buy', args: [q.orders, fwa, strategy, 1n, fee], value },
+      note,
+    );
     // What actually arrived (a sold listing is skipped), from the Credits transfers to this wallet.
     const me = account!.toLowerCase();
     const arrived = receipt.logs

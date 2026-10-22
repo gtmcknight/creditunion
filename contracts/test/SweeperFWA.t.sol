@@ -6,6 +6,7 @@ import {ratingsOf} from "../script/RatingsOf.sol";
 import {Batch, IRatings} from "../src/Batch.sol";
 import {BatchFactory} from "../src/BatchFactory.sol";
 import {Sweeper} from "../src/Sweeper.sol";
+import {ICCController, ICCCore} from "../src/interfaces/ICCController.sol";
 import {ICreditStrategy} from "../src/interfaces/ICreditStrategy.sol";
 import {IFWAMarket} from "../src/interfaces/IFWAMarket.sol";
 import {ICredits} from "../src/interfaces/ICredits.sol";
@@ -91,7 +92,7 @@ contract SweeperFWATest is Test {
         );
         market = new MockFWAMarket();
         seaport = new MockSeaport(credits);
-        sweeper = new Sweeper(ISeaport(address(seaport)), factory, 100, IFWAMarket(address(market)), ICreditStrategy(address(0)));
+        sweeper = new Sweeper(ISeaport(address(seaport)), factory, 100, IFWAMarket(address(market)), ICreditStrategy(address(0)), ICCCore(address(0)));
         credits.mint(alice, 10); // 1..10
         credits.mint(bob, 20); // 11..30
         other.mint(bob, 1);
@@ -286,7 +287,7 @@ contract SweeperFWATest is Test {
     }
 
     function test_NoMarketConfiguredReverts() public {
-        Sweeper plain = new Sweeper(ISeaport(address(seaport)), factory, 100, IFWAMarket(address(0)), ICreditStrategy(address(0)));
+        Sweeper plain = new Sweeper(ISeaport(address(seaport)), factory, 100, IFWAMarket(address(0)), ICreditStrategy(address(0)), ICCCore(address(0)));
         Sweeper.FWAListing[] memory fwa = new Sweeper.FWAListing[](1);
         fwa[0] = _fwa(1, 1 ether);
         vm.prank(carol);
