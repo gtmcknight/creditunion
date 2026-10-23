@@ -10237,7 +10237,9 @@ dialog.how .how-tile img.st { height: 84%; }
 .tk-short a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .tk-picks .tk-usd { grid-column: 1; }
 /* The ways in, one line each, so two fit the lines' height. */
-.tk-way { padding: 8px 12px; }
+.tk-way { padding: 8px 16px; } /* text on the panels' 16px line */
+.tk-form .tk-lines > p { padding-inline: 16px; }
+.tk-form .tk-lines > p:has(.tk-ways) { padding-inline: 0; }
 .tk-way .muted { flex-basis: auto; }
 .tk-way > span:first-child { flex-wrap: nowrap; overflow: hidden; }
 .tk-way .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -10289,6 +10291,8 @@ dialog.how .how-tile img.st { height: 84%; }
 @media (max-width: 760px) { .home-hero .wall-frame { height: 190px; } .home-hero .hero-text h1 { font-size: min(7.4vw, 30px); } }
 .tk-steps { font-size: 17px; }
 .tk-ways.idle .tk-way { cursor: default; }
+div.tk-way { cursor: default; }
+.tk-way b { white-space: nowrap; flex: none; } /* the way's name stays one line; what it does gives way */
 .tk-ways.idle .tk-way b, .tk-ways.idle .tk-way .num { color: var(--muted); font-weight: 500; }
 .tk-ways.idle .tk-way:hover { box-shadow: inset 0 0 0 1px var(--line-strong); }
 /* The homepage's box has no ways to choose between, so its lines need only room for two. */
