@@ -1349,7 +1349,17 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   /// Art for ETH or BALANCE: the ETH it comes to (BALANCE sold on Uniswap first, counted at the least that sale can
   /// bring), then the Credits with the most rating for it (the cheapest per point first, the Sweeper's fee in), or the
   /// Statement it covers with the most rating per ETH.
-  let artPlan: { cred: Listing[]; st: ForSale | null; amt: bigint; eth: bigint } | null = null;
+  let artPlan: { cred: Listing[]; sts: ForSale[]; amt: bigint; eth: bigint } | null = null;
+  /// The Statements `eth` buys: the most rating per ETH first while each fits, up to what one Seaport call fills.
+  const stmtsFor = (eth: bigint) => {
+    const out: ForSale[] = [];
+    let spent = 0n;
+    for (const y of [...stmts].sort((a, b) => b.rating! / Number(BigInt(b.price)) - a.rating! / Number(BigInt(a.price)))) {
+      if (out.length >= 10) break;
+      if (spent + BigInt(y.price) <= eth) out.push(y), (spent += BigInt(y.price));
+    }
+    return { sts: out, spent };
+  };
   /// The Credits `eth` buys to the wallet: the cheapest per point first while each fits, the Sweeper's fee in.
   const credFor = (eth: bigint) => {
     const cost = (x: Listing) => BigInt(x.price) + (BigInt(x.price) * artFee) / 10_000n;
@@ -1410,18 +1420,18 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     }
     setText('amt-usd', dollars(Number(formatEther(eth))));
     let { cred, spent } = to === 'credit' ? credFor(eth) : { cred: [] as Listing[], spent: 0n };
-    const s = to === 'statement' ? stmtFor(eth) : null;
-    if (s) spent = BigInt(s.price);
-    const n = to === 'credit' ? cred.length : s ? 1 : 0;
-    const tenths = to === 'credit' ? cred.reduce((a, x) => a + x.tenths, 0) : (s?.rating ?? 0) * 10;
-    if (n) artPlan = { cred, st: s, amt, eth };
+    const { sts } = to === 'statement' ? stmtsFor(eth) : { sts: [] as ForSale[] };
+    if (to === 'statement') spent = sts.reduce((a, y) => a + BigInt(y.price), 0n);
+    const n = to === 'credit' ? cred.length : sts.length;
+    const tenths = to === 'credit' ? cred.reduce((a, x) => a + x.tenths, 0) : sts.reduce((a, y) => a + y.rating!, 0) * 10;
+    if (n) artPlan = { cred, sts, amt, eth };
     // You get: the Credits fanned with how many, or the Statement with its number.
     setText(
       'art-get',
       to === 'credit'
         ? `${cred.length ? `<span class="tk-stack">${cred.slice(0, 5).map((x) => `<img src="${art(BigInt(x.id))}" alt="">`).join('')}</span>` : ''}<span class="num tk-out">${cred.length}</span>`
-        : s
-          ? `<span class="tk-stack"><img class="st" src="/statement/${s.id}.svg" alt=""></span><span class="num tk-out">#${s.id}</span>`
+        : sts.length
+          ? `<span class="tk-stack">${sts.slice(0, 5).map((y) => `<img class="st" src="/statement/${y.id}.svg" alt="">`).join('')}</span><span class="num tk-out">${sts.length === 1 ? `#${sts[0].id}` : sts.length}</span>`
           : '<span class="num tk-out">0</span>',
     );
     setText('route', n ? `Rated ${whole(tenths / 10)} · converts to ${whole(tenths / 10)} ${TOKEN}` : '');
@@ -1439,7 +1449,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
           ? `Sells on Uniswap for at least ${ethNum(eth, 3)} ETH, then buys on OpenSea. Two confirmations · Fees included.`
           : to === 'credit'
             ? `From OpenSea, most rating per ETH first · Fees included${rest}`
-            : `From OpenSea at ${ethNum(spent, 3)} ETH${rest}`,
+            : `From OpenSea, most rating per ETH first · ${ethNum(spent, 3)} ETH${rest}`,
     );
     const short = selling ? !!account && amt > tokenHeld : ethHeld !== null && amt > ethHeld;
     const loading = market === 'loading' && to === 'credit';
@@ -1454,7 +1464,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
             : n
               ? to === 'credit'
                 ? `Get ${plural(n)}`
-                : `Get Statement #${s!.id}`
+                : sts.length === 1
+                  ? `Get Statement #${sts[0].id}`
+                  : `Get ${sts.length} Statements`
               : selling && !eth
                 ? 'No price right now'
                 : `Not enough for a ${to === 'credit' ? 'Credit' : 'Statement'}`,
@@ -1797,11 +1809,21 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
               else for (const c of calls) await send(c, note);
             }
             const after = selling ? ` Your ${TOKEN} sold; the ETH is in your wallet.` : '';
-            if (p.st) {
-              let ok = false;
-              await buyListed(go, p.st, () => (ok = true), true);
-              if (!ok) throw new Error(`Statement #${p.st.id} didn’t go through.${after}`);
-              stmts = stmts.filter((y) => y.id !== p.st!.id);
+            if (p.sts.length) {
+              // Every pick in one Seaport call: a listing that sold first is skipped and its ETH comes back.
+              const r = await fetch('/market/statements/buy-many', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ listings: p.sts.map((y) => ({ hash: y.hash, protocol: y.protocol })), buyer: account }) });
+              const tx = (await r.json()) as { to?: Address; data?: `0x${string}`; value?: string; error?: string };
+              if (!r.ok || !tx.to || !tx.data || !tx.value) throw new Error(`${tx.error ?? 'Those Statements can’t be bought right now.'}${after}`);
+              await pub.call({ account: account!, to: tx.to, data: tx.data, value: BigInt(tx.value) });
+              const hash = await session.wallet!.sendTransaction({ account: account!, chain: session.wallet!.chain, to: tx.to, data: tx.data, value: BigInt(tx.value) });
+              note();
+              const receipt = await pub.waitForTransactionReceipt({ hash });
+              if (receipt.status !== 'success') throw new Error(`The purchase reverted.${after}`);
+              const me = account!.toLowerCase(), st = (config.statements ?? '').toLowerCase();
+              const got = receipt.logs.filter((l) => l.address.toLowerCase() === st && l.topics.length === 4 && `0x${l.topics[2]!.slice(26)}` === me).map((l) => String(BigInt(l.topics[3]!)));
+              stmts = stmts.filter((y) => !got.includes(y.id));
+              if (!got.length) throw new Error(`Those Statements sold before you got to them.${after}`);
+              toast(got.length === 1 ? `Statement #${got[0]} is yours.` : `${got.length} Statements are yours.`, 'ok', 8000);
               return;
             }
             // The book's rows name a Credit and its price; a buy needs each one's live order (and drops any gone since).
@@ -1812,7 +1834,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
             const got = await sweepToWallet(offers, go, note, undefined, drop);
             if (!got?.length) throw new Error(`The Credits didn’t go through.${after}`);
           },
-          p.st ? `Statement #${p.st.id} is yours.` : '',
+          '',
         );
       }
       if (v === 'sell')

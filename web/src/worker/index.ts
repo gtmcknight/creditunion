@@ -26,7 +26,7 @@ import type { Row } from './market';
 import { cacheStore, confirmListing, marketListings, type FwaListing } from './fwa';
 import { confirmStrategy, strategyAbi, strategyListings } from './strategy';
 import { inks, ratings, loadTable } from './ratings';
-import { buyStatement, statementsForSale } from './statements-market';
+import { buyStatement, buyStatements, MAX_STATEMENTS, statementsForSale } from './statements-market';
 import { livesOf, overprintsOf } from './statement-history';
 import { load, loadScores, match, predicate, type Rules } from './match';
 import { cardFor, creditCard, creditsCard, partyCard, rangeCard, ruleLine, timeCard, traitCard, withCard, type Filter } from './og';
@@ -139,6 +139,9 @@ const SUPPLY = 122_154;
 const inSupply = (id: number) => Number.isInteger(id) && id >= 1 && id <= SUPPLY;
 
 /// The site's home. The old domains (OLD_HOSTS) redirect here.
+/// Seaport 1.6: on a local fork only, /rpc serves its eth_call too, so a Statement buy's pre-check runs there (on the
+/// live site that read falls back to the wallet).
+const SEAPORT_ADDR = '0x0000000000000068F116a894984e2DB1123eB395';
 const OLD_HOSTS = new Set(['creditunion.party', 'eighty.fun', 'www.eighty.fun', 'eighty.rhps.fun']);
 const SITE_HOST = 'creditunion.fun';
 const rpcUrl = (env: Env) => env.RPC_URL || env.FALLBACK_RPC;
@@ -1329,6 +1332,22 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       const res = Response.json({ items, at: Date.now() }, { headers: { 'cache-control': 'public, max-age=60' } });
       ctx.waitUntil(caches.default.put(key, res.clone()));
       return res;
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502 });
+    }
+  }
+  // Buying several Statements in one transaction (the swap box): each listing's signed order for this buyer, filled
+  // together through Seaport's fulfillAvailableAdvancedOrders. One OpenSea call per listing, so it counts like a quote.
+  if (url.pathname === '/market/statements/buy-many') {
+    if (req.method !== 'POST' || !sameSite(req)) return text('forbidden', 403);
+    if (!env.OPENSEA_API_KEY) return text('OpenSea is not configured', 501);
+    if (await limited(env.RL_QUOTE, req)) return text('slow down', 429);
+    try {
+      const b = JSON.parse((await readBody(req, 8_000)) ?? '') as { listings?: { hash?: unknown; protocol?: unknown }[]; buyer?: unknown };
+      const buyer = /^0x[0-9a-fA-F]{40}$/.test(String(b.buyer ?? '')) ? (String(b.buyer) as Address) : null;
+      const picks = (Array.isArray(b.listings) ? b.listings : []).map((l) => ({ hash: String(l.hash ?? ''), protocol: String(l.protocol ?? '') }));
+      if (!buyer || !picks.length || picks.length > MAX_STATEMENTS || picks.some((p) => !/^0x[0-9a-fA-F]{64}$/.test(p.hash) || !/^0x[0-9a-fA-F]{40}$/.test(p.protocol))) return text('bad request', 400);
+      return Response.json(await buyStatements(env.OPENSEA_API_KEY, picks, buyer), { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502 });
     }
@@ -3129,7 +3148,7 @@ async function rpc(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
   // The token the adapter converts into is readable as soon as the adapter is named (balances, its launch gate), not
   // only once BALANCE_TOKEN is set.
   const adapterToken = await tokenOf(env, ctx);
-  const allowed = new Set([env.CREDITS, addrOrNull(env.STATEMENTS), env.FACTORY, env.SWEEPER, addrOrNull(env.FORMATS), addrOrNull(env.TOKEN_FACTORY), addrOrNull(env.TOKEN_ADAPTER), addrOrNull(env.TOKEN_FORMATS), tokenSweeper(env), adapterToken, addrOrNull(env.CC_CORE), ...swapTargets(env)].map((a) => a?.toLowerCase()).filter(Boolean));
+  const allowed = new Set([env.CREDITS, addrOrNull(env.STATEMENTS), env.FACTORY, env.SWEEPER, addrOrNull(env.FORMATS), addrOrNull(env.TOKEN_FACTORY), addrOrNull(env.TOKEN_ADAPTER), addrOrNull(env.TOKEN_FORMATS), tokenSweeper(env), adapterToken, addrOrNull(env.CC_CORE), ...swapTargets(env), ...(localRpc(env) ? [SEAPORT_ADDR] : [])].map((a) => a?.toLowerCase()).filter(Boolean));
   const clean: { jsonrpc: string; id: unknown; method: string; params: unknown[] }[] = [];
   // Targets outside `allowed`, by the call that first names each. They are checked together below (Credits' art
   // contract once, each batch address once, in parallel), not one call at a time.
