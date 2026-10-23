@@ -1724,14 +1724,16 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     if (from !== 'eth' || to !== (atHome ? 'credit' : 'balance')) p.set('from', from), p.set('to', to);
     return `${atHome ? '/' : '/balance'}${p.size ? `?${p}` : ''}`;
   };
-  /// To another pair: the sides change, and what was typed or picked for the last one goes.
+  /// To another pair: the sides change. What was typed or picked stays while what you pay with does (only what you
+  /// get changed); a new thing to pay with starts fresh.
   function goPair(a: Asset, b: Asset) {
     if (a === b) return;
-    if (viewNow() === 'credits') picks.clear();
+    const same = a === from;
+    if (viewNow() === 'credits' && !same) picks.clear();
     setPair(a, b);
     history.replaceState(history.state, '', pageUrl());
     if (from !== 'statement') then = null;
-    typed = a === 'eth' && b !== 'statement' ? '0.1' : '';
+    if (!same || (a !== 'eth' && a !== 'balance')) typed = a === 'eth' && b !== 'statement' ? '0.1' : '';
     chosen = null;
     if (view === 'credits' && lane().ink >= 0) for (const id of ownedHere()) picks.add(id.toString());
     draw();
