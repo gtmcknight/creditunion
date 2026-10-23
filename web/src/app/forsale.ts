@@ -611,6 +611,38 @@ export async function listedById(ids: string[], strict = false): Promise<Listed[
   return ids.flatMap((id) => found.get(id) ?? []);
 }
 
+/// One buy of exactly these Credits to the wallet, as a call for a chain of steps (sell then buy, buy then sell):
+/// a fresh price for them, all or none (a listing that sold since fails the quote here, or the call on chain), the
+/// fee read now. `budget`: the most ETH it may spend, when the ETH comes from an earlier step in the same chain.
+/// `some`: Credits the page picked by price, not the person: whichever are still for sale, at least one.
+export async function sweepCallFor(picked: Listed[], budget?: bigint, some = false) {
+  const r = await fetch('/opensea/buyquote', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ listings: picked }) });
+  const q = (await r.json()) as Quote;
+  if (q.sold?.length) rememberBought(q.sold);
+  if (q.sold?.length && !some) {
+    throw Object.assign(new Error(`${q.sold.length === 1 ? `#${Number(q.sold[0]).toLocaleString('en-US')}` : `${q.sold.length} of them`} just sold. Pick again.`), { sold: q.sold });
+  }
+  if (!r.ok || q.error) throw new Error(q.error ?? 'No price right now.');
+  checkQuote(q);
+  const ids = [...q.ids, ...(q.fwa ?? []).map((f) => f.id), ...(q.strategy ?? []).map((f) => f.id), ...(q.cc ?? []).map((f) => f.id)];
+  if (!ids.length) throw Object.assign(new Error('Those Credits just sold. Pick again.'), { sold: picked.map((l) => l.id) });
+  if (ids.length < picked.length && !some) throw Object.assign(new Error('Some of those just sold. Pick again.'), { sold: picked.map((l) => l.id).filter((id) => !ids.includes(id)) });
+  const { pile, room } = ccPicks(q);
+  const [value, feeBps] = (await Promise.all([
+    pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'quote', args: [BigInt(q.total) + room] }),
+    pub.readContract({ address: config.sweeper!, abi: sweeperAbi, functionName: 'feeBps' }),
+  ])) as [bigint, bigint];
+  // Against the price itself: the room sent on the $CC pile's Credits comes back unspent.
+  if (budget !== undefined && (BigInt(q.total) * (10_000n + feeBps)) / 10_000n > budget) throw new Error('Prices moved since this was priced. Try again.');
+  const fwa = (q.fwa ?? []).map((f) => ({ listingId: BigInt(f.listingId), price: BigInt(f.price) }));
+  const strategy = (q.strategy ?? []).map((f) => ({ tokenId: BigInt(f.id), price: BigInt(f.price) }));
+  const least = BigInt(some ? 1 : picked.length);
+  const call = pile.length
+    ? ({ address: config.sweeper!, abi: sweeperAbi, functionName: 'buyEvery', args: [q.orders, fwa, strategy, pile, least, feeBps], value } as const)
+    : ({ address: config.sweeper!, abi: sweeperAbi, functionName: 'buy', args: [q.orders, fwa, strategy, least, feeBps], value } as const);
+  return { call, ids, value };
+}
+
 /// Sweep these listings into the connected wallet (Sweeper.buy): a fresh price for exactly them, checked
 /// against what it shows, the fee read now, then one transaction. Credits sold since drop out of the price.
 /// Resolves to the ids bought, or null if nothing was.

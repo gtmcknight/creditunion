@@ -7,14 +7,14 @@
 /// unions (TokenAdapter): at 80 a batch converts in its own pocket and pays its members by the rating each put in.
 /// Before the adapter is active nothing locks: anyone can withdraw. Converting and paying out is the keeper's job
 /// (scripts/convert-tokens.mjs); Claim is the fallback.
-import { erc20Abi, formatEther, formatUnits, parseEther, parseUnits, zeroAddress, type Address } from 'viem';
+import { erc20Abi, formatEther, formatUnits, parseEther, parseUnits, zeroAddress, type Address, type Hex } from 'viem';
 import { parseAbi } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi, sweeperAbi, tokenAdapterAbi } from '../abi';
 import { balanceSvg, PURE, type Palette } from '../balance-art';
-import { canBatch, config, pub, send, sendBatch, session } from '../chain';
+import { canBatch, config, pub, send, sendBatch, sendSteps, session, type Call as TxCall } from '../chain';
 import { bin } from '../bins';
 import { getBatch, myCredits, shareOf, STATES, tokenIndex, type Payout, type Summary } from '../data';
-import { CC_ROOM_BPS, ccPicks, checkQuote, listedById, MAX_SWEEP, priceTag, SOURCES, sweepFee, sweepToWallet, type Listed, type Quote } from '../forsale';
+import { CC_ROOM_BPS, ccPicks, checkQuote, listedById, MAX_SWEEP, priceTag, rememberBought, SOURCES, sweepCallFor, sweepFee, sweepToWallet, type Listed, type Quote } from '../forsale';
 import { buyListed, listings, type ForSale } from './statements';
 import { priceChart, usdPrice } from './price-chart';
 import { editionArt, registerDeposits } from '../ghosts';
@@ -552,7 +552,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   /// The left side: the batch's sheet, unless the way in is Uniswap (or you're selling).
   const viaSheet = () => {
     const v = viewNow();
-    return (v === 'credits' || v === 'out' || v === 'buy') && !(v === 'buy' && (wayNow() === 'pool' || wayNow() === 'statement')) && !(v === 'credits' && convertNow());
+    return (v === 'credits' || v === 'out' || v === 'buy') && !(v === 'buy' && (wayNow() === 'pool' || wayNow() === 'statement' || !!buyNow())) && !(v === 'credits' && convertNow());
   };
   const lands = () => `Lands when the batch fills${isOpen ? '' : ' and trading opens'}`;
 
@@ -703,8 +703,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   }
   /// A side's picker, where its panel names its unit: its mark and name, and a menu of the others. From's menu says what
   /// you hold of each; To's how it gets there, and once it's open, what the amount typed comes to.
-  const pickChip = (k: 'from' | 'to') => {
-    const a = k === 'from' ? from : to;
+  const pickChip = (k: 'from' | 'to', shown?: Asset) => {
+    const a = shown ?? (k === 'from' ? from : to);
     // On /balance the unit is just named: ETH's diamond, BALANCE a tap on its name for what it is.
     if (!atHome)
       return a === 'balance'
@@ -724,9 +724,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   const creditIcon = [...owned].sort((x, y) => t(y) - t(x))[0] ?? BigInt(inks.findIndex((x) => x === 1) + 1);
   const assetIcon = (a: Asset) =>
     a === 'credit'
-      ? `<span class="tk-aicon"><img src="${art(creditIcon)}" alt=""></span>`
+      ? `<span class="tk-aicon sq"><img src="${art(creditIcon)}" alt=""></span>`
       : a === 'statement'
-        ? `<span class="tk-aicon"><img class="st" src="/statement/${myStmts[0]?.id ?? 1}.svg" alt=""></span>`
+        ? `<span class="tk-aicon tall"><img class="st" src="/statement/${myStmts[0]?.id ?? 1}.svg" alt=""></span>`
         : a === 'balance'
           ? `<span class="tk-aicon tk-inks">${INK.map((c) => `<i style="background:${c}"></i>`).join('')}</span>`
           : `<span class="tk-aicon tk-ethi">${ETH_ICON}</span>`;
@@ -855,7 +855,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   /// Your Statements as a row to pick from (all that redeem now, picked), what they come to, and one button that
   /// redeems them through Jack's contract.
   function redeemHtml() {
-    const next = then ? ` Then swap the ${TOKEN} into ${assetName(then)}.` : '';
+    // On the way to ETH or Credits, the box shows where it ends: the ETH, or the Credits, with the BALANCE between said under it.
+    const end = chainOn() ? then! : undefined;
+    const next = end ? '' : then ? ` Then swap the ${TOKEN} into ${assetName(then)}.` : '';
     const pick = (x: (typeof myStmts)[number]) =>
       `<button type="button" class="pick st${x.ready ? '' : ' off'}" data-sid="${x.id}" aria-pressed="${sPicks.has(String(x.id))}" aria-label="Statement #${x.id}" title="Statement #${x.id} · rated ${x.rating.toLocaleString('en-US')}${x.ready ? '' : ' · not yet'}"${x.ready ? '' : ' disabled'}><img src="/statement/${x.id}.svg" alt="" loading="lazy"></button>`;
     return `
@@ -872,8 +874,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
           ${flipHtml()}
           <div class="tk-gethead"><h2 class="form-title">You get</h2></div>
           <section class="rule">
-            <div class="tk-get tk-panel"><span class="num tk-out" id="s-get">0</span>${pickChip('to')}<span class="tk-usd">One per rating point, at once</span></div>
-            <div class="tk-lines term-desc"><p>${account && !myStmts.length ? `<button type="button" class="link" data-pair="eth:statement">Buy one with ETH</button>` : `Through Jack’s contract · No fee.${next}`}</p></div>
+            <div class="tk-get tk-panel"><span class="num tk-out" id="s-get">0</span>${pickChip('to', end)}<span class="tk-usd" id="s-how">${end ? '' : 'One per rating point, at once'}</span></div>
+            <div class="tk-lines term-desc"><p>${account && !myStmts.length ? `<button type="button" class="link" data-pair="eth:statement">Buy one with ETH</button>` : end ? `Redeems through Jack’s contract, then sells on Uniswap${end === 'credit' ? ' and buys on OpenSea' : ''} · Fees included.` : `Through Jack’s contract · No fee.${next}`}</p></div>
           </section>
           <div class="submit">${goHtml('Pick Statements')}${sureHtml()}</div>`;
   }
@@ -947,6 +949,19 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const amount = (BigInt(tenths) * 10n ** 17n * BigInt(10_000 - b.s.protocolFeeBps - b.s.creatorFeeBps)) / 10_000n;
     return amount > 0n && amount <= iv.stock ? { vault: v, batch: b.s.address, ids, amount } : null;
   };
+  /// The most of `ids` the vault can pay for now: the highest rated first, while its $BALANCE and the batch's room last.
+  const ivTake = (ids: bigint[]) => {
+    const b = curOf(lane());
+    if (!b || iv.stock === null) return null;
+    const keep = BigInt(10_000 - b.s.protocolFeeBps - b.s.creatorFeeBps), room = 80 - b.s.count;
+    const take: bigint[] = [];
+    let amount = 0n;
+    for (const id of [...ids].sort((x, y) => t(y) - t(x))) {
+      const a = (BigInt(t(id)) * 10n ** 17n * keep) / 10_000n;
+      if (take.length < room && amount + a <= iv.stock) take.push(id), (amount += a);
+    }
+    return ivFor(take);
+  };
   /// A sale to the vault, as calls: its leave to take your Credits (once), then the sale, paid to you.
   const ivCalls = (x: NonNullable<ReturnType<typeof ivFor>>) => [
     ...(iv.approved ? [] : [{ address: config.credits, abi: creditsAbi, functionName: 'setApprovalForAll', args: [x.vault, true] } as const]),
@@ -960,6 +975,11 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const here = new Set(ownedHere().map(String));
     return !!ivFor([...picks].filter((id) => here.has(id)).map(BigInt));
   };
+  /// A buy through Credits the vault pays for at once: the Credits come to the wallet and go straight to the vault,
+  /// which puts them in the batch and pays their $BALANCE, so nothing waits for it to fill. All of them or none.
+  const buyNow = () => (viewNow() === 'buy' && route === 'batch' && plan && !plan.left ? ivFor(plan.b.out.map((x) => BigInt(x.id))) : null);
+  /// Redeem on the way to ETH or Credits goes all the way in one go: redeem, sell the BALANCE, buy (for Credits).
+  const chainOn = () => (then === 'eth' || then === 'credit') && !!m && !!trade?.open;
   /// The vault is a way to sell only once it holds $BALANCE to pay with.
   const ivLive = () => !!config.instantVault && (iv.stock ?? 0n) > 0n;
   /// The way Credits to ETH goes: the vault then Uniswap, or $CC's bid. Picked by what pays more, until tapped.
@@ -989,8 +1009,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     if (!app.isConnected || viewNow() !== 'sellc') return;
     if (ivFresh && ivLive()) return void draw(); // its route shows once it's known to have $BALANCE
     const { mine, take, eth: ccEth } = ccSale();
-    // The vault's way: what it pays for all of them, sold on Uniswap (a beat after picking stops, priced again per pick).
-    const inst = ivFor(mine);
+    // The vault's way: what it pays for as many as it can, sold on Uniswap (a beat after picking stops, priced again per pick).
+    const inst = ivTake(mine);
     const key = inst ? `${inst.batch}|${inst.amount}` : '';
     if (inst && m && trade?.open && ivEth?.key !== key) {
       const run = ++quoteRun;
@@ -1005,11 +1025,13 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const way = sellWay && (sellWay === 'vault' ? vEth : ccEth) ? sellWay : best;
     const eth = way === 'vault' ? vEth : way === 'cc' ? ccEth : 0n;
     setText('sc-get', eth ? ethNum(eth, 4) : '0');
-    setText('sc-vault', vEth ? `${ethNum(vEth, 4)} ETH` : '—');
-    setText('sc-way', ccEth ? `${ethNum(ccEth, 4)} ETH` : '—');
+    // A way that takes only some of them says how many, so it isn't weighed against all of them blind.
+    const of = (k: number) => (k < mine.length ? `<span class="muted small">${k} of ${mine.length} · </span>` : '');
+    setText('sc-vault', vEth ? `${of(inst!.ids.length)}${ethNum(vEth, 4)} ETH` : mine.length && !inst && iv.stock !== null ? '<span class="muted small">Not enough $BALANCE now</span>' : '—');
+    setText('sc-way', ccEth ? `${of(take.length)}${ethNum(ccEth, 4)} ETH` : '—');
     $$<HTMLElement>('.tk-way[data-sell]', app).forEach((b) => b.setAttribute('aria-checked', String(b.dataset.sell === way && eth > 0n)));
     // What that is per rating point.
-    const tenths = (way === 'vault' ? mine : take).reduce((a, id) => a + t(id), 0);
+    const tenths = (way === 'vault' ? (inst?.ids ?? []) : take).reduce((a, id) => a + t(id), 0);
     const per = (wei: bigint, tn: number) => (tn ? ethNum((wei * 10_000n) / BigInt(tn), 4) : '');
     setText('sc-sub', eth ? [dollars(Number(formatEther(eth))), `${per(eth, tenths)} ETH per 1,000 rating`].filter(Boolean).join(' · ') : '');
     const picked = mine.reduce((a, id) => a + t(id), 0);
@@ -1017,24 +1039,43 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const all = document.getElementById('pick-all');
     if (all) all.textContent = mine.length ? 'Clear' : 'Select all';
     const left = mine.length - take.length;
-    const vaultShort = ivLive() && mine.length > 0 && !inst;
-    setText('fees', way === 'vault' ? 'Paid in $BALANCE now and sold on Uniswap · Two confirmations the first time' : vaultShort && !ccEth ? 'More than Credit Union can pay for right now. Pick fewer, or list them on OpenSea.' : !cc.live || way !== 'cc' ? '' : left > 0 ? `$CC can take ${plural(take.length)} of these now. List the rest on OpenSea.` : '');
-    // With no instant sale at all, the button is the next best thing: listing them on OpenSea.
-    if (!cc.live && !ivLive()) return setGo(account ? 'List on OpenSea' : 'Sell my Credits', true);
+    const vaultShort = ivLive() && mine.length > 0 && (inst?.ids.length ?? 0) < mine.length;
+    const nv = inst?.ids.length ?? 0;
+    setText(
+      'fees',
+      way === 'vault'
+        ? vaultShort ? `Credit Union can pay for ${nv} of these now. List the rest on OpenSea.` : ''
+        : vaultShort && !ccEth ? 'Credit Union can’t pay for these right now. List them on OpenSea.' : !cc.live || way !== 'cc' ? '' : left > 0 ? `$CC can take ${plural(take.length)} of these now. List the rest on OpenSea.` : '',
+    );
+    // With no instant sale for these, the button is the next best thing: listing them on OpenSea.
+    if ((!cc.live && !ivLive()) || (account && mine.length && !inst && !ccEth && (!ivLive() || iv.stock !== null))) return setGo(account ? 'List on OpenSea' : 'Sell my Credits', true);
     const n = way === 'vault' ? mine.length : take.length;
     setGo(!account ? 'Sell my Credits' : n && eth ? `Sell ${plural(n)} · ${ethNum(eth, 4)} ETH` : mine.length ? 'No price right now' : 'Pick Credits', !account || (n > 0 && eth > 0n));
   }
   /// Your Statements picked to redeem (all that redeem now, until you pick).
   const sPicks = new Set<string>();
   let sPicked = false;
+  /// What redeeming `total` comes to at the end of the chain: the ETH it sells for, or the Credits that ETH buys.
+  async function redeemEnd(total: number) {
+    const run = ++quoteRun;
+    const amt = parseUnits(String(total), m!.decimals);
+    const q = total ? await swapQuote(m!, false, amt) : null;
+    if (run !== quoteRun || !app.isConnected || viewNow() !== 'redeem') return;
+    const eth = q?.net ?? 0n;
+    const n = then === 'credit' && eth ? credFor(eth).cred.length : 0;
+    setText('s-get', then === 'credit' ? String(n) : eth ? ethNum(eth, 4) : '0');
+    setText('s-how', total ? `Via ${whole(total)} ${TOKEN}${then === 'credit' && eth ? ` · ${ethNum(eth, 3)} ETH` : ''}` : '');
+  }
   function redeemSync() {
     if (!sPicked) for (const x of myStmts) if (x.ready) sPicks.add(String(x.id));
     const mine = myStmts.filter((x) => x.ready && sPicks.has(String(x.id)));
     const total = mine.reduce((a, x) => a + x.rating, 0);
-    setText('s-get', whole(total));
+    if (!chainOn()) setText('s-get', whole(total));
+    else void redeemEnd(total);
     setText('s-sel', !account || !myStmts.length ? '' : mine.length ? `${mine.length} of ${myStmts.length} picked` : 'Pick the ones to redeem');
     $$<HTMLElement>('#s-picker .pick', app).forEach((p) => p.setAttribute('aria-pressed', String(sPicks.has(p.dataset.sid!))));
-    setGo(!account ? 'Redeem my Statements' : mine.length ? `Redeem ${mine.length === 1 ? `Statement #${mine[0].id}` : `${mine.length} Statements`}` : myStmts.length ? 'Pick Statements' : 'No Statements yet', !account || mine.length > 0);
+    const what = mine.length === 1 ? `Statement #${mine[0].id}` : `${mine.length} Statements`;
+    setGo(!account ? 'Redeem my Statements' : mine.length ? (chainOn() ? `Redeem ${what} for ${then === 'eth' ? 'ETH' : 'Credits'}` : `Redeem ${what}`) : myStmts.length ? 'Pick Statements' : 'No Statements yet', !account || mine.length > 0);
   }
   /// The pairs one box can't do in one go: the way there, and a button to its first step.
   function viaHtml() {
@@ -1048,8 +1089,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
             ? [[['credit', ''], ['balance', 'Convert'], ['eth', 'sell on Uniswap']], 'Or list them on OpenSea.', `<button type="button" class="btn primary block" data-pair="credit:balance">Convert to ${TOKEN}</button>`]
             : [
                 [['statement', ''], ['balance', 'Redeem'], ...(to === 'credit' ? ([['eth', 'sell on Uniswap'], ['credit', 'buy on OpenSea']] as [Asset, string][]) : ([['eth', 'sell on Uniswap']] as [Asset, string][]))],
-                `Redeeming has no fee. Then the ${TOKEN} is typed in for you.`,
-                `<button type="button" class="btn primary block" data-pair="statement:balance" data-then="${to}">Redeem first</button>`,
+                trade?.open ? `Redeeming has no fee. It all goes in one go.` : `Redeeming has no fee. Then the ${TOKEN} is typed in for you.`,
+                `<button type="button" class="btn primary block" data-pair="statement:balance" data-then="${to}">${trade?.open ? `Redeem for ${to === 'eth' ? 'ETH' : 'Credits'}` : 'Redeem first'}</button>`,
               ];
     const held = !account ? '' : from === 'credit' ? owned.length : from === 'statement' ? myStmts.length : from === 'balance' ? tokAmt(tokenHeld) : ethHeld !== null ? ethNum(ethHeld, 3) : '';
     return `
@@ -1220,6 +1261,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   async function buySync() {
     const wei = amountIn();
     const run = ++quoteRun;
+    if (config.instantVault && iv.stock === null) void readIV().then(() => void (viewNow() === 'buy' && app.isConnected && buySync()));
     const b = sweeps && market === 'ready' ? viaBatch(wei, laneKey, capOf(lane())) : null;
     const left = b?.out.length && poolOk() && wei - b.spent >= DUST ? wei - b.spent : 0n;
     let q: bigint | null = null, qLeft: bigint | null = null;
@@ -1245,7 +1287,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const ways = ([['pool', poolN], ['batch', withBatch], ['statement', stN]] as [Route, number][]).filter(([, n]) => n > 0);
     // Compared per ETH spent (a Statement may use only part of the amount); each way that isn't instant pays its edge.
     const spentOn = (r: Route) => Number(formatUnits(r === 'statement' ? BigInt(st!.price) : r === 'batch' ? b!.spent + left : wei, 18)) || 1;
-    const score = ([r, n]: [Route, number]) => n / spentOn(r) / (r === 'batch' ? WAIT_EDGE : r === 'statement' ? BATCH_EDGE : 1);
+    // Through Credits the vault pays for now, nothing waits, so it competes with Uniswap as it is.
+    const instant = !!b && !(leftN > 0) && !!ivFor(b.out.map((x) => BigInt(x.id)));
+    const score = ([r, n]: [Route, number]) => n / spentOn(r) / (r === 'batch' && !instant ? WAIT_EDGE : r === 'statement' ? BATCH_EDGE : 1);
     const best = ways.length ? ways.reduce((a, x) => (score(x) > score(a) ? x : a))[0] : null;
     route = !wei ? null : chosen && ways.some(([r]) => r === chosen) ? chosen : best;
     void batchWins;
@@ -1266,14 +1310,15 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const rate = per ? `${usd ? usdPrice(per * usd) : `${per.toPrecision(3)} ETH`} each` : '';
     setText('amt-usd', dollars(Number(formatUnits(wei, 18))));
     // Two lines: what each one costs, then how it arrives and what we take on that way.
-    setText('tk-gettitle', way === 'batch' || route === 'statement' ? 'You’ll get' : 'You get');
+    const now = buyNow();
+    setText('tk-gettitle', (way === 'batch' && !now) || route === 'statement' ? 'You’ll get' : 'You get');
     // Our fees in one line under the tokens: a buy's (in the ETH it spends) and the conversion's.
     const n = hasBatch ? b!.out.length : 0;
     const tenthsIn = n ? b!.out.reduce((a, x) => a + t(x.id), 0) : 0;
     // Through a batch, one line under the number: what the ETH does, then that our fees are in (a tap says what they come to).
     // Split: the two parts that add up to the number, each with when it arrives, on that one line.
     const fee = feeBps ? buyFeeLine(tenthsIn, b?.spent ?? 0n) : feeLine(tenthsIn);
-    setText('route', route === 'batch' && n ? (split ? `${whole(b!.tokens)} when the batch fills + ${whole(leftN)} now on Uniswap. ${fee}.` : `Buys ${plural(n)} to convert. ${fee}.`) : rate);
+    setText('route', route === 'batch' && n ? (split ? `${whole(b!.tokens)} when the batch fills + ${whole(leftN)} now on Uniswap. ${fee}.` : now ? `Buys ${plural(n)}; Credit Union pays for them now. ${fee}.` : `Buys ${plural(n)} to convert. ${fee}.`) : rate);
     // Fill it: the ETH that buys every open spot, so the batch converts as soon as that lands.
     const open = 80 - (curOf(lane())?.s.count ?? 0);
     // Its budget is the open spots' worth of the cheapest Credits per point, fee in, so it fills at the best value
@@ -1295,7 +1340,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     setText('route2', ''); // a split's Uniswap part is said under the number now
     const label: Record<Route, [string, string]> = {
       pool: ['Uniswap', 'Instant · Fees included'],
-      batch: ['Credits', 'When the batch fills · Fees included'],
+      batch: ['Credits', instant ? 'Now · Fees included' : 'When the batch fills · Fees included'],
       statement: [st ? `Statement #${st.id}` : 'Statement', `On OpenSea · ${trade?.open ? 'redeems at once' : `redeems when ${TOKEN} opens`}`],
     };
     const box = document.getElementById('tk-batch'), home = document.getElementById('tk-batch-home');
@@ -1374,7 +1419,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
                   : 'No price right now',
       !!wei && !short && !!route,
     );
-    setText('tk-sure', route === 'batch' && !split && n > 0 && n < 80 - (curOf(lane())?.s.count ?? 0) ? 'Take your Credits back anytime before the batch fills.' : '');
+    setText('tk-sure', route === 'batch' && !split && !now && n > 0 && n < 80 - (curOf(lane())?.s.count ?? 0) ? 'Take your Credits back anytime before the batch fills.' : '');
     showLeft();
     if (viaSheet()) drawSheet();
     else drawHolding(route === 'pool' ? poolN : 0, pPal);
@@ -1424,6 +1469,23 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
       if (spent + BigInt(y.price) <= eth) out.push(y), (spent += BigInt(y.price));
     }
     return { sts: out, spent };
+  };
+  /// One step of a chain sendSteps sends: a call, or calls built once the step before has landed.
+  type Step = TxCall | (() => Promise<TxCall[]>);
+  /// The button says which confirmation is up when a wallet takes them one at a time.
+  const stepOf = (btn: HTMLElement) => (i: number, n: number) => void (n > 1 && (btn.textContent = `Confirm ${i} of ${n} in your wallet…`));
+  /// Token ids of `contract` that reached this wallet in these receipts.
+  const toMe = (receipts: { logs: { address: string; topics: readonly string[] }[] }[], contract: string) => {
+    const me = account!.toLowerCase(), c = contract.toLowerCase();
+    return receipts.flatMap((r) => r.logs).filter((l) => l.address.toLowerCase() === c && l.topics.length === 4 && `0x${l.topics[2]!.slice(26)}` === me).map((l) => String(BigInt(l.topics[3]!)));
+  };
+  /// Several Statements in one Seaport call, as the Worker builds it for this wallet (a listing sold first is skipped
+  /// and its ETH comes back).
+  const statementsBuy = async (sts: ForSale[]): Promise<TxCall[]> => {
+    const r = await fetch('/market/statements/buy-many', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ listings: sts.map((y) => ({ hash: y.hash, protocol: y.protocol })), buyer: account }) });
+    const tx = (await r.json()) as { to?: Address; data?: Hex; value?: string; error?: string };
+    if (!r.ok || !tx.to || !tx.data || !tx.value) throw new Error(tx.error ?? 'Those Statements can’t be bought right now.');
+    return [{ to: tx.to, data: tx.data, value: BigInt(tx.value) }];
   };
   /// The Credits `eth` buys to the wallet: the cheapest per point first while each fits, the Sweeper's fee in.
   const credFor = (eth: bigint) => {
@@ -1511,7 +1573,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
             ? 'Bought on OpenSea, most rating per ETH first · Fees included.'
             : 'Bought on OpenSea, the most rating per ETH it covers.'
         : selling
-          ? `Sells on Uniswap for at least ${ethNum(eth, 3)} ETH, then buys on OpenSea. Two confirmations · Fees included.`
+          ? `Sells on Uniswap for at least ${ethNum(eth, 3)} ETH, then buys on OpenSea · Fees included.`
           : to === 'credit'
             ? `From OpenSea, most rating per ETH first · Fees included${rest}`
             : `From OpenSea, most rating per ETH first · ${ethNum(spent, 3)} ETH${rest}`,
@@ -1835,9 +1897,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
       const v = viewNow(), l = lane(), wei = amountIn();
       // Sell the picked Credits $CC pays for: let its engine take Credits (once), then one sale at no less than 98% of
       // its bid now (a bid only moves a little between this read and the block).
-      if (v === 'sellc' && !cc.live && !ivLive()) return void document.getElementById('sc-os')?.click();
       const mineSell = [...owned].filter((id) => picks.has(String(id)));
-      const inst = v === 'sellc' ? ivFor(mineSell) : null;
+      const inst = v === 'sellc' ? ivTake(mineSell) : null;
+      if (v === 'sellc' && !inst && !ccSale().take.length) return void document.getElementById('sc-os')?.click();
       const vaultWay = inst && (sellWay === 'vault' || (sellWay !== 'cc' && (ivEth?.eth ?? 0n) >= ccSale().eth));
       if (v === 'sellc' && inst && vaultWay) {
         return run(
@@ -1848,9 +1910,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
             // takes a batch, else each in turn.
             const q = await swapQuote(m!, false, inst.amount);
             if (!q) throw new Error('No price on Uniswap right now. Try again in a moment.');
-            const calls = [...ivCalls(inst), ...(await sellCalls(m!, account!, inst.amount, q.net))];
-            if (await canBatch()) await sendBatch(calls, note);
-            else for (const c of calls) await send(c, note);
+            await sendSteps([...ivCalls(inst), ...(await sellCalls(m!, account!, inst.amount, q.net))], note, stepOf(go));
             inst.ids.forEach((id) => picks.delete(String(id)));
             iv.read = null;
             ivEth = null;
@@ -1890,14 +1950,50 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
           async () => {
             const vault = await vaultOf();
             if (!vault || !config.statements) throw new Error(`${TOKEN} isn't live yet.`);
-            let got = 0n;
-            for (const x of mine) {
-              const q = (await pub.readContract({ address: vault, abi: VAULT_ABI, functionName: 'quote', args: [x.id] })) as bigint;
-              await send({ address: config.statements, abi: ST_ABI, functionName: 'approve', args: [vault, x.id] }, note);
-              await send({ address: vault, abi: VAULT_ABI, functionName: 'withdraw', args: [x.id, q] }, note);
-              myStmts = myStmts.filter((y) => y.id !== x.id);
-              sPicks.delete(String(x.id));
-              got += q;
+            // Every pick's approve and withdraw as one set of steps: one confirmation where the wallet takes a batch.
+            const qs = (await Promise.all(mine.map((x) => pub.readContract({ address: vault, abi: VAULT_ABI, functionName: 'quote', args: [x.id] })))) as bigint[];
+            const steps = mine.flatMap((x, i) => [
+              { address: config.statements!, abi: ST_ABI, functionName: 'approve', args: [vault, x.id] },
+              { address: vault, abi: VAULT_ABI, functionName: 'withdraw', args: [x.id, qs[i]] },
+            ]);
+            const got = qs.reduce((a, q) => a + q, 0n);
+            // Through to ETH or Credits: the sale of what redeems, and the buy, in the same set.
+            const chained = chainOn() ? then : null;
+            const after: Step[] = [];
+            let net = 0n, sold = false;
+            if (chained) {
+              const q = await swapQuote(m!, false, got);
+              if (!q) throw new Error('No price right now. Try again in a moment.');
+              net = q.net;
+              after.push(...(await sellCalls(m!, account!, got, q.net)));
+              if (chained === 'credit') {
+                const { cred } = credFor(net);
+                if (!cred.length) throw new Error('That’s not enough for a Credit. Redeem alone, or pick more Statements.');
+                after.push(async () => {
+                  sold = true;
+                  const pile = cred.filter((x) => x.source === 'cc');
+                  const offers = [...(await listedById(cred.filter((x) => x.source !== 'cc').map((x) => x.id), true)), ...pile.map((x) => ({ id: x.id, price: x.price, source: 'cc' as const }))];
+                  if (!offers.length) throw new Error('Those Credits just sold.');
+                  return [(await sweepCallFor(offers, net, true)).call];
+                });
+              }
+            }
+            const batch = await canBatch();
+            const receipts = await sendSteps([...steps, ...after], note, stepOf(go)).catch((e) => {
+              // One at a time, a buy that fails after the sale leaves the ETH in the wallet: say so.
+              throw new Error(chained === 'credit' && !batch && sold ? `${errText(e)} Your Statements redeemed and sold; the ETH is in your wallet.` : errText(e));
+            });
+            myStmts = myStmts.filter((y) => !mine.includes(y));
+            mine.forEach((x) => sPicks.delete(String(x.id)));
+            if (chained) {
+              then = null;
+              if (chained === 'eth') toast(`Sold for about ${ethNum(net, 4)} ETH.`, 'ok', 8000);
+              else {
+                const ids = toMe(receipts, config.credits);
+                rememberBought(ids);
+                toast(ids.length === 1 ? `Credit #${ids[0]} is yours.` : `${ids.length} Credits are yours.`, 'ok', 8000);
+              }
+              return;
             }
             // On the way to Credits or ETH: the box turns to that, with the BALANCE just redeemed typed in.
             if (then) {
@@ -1906,7 +2002,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
               carry = formatUnits(got, m?.decimals ?? 18).replace(/(\.\d{4})\d+$/, '$1');
             }
           },
-          'Redeemed.',
+          chainOn() ? '' : 'Redeemed.',
         );
       }
       if (v === 'art' && artPlan) {
@@ -1915,38 +2011,42 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
           go,
           selling ? 'Selling…' : 'Buying…',
           async () => {
+            // One set of steps: the sale of the BALANCE (when it pays with it), then the buy. One confirmation where
+            // the wallet takes a batch; else each in turn, the buy priced again once the sale has landed.
+            const steps: Step[] = [];
             if (selling) {
               const q = await swapQuote(m!, false, p.amt);
               if (!q) throw new Error('No price right now. Try again in a moment.');
-              const calls = await sellCalls(m!, account!, p.amt, q.net);
-              if (calls.length > 1 && (await canBatch())) await sendBatch(calls, note);
-              else for (const c of calls) await send(c, note);
+              steps.push(...(await sellCalls(m!, account!, p.amt, q.net)));
             }
-            const after = selling ? ` Your ${TOKEN} sold; the ETH is in your wallet.` : '';
+            let sold = false;
+            if (p.sts.length) steps.push(async () => ((sold = selling), statementsBuy(p.sts)));
+            else
+              steps.push(async () => {
+                sold = selling;
+                // The book's rows name a Credit and its price; a buy needs each one's live order (and drops any gone since).
+                const offers = await listedById(p.cred.map((x) => x.id), true);
+                const gone = p.cred.filter((x) => !offers.some((o) => o.id === x.id)).map((x) => x.id);
+                if (gone.length) drop(gone);
+                if (!offers.length) throw new Error('Those Credits just sold. Pick again.');
+                return [(await sweepCallFor(offers, selling ? p.eth : undefined, true)).call];
+              });
+            const batch = await canBatch();
+            const after = () => (sold && !batch ? ` Your ${TOKEN} sold; the ETH is in your wallet.` : '');
+            const receipts = await sendSteps(steps, note, stepOf(go)).catch((e: Error & { sold?: string[] }) => {
+              if (e?.sold) drop(e.sold);
+              throw new Error(`${errText(e)}${after()}`);
+            });
             if (p.sts.length) {
-              // Every pick in one Seaport call: a listing that sold first is skipped and its ETH comes back.
-              const r = await fetch('/market/statements/buy-many', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ listings: p.sts.map((y) => ({ hash: y.hash, protocol: y.protocol })), buyer: account }) });
-              const tx = (await r.json()) as { to?: Address; data?: `0x${string}`; value?: string; error?: string };
-              if (!r.ok || !tx.to || !tx.data || !tx.value) throw new Error(`${tx.error ?? 'Those Statements can’t be bought right now.'}${after}`);
-              await pub.call({ account: account!, to: tx.to, data: tx.data, value: BigInt(tx.value) });
-              const hash = await session.wallet!.sendTransaction({ account: account!, chain: session.wallet!.chain, to: tx.to, data: tx.data, value: BigInt(tx.value) });
-              note();
-              const receipt = await pub.waitForTransactionReceipt({ hash });
-              if (receipt.status !== 'success') throw new Error(`The purchase reverted.${after}`);
-              const me = account!.toLowerCase(), st = (config.statements ?? '').toLowerCase();
-              const got = receipt.logs.filter((l) => l.address.toLowerCase() === st && l.topics.length === 4 && `0x${l.topics[2]!.slice(26)}` === me).map((l) => String(BigInt(l.topics[3]!)));
+              const got = toMe(receipts, config.statements ?? '');
               stmts = stmts.filter((y) => !got.includes(y.id));
-              if (!got.length) throw new Error(`Those Statements sold before you got to them.${after}`);
+              if (!got.length) throw new Error(`Those Statements sold before you got to them.${after()}`);
               toast(got.length === 1 ? `Statement #${got[0]} is yours.` : `${got.length} Statements are yours.`, 'ok', 8000);
-              return;
+            } else {
+              const got = toMe(receipts, config.credits);
+              rememberBought(got);
+              toast(got.length === 1 ? `Credit #${got[0]} is yours.` : `${got.length} Credits are yours.`, 'ok', 8000);
             }
-            // The book's rows name a Credit and its price; a buy needs each one's live order (and drops any gone since).
-            const offers = await listedById(p.cred.map((x) => x.id), true);
-            const gone = p.cred.filter((x) => !offers.some((o) => o.id === x.id)).map((x) => x.id);
-            if (gone.length) drop(gone);
-            if (!offers.length) throw new Error(`Those Credits just sold. Pick again.${after}`);
-            const got = await sweepToWallet(offers, go, note, undefined, drop);
-            if (!got?.length) throw new Error(`The Credits didn’t go through.${after}`);
           },
           '',
         );
@@ -1980,6 +2080,30 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
             const q = await swapQuote(m!, true, wei);
             if (!q) throw new Error('No price right now. Try again in a moment.');
             await send(await buyCall(m!, wei, q.net), note);
+          },
+          `Bought ${sym()}.`,
+        );
+      const instant = v === 'buy' ? buyNow() : null;
+      if (instant)
+        return run(
+          go,
+          `Buying ${plural(instant.ids.length)}…`,
+          async () => {
+            // The $CC pile's Credits aren't listed anywhere: they go to the quote as picked, as in a batch buy.
+            const out = plan!.b.out, pile = out.filter((x) => x.source === 'cc');
+            const offers = [...(await listedById(out.filter((x) => x.source !== 'cc').map((x) => x.id), true)), ...pile.map((x) => ({ id: x.id, price: x.price, source: 'cc' as const }))];
+            if (offers.length < instant.ids.length) {
+              drop(plan!.b.out.map((x) => x.id).filter((id) => !offers.some((o) => o.id === id)));
+              throw new Error('Some of those Credits just sold. Try again.');
+            }
+            // The buy, then the vault's leave and the sale: one confirmation where the wallet takes a batch.
+            const { call } = await sweepCallFor(offers, wei);
+            await sendSteps([call, ...ivCalls(instant)], note, stepOf(go)).catch((e: Error & { sold?: string[] }) => {
+              if (e?.sold) drop(e.sold);
+              throw e;
+            });
+            iv.stock = null;
+            iv.approved = true;
           },
           `Bought ${sym()}.`,
         );

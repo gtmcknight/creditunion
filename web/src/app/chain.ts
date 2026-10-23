@@ -9,6 +9,7 @@ import {
   type Chain,
   type EIP1193Provider,
   type Hash,
+  type Hex,
   type WalletClient,
 } from 'viem';
 import { foundry, mainnet, sepolia } from 'viem/chains';
@@ -187,6 +188,29 @@ function reportMoves(receipts: readonly { transactionHash: string; logs: readonl
       void fetch('/market/moved', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tx: r.transactionHash }) }).catch(() => {});
 }
 export const onTx = (f: () => void) => txDone.add(f);
+
+/// Several steps from one button: one confirmation when the wallet takes a batch, else each in turn with `step`
+/// told which (1 of n) before its wallet prompt. Each step is built when it's reached (`() => Call[]`), so a later
+/// one can use what an earlier one produced; a batch builds them all first. The receipts, in order.
+export async function sendSteps(steps: (Call | (() => Promise<Call[]>))[], onSubmit: () => void, step?: (i: number, n: number) => void) {
+  if (await canBatch()) {
+    const calls: Call[] = [];
+    for (const s of steps) calls.push(...(typeof s === 'function' ? await s() : [s]));
+    return sendBatch(calls, onSubmit);
+  }
+  const receipts: Awaited<ReturnType<typeof sendRaw>>[] = [];
+  const flat: (Call | (() => Promise<Call[]>))[] = steps;
+  let n = flat.length, i = 0;
+  for (const s of flat) {
+    const calls = typeof s === 'function' ? await s() : [s];
+    n += calls.length - 1;
+    for (const c of calls) {
+      step?.(++i, n);
+      receipts.push(isRaw(c) ? await sendRaw(c, onSubmit) : await send(c, onSubmit));
+    }
+  }
+  return receipts;
+}
 const settled = () => txDone.forEach((f) => f());
 
 /// Simulate, send, wait. Simulation surfaces the contract's revert reason before the wallet opens.
@@ -291,7 +315,28 @@ export function canBatch(): Promise<boolean> {
   return p;
 }
 
-type Call = { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[]; value?: bigint };
+/// A contract call, or a transaction already encoded elsewhere (a Seaport fill the Worker built).
+export type Call = { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[]; value?: bigint } | Raw;
+export type Raw = { to: Address; data: Hex; value?: bigint };
+const isRaw = (c: Call): c is Raw => 'data' in c;
+
+/// An encoded transaction from the wallet: checked against the chain first (a stale order fails here, not in the
+/// wallet), sent, waited for.
+export async function sendRaw(tx: Raw, onHash?: (h: Hash) => void) {
+  if (!session.wallet || !session.account) throw new Error('Connect a wallet first.');
+  await ensureChain();
+  await pub.call({ account: session.account, to: tx.to, data: tx.data, value: tx.value });
+  try {
+    const hash = await session.wallet.sendTransaction({ account: session.account, chain, to: tx.to, data: tx.data, value: tx.value ?? 0n });
+    onHash?.(hash);
+    const receipt = await pub.waitForTransactionReceipt({ hash, timeout: 0 });
+    if (receipt.status !== 'success') throw new Error('Transaction reverted.');
+    reportMoves([receipt]);
+    return receipt;
+  } finally {
+    settled();
+  }
+}
 
 /// Several calls as one wallet step, all or nothing (EIP-5792 `wallet_sendCalls`), then wait for them to land.
 /// Only the first call is simulated: the rest depend on it (an approval, then what it allows), and the RPC
@@ -299,13 +344,15 @@ type Call = { address: Address; abi: readonly unknown[]; functionName: string; a
 export async function sendBatch(calls: Call[], onSubmit?: (id: string) => void) {
   if (!session.wallet || !session.account || !session.provider) throw new Error('Connect a wallet first.');
   await ensureChain();
+  const first = calls[0];
+  if (isRaw(first)) await pub.call({ account: session.account, to: first.to, data: first.data, value: first.value });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await pub.simulateContract({ ...(calls[0] as any), account: session.account });
+  else await pub.simulateContract({ ...(first as any), account: session.account });
   const { id } = await session.wallet.sendCalls({
     account: session.account,
     chain,
     forceAtomic: true,
-    calls: calls.map((c) => ({ to: c.address, abi: c.abi, functionName: c.functionName, args: c.args, value: c.value })) as never,
+    calls: calls.map((c) => (isRaw(c) ? { to: c.to, data: c.data, value: c.value } : { to: c.address, abi: c.abi, functionName: c.functionName, args: c.args, value: c.value })) as never,
   });
   onSubmit?.(id);
   try {
