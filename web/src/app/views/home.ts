@@ -115,6 +115,21 @@ export const FIG = {
 
 type Chapter = { id: string; nav: string; title: string; figure?: string; body: string };
 
+/// What all this is, as one line of cards under the swap box on the homepage: the three things and what we do with
+/// them, each to its part of the docs, and the docs.
+export function explainers() {
+  const cards: [string, string, string, string][] = [
+    ['Credits', `Jack Butcher's onchain art, printed in ink. Each one has a rating.`, FAMILY.lanes, '/docs#how'],
+    ['Statements', '80 Credits compose one. Pool yours with other holders to make it.', FAMILY.batch, '/docs#deposits'],
+    ['$BALANCE', 'A Statement redeems for one $BALANCE per rating point. It trades on Uniswap.', FAMILY.rating, '/docs#balance'],
+    ['Credit Unions', 'Pool 80 with others, then auction the Statement or convert it, and split.', FAMILY.story, '/docs#auctions'],
+  ];
+  return `<section class="about doc explain" aria-label="What this is">
+    <div class="chapter-grid line">${cards.map(([t, p, fig, href]) => `<a class="chapter" href="${href}"><h2>${esc(t)}</h2><p>${esc(p)}</p>${fig}</a>`).join('')}</div>
+    <p class="explain-more"><a href="/docs">Full docs →</a></p>
+  </section>`;
+}
+
 export function home(app: HTMLElement) {
   const chapters: Chapter[] = [
     {

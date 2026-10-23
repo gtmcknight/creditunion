@@ -37,9 +37,9 @@ export const OVERPRINTS = '<svg viewBox="0 0 16 16" width="16" height="16" aria-
 
 /// Click once to see the price on the button, again to buy: a Statement is dear, so the second click is the decision.
 /// OpenSea's signed order for this wallet, run first (a stale listing fails here, not in the wallet), then sent.
-export async function buyListed(btn: HTMLButtonElement, x: ForSale, done: () => void) {
+export async function buyListed(btn: HTMLButtonElement, x: ForSale, done: () => void, confirmed = false) {
   if (!session.wallet || !session.account) return;
-  if (!btn.dataset.armed) {
+  if (!confirmed && !btn.dataset.armed) {
     btn.dataset.armed = '1';
     btn.textContent = `Buy for ${eth(BigInt(x.price))}`;
     return;

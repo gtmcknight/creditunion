@@ -14,15 +14,16 @@ import { balanceSvg, PURE, type Palette } from '../balance-art';
 import { canBatch, config, pub, send, sendBatch, session } from '../chain';
 import { bin } from '../bins';
 import { getBatch, myCredits, shareOf, STATES, tokenIndex, type Payout, type Summary } from '../data';
-import { CC_ROOM_BPS, ccPicks, checkQuote, listedById, type Quote } from '../forsale';
+import { CC_ROOM_BPS, ccPicks, checkQuote, listedById, MAX_SWEEP, priceTag, SOURCES, sweepFee, sweepToWallet, type Listed, type Quote } from '../forsale';
 import { buyListed, listings, type ForSale } from './statements';
 import { priceChart, usdPrice } from './price-chart';
-import { registerDeposits } from '../ghosts';
-import { buyCall, inkPalette, launchGate, market as swapMarket, opened, poolPalette, quote as swapQuote, sellCalls } from '../swap';
+import { editionArt, registerDeposits } from '../ghosts';
+import { explainers } from './home';
+import { buyCall, inkPalette, launchGate, market as swapMarket, opened, poolPalette, quote as swapQuote, sellCalls, SELL_SLIPPAGE_BPS } from '../swap';
 import { balanceArt, balanceHref, balanceSrc, converted, type BalanceArt } from '../tokens';
 import { INK } from '../traits';
 import { $$, art, errText, esc, ethNum, openModal, same, sheet, toast } from '../ui';
-import { loadPalette } from '../wall';
+import { loadPalette, mountWall } from '../wall';
 
 const CHUNK = 40; // Credits per create/deposit transaction
 const MAX_BUY = 40; // listings per buy (the Worker's quote limit)
@@ -121,9 +122,34 @@ let laneKey: Lane['key'] = 'any';
 let pageRun = 0;
 /// How many Credits each batch's sheet showed last time it was drawn: newer ones drop in.
 const shown = new Map<string, number>();
-/// What the box does: Buy with ETH, Sell on Uniswap, Convert your own Credits in a batch, or Withdraw yours from one.
-/// Kept while you move around the page.
-let view: 'buy' | 'sell' | 'credits' | 'out' = 'buy';
+/// What the box does: Buy with ETH, Sell on Uniswap, Convert your own Credits in a batch, Redeem a Statement, buy art
+/// (Credits or a Statement) with ETH or BALANCE, say the way between two that take more than one step, or Withdraw
+/// yours from a batch. Kept while you move around the page.
+type View = 'buy' | 'sell' | 'credits' | 'out' | 'redeem' | 'art' | 'via' | 'sellc';
+let view: View = 'buy' as View;
+/// The four things the box goes between: Jack's three, and ETH, which pays for them or comes out of them.
+type Asset = 'credit' | 'statement' | 'balance' | 'eth';
+const ASSETS: Asset[] = ['credit', 'statement', 'balance', 'eth'];
+/// The box's two sides: what you give and what you get. The view follows from them.
+let from: Asset = 'eth';
+let to: Asset = 'balance';
+/// A Statement redeemed on its way to Credits or ETH: what the BALANCE goes into next.
+let then: Asset | null = null;
+const viewFor = (a: Asset, b: Asset): View =>
+  a === 'eth' && b === 'balance' ? 'buy'
+  : a === 'balance' && b === 'eth' ? 'sell'
+  : a === 'credit' && b === 'balance' ? 'credits'
+  : a === 'statement' && b === 'balance' ? 'redeem'
+  : (a === 'eth' || a === 'balance') && (b === 'credit' || b === 'statement') ? 'art'
+  : a === 'credit' && b === 'eth' && config.ccCore ? 'sellc'
+  : 'via';
+const setPair = (a: Asset, b: Asset) => {
+  from = a;
+  to = b;
+  view = viewFor(a, b);
+};
+/// The sides a view stands for, when something other than the pair picks it (a link, the first visit).
+const PAIR_OF: Partial<Record<View, [Asset, Asset]>> = { buy: ['eth', 'balance'], sell: ['balance', 'eth'], credits: ['credit', 'balance'], redeem: ['statement', 'balance'] };
 /// The batch whose Withdraw opened that view: only its Credits are offered, still after a partial withdraw.
 let outFrom: Address | null = null;
 /// What's typed: ETH to buy with, or the token to sell.
@@ -147,14 +173,44 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /// The wallet and how many converted batches still owed it at the last draw: a draw that finds none owed says it's paid.
 let owedLast: { who: string; n: number } | null = null;
 
-export async function tokensPage(app: HTMLElement, rerun: () => void) {
+/// The homepage says what this is before the box: what you can do here, in plain words.
+const HOME_HEAD = `<section class="hero home-hero" id="home-hero"><div id="wall"></div><div class="hero-text"><h1><span>Swap Credits, Statements</span> <span>and ${TOKEN}.</span></h1></div></section><p class="create-lede home-lede">An independent market for Jack Butcher’s art. Swap any one for another, or pool Credits into a Statement.</p>`;
+/// Draws `put` into the page and keeps the homepage's wall of Credits as it was (it's alive: redrawing it would start it
+/// over), mounting it the first time.
+function keepHero(app: HTMLElement, put: () => void) {
+  const hero = app.querySelector('#home-hero');
+  put();
+  const slot = app.querySelector('#home-hero');
+  if (hero && slot) slot.replaceWith(hero);
+  else if (slot) void mountWall(slot.querySelector<HTMLElement>('#wall')!);
+}
+/// Which page the box is on: the homepage opens on ETH to Credits (the marketplace, what most people come for),
+/// /balance on ETH to BALANCE. Coming from the other one starts the box over on its own pair.
+let pageAt: 'home' | 'balance' | '' = '';
+export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'home' | 'balance' = 'balance') {
   if (!config.tokenFactory) {
     app.innerHTML = `<section class="prose"><h1>${TOKEN}</h1><p class="muted">Coming soon.</p></section>`;
     return;
   }
   const factory = config.tokenFactory;
   const thisRun = ++pageRun;
-  const asked = new URLSearchParams(location.search).get('color');
+  if (pageAt !== where) {
+    pageAt = where;
+    setPair('eth', where === 'home' ? 'credit' : 'balance');
+    typed = '';
+    landed = false;
+    then = null;
+  }
+  const atHome = where === 'home';
+  const q = new URLSearchParams(location.search), asked = q.get('color');
+  // A link to a pair (?from=balance&to=credit) opens the box on it.
+  const af = q.get('from') as Asset | null, at = q.get('to') as Asset | null;
+  const ownPair = (a: Asset, b: Asset) => where === 'home' || b === 'balance' || (a === 'balance' && b === 'eth');
+  if (af && at && af !== at && ASSETS.includes(af) && ASSETS.includes(at) && ownPair(af, at) && !landed) {
+    setPair(af, at);
+    landed = true;
+    if (af === 'eth' && at !== 'statement') typed ||= '0.1';
+  }
   if (asked && LANES.some((l) => l.key === asked)) laneKey = asked as Lane['key'];
   // The market starts now, beside the chain reads, so prices are in when the card draws: for Mixed, the Worker's cut of
   // the book (the cheapest per point, all a buy here reaches), else, or if that can't be read, the whole book.
@@ -163,11 +219,11 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   const bookP = config.tokenSweeper ? (laneKey === 'any' ? readBook('/market-top.json').then((b) => (b?.items?.length ? b : readBook('/market.json'))) : readBook('/market.json')) : null;
   if (previewJoined && !joined) joined = { batch: '', lane: laneKey, at: Date.now() };
   // The page’s frame at once (its title, where the launch line goes and the card), filled in as the chain is read.
-  app.innerHTML = `<section class="tokens">
-      <header class="create-head"><h1>Get ${TOKEN}${Date.now() < TRADES_PLANNED ? ' before it trades' : ''}</h1></header>
+  keepHero(app, () => (app.innerHTML = `<section class="tokens">
+      ${atHome ? HOME_HEAD : `<header class="create-head"><h1>Get ${TOKEN}${Date.now() < TRADES_PLANNED ? ' before it trades' : ''}</h1></header>`}
       <p class="tk-when">&nbsp;</p>
       <div class="tk-layout"><section class="tk-card tk-wait" aria-busy="true"></section></div>
-    </section>`;
+    </section>`));
   const account = session.account;
   // What doesn't wait on the batches starts now, beside them, so the page waits on the slowest read and not on the
   // sum of them: your Credits and ETH, the BALANCE pool, and the launch's state.
@@ -311,6 +367,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   keptPicks = [];
 
   let busy = false;
+  /// What's typed once a transaction is done (nothing, unless it leads on to the next step).
+  let carry = '';
   /// While a transaction is in flight nothing on the page can change what it's doing: batches, picks, amounts.
   const lock = (on: boolean) => {
     busy = on;
@@ -331,7 +389,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       await fn();
       flying = null;
       if (ok) toast(ok, 'ok');
-      typed = '';
+      typed = carry;
+      carry = '';
       rerun();
     } catch (e) {
       // Back to how it was: redrawn, so every control is live again.
@@ -360,7 +419,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   /// The view that applies: Sell only once trading opens, Withdraw only with something to withdraw, and with no way to
   /// spend ETH (no Sweeper, no pool for this color) Buy is your Credits.
   const viewNow = (): typeof view => {
-    const v = (view === 'sell' && !trade?.open) || (view === 'out' && !outHere().length) ? 'buy' : view;
+    // BALANCE moves only once it trades: until then a side that sells it says the way.
+    if ((view === 'sell' || (view === 'art' && from === 'balance')) && !trade?.open) return 'via';
+    const v = view === 'out' && !outHere().length ? 'buy' : view;
     return v === 'buy' && !sweeps && !poolOk() ? 'credits' : v;
   };
   /// ETH in dollars (Coinbase spot through the worker), read once: what a trade is worth, as Uniswap shows it.
@@ -373,9 +434,11 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       if (usd && app.querySelector('.tk-form')) paint();
     })
     .catch(() => {});
+  /// Whether the amount typed is BALANCE (a sale, or art bought with it) rather than ETH.
+  const paysToken = () => viewNow() === 'sell' || (viewNow() === 'art' && from === 'balance');
   const amountIn = (): bigint => {
     try {
-      return viewNow() === 'sell' ? parseUnits(typed.trim() || '0', m!.decimals) : parseEther(typed.trim() || '0');
+      return paysToken() ? parseUnits(typed.trim() || '0', m!.decimals) : parseEther(typed.trim() || '0');
     } catch {
       return 0n;
     }
@@ -435,11 +498,17 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     `<button type="button" class="link" id="fee-rate">${feeFlipped ? `${whole(feeOn(tenthsIn))} ${TOKEN} to Credit Union` : 'Fee included'}</button>`;
   const buyFeeLine = (tenthsIn: number, spent: bigint) =>
     `<button type="button" class="link" id="fee-rate">${feeFlipped ? `${ethNum((spent * BigInt(feeBps)) / (10_000n + BigInt(feeBps)), 4, true)} ETH + ${whole(feeOn(tenthsIn))} ${TOKEN} to Credit Union` : 'Fees included'}</button>`;
+  /// The Sweeper's fee on Credits bought to the wallet (art bought here), read once.
+  let artFee = 200n;
+  void sweepFee().then((v) => (artFee = v));
   /// Statements listed on OpenSea, read once: a whole Statement is a way in when the amount covers one.
   let stmts: ForSale[] = [];
+  let stmtsRead = false;
   listings()
     .then((x) => {
       stmts = x.filter((y) => y.rating);
+      stmtsRead = true;
+      fillCheap();
       if (app.querySelector('.tk-form')) paint();
     })
     .catch(() => {});
@@ -483,7 +552,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   /// The left side: the batch's sheet, unless the way in is Uniswap (or you're selling).
   const viaSheet = () => {
     const v = viewNow();
-    return v !== 'sell' && !(v === 'buy' && (wayNow() === 'pool' || wayNow() === 'statement'));
+    return (v === 'credits' || v === 'out' || v === 'buy') && !(v === 'buy' && (wayNow() === 'pool' || wayNow() === 'statement'));
   };
   const lands = () => `Lands when the batch fills${isOpen ? '' : ' and trading opens'}`;
 
@@ -620,23 +689,71 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     }
   };
 
-  /// Buy · Sell · Convert. Sell shows once the token trades; Buy only when there's a way to buy (a Sweeper or the pool).
+  /// /balance keeps its modes as one big control over the panels: Buy · Sell · Convert, and Redeem for a wallet with
+  /// Statements. (The homepage's box goes any way between the four instead: pickChip, flipHtml.) Sell shows once the
+  /// token trades; Buy only when there's a way to buy (a Sweeper or the pool).
   function tabsHtml() {
     const v = viewNow();
-    if (v === 'out') return '';
-    const tab = (k: 'buy' | 'sell' | 'credits', label: string) => `<button type="button" role="tab" data-view="${k}" aria-selected="${v === k}">${label}</button>`;
+    if (atHome || v === 'out') return '';
+    const tab = (k: 'buy' | 'sell' | 'credits' | 'redeem', label: string) => `<button type="button" role="tab" data-view="${k}" aria-selected="${v === k}">${label}</button>`;
     const n = account ? owned.length : 0;
     // Yours to convert, on its tab: your best three Credits fanned as their art, and how many.
     const fanned = [...owned].sort((x, y) => t(y) - t(x)).slice(0, 3).map((id) => `<img src="${art(id)}" alt="" loading="lazy">`).join('');
-    return `<div class="subtabs tk-modes" role="tablist" aria-label="Buy, sell or convert">${sweeps || poolOk() ? tab('buy', 'Buy') : ''}${m && trade?.open ? tab('sell', 'Sell') : ''}${tab('credits', n ? `<span class="tk-tabfan" aria-hidden="true">${fanned}</span>Convert <span class="num">${n}</span>` : 'Convert')}</div>`;
+    return `<div class="subtabs tk-modes" role="tablist" aria-label="Buy, sell or convert">${sweeps || poolOk() ? tab('buy', 'Buy') : ''}${m && trade?.open ? tab('sell', 'Sell') : ''}${tab('credits', n ? `<span class="tk-tabfan" aria-hidden="true">${fanned}</span>Convert <span class="num">${n}</span>` : 'Convert')}${account && myStmts.length ? tab('redeem', `Redeem <span class="num">${myStmts.length}</span>`) : ''}</div>`;
   }
+  /// A side's picker, where its panel names its unit: its mark and name, and a menu of the others. From's menu says what
+  /// you hold of each; To's how it gets there, and once it's open, what the amount typed comes to.
+  const pickChip = (k: 'from' | 'to') => {
+    const a = k === 'from' ? from : to;
+    // On /balance the unit is just named: ETH's diamond, BALANCE a tap on its name for what it is.
+    if (!atHome)
+      return a === 'balance'
+        ? `<button type="button" class="tk-unit" data-how title="What is ${TOKEN}?"><span class="sw-ink tk-coin">${swatch(lane())}</span>${esc(sym())}</button>`
+        : `<span class="tk-unit">${a === 'eth' ? ETH_ICON : assetIcon(a)}${assetName(a)}</span>`;
+    // All four on both sides: the other side's swaps the two (choose), so any start is a tap away.
+    const opts = ASSETS.map((x) => `<li role="option" tabindex="-1" data-asset="${x}" aria-selected="${x === a}"><span class="tk-opt">${assetIcon(x)}<span class="tk-aname"><b>${assetName(x)}</b><span class="muted small" data-hint>${x === (k === 'from' ? to : from) ? 'Swaps the two sides' : k === 'from' ? have(x) : how(from, x)}</span></span></span></li>`)
+      .join('');
+    return `<div class="tk-side" data-side="${k}"><button type="button" class="tk-chip" aria-haspopup="listbox" aria-expanded="false" aria-label="${k === 'from' ? 'Pay with' : 'Get'} ${assetName(a)}">${assetIcon(a)}<span>${assetName(a)}</span></button><div class="sort-menu tk-amenu" hidden><ul role="listbox" aria-label="${k === 'from' ? 'Pay with' : 'Get'}">${opts}</ul><button type="button" class="link small" data-how>What is ${TOKEN}?</button></div></div>`;
+  };
+  /// Between the two panels: the flip.
+  const flipHtml = () =>
+    !atHome ? '' : `<div class="tk-flipwrap"><button type="button" class="tk-flip" id="tk-flip" aria-label="Flip: ${assetName(to)} to ${assetName(from)}" title="Flip (F)"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M5.5 2.5v10m0 0-3-3m3 3 3-3M10.5 13.5v-10m0 0-3 3m3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>`;
+  const assetName = (a: Asset) => (a === 'credit' ? 'Credits' : a === 'statement' ? 'Statement' : a === 'balance' ? TOKEN : 'ETH');
+  /// Each one as itself: your best Credit (else a cyan one), Statement #1 (Union Jack, the first one made here),
+  /// BALANCE's four inks, ETH's diamond.
+  const creditIcon = [...owned].sort((x, y) => t(y) - t(x))[0] ?? BigInt(inks.findIndex((x) => x === 1) + 1);
+  const assetIcon = (a: Asset) =>
+    a === 'credit'
+      ? `<span class="tk-aicon"><img src="${art(creditIcon)}" alt=""></span>`
+      : a === 'statement'
+        ? `<span class="tk-aicon"><img class="st" src="/statement/${myStmts[0]?.id ?? 1}.svg" alt=""></span>`
+        : a === 'balance'
+          ? `<span class="tk-aicon tk-inks">${INK.map((c) => `<i style="background:${c}"></i>`).join('')}</span>`
+          : `<span class="tk-aicon tk-ethi">${ETH_ICON}</span>`;
+  /// How `a` becomes `b`, in a few words: the To menu says it beside each.
+  const how = (a: Asset, b: Asset) => {
+    const v = viewFor(a, b);
+    if (!trade?.open && a === 'balance') return 'Once it trades';
+    if (v === 'buy') return 'Uniswap or a batch';
+    if (v === 'sell') return 'Uniswap';
+    if (v === 'credits') return 'Convert in a batch';
+    if (v === 'redeem') return 'Redeem at once';
+    if (v === 'art') return a === 'eth' ? 'OpenSea' : 'Uniswap, then OpenSea';
+    if (v === 'sellc') return cc.live ? 'Instant, at $CC’s bid' : 'List on OpenSea';
+    if (a === 'credit') return b === 'statement' ? '80 in a Credit Union' : 'Convert, then sell';
+    return 'Redeem, then swap';
+  };
+  /// What you hold of it, once a wallet is connected.
+  const have = (a: Asset) => {
+    if (!account) return '';
+    const n = a === 'credit' ? owned.length : a === 'statement' ? myStmts.length : -1;
+    if (n >= 0) return n ? `You have ${n.toLocaleString('en-US')}` : 'None yet';
+    if (a === 'balance') return tokenHeld ? `You have ${tokAmt(tokenHeld)}` : 'None yet';
+    return ethHeld !== null ? `You have ${ethNum(ethHeld, 3)}` : '';
+  };
   /// A token's mark and name, as a chip on the right of a panel: ETH's diamond; $BALANCE as its ink, the batch's colours.
   const ETH_ICON = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M8 1 3.5 8.2 8 10.8l4.5-2.6z" fill="currentColor" opacity=".9"/><path d="M8 11.7 3.5 9.1 8 15l4.5-5.9z" fill="currentColor" opacity=".6"/></svg>';
-  const tokenChip = (eth: boolean) =>
-    eth
-      ? `<span class="tk-unit">${ETH_ICON}ETH</span>`
-      : `<button type="button" class="tk-unit" data-how title="What is ${TOKEN}?"><span class="sw-ink tk-coin">${swatch(lane())}</span>${esc(sym())}</button>`; // what it is, a tap on its name
-  const payHtml = (selling: boolean) => {
+  const payHtml = (selling: boolean, title = selling ? 'Sell' : 'Pay') => {
     const max = selling
       ? account ? `<span class="tk-bal">You hold <span class="num">${tokAmt(tokenHeld)}</span> <button type="button" class="link small" id="amt-max">Max</button></span>` : ''
       : ethHeld !== null ? `<span class="tk-bal">Wallet <span class="num">${ethNum(ethHeld, 4)}</span> ETH <button type="button" class="link small" id="amt-max">Max</button></span>` : '';
@@ -646,18 +763,17 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     // Pay mirrors You get: the title with its quick amounts on one line, then the panel with the amount, its unit,
     // what it's worth and, at the bottom right, your balance with Max (as Uniswap does).
     return `
-          <div class="tk-gethead"><h2 class="form-title">${selling ? 'Sell' : 'Pay'}</h2>${quick}</div>
+          <div class="tk-gethead"><h2 class="form-title">${title}</h2>${quick}</div>
           <section class="rule">
-            <div class="tk-eth"><input id="amt" class="num" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="${selling ? `${esc(sym())} to sell` : 'ETH to spend'}" value="${esc(typed)}">${tokenChip(!selling)}<span class="tk-usd num" id="amt-usd"></span>${max}</div>
-            <p class="term-desc tk-ethrow"><span id="amt-line"></span></p>
+            <div class="tk-eth"><input id="amt" class="num" inputmode="decimal" autocomplete="off" placeholder="0" aria-label="${selling ? `${esc(sym())} to sell` : 'ETH to spend'}" value="${esc(typed)}">${pickChip('from')}<span class="tk-usd num" id="amt-usd"></span>${max}</div>
           </section>`;
   };
   /// You get, then the way it goes, the other way when it's a real choice, and our fees on this way.
-  const getHtml = (selling: boolean) => `
+  const getHtml = (selling: boolean, extra = '') => `${flipHtml()}
           <div class="tk-gethead"><h2 class="form-title" id="tk-gettitle">You get</h2>${selling || laneKey === 'any' ? '' : colorChip()}</div>
           <section class="rule">
-            ${selling ? `<div class="tk-get tk-panel"><span class="num tk-out" id="get-eth">0</span>${tokenChip(true)}<span class="tk-usd" id="route"></span></div>` : `<div class="tk-get tk-panel"><span class="tk-getrow"><span id="get">${balanceSvg('0', EVEN, 4, '0', ON_PANEL)}</span></span>${tokenChip(false)}<span class="tk-usd" id="route"></span></div>`}
-            <div class="tk-lines term-desc"><p id="route2"></p><p id="alt"></p><p id="fees"></p></div>
+            ${selling ? `<div class="tk-get tk-panel"><span class="num tk-out" id="get-eth">0</span>${pickChip('to')}<span class="tk-usd" id="route"></span></div>` : `<div class="tk-get tk-panel"><span class="tk-getrow"><span id="get">${balanceSvg('0', EVEN, 4, '0', ON_PANEL)}</span></span>${pickChip('to')}<span class="tk-usd" id="route"></span></div>`}
+            <div class="tk-lines term-desc"><p id="amt-line"></p><p id="route2"></p><p id="alt"></p><p id="fees"></p>${extra}</div>
           </section>`;
   const goHtml = (label: string) => `<button type="button" class="btn primary block" id="go"${account ? '' : ' data-connect'} disabled>${label}</button>`;
   const linkHtml = (to: typeof view, text: string) => (text ? `<p class="hint center"><button type="button" class="link small" data-view="${to}">${text}</button></p>` : '');
@@ -673,30 +789,20 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       const p = lane().ink < 0 ? pure(inkOf(id)) : null; // in Mixed, a single-ink Credit is marked with its ink
       return `<button type="button" class="pick" data-id="${id}" aria-pressed="${picks.has(id.toString())}" aria-label="Credit #${id}" title="Credit #${id} · ${pts(t(id))} rating"><img src="${art(id)}" alt="" loading="lazy">${p ? `<span class="tk-pure" style="${inkVar(p)}" title="${p.name} only"></span>` : ''}<span class="pick-id num">${pts(t(id))}</span></button>`;
     };
+    const back = account && lane().ink >= 0 && owned.length > mineHere.length ? `<p class="tk-back"><button type="button" class="link small" id="tk-back">← Back to Mixed</button> for your other ${plural(owned.length - mineHere.length)}</p>` : '';
     return `
-          <div class="tk-gethead"><h2 class="form-title">Your Credits</h2>${account && mineHere.length ? '<button type="button" class="link small" id="pick-all">Select all</button>' : ''}</div>
+          <div class="tk-gethead"><h2 class="form-title">Pay</h2></div>
           <section class="rule">
-            ${
+            <div class="tk-eth tk-picks">${
               !account
-                ? '<p class="term-desc"><button type="button" class="link" data-connect>Connect</button> to pick from the Credits you own.</p>'
+                ? '<span class="tk-none muted">Any Credits you own</span>'
                 : mineHere.length
-                  ? `<p class="tk-sel term-desc"><span id="n-sel">Pick the ones to convert.</span></p>
-                     <div class="picker captioned" id="picker">${mineHere.map(pick).join('')}</div>`
-                  : `<p class="term-desc">${owned.length ? `None of yours are printed in ${lane().name.toLowerCase()} only.` : 'No Credits in this wallet.'}</p>`
-            }
-            ${account && lane().ink >= 0 && owned.length > mineHere.length ? `<p class="tk-back small"><button type="button" class="link small" id="tk-back">← Back to Mixed</button> for your other ${plural(owned.length - mineHere.length)}</p>` : ''}
+                  ? `<div class="tk-strip capt" id="picker">${mineHere.map(pick).join('')}</div>`
+                  : `<span class="tk-none muted">${owned.length ? `None printed in ${lane().name.toLowerCase()} only` : 'None in this wallet'}</span>`
+            }${pickChip('from')}<span class="tk-usd" id="n-sel"></span>${account && mineHere.length ? '<span class="tk-bal"><button type="button" class="link small" id="pick-all">Select all</button></span>' : ''}</div>
           </section>
-          ${getHtml(false)}
-          <div class="submit">${goHtml('Pick Credits')}${sureHtml()}</div>${stmtsHtml()}`;
-  }
-  /// Statements you hold redeem straight into BALANCE through Jack's contract, each its own button, under the Credits.
-  function stmtsHtml() {
-    if (!account || !myStmts.length) return '';
-    const rows = myStmts.map(
-      (x) =>
-        `<div class="tk-yrow"><span class="tk-yart"><img class="st" src="/statement/${x.id}.svg" alt=""></span><div class="tk-ytext"><b>Statement #${x.id}</b><span class="muted small">${x.rating.toLocaleString('en-US')} ${TOKEN}</span></div>${x.ready ? `<button type="button" class="tk-yact go" data-redeem="${x.id}">Redeem</button>` : `<span class="tk-yact tk-ylater">${Date.now() < OPENS_AT ? whenShort(OPENS_AT) : 'Soon'}</span>`}</div>`,
-    );
-    return `<div class="tk-gethead tk-stmts"><h2 class="form-title">Your Statements</h2></div><section class="rule">${rows.join('')}</section>`;
+          ${getHtml(false, back)}
+          <div class="submit">${goHtml('Pick Credits')}${sureHtml()}</div>`;
   }
   function outHtml() {
     const ps = outHere();
@@ -736,7 +842,200 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
   }
   const sellHtml = () => `${payHtml(true)}${getHtml(true)}
           <div class="submit">${goHtml('Enter an amount')}${sureHtml()}</div>`;
+  /// ETH or BALANCE into art: Pay, then You get as the art itself (the Credits fanned, or the Statement), the way it
+  /// goes as a row of marks, and the button.
+  const artHtml = () => `${payHtml(from === 'balance', 'Pay')}
+          ${flipHtml()}
+          <div class="tk-gethead"><h2 class="form-title">You get</h2></div>
+          <section class="rule">
+            <div class="tk-get tk-panel"><span class="tk-getrow" id="art-get"><span class="num tk-out">0</span></span>${pickChip('to')}<span class="tk-usd" id="route"></span></div>
+            <div class="tk-lines term-desc"><p id="amt-line"></p><p id="route2"></p><p id="fees"></p></div>
+          </section>
+          <div class="submit">${goHtml('Enter an amount')}${sureHtml()}</div>`;
+  /// Your Statements as a row to pick from (all that redeem now, picked), what they come to, and one button that
+  /// redeems them through Jack's contract.
+  function redeemHtml() {
+    const next = then ? ` Then swap the ${TOKEN} into ${assetName(then)}.` : '';
+    const pick = (x: (typeof myStmts)[number]) =>
+      `<button type="button" class="pick st${x.ready ? '' : ' off'}" data-sid="${x.id}" aria-pressed="${sPicks.has(String(x.id))}" aria-label="Statement #${x.id}" title="Statement #${x.id} · rated ${x.rating.toLocaleString('en-US')}${x.ready ? '' : ' · not yet'}"${x.ready ? '' : ' disabled'}><img src="/statement/${x.id}.svg" alt="" loading="lazy"></button>`;
+    return `
+          <div class="tk-gethead"><h2 class="form-title">Pay</h2></div>
+          <section class="rule">
+            <div class="tk-eth tk-picks">${
+              !account
+                ? '<span class="tk-none muted">Any Statements you own</span>'
+                : myStmts.length
+                  ? `<div class="tk-strip" id="s-picker">${myStmts.map(pick).join('')}</div>`
+                  : '<span class="tk-none muted">None in this wallet</span>'
+            }${pickChip('from')}<span class="tk-usd" id="s-sel"></span></div>
+          </section>
+          ${flipHtml()}
+          <div class="tk-gethead"><h2 class="form-title">You get</h2></div>
+          <section class="rule">
+            <div class="tk-get tk-panel"><span class="num tk-out" id="s-get">0</span>${pickChip('to')}<span class="tk-usd">One per rating point, at once</span></div>
+            <div class="tk-lines term-desc"><p>${account && !myStmts.length ? `<button type="button" class="link" data-pair="eth:statement">Buy one with ETH</button>` : `Through Jack’s contract · No fee.${next}`}</p></div>
+          </section>
+          <div class="submit">${goHtml('Pick Statements')}${sureHtml()}</div>`;
+  }
+  /// Credits to ETH: yours as a row to pick from (the best bid first), what they sell for, and the ways to sell: $CC's
+  /// engine at its bid (cc.artcoins.art: it pays ETH for any Credit by its score, at once, from its pot), or a listing
+  /// on OpenSea at your own price. No fee of ours on either.
+  function sellcHtml() {
+    const mine = [...owned].sort((x, y) => Number((cc.bids.get(String(y)) ?? 0n) - (cc.bids.get(String(x)) ?? 0n)) || t(y) - t(x));
+    const pick = (id: bigint) => {
+      const bid = cc.bids.get(String(id));
+      return `<button type="button" class="pick" data-id="${id}" aria-pressed="${picks.has(id.toString())}" aria-label="Credit #${id}" title="Credit #${id} · rated ${pts(t(id))}${bid ? ` · $CC pays ${ethNum(bid, 4)} ETH` : ''}"><img src="${art(id)}" alt="" loading="lazy"><span class="pick-id num">${pts(t(id))}</span></button>`;
+    };
+    const os = account ? `https://opensea.io/${account}` : 'https://opensea.io/collection/credits';
+    return `
+          <div class="tk-gethead"><h2 class="form-title">Pay</h2></div>
+          <section class="rule">
+            <div class="tk-eth tk-picks">${
+              !account ? '<span class="tk-none muted">Any Credits you own</span>' : mine.length ? `<div class="tk-strip capt" id="picker">${mine.map(pick).join('')}</div>` : '<span class="tk-none muted">None in this wallet</span>'
+            }${pickChip('from')}<span class="tk-usd" id="n-sel"></span>${account && mine.length ? '<span class="tk-bal"><button type="button" class="link small" id="pick-all">Select all</button></span>' : ''}</div>
+          </section>
+          ${flipHtml()}
+          <div class="tk-gethead"><h2 class="form-title">You get</h2></div>
+          <section class="rule">
+            <div class="tk-get tk-panel"><span class="num tk-out" id="sc-get">0</span>${pickChip('to')}<span class="tk-usd" id="sc-sub"></span></div>
+            <div class="tk-lines term-desc"><div class="tk-ways" role="radiogroup" aria-label="Way to sell">${cc.live ? '<button type="button" class="tk-way" role="radio" aria-checked="false"><span><b>$CC bid</b><span class="muted small">Instant · No fee</span></span><span class="num" id="sc-way">—</span></button>' : ''}<a class="tk-way" href="${os}" target="_blank" rel="noopener" id="sc-os"><span><b>List on OpenSea</b><span class="muted small">Your price, when someone buys</span></span><span class="num muted">↗</span></a>${cc.live ? '' : `<button type="button" class="tk-way" data-pair="credit:balance"><span><b>Convert to ${TOKEN}</b><span class="muted small">Then sell it on Uniswap</span></span><span class="num muted">→</span></button>`}</div><p id="fees"></p></div>
+          </section>
+          <div class="submit">${goHtml('Pick Credits')}${sureHtml()}</div>`;
+  }
+  /// $CC's engine as read for this wallet: its bid for each of your Credits, its pot (it can't pay past it) and whether
+  /// it may take your Credits yet. Read once a visit, and again after a sale.
+  /// `live`: it's bidding at all (a rate and a pot); when it isn't, it isn't shown as a way to sell.
+  const cc: { bids: Map<string, bigint>; pot: bigint | null; live: boolean; approved: boolean; read: Promise<void> | null } = { bids: new Map(), pot: null, live: true, approved: false, read: null };
+  const CC_ABI = parseAbi(['function bidOf(uint256) view returns (uint256)', 'function ethPot() view returns (uint256)', 'function ethRate() view returns (uint256)', 'function sellForEth(uint256[] ids, uint256 minOut)']);
+  const readCC = () =>
+    (cc.read ??= (async () => {
+      const core = config.ccCore;
+      if (!core) return;
+      const ids = account ? [...owned] : [];
+      const [pot, rate, ok, ...bids] = await Promise.all([
+        pub.readContract({ address: core, abi: CC_ABI, functionName: 'ethPot' }) as Promise<bigint>,
+        pub.readContract({ address: core, abi: CC_ABI, functionName: 'ethRate' }) as Promise<bigint>,
+        account ? (pub.readContract({ address: config.credits, abi: creditsAbi, functionName: 'isApprovedForAll', args: [account, core] }) as Promise<boolean>) : Promise.resolve(false),
+        ...ids.map((id) => (pub.readContract({ address: core, abi: CC_ABI, functionName: 'bidOf', args: [id] }) as Promise<bigint>).catch(() => 0n)),
+      ]);
+      cc.pot = pot;
+      cc.live = pot > 0n && rate > 0n;
+      cc.approved = ok;
+      ids.forEach((id, i) => cc.bids.set(String(id), bids[i]));
+    })().catch(() => {}));
+  /// The Credits picked that $CC can pay for: the best bids first, while its pot lasts.
+  const ccSale = () => {
+    const mine = [...owned].filter((id) => picks.has(String(id))).sort((x, y) => Number((cc.bids.get(String(y)) ?? 0n) - (cc.bids.get(String(x)) ?? 0n)));
+    const take: bigint[] = [];
+    let eth = 0n;
+    for (const id of mine) {
+      const b = cc.bids.get(String(id)) ?? 0n;
+      if (!b || (cc.pot !== null && eth + b > cc.pot)) continue;
+      take.push(id);
+      eth += b;
+    }
+    return { mine, take, eth };
+  };
+  async function sellcSync() {
+    const fresh = !cc.read;
+    await readCC();
+    if (!app.isConnected || viewNow() !== 'sellc') return;
+    if (fresh && (account || !cc.live)) return void draw(); // the row now sorts by bid, and $CC shows only if it's bidding
+    const { mine, take, eth } = ccSale();
+    setText('sc-get', eth ? ethNum(eth, 4) : '0');
+    setText('sc-way', eth ? `${ethNum(eth, 4)} ETH` : '—');
+    document.querySelector('.tk-way[role="radio"]')?.setAttribute('aria-checked', String(eth > 0n)); // chosen once there's a sale
+    // What that is per rating point.
+    const tenths = take.reduce((a, id) => a + t(id), 0);
+    const per = (wei: bigint, tn: number) => (tn ? ethNum((wei * 10_000n) / BigInt(tn), 4) : '');
+    setText('sc-sub', eth ? [dollars(Number(formatEther(eth))), `${per(eth, tenths)} ETH per 1,000 rating`].filter(Boolean).join(' · ') : '');
+    const picked = mine.reduce((a, id) => a + t(id), 0);
+    setText('n-sel', !account || !owned.length ? '' : mine.length ? `${mine.length} of ${owned.length} · rated ${pts(picked)}` : `Pick from your ${owned.length}`);
+    const all = document.getElementById('pick-all');
+    if (all) all.textContent = mine.length ? 'Clear' : 'Select all';
+    const left = mine.length - take.length;
+    setText('fees', cc.pot === null ? '' : !cc.live ? '' : !take.length && mine.length ? '$CC has no bid for these right now.' : left > 0 ? `$CC can take ${plural(take.length)} of these now. List the rest on OpenSea.` : '');
+    // With no instant sale, the button is the next best thing: listing them on OpenSea.
+    if (!cc.live) return setGo(account ? 'List on OpenSea' : 'Sell my Credits', true);
+    setGo(!account ? 'Sell my Credits' : take.length ? `Sell ${plural(take.length)} · ${ethNum(eth, 4)} ETH` : mine.length ? 'No bid right now' : 'Pick Credits', !account || take.length > 0);
+  }
+  /// Your Statements picked to redeem (all that redeem now, until you pick).
+  const sPicks = new Set<string>();
+  let sPicked = false;
+  function redeemSync() {
+    if (!sPicked) for (const x of myStmts) if (x.ready) sPicks.add(String(x.id));
+    const mine = myStmts.filter((x) => x.ready && sPicks.has(String(x.id)));
+    const total = mine.reduce((a, x) => a + x.rating, 0);
+    setText('s-get', whole(total));
+    setText('s-sel', !account || !myStmts.length ? '' : mine.length ? `${mine.length} of ${myStmts.length} picked` : 'Pick the ones to redeem');
+    $$<HTMLElement>('#s-picker .pick', app).forEach((p) => p.setAttribute('aria-pressed', String(sPicks.has(p.dataset.sid!))));
+    setGo(!account ? 'Redeem my Statements' : mine.length ? `Redeem ${mine.length === 1 ? `Statement #${mine[0].id}` : `${mine.length} Statements`}` : myStmts.length ? 'Pick Statements' : 'No Statements yet', !account || mine.length > 0);
+  }
+  /// The pairs one box can't do in one go: the way there, and a button to its first step.
+  function viaHtml() {
+    const tok = !trade?.open && (from === 'balance' || to === 'balance');
+    const [steps, text, btn]: [[Asset, string][], string, string] =
+      tok && from === 'balance'
+        ? [[['balance', '']], `${TOKEN} trades once it opens.`, '']
+        : from === 'credit' && to === 'statement'
+          ? [[['credit', ''], ['statement', 'Pool 80 in a Credit Union']], '80 Credits make a Statement. Fill it with other holders, or with your own.', '<a class="btn primary block" href="/create">Start a Credit Union</a>']
+          : from === 'credit'
+            ? [[['credit', ''], ['balance', 'Convert'], ['eth', 'sell on Uniswap']], 'Or list them on OpenSea.', `<button type="button" class="btn primary block" data-pair="credit:balance">Convert to ${TOKEN}</button>`]
+            : [
+                [['statement', ''], ['balance', 'Redeem'], ...(to === 'credit' ? ([['eth', 'sell on Uniswap'], ['credit', 'buy on OpenSea']] as [Asset, string][]) : ([['eth', 'sell on Uniswap']] as [Asset, string][]))],
+                `Redeeming has no fee. Then the ${TOKEN} is typed in for you.`,
+                `<button type="button" class="btn primary block" data-pair="statement:balance" data-then="${to}">Redeem first</button>`,
+              ];
+    const held = !account ? '' : from === 'credit' ? owned.length : from === 'statement' ? myStmts.length : from === 'balance' ? tokAmt(tokenHeld) : ethHeld !== null ? ethNum(ethHeld, 3) : '';
+    return `
+          <div class="tk-gethead"><h2 class="form-title">You have</h2></div>
+          <section class="rule">
+            <div class="tk-get tk-panel">${account ? `<span class="num tk-out">${held}</span>` : '<span class="muted">Any you own</span>'}${pickChip('from')}</div>
+          </section>
+          ${flipHtml()}
+          <div class="tk-gethead"><h2 class="form-title">You get</h2></div>
+          <section class="rule">
+            <div class="tk-get tk-panel"><span class="tk-getrow tk-steps">${steps.slice(1).map(([, how]) => how).join(', then ')}</span>${pickChip('to')}</div>
+            <div class="tk-lines term-desc"><p>${text}</p></div>
+          </section>
+          ${btn ? `<div class="submit">${btn}</div>` : ''}`;
+  }
 
+  /// The homepage under the box: the cheapest ways in side by side, Credits on the left and Statements on the right,
+  /// each the most rating per ETH first as the marketplace's tiles (one row of as many as fit), headed by the most
+  /// BALANCE an ETH gets that way (one rating point is one BALANCE), and each a tap from its whole market.
+  const CHEAP = 24;
+  const perEth = (tenths: number, wei: bigint) => (wei ? Math.floor(tenths / 10 / (Number(wei) / 1e18)) : 0);
+  const skel = '<div class="cc skel" aria-hidden="true"><span class="cc-art"></span><span class="cc-cap"></span></div>';
+  const credBody = () => {
+    const ls = (pools.get('any') ?? []).slice(0, CHEAP);
+    const cell = (x: Listing) =>
+      `<div class="cc listed" data-id="${x.id}"><a class="cc-art" href="/credit/${x.id}"><img src="${editionArt(Number(x.id))}" alt="Credit #${x.id}" loading="lazy" decoding="async"></a><span class="cc-cap"><a class="num" href="/credit/${x.id}">#${Number(x.id).toLocaleString('en-US')}</a>${priceTag(x as unknown as Listed)}</span><span class="cc-line num">Rating ${pts(x.tenths)}</span></div>`;
+    return market === 'none' ? '<p class="muted">No Credits for sale right now.</p>' : ls.length ? ls.map(cell).join('') : skel.repeat(8);
+  };
+  const stBody = () => {
+    const ls = [...stmts].sort((a, b) => b.rating! / Number(BigInt(b.price)) - a.rating! / Number(BigInt(a.price))).slice(0, CHEAP);
+    const cell = (x: ForSale) =>
+      `<div class="cc listed st" data-id="${x.id}"><a class="cc-art" href="/statement/${x.id}"><img src="/statement/${x.id}.svg" alt="Statement #${x.id}" loading="lazy" decoding="async"></a><span class="cc-cap"><a class="num" href="/statement/${x.id}">#${x.id}</a><span class="cc-price num" title="On OpenSea"><img class="src" src="${SOURCES.opensea.icon}" alt="OpenSea">${ethNum(BigInt(x.price))}</span></span><span class="cc-line num">Rating ${whole(x.rating!)}</span></div>`;
+    return ls.length ? ls.map(cell).join('') : stmtsRead ? '<p class="muted">No Statements for sale right now.</p>' : skel.repeat(4);
+  };
+  const credRate = () => {
+    const x = (pools.get('any') ?? [])[0];
+    return x ? perEth(x.tenths, BigInt(x.price) + (BigInt(x.price) * artFee) / 10_000n) : 0;
+  };
+  const stRate = () => stmts.reduce((a, x) => Math.max(a, perEth(x.rating! * 10, BigInt(x.price))), 0);
+  const rateLine = (n: number) => (n ? `Up to <span class="num">${n.toLocaleString('en-US')}</span> ${TOKEN} per ETH` : '&nbsp;');
+  const cheapHtml = () => `<section class="tk-cheap">
+      <div class="tk-cheapcol cred"><div class="tk-cheaphead"><div><h3>Credits</h3><p class="muted" id="tk-cred-rate">${rateLine(credRate())}</p></div><a href="/credits">All Credits →</a></div><div class="trait-grid tk-cheaprow" id="tk-cheap">${credBody()}</div></div>
+      <div class="tk-cheapcol stmt"><div class="tk-cheaphead"><div><h3>Statements</h3><p class="muted" id="tk-st-rate">${rateLine(stRate())}</p></div><a href="/statements">All Statements →</a></div><div class="trait-grid tk-cheaprow" id="tk-cheap-st">${stBody()}</div></div>
+    </section>`;
+  const fillCheap = () => {
+    if (!atHome) return;
+    setText('tk-cheap', credBody());
+    setText('tk-cheap-st', stBody());
+    setText('tk-cred-rate', rateLine(credRate()));
+    setText('tk-st-rate', rateLine(stRate()));
+  };
   /// Listeners on the document from the last draw, dropped when the page draws again.
   let drawn = new AbortController();
   function draw() {
@@ -771,7 +1070,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     // One shape for every row: its art, a bold line and a grey line under it, and the one action on the right.
     const row = (artHtml: string, title: string, sub: string, action = '') => `<div class="tk-yrow">${artHtml}<div class="tk-ytext"><b>${title}</b>${sub ? `<span class="muted small">${sub}</span>` : ''}</div>${action}</div>`;
     const bal = m && tokenHeld > 0n ? tokAmt(tokenHeld) : !m && held && held.amount > 0n ? amount(held.amount) : '';
-    if (bal) {
+    // Once it trades, what you hold shows where you pick it (the $BALANCE side's "You have"): a row only while it's locked.
+    if (bal && !isOpen) {
       rows.push(row(coin(bal), `Your <span class="num">${bal}</span> ${TOKEN}`, isOpen ? 'In your wallet' : `In your wallet, unlocks ${whenShort(tradesAt)}`));
     }
     // Owed from a converted batch: claimable once the token's transfers open (the keeper usually pays it first).
@@ -798,26 +1098,27 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       }</p>`;
     const whenLine = isOpen && !previewSoon ? '' : stepsHtml();
     kept.clear();
-    app.innerHTML = `
-    <section class="tokens">
-      <header class="create-head"><h1>Get ${TOKEN}${isOpen && !previewSoon ? '' : ' before it trades'}</h1></header>
+    keepHero(app, () => (app.innerHTML = `
+    <section class="tokens${atHome ? ' home' : ''}">
+      ${atHome ? HOME_HEAD : `<header class="create-head"><h1>Get ${TOKEN}${isOpen && !previewSoon ? '' : ' before it trades'}</h1></header>`}
       ${whenLine}
       <div class="tk-layout">
       <section class="tk-card">
         ${yoursBox}
         <form class="design-form tk-form" novalidate style="${inkVar(l)}">
           ${tabsHtml()}
-          ${v === 'sell' ? sellHtml() : v === 'credits' ? creditsHtml() : v === 'out' ? outHtml() : buyHtml()}
+          ${v === 'sell' ? sellHtml() : v === 'credits' ? creditsHtml() : v === 'out' ? outHtml() : v === 'redeem' ? redeemHtml() : v === 'art' ? artHtml() : v === 'via' ? viaHtml() : v === 'sellc' ? sellcHtml() : buyHtml()}
         </form>
       </section>
-      <div class="tk-right">${isOpen ? '<div class="pc" id="tk-chart"></div>' : ''}<div id="tk-batch-home">${v === 'buy' || v === 'credits' ? batchHtml() : ''}</div></div>
+      <div class="tk-right">${isOpen ? '<div class="pc" id="tk-chart"></div>' : ''}<div id="tk-batch-home">${v === 'buy' || v === 'credits' ? batchHtml() : ''}</div>${isOpen ? '<div class="sp" id="tk-supply"></div>' : ''}</div>
       </div>
+      ${atHome ? `${cheapHtml()}${explainers()}` : ''}
       ${
-        made.length
+        made.length && !atHome
           ? `<section class="tokens-made"><h3>${isOpen ? 'Paid out' : 'Converted'}</h3>${madeLine()}<div class="made-row${isOpen ? ' paid' : ''}">${made.map(madeTile).join('')}</div></section>`
           : ''
       }
-    </section>`;
+    </section>`));
     previewed = ''; // the batch box's bar and key come from drawSheet, so its first run goes through
     bind();
     prices();
@@ -825,6 +1126,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     // Trading: the price, atop the right column (on a phone, under the button).
     const chartHost = document.getElementById('tk-chart');
     if (chartHost) priceChart(chartHost);
+    const supplyHost = document.getElementById('tk-supply');
+    if (supplyHost) void supplyBar(supplyHost);
     // Just joined: the batch comes into view once (on a phone it's under the button), yours in it.
     if (joined && !joined.shown && !previewJoined && Date.now() - joined.at < 60_000) {
       joined.shown = true;
@@ -838,7 +1141,11 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     if (v === 'buy') void buySync();
     else if (v === 'sell') void sellSync();
     else if (v === 'credits') creditsSync();
-    else outSync();
+    else if (v === 'art') void artSync();
+    else if (v === 'out') outSync();
+    else if (v === 'redeem') redeemSync(), showLeft();
+    else if (v === 'sellc') void sellcSync(), showLeft();
+    else showLeft();
   }
 
   let quoteRun = 0;
@@ -922,15 +1229,22 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     }
     setText('route2', ''); // a split's Uniswap part is said under the number now
     const label: Record<Route, [string, string]> = {
-      pool: ['Uniswap', 'Instant'],
-      batch: ['Credits', `Lands when the ${lane().name} batch fills · ${80 - (curOf(lane())?.s.count ?? 0)} to go`],
+      pool: ['Uniswap', 'Instant · Fees included'],
+      batch: ['Credits', 'When the batch fills · Fees included'],
       statement: [st ? `Statement #${st.id}` : 'Statement', `On OpenSea · ${trade?.open ? 'redeems at once' : `redeems when ${TOKEN} opens`}`],
     };
     const box = document.getElementById('tk-batch'), home = document.getElementById('tk-batch-home');
     if (box && home && box.parentElement !== home) home.append(box);
+    // Nothing typed: the ways there are, greyed, so the box shows how it goes before there's a number to compare.
+    const idle = ([poolOk() ? 'pool' : null, sweeps ? 'batch' : null].filter(Boolean) as Route[])
+      .map((r) => `<button type="button" class="tk-way" role="radio" aria-checked="false" disabled><span><b>${label[r][0]}</b><span class="muted small">${label[r][1]}</span></span><span class="num muted">—</span></button>`)
+      .join('');
+    // The homepage's box takes the better way and says which; choosing between them is /balance's.
     setText(
       'alt',
-      wei && ways.length > 1
+      !wei && idle
+        ? `<div class="tk-ways idle" role="radiogroup" aria-label="Way to buy" aria-disabled="true">${idle}</div>`
+        : wei && ways.length > 1
         ? `<div class="tk-ways" role="radiogroup" aria-label="Way to buy">${ways
             .map(([r, n]) => `<button type="button" class="tk-way" role="radio" data-route="${r}" aria-checked="${r === route}"><span><b>${label[r][0]}</b>${r === best ? '<span class="tag">Best</span>' : ''}<span class="muted small">${label[r][1]}</span></span><span class="num">${whole(n)}<span class="muted small"> for ${ethNum(BigInt(Math.round(spentOn(r) * 1e18)), 3)} ETH</span></span></button>`)
             .join('')}</div>`
@@ -946,10 +1260,10 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     const poolFee = poolN && m ? (poolN * m.feeBps) / (10_000 - m.feeBps) : 0;
     setText(
       'fees',
-      way === 'batch'
+      way === 'batch' || (!wei && idle)
         ? ''
         : way === 'pool' && route === 'pool'
-          ? `Instant via Uniswap · <button type="button" class="link" id="fee-rate">${feeFlipped && poolFee ? `${whole(poolFee)} ${TOKEN} to Credit Union` : 'Fees included'}</button>`
+          ? wei && ways.length > 1 ? '' : `Instant via Uniswap · <button type="button" class="link" id="fee-rate">${feeFlipped && poolFee ? `${whole(poolFee)} ${TOKEN} to Credit Union` : 'Fees included'}</button>`
           : wei && ways.length > 1
           ? ''
           : route === 'statement'
@@ -1019,7 +1333,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       out(0n);
       return;
     }
-    const short = amt > tokenHeld;
+    const short = !!account && amt > tokenHeld;
     setGo(short ? `Not enough ${sym()}` : `Sell ${tokAmt(amt)} ${sym()}`, false);
     await wait(250);
     if (run !== quoteRun) return;
@@ -1030,6 +1344,122 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     if (q && q.out > q.net) setText('fees', `Instant via Uniswap · <button type="button" class="link" id="fee-rate">${feeFlipped ? `${ethNum(q.out - q.net, 4, true)} ETH to Credit Union` : 'Fees included'}</button>`);
     out(q?.net ?? 0n);
     if (!short) setGo(q ? `Sell ${tokAmt(amt)} ${sym()}` : 'No price', !!q);
+  }
+
+  /// Art for ETH or BALANCE: the ETH it comes to (BALANCE sold on Uniswap first, counted at the least that sale can
+  /// bring), then the Credits with the most rating for it (the cheapest per point first, the Sweeper's fee in), or the
+  /// Statement it covers with the most rating per ETH.
+  let artPlan: { cred: Listing[]; st: ForSale | null; amt: bigint; eth: bigint } | null = null;
+  /// The Credits `eth` buys to the wallet: the cheapest per point first while each fits, the Sweeper's fee in.
+  const credFor = (eth: bigint) => {
+    const cost = (x: Listing) => BigInt(x.price) + (BigInt(x.price) * artFee) / 10_000n;
+    const cred: Listing[] = [];
+    let spent = 0n;
+    for (const x of pools.get('any') ?? []) {
+      if (cred.length >= MAX_SWEEP) break;
+      if (spent + cost(x) <= eth) cred.push(x), (spent += cost(x));
+    }
+    return { cred, spent };
+  };
+  /// The To menu, once open: beside each, what the amount typed comes to that way (its ETH first, when it's BALANCE),
+  /// then how. Just how, while there's nothing typed or nothing to say.
+  async function toHints(menu: HTMLElement) {
+    const run = ++hintRun, amt = from === 'eth' || from === 'balance' ? amountIn() : 0n;
+    const set = (x: Asset, v: string) => {
+      const el = menu.querySelector(`[data-asset="${x}"] [data-hint]`);
+      if (el) el.textContent = v ? `${v} · ${how(from, x)}` : how(from, x);
+    };
+    const eth = from === 'eth' ? amt : from === 'balance' && amt && m && trade?.open ? ((await swapQuote(m, false, amt))?.net ?? 0n) : 0n;
+    if (run !== hintRun || menu.hidden) return;
+    const minSt = stmts.reduce<bigint | null>((a, y) => (a === null || BigInt(y.price) < a ? BigInt(y.price) : a), null);
+    for (const x of ASSETS) {
+      if (x === from) continue;
+      if (x === 'credit' && eth && market === 'ready') {
+        const n = credFor(eth).cred.length;
+        set(x, n ? `≈${plural(n)}` : 'Not enough for one');
+      } else if (x === 'statement' && eth) {
+        const st = stmtFor(eth);
+        set(x, st ? `#${st.id}, rated ${whole(st.rating!)}` : minSt ? `From ${ethNum(minSt, 2)} ETH` : '');
+      } else if (x === 'eth' && from === 'balance' && eth) set(x, `≈${ethNum(eth, 3)} ETH`);
+      else if (x === 'balance' && from === 'credit') {
+        const tenths = [...picks].reduce((a, id) => a + t(id), 0);
+        set(x, tenths ? `≈${whole(est(tenths))}` : '');
+      } else if (x === 'balance' && from === 'statement') {
+        const total = myStmts.reduce((a, y) => a + y.rating, 0);
+        set(x, total ? whole(total) : '');
+      } else if (x === 'balance' && from === 'eth' && eth && m && trade?.open) {
+        const q = await swapQuote(m, true, eth);
+        if (run !== hintRun || menu.hidden) return;
+        set(x, q ? `≈${whole(Number(formatUnits(q.net, m.decimals)))}` : '');
+      }
+    }
+  }
+  let hintRun = 0;
+  async function artSync() {
+    const amt = amountIn(), selling = from === 'balance', run = ++quoteRun;
+    showLeft();
+    artPlan = null;
+    let eth = selling ? 0n : amt;
+    if (selling && amt) {
+      setGo('Pricing…', false);
+      await wait(250);
+      if (run !== quoteRun) return;
+      const q = await swapQuote(m!, false, amt);
+      if (run !== quoteRun || !app.isConnected) return;
+      eth = q ? (q.net * (10_000n - SELL_SLIPPAGE_BPS)) / 10_000n : 0n;
+    }
+    setText('amt-usd', dollars(Number(formatEther(eth))));
+    let { cred, spent } = to === 'credit' ? credFor(eth) : { cred: [] as Listing[], spent: 0n };
+    const s = to === 'statement' ? stmtFor(eth) : null;
+    if (s) spent = BigInt(s.price);
+    const n = to === 'credit' ? cred.length : s ? 1 : 0;
+    const tenths = to === 'credit' ? cred.reduce((a, x) => a + x.tenths, 0) : (s?.rating ?? 0) * 10;
+    if (n) artPlan = { cred, st: s, amt, eth };
+    // You get: the Credits fanned with how many, or the Statement with its number.
+    setText(
+      'art-get',
+      to === 'credit'
+        ? `${cred.length ? `<span class="tk-stack">${cred.slice(0, 5).map((x) => `<img src="${art(BigInt(x.id))}" alt="">`).join('')}</span>` : ''}<span class="num tk-out">${cred.length}</span>`
+        : s
+          ? `<span class="tk-stack"><img class="st" src="/statement/${s.id}.svg" alt=""></span><span class="num tk-out">#${s.id}</span>`
+          : '<span class="num tk-out">0</span>',
+    );
+    setText('route', n ? `Rated ${whole(tenths / 10)} · converts to ${whole(tenths / 10)} ${TOKEN}` : '');
+
+    const rest = eth - spent >= parseEther('0.001') && n ? ` · ${ethNum(eth - spent, 3)} ETH left over` : '';
+    setText(
+      'fees',
+      !n
+        ? selling
+          ? 'Sells on Uniswap, then buys on OpenSea · Fees included.'
+          : to === 'credit'
+            ? 'Bought on OpenSea, most rating per ETH first · Fees included.'
+            : 'Bought on OpenSea, the most rating per ETH it covers.'
+        : selling
+          ? `Sells on Uniswap for at least ${ethNum(eth, 3)} ETH, then buys on OpenSea. Two confirmations · Fees included.`
+          : to === 'credit'
+            ? `From OpenSea, most rating per ETH first · Fees included${rest}`
+            : `From OpenSea at ${ethNum(spent, 3)} ETH${rest}`,
+    );
+    const short = selling ? !!account && amt > tokenHeld : ethHeld !== null && amt > ethHeld;
+    const loading = market === 'loading' && to === 'credit';
+    setText('amt-line', '');
+    setGo(
+      !amt
+        ? 'Enter an amount'
+        : short
+          ? `Not enough ${selling ? sym() : 'ETH'}`
+          : loading
+            ? 'Pricing…'
+            : n
+              ? to === 'credit'
+                ? `Get ${plural(n)}`
+                : `Get Statement #${s!.id}`
+              : selling && !eth
+                ? 'No price right now'
+                : `Not enough for a ${to === 'credit' ? 'Credit' : 'Statement'}`,
+      !!amt && !short && n > 0,
+    );
   }
 
   /// Your Credits picked: what they pay out, which of them would pay their own color, and the button.
@@ -1052,7 +1482,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     setText('tk-bfee', txs > 1 ? `${txs} confirmations` : '');
     const all = document.getElementById('pick-all');
     if (all) all.textContent = mine.length ? 'Clear' : 'Select all';
-    setText('n-sel', mine.length ? `${mine.length} of your ${ownedHere().length} picked` : `Pick from your ${ownedHere().length}.`);
+    setText('n-sel', mine.length ? `${mine.length} of ${ownedHere().length} · rated ${pts(tenths)}` : `Pick from your ${ownedHere().length}`);
     setGo(!account ? 'Convert my Credits' : mine.length ? `Convert ${plural(mine.length)}${trade?.open || converting ? '' : ' · converts when it opens'}` : 'Pick Credits', !account || mine.length > 0);
     showLeft();
     drawSheet();
@@ -1085,7 +1515,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     picks.clear();
     if (keep) keep.forEach((id) => picks.add(id));
     else if (lane().ink >= 0 && viewNow() === 'credits') for (const id of ownedHere()) picks.add(id.toString());
-    history.replaceState(history.state, '', laneKey === 'any' ? '/balance' : `/balance?color=${laneKey}`);
+    history.replaceState(history.state, '', pageUrl());
     draw();
   }
 
@@ -1131,7 +1561,90 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     document.addEventListener('pointerdown', (e) => !menu.hidden && !box.contains(e.target as Node) && open(false), { signal: drawn.signal });
   }
 
+  /// The page's address: the color, and the pair unless it's the usual ETH to BALANCE.
+  const pageUrl = () => {
+    const p = new URLSearchParams();
+    if (laneKey !== 'any') p.set('color', laneKey);
+    if (from !== 'eth' || to !== (atHome ? 'credit' : 'balance')) p.set('from', from), p.set('to', to);
+    return `${atHome ? '/' : '/balance'}${p.size ? `?${p}` : ''}`;
+  };
+  /// To another pair: the sides change, and what was typed or picked for the last one goes.
+  function goPair(a: Asset, b: Asset) {
+    if (a === b) return;
+    if (viewNow() === 'credits') picks.clear();
+    setPair(a, b);
+    history.replaceState(history.state, '', pageUrl());
+    if (from !== 'statement') then = null;
+    typed = a === 'eth' && b !== 'statement' ? '0.1' : '';
+    chosen = null;
+    if (view === 'credits' && lane().ink >= 0) for (const id of ownedHere()) picks.add(id.toString());
+    draw();
+    document.querySelector<HTMLInputElement>('#amt')?.focus({ preventScroll: true });
+  }
+  /// The two sides' menus (arrows move, Enter picks, Escape or a click elsewhere closes), the flip, and F to flip.
+  function bindPair() {
+    for (const box of $$<HTMLElement>('.tk-side', app)) {
+      const btn = box.querySelector<HTMLButtonElement>('.tk-chip')!, menu = box.querySelector<HTMLElement>('.tk-amenu')!;
+      const opts = [...menu.querySelectorAll<HTMLElement>('[data-asset]')];
+      const k = box.dataset.side as 'from' | 'to';
+      const open = (on: boolean) => {
+        menu.hidden = !on;
+        btn.setAttribute('aria-expanded', String(on));
+        if (on) (opts.find((o) => o.getAttribute('aria-selected') === 'true') ?? opts[0]).focus();
+        if (on && k === 'to') void toHints(menu);
+      };
+      // The other side's pick here swaps the two.
+      const choose = (a: Asset) => {
+        open(false);
+        const other = k === 'from' ? to : from;
+        if (k === 'from') goPair(a, a === other ? from : other);
+        else goPair(a === other ? to : other, a);
+      };
+      btn.addEventListener('click', () => open(menu.hidden === true));
+      menu.addEventListener('click', (e) => {
+        const o = (e.target as HTMLElement).closest<HTMLElement>('[data-asset]');
+        if (o) choose(o.dataset.asset as Asset);
+        else if ((e.target as HTMLElement).closest('[data-how]')) open(false);
+      });
+      menu.addEventListener('keydown', (e) => {
+        const i = opts.indexOf(document.activeElement as HTMLElement);
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          opts[(i + (e.key === 'ArrowDown' ? 1 : opts.length - 1)) % opts.length].focus();
+        } else if ((e.key === 'Enter' || e.key === ' ') && i >= 0) {
+          e.preventDefault();
+          choose(opts[i].dataset.asset as Asset);
+        } else if (e.key === 'Escape') {
+          open(false);
+          btn.focus();
+        }
+      });
+      document.addEventListener('pointerdown', (e) => !menu.hidden && !box.contains(e.target as Node) && open(false), { signal: drawn.signal });
+    }
+    document.getElementById('tk-flip')?.addEventListener('click', () => goPair(to, from));
+    document.addEventListener(
+      'keydown',
+      (e) => {
+        if (e.key !== 'f' && e.key !== 'F') return;
+        if (e.metaKey || e.ctrlKey || e.altKey || busy || (e.target as HTMLElement).closest('input, textarea, select, [contenteditable]')) return;
+        if (!document.getElementById('tk-flip')) return;
+        e.preventDefault();
+        goPair(to, from);
+      },
+      { signal: drawn.signal },
+    );
+    $$<HTMLElement>('[data-pair]', app).forEach((x) =>
+      x.addEventListener('click', () => {
+        const [a, b] = x.dataset.pair!.split(':') as [Asset, Asset];
+        goPair(a, b);
+        if (x.dataset.then) then = x.dataset.then as Asset;
+        if (then) draw();
+      }),
+    );
+  }
+
   function bind() {
+    bindPair();
     // The views: Buy · Sell, and the links between Buy, your Credits and Withdraw.
     $$<HTMLButtonElement>('[data-view]', app).forEach((b) =>
       b.addEventListener('click', () => {
@@ -1139,6 +1652,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
         if (b.disabled || k === viewNow()) return;
         if (viewNow() === 'credits') picks.clear();
         view = k;
+        const pair = PAIR_OF[k];
+        if (pair) [from, to] = pair;
         typed = '';
         // Into Convert from the sidebar, or a pure colour: every Credit of yours that fits is picked already.
         if (k === 'credits' && (lane().ink >= 0 || b.hasAttribute('data-all'))) for (const id of ownedHere()) picks.add(id.toString());
@@ -1214,6 +1729,92 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
     go?.addEventListener('click', () => {
       if (!account) return; // its data-connect opens the wallet; the page draws again once one connects
       const v = viewNow(), l = lane(), wei = amountIn();
+      // Sell the picked Credits $CC pays for: let its engine take Credits (once), then one sale at no less than 98% of
+      // its bid now (a bid only moves a little between this read and the block).
+      if (v === 'sellc' && !cc.live) return void document.getElementById('sc-os')?.click();
+      if (v === 'sellc') {
+        const { take, eth } = ccSale();
+        const core = config.ccCore;
+        if (!take.length || !core) return;
+        return run(
+          go,
+          `Selling ${plural(take.length)}…`,
+          async () => {
+            const approve = { address: config.credits, abi: creditsAbi, functionName: 'setApprovalForAll', args: [core, true] } as const;
+            const sale = { address: core, abi: CC_ABI, functionName: 'sellForEth', args: [take, (eth * 98n) / 100n] } as const;
+            if (!cc.approved && (await canBatch())) await sendBatch([approve, sale], note);
+            else {
+              if (!cc.approved) await send(approve, note);
+              await send(sale, note);
+            }
+            take.forEach((id) => picks.delete(String(id)));
+            cc.read = null;
+            cc.pot = null;
+          },
+          `Sold ${plural(take.length)} for about ${ethNum(eth, 4)} ETH.`,
+        );
+      }
+      // Redeem the Statements picked: for each, approve the token for that one Statement, then withdraw its exact quote.
+      if (v === 'redeem') {
+        const mine = myStmts.filter((x) => x.ready && sPicks.has(String(x.id)));
+        if (!mine.length) return;
+        return run(
+          go,
+          'Redeeming…',
+          async () => {
+            const vault = await vaultOf();
+            if (!vault || !config.statements) throw new Error(`${TOKEN} isn't live yet.`);
+            let got = 0n;
+            for (const x of mine) {
+              const q = (await pub.readContract({ address: vault, abi: VAULT_ABI, functionName: 'quote', args: [x.id] })) as bigint;
+              await send({ address: config.statements, abi: ST_ABI, functionName: 'approve', args: [vault, x.id] }, note);
+              await send({ address: vault, abi: VAULT_ABI, functionName: 'withdraw', args: [x.id, q] }, note);
+              myStmts = myStmts.filter((y) => y.id !== x.id);
+              sPicks.delete(String(x.id));
+              got += q;
+            }
+            // On the way to Credits or ETH: the box turns to that, with the BALANCE just redeemed typed in.
+            if (then) {
+              setPair('balance', then);
+              then = null;
+              carry = formatUnits(got, m?.decimals ?? 18).replace(/(\.\d{4})\d+$/, '$1');
+            }
+          },
+          'Redeemed.',
+        );
+      }
+      if (v === 'art' && artPlan) {
+        const p = artPlan, selling = from === 'balance';
+        return run(
+          go,
+          selling ? 'Selling…' : 'Buying…',
+          async () => {
+            if (selling) {
+              const q = await swapQuote(m!, false, p.amt);
+              if (!q) throw new Error('No price right now. Try again in a moment.');
+              const calls = await sellCalls(m!, account!, p.amt, q.net);
+              if (calls.length > 1 && (await canBatch())) await sendBatch(calls, note);
+              else for (const c of calls) await send(c, note);
+            }
+            const after = selling ? ` Your ${TOKEN} sold; the ETH is in your wallet.` : '';
+            if (p.st) {
+              let ok = false;
+              await buyListed(go, p.st, () => (ok = true), true);
+              if (!ok) throw new Error(`Statement #${p.st.id} didn’t go through.${after}`);
+              stmts = stmts.filter((y) => y.id !== p.st!.id);
+              return;
+            }
+            // The book's rows name a Credit and its price; a buy needs each one's live order (and drops any gone since).
+            const offers = await listedById(p.cred.map((x) => x.id), true);
+            const gone = p.cred.filter((x) => !offers.some((o) => o.id === x.id)).map((x) => x.id);
+            if (gone.length) drop(gone);
+            if (!offers.length) throw new Error(`Those Credits just sold. Pick again.${after}`);
+            const got = await sweepToWallet(offers, go, note, undefined, drop);
+            if (!got?.length) throw new Error(`The Credits didn’t go through.${after}`);
+          },
+          p.st ? `Statement #${p.st.id} is yours.` : '',
+        );
+      }
       if (v === 'sell')
         return run(
           go,
@@ -1326,25 +1927,14 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
       },
       { signal: drawn.signal },
     );
-    // Redeem a Statement you hold: approve the token for that one Statement, then withdraw its exact quote.
-    $$<HTMLButtonElement>('[data-redeem]', app).forEach((x) =>
-      x.addEventListener('click', () =>
-        run(
-          x,
-          'Redeeming…',
-          async () => {
-            const id = BigInt(x.dataset.redeem!);
-            const vault = await vaultOf();
-            if (!vault || !config.statements) throw new Error(`${TOKEN} isn't live yet.`);
-            const q = (await pub.readContract({ address: vault, abi: VAULT_ABI, functionName: 'quote', args: [id] })) as bigint;
-            await send({ address: config.statements, abi: ST_ABI, functionName: 'approve', args: [vault, id] }, note);
-            await send({ address: vault, abi: VAULT_ABI, functionName: 'withdraw', args: [id, q] }, note);
-            myStmts = myStmts.filter((y) => y.id !== id);
-          },
-          'Redeemed.',
-        ),
-      ),
-    );
+    document.getElementById('s-picker')?.addEventListener('click', (e) => {
+      const el = (e.target as HTMLElement).closest<HTMLButtonElement>('.pick');
+      if (!el || el.disabled) return;
+      const id = el.dataset.sid!;
+      sPicked = true;
+      sPicks.has(id) ? sPicks.delete(id) : sPicks.add(id);
+      redeemSync();
+    });
     document.getElementById('how-color')?.addEventListener('click', howColor);
     $$<HTMLElement>('[data-how]', app).forEach((x) => x.addEventListener('click', howBalance));
     const left = document.getElementById('tk-left');
@@ -1518,10 +2108,10 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
 
   if (!landed) {
     landed = true;
-    if (account && owned.length && view === 'buy') {
-      view = 'credits';
+    if (account && owned.length && view === 'buy' && !atHome) {
+      setPair('credit', 'balance');
       for (const id of ownedHere()) picks.add(id.toString());
-    } else if (view === 'buy' && !typed) typed = '0.1';
+    } else if (from === 'eth' && to !== 'statement' && !typed) typed = '0.1';
   }
   // Your Credits in a pure color open with yours of that ink picked, however you got here (its card, or a ?color= link).
   if (viewNow() === 'credits' && lane().ink >= 0 && !picks.size) for (const id of ownedHere()) picks.add(id.toString());
@@ -1619,17 +2209,37 @@ export async function tokensPage(app: HTMLElement, rerun: () => void) {
           .sort((a, b) => Number((BigInt(a.price) * 1000n) / BigInt(a.tenths)) - Number((BigInt(b.price) * 1000n) / BigInt(b.tenths)));
         for (const x of LANES) pools.set(x.key, ranked.filter((r) => fitsLane(x, inkOf(r.id))).slice(0, SHOWN));
         market = 'ready';
+        fillCheap();
         if (m && trade?.open) {
           const [q, b] = [await swapQuote(m, true, REF), viaBatch(REF, 'any', capOf(LANES[0]))];
           restMixed = b.out.length && (!q || b.tokens > Number(formatUnits(q.net, m.decimals)) * WAIT_EDGE) ? 'batch' : q ? 'pool' : 'batch';
         }
       } catch {
         market = 'none';
+        fillCheap();
       }
       if (!app.isConnected) return;
       prices();
       paint();
     })();
+}
+
+/// Where all the rating sits now (the Worker's /market/supply.json), read once a visit: one line, the share that's
+/// BALANCE, over one bar of the three.
+type Supply = { total: number; credits: number; statements: number; balance: number };
+let supplyRead: Promise<Supply | null> | null = null;
+async function supplyBar(host: HTMLElement) {
+  supplyRead ??= fetch('/market/supply.json').then((r) => (r.ok ? (r.json() as Promise<Supply>) : null)).catch(() => null);
+  const d = await supplyRead;
+  if (!d?.total || !host.isConnected) return;
+  const pc = (v: number) => (v / d.total) * 100;
+  const label = (v: number) => `${pc(v).toFixed(1)}%`;
+  const amt = (v: number) => `${(v / 1e6).toFixed(2)}M`;
+  const parts: [string, string, number][] = [['Credits', 'sp-c', d.credits], ['Statements', 'sp-s', d.statements], [TOKEN, 'sp-b', d.balance]];
+  host.innerHTML = `
+    <p class="sp-head"><span class="num">${label(d.balance)}</span> of all rating is now ${TOKEN}</p>
+    <div class="sp-bar" role="img" aria-label="${parts.map(([n, , v]) => `${n} ${label(v)}`).join(', ')}">${parts.map(([n, c, v]) => `<span class="${c}" style="flex:${pc(v).toFixed(3)}" title="${n}: ${amt(v)} rating"></span>`).join('')}</div>
+    <div class="sp-key">${parts.map(([n, c, v]) => `<span><i class="${c}"></i>${n} <span class="num">${label(v)}</span></span>`).join('')}</div>`;
 }
 
 /// The BALANCE a wallet holds now, once the adapter (and so the token) is known.

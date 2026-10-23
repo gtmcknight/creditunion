@@ -448,6 +448,7 @@ export const creditsHead = (current: string, value?: string, side = '') => {
   const bar = `<nav class="subtabs swipe" aria-label="Credits by">${tabs.map(([k, l]) => `<a href="/${k}"${k === current ? ' aria-current="page"' : ''}>${l}</a>`).join('')}</nav>`;
   return `<header class="page-head">
       <nav class="jb-crumb" aria-label="Where">${crumb}</nav>
+      ${current === 'credits' ? '<p class="page-lede">Jack Butcher’s onchain art. Each Credit has a rating, and turns into that much $BALANCE. Buy one, or sweep the most rating for your ETH.</p>' : ''}
       ${current === 'statement' || current === 'balances' ? '' : current === 'credits' ? '' : `<div class="page-bar">${bar}${side ? `<span class="page-side">${side}</span>` : ''}</div>`}
     </header>`;
 };

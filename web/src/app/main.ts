@@ -113,9 +113,9 @@ async function route() {
     setTimeout(() => (seen.disconnect(), show()), 400);
   }
   try {
-    if (page === '') home(app);
+    if (page === '') config.tokenFactory ? await (await import('./views/tokens')).tokensPage(app, route, 'home') : home(app);
     else if (page === 'docs') docs(app);
-    else if (page === 'balance') config.tokenFactory ? await (await import('./views/tokens')).tokensPage(app, route) : balance(app);
+    else if (page === 'balance') config.tokenFactory ? await (await import('./views/tokens')).tokensPage(app, route, 'balance') : balance(app);
     else if (page === 'mint') await mint(app, route);
     else if (page === 'og') await previews(app);
     else if (page === 'activity' || page === 'live') await live(app);

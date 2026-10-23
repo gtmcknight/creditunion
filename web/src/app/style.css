@@ -10152,3 +10152,174 @@ dialog.how .how-tile img.st { height: 84%; }
   .ft-set button { width: 44px; }
   .ft-ways { grid-template-columns: repeat(8, 15px); }
 }
+/* A mark: a Credit's own art, a Statement's, BALANCE's four inks, ETH's diamond, all one shape. */
+.tk-aname { display: grid; min-width: 0; line-height: 1.25; text-align: left; }
+.tk-aname b { font-weight: 500; font-size: 14px; white-space: nowrap; }
+.tk-aname .small { font-size: 13px; white-space: nowrap; }
+.tk-aname .small:empty { display: none; }
+.tk-aicon { flex: none; display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 4px; overflow: hidden; background: #fff; box-shadow: 0 0 0 1px var(--img-outline); }
+.tk-aicon img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tk-aicon img.st { object-fit: contain; }
+.tk-aicon.tk-inks { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.tk-aicon.tk-inks i { display: block; width: 100%; height: 100%; }
+.tk-aicon.tk-ethi { background: var(--bg); color: var(--fg); }
+.tk-aicon.tk-ethi svg { width: 18px; height: 18px; }
+.tk-amenu li { height: auto; min-height: 48px; padding: 6px 10px; }
+.tk-amenu .tk-opt { display: inline-flex; align-items: center; gap: 10px; color: var(--fg); }
+.tk-amenu .tk-aicon { width: 28px; height: 28px; border-radius: 14px; }
+.tk-amenu .tk-aicon.tk-ethi svg { width: 16px; height: 16px; }
+.tk-flip { position: absolute; z-index: 2; left: 50%; translate: -50% 0; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; background: var(--bg); color: var(--fg); box-shadow: 0 0 0 4px var(--bg), inset 0 0 0 1px var(--line-strong); cursor: pointer; transition: rotate 250ms var(--ease), box-shadow 150ms var(--ease); }
+.tk-flip:hover { box-shadow: 0 0 0 4px var(--bg), inset 0 0 0 1px var(--fg); rotate: 180deg; }
+.tk-flip:focus { outline: none; }
+.tk-flip:focus-visible { box-shadow: 0 0 0 4px var(--bg), inset 0 0 0 2px var(--fg); }
+/* Art you'd get: a few of the Credits stacked, then how many (or the Statement and its number). */
+.tk-stack { display: inline-flex; flex: none; }
+.tk-stack img { width: 36px; height: 36px; border-radius: 3px; background: #fff; box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--img-outline); }
+.tk-stack img + img { margin-left: -14px; }
+.tk-stack img.st { width: 30px; height: 38px; object-fit: contain; }
+/* Where all the rating sits: the share that's BALANCE in one line, then the three as one bar and its key. */
+.sp:empty { display: none; }
+.sp { display: grid; gap: 10px; }
+.sp-head { margin: 0; font-size: 15px; }
+.sp-head .num { font-weight: 500; }
+.sp-bar { display: flex; gap: 2px; height: 10px; }
+.sp-bar span { min-width: 2px; border-radius: 2px; }
+.sp-c { background: var(--faint); }
+.sp-s { background: var(--muted); }
+.sp-b { background: var(--fg); }
+.sp-key { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; color: var(--muted); }
+.sp-key > span { display: inline-flex; align-items: center; gap: 6px; }
+.sp-key i { width: 8px; height: 8px; border-radius: 2px; }
+.sp-key .num { color: var(--fg); }
+/* The pair on the panels: each side's picker where its unit goes (its mark, name and a chevron), a menu of the others
+   from it, and the flip on the seam between Pay and You get. */
+.tk-side { position: relative; }
+.tk-eth > .tk-side, .tk-get.tk-panel > .tk-side { grid-column: 2; grid-row: 1; justify-self: end; align-self: center; }
+.tk-chip { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px 0 6px; border: 0; border-radius: 20px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line-strong); font: inherit; font-size: 15px; font-weight: 500; color: var(--fg); white-space: nowrap; cursor: pointer; transition: box-shadow 150ms var(--ease), transform 150ms var(--ease); }
+.tk-chip .tk-aicon { width: 28px; height: 28px; border-radius: 14px; }
+.tk-chip .tk-aicon.tk-ethi svg { width: 16px; height: 16px; }
+.tk-chip::after { content: ''; width: 6px; height: 6px; margin-left: 2px; border: solid var(--muted); border-width: 0 1.5px 1.5px 0; rotate: 45deg; translate: 0 -2px; transition: rotate 150ms var(--ease); }
+.tk-chip:hover, .tk-chip[aria-expanded='true'] { box-shadow: inset 0 0 0 1px var(--fg); }
+.tk-chip:active { transform: scale(0.97); }
+.tk-chip[aria-expanded='true']::after { rotate: 225deg; translate: 0 2px; }
+.tk-chip:focus { outline: none; }
+.tk-chip:focus-visible { box-shadow: inset 0 0 0 2px var(--fg); }
+.tk-amenu { left: auto; right: 0; min-width: 264px; padding: 4px; }
+.tk-amenu ul { margin: 0; padding: 0; list-style: none; }
+.tk-amenu > .link { display: block; margin: 4px 10px 6px; }
+.tk-gethead .tk-side .tk-chip { height: 36px; }
+.tk-flipwrap { position: relative; z-index: 3; height: 0; }
+.tk-flipwrap .tk-flip { bottom: auto; top: 4px; }
+@media (prefers-reduced-motion: reduce) { .tk-flip, .tk-chip, .tk-chip::after { transition: none; } .tk-flip:hover { rotate: none; } }
+@media (max-width: 420px) { .tk-chip { font-size: 14px; padding-right: 10px; } .tk-chip .tk-aicon { width: 24px; height: 24px; } }
+/* Every pair the same frame: Pay and You get one height, the lines under You get a set height, so the button never
+   moves as you switch. What you'd give from your wallet (Credits, Statements) is a row on the Pay panel. */
+.tk-card .tk-eth, .tk-card .tk-get.tk-panel { height: 108px; min-height: 0; }
+.tk-card .tk-form > .rule > .tk-lines.term-desc { display: grid; align-content: start; min-height: 0; padding-top: 8px; } /* no room held for routes a tab doesn't have */
+.tk-picks .tk-none { grid-column: 1; grid-row: 1; align-self: center; font-size: 15px; }
+.tk-strip { grid-column: 1; grid-row: 1; align-self: center; display: flex; gap: 6px; min-width: 0; margin: -3px 12px -3px -3px; padding: 3px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; mask-image: linear-gradient(90deg, #000 calc(100% - 20px), transparent); -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 20px), transparent); }
+.tk-strip::-webkit-scrollbar { display: none; }
+.tk-strip .pick { flex: none; width: 44px; height: 44px; }
+.tk-strip .pick-id { display: none; }
+.tk-strip .pick.st { width: 36px; height: 45px; aspect-ratio: auto; background: none; }
+.tk-strip .pick.st img { object-fit: contain; }
+.tk-strip .pick.off { opacity: 0.4; cursor: not-allowed; }
+.tk-picks .tk-usd { grid-column: 1; }
+/* The ways in, one line each, so two fit the lines' height. */
+.tk-way { padding: 8px 12px; }
+.tk-way .muted { flex-basis: auto; }
+.tk-way > span:first-child { flex-wrap: nowrap; overflow: hidden; }
+.tk-way .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-card .tk-lines > *, .tk-ways, .tk-way { min-width: 0; }
+.tk-way > span:first-child { flex: 1 1 auto; min-width: 0; }
+.tk-way > .num { flex: none; }
+/* The homepage under the swap box: the Credits a buy here picks from, then what all this is, in one line of cards. */
+.tk-cheap { margin-top: 56px; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 32px; }
+.tk-cheapcol { display: grid; gap: 16px; align-content: start; min-width: 0; }
+.tk-cheaphead p { margin: 2px 0 0; font-size: 14px; }
+.tk-cheaprow .cc.st .cc-art img { object-fit: contain; }
+@media (max-width: 900px) { .tk-cheap { grid-template-columns: minmax(0, 1fr); gap: 40px; } }
+.tk-cheaphead { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.tk-cheaphead h3 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.tk-cheaphead a { font-size: 14px; color: var(--fg); }
+/* The marketplace's own tile size; one row of as many as fit, the rest behind All Credits. */
+.tk-cheaprow { margin: 0; grid-template-rows: auto; grid-auto-rows: 0; row-gap: 0; overflow: hidden; }
+.about.doc.explain { margin-top: 56px; gap: 16px; max-width: none; }
+.chapter-grid.line { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.chapter-grid.line .chapter { padding: 28px 20px 16px; text-decoration: none; transition: background 150ms var(--ease); }
+.chapter-grid.line .chapter:hover { background: #fff; }
+.chapter-grid.line h2 { font-size: 20px; letter-spacing: -0.01em; }
+.chapter-grid.line p { font-size: 14px; }
+.chapter-grid.line .fig { max-width: 200px; }
+.explain-more { margin: 0; font-size: 14px; }
+.explain-more a { color: var(--fg); }
+@media (max-width: 900px) { .chapter-grid.line { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) {
+  .tk-cheaprow { grid-template-columns: none; grid-template-rows: none; grid-auto-flow: column; grid-auto-columns: 96px; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+  .tk-cheaprow::-webkit-scrollbar { display: none; }
+  .chapter-grid.line { grid-template-columns: minmax(0, 1fr); }
+}
+/* On a phone the homepage goes box, Credits, cards: BALANCE's chart and supply stay on /balance. The cards swipe. */
+@media (max-width: 900px) { .tokens.home .tk-right { display: none; } }
+@media (max-width: 600px) {
+  .chapter-grid.line { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 78%; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; }
+  .chapter-grid.line::-webkit-scrollbar { display: none; }
+  .chapter-grid.line .chapter { scroll-snap-align: start; }
+}
+/* The homepage's one establishing line: the largest, tightest type on the page, then what Credit Union is. */
+.home-head { gap: 12px; }
+.home-head h1 { max-width: 18ch; font-size: clamp(34px, 4.6vw, 56px); line-height: 1.04; font-weight: 600; letter-spacing: -0.04em; text-wrap: balance; }
+.home-head .create-lede { max-width: 58ch; font-size: 17px; text-wrap: pretty; }
+/* The homepage's wall: a shorter band than it was, so the box still starts on the first screen; the line under it. */
+.tokens .home-hero { margin: -9px 0 0; } /* over the bar's rule and gap: the bar's text sits halfway between the header line and the wall */
+.home-hero .wall-band { margin: 0; }
+.home-hero .wall-frame { height: clamp(220px, 22vw, 300px); }
+.home-lede { margin: 16px 0 0; max-width: none; font-size: 17px; text-wrap: balance; }
+@media (max-width: 760px) { .home-hero .wall-frame { height: 190px; } .home-hero .hero-text h1 { font-size: min(7.4vw, 30px); } }
+.tk-steps { font-size: 17px; }
+.tk-ways.idle .tk-way { cursor: default; }
+.tk-ways.idle .tk-way b, .tk-ways.idle .tk-way .num { color: var(--muted); font-weight: 500; }
+.tk-ways.idle .tk-way:hover { box-shadow: inset 0 0 0 1px var(--line-strong); }
+/* The homepage's box has no ways to choose between, so its lines need only room for two. */
+.tokens.home .tk-card .tk-form > .rule > .tk-lines.term-desc { min-height: 26px; } /* one line: the button holds still on a wide screen */
+.tk-cheap .tk-cheaprow { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); column-gap: 12px; }
+@media (max-width: 600px) { .tk-cheap .tk-cheaprow { grid-template-columns: none; grid-auto-rows: auto; grid-auto-columns: 104px; overflow-x: auto; } }
+a.tk-way { text-decoration: none; box-sizing: border-box; }
+/* Your Credits on the Pay panel, each its rating under it: what it sells or converts for. */
+.tk-strip.capt { margin-top: 0; margin-bottom: 6px; } /* 54 of tiles, 8 to the count, 18 of count: the panel's 80 inside */
+.tk-strip.capt .pick { height: auto; display: grid; gap: 2px; background: none; }
+.tk-strip.capt .pick img { width: 40px; height: 40px; }
+.tk-strip.capt .pick-id { display: block; font-size: 12px; line-height: 1.2; color: var(--muted); text-align: center; }
+.tk-strip.capt .pick[aria-pressed='true']::after { bottom: 16px; }
+.tk-strip.capt .pick-id { position: static; background: none; box-shadow: none; padding: 0; outline: 0; }
+.tk-card .tk-strip.capt .pick { background: none; }
+.tk-card .tk-strip.capt .pick img { background: #fff; }
+.tk-card .tk-strip.capt .pick-id { margin-top: 0; }
+.tk-strip.capt .pick { width: 40px; }
+.tk-strip.capt .pick[aria-pressed='true']::after { bottom: 15px; }
+.tk-card :is(#picker, #s-picker).capt .pick { background: none; }
+.tk-card .tk-picks { align-content: start; padding-top: 16px; padding-bottom: 12px; }
+/* The box's one rhythm: 10 from a title to its panel, a 44 band between Pay and You get with the flip centred in it,
+   12 from You get to its routes, 8 between routes, 24 to the button. */
+.tk-card .tk-flipwrap { height: 44px; display: flex; align-items: center; justify-content: center; }
+.tk-card .tk-flipwrap .tk-flip { position: static; translate: none; }
+.tk-card .tk-flipwrap + .tk-gethead { margin-top: 0; }
+.tk-card .tk-form > .rule > .tk-lines.term-desc { padding-top: 2px; }
+.tk-card .tk-lines .tk-ways { margin-top: 0; gap: 8px; }
+/* Jack's links in the footer, each with its mark: the art itself, BALANCE's inks, the exchange's arrows. */
+.foot-col a:has(.fi) { display: inline-flex; align-items: center; gap: 8px; }
+.fi { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 3px; overflow: hidden; background: #fff; box-shadow: 0 0 0 1px var(--img-outline); }
+.fi img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fi img.st { object-fit: contain; }
+.fi-x { background: none; box-shadow: none; color: var(--muted); }
+.fi-x svg { width: 14px; height: 14px; }
+.fi-t { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; border-radius: 50%; }
+.fi-t i, .fi-b i { display: block; width: 100%; height: 100%; }
+.fi-b { grid-auto-flow: column; grid-template-rows: 1fr; gap: 1px; padding: 5px 2px; box-sizing: border-box; }
+.fi-b i { height: 6px; }
+/* The route that's chosen reads as chosen without shouting: the panels' own fill and hairline, its name bold as before.
+   The others sit on the page with a hairline; nothing is chosen until there's an amount. */
+.tk-card .tk-way { box-shadow: inset 0 0 0 1px var(--line); }
+.tk-card .tk-way[aria-checked="true"] { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.tk-card .tk-way:not([disabled]):hover { box-shadow: inset 0 0 0 1px var(--line-strong); }
+.tk-card .tk-ways .tk-way[aria-checked="true"]:has(+ .tk-batch.attached) { box-shadow: inset 1px 0 0 var(--line-strong), inset -1px 0 0 var(--line-strong), inset 0 1px 0 var(--line-strong); }

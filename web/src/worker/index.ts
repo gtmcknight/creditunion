@@ -94,7 +94,7 @@ interface Env {
   TOKEN_SWEEPER?: string;
   /// The $CC engine's Core (cc.artcoins.art), whose controller of the moment sells its pile (read from Core, since
   /// $CC swaps controllers: V1 then V2). Set only with a SWEEPER and TOKEN_SWEEPER that have sweepEvery and buyEvery:
-  /// every Buy then offers the pile's Credits too.
+  /// every Buy then offers the pile's Credits too, and the swap box's Credits to ETH sells at its bid.
   CC_CORE?: string;
   /// BALANCE's Uniswap pool for /tokens Buy and Sell: the token, the pool's fee, tick spacing and hooks (the launch picks
   /// them), and our slice of each swap's output (bps, capped at 5%) and where it goes. Unset: no Buy or Sell.
@@ -444,6 +444,7 @@ const publicConfig = (env: Env) => ({
   tokenKeeper: addrOrNull(env.TOKEN_KEEPER),
   tokenFormats: addrOrNull(env.TOKEN_FORMATS),
   tokenSweeper: env.OPENSEA_API_KEY ? tokenSweeper(env) : null,
+  ccCore: addrOrNull(env.CC_CORE),
   balance: balanceConfig(env),
   ...(localRpc(env) ? { fork: true } : {}),
 });
@@ -1278,6 +1279,22 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
     if (hit) return hit;
     try {
       const res = Response.json(await priceChart(env, ctx), { headers: { 'cache-control': 'public, max-age=10' } }); // the chart reads each block
+      ctx.waitUntil(caches.default.put(key, res.clone()));
+      return res;
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502, headers: { 'cache-control': 'no-store' } });
+    }
+  }
+  // Where all the rating sits now, for the bar on /balance: in Statements still standing, released as BALANCE, and
+  // the rest still in Credits (every Credit's rating is one BALANCE in the token's supply, so the three add up to
+  // it). Kept ten minutes at the edge.
+  if (url.pathname === '/market/supply.json') {
+    if (!sameSite(req)) return text('forbidden', 403);
+    const key = new Request(`${url.origin}/market/supply.json/v1`);
+    const hit = await caches.default.match(key);
+    if (hit) return hit;
+    try {
+      const res = Response.json(await supplyParts(env), { headers: { 'cache-control': 'public, max-age=600' } });
       ctx.waitUntil(caches.default.put(key, res.clone()));
       return res;
     } catch (e) {
@@ -2643,6 +2660,29 @@ async function recordPrice(env: Env) {
 const priceCatchUp = shared<void>(() => 30_000); // at most every 30 s per isolate
 /// ETH in USD as the chart prices now: read once a minute per isolate.
 const ethUsdKept = shared<number>(() => 60_000);
+/// The token's supply in whole BALANCE, split three ways: released (all of it less what the token still holds back),
+/// in Statements (the rating of every Statement not handed in to the token), and in Credits (what's left).
+async function supplyParts(env: Env) {
+  const token = balanceConfig(env)?.token;
+  const statements = addrOrNull(env.STATEMENTS) ?? (await statementsOf(env));
+  if (!token || !statements) throw new Error('no BALANCE here');
+  const c = client(env);
+  const tokAbi = parseAbi(['function totalSupply() view returns (uint256)', 'function unreleasedSupply() view returns (uint256)']);
+  const stAbi = parseAbi(['function supply() view returns (uint256)', 'function ownerOf(uint256) view returns (address)', 'function creditScoreOf(uint256) view returns (uint256)']);
+  const [total, unreleased, n] = await Promise.all([
+    c.readContract({ address: token, abi: tokAbi, functionName: 'totalSupply' }),
+    c.readContract({ address: token, abi: tokAbi, functionName: 'unreleasedSupply' }),
+    c.readContract({ address: statements, abi: stAbi, functionName: 'supply' }),
+  ]);
+  const ids = Array.from({ length: Number(n) }, (_, i) => BigInt(i + 1));
+  const owners = await c.multicall({ contracts: ids.map((id) => ({ address: statements, abi: stAbi, functionName: 'ownerOf', args: [id] }) as const), allowFailure: true, multicallAddress: MULTICALL3, batchSize: 1024 });
+  const standing = ids.filter((_, i) => owners[i].status === 'success' && String(owners[i].result).toLowerCase() !== token.toLowerCase());
+  const scores = await c.multicall({ contracts: standing.map((id) => ({ address: statements, abi: stAbi, functionName: 'creditScoreOf', args: [id] }) as const), allowFailure: true, multicallAddress: MULTICALL3, batchSize: 1024 });
+  // A Statement's score is in ten-thousandths of a point.
+  const inStatements = scores.reduce((a, r) => a + (r.status === 'success' ? Number(r.result) / 10_000 : 0), 0);
+  const all = Number(total / 10n ** 18n), released = Number((total - unreleased) / 10n ** 18n);
+  return { at: Date.now(), total: all, credits: Math.max(0, Math.round(all - released - inStatements)), statements: Math.round(inStatements), balance: released, standing: standing.length, made: Number(n) };
+}
 /// $BALANCE's supply, for its market cap: read once an hour per isolate.
 const supplyKept = shared<number>(() => 3_600_000);
 /// The chart's data: the record and the swaps since its last block (so the line runs to the latest trade), cut to
@@ -3089,7 +3129,7 @@ async function rpc(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
   // The token the adapter converts into is readable as soon as the adapter is named (balances, its launch gate), not
   // only once BALANCE_TOKEN is set.
   const adapterToken = await tokenOf(env, ctx);
-  const allowed = new Set([env.CREDITS, addrOrNull(env.STATEMENTS), env.FACTORY, env.SWEEPER, addrOrNull(env.FORMATS), addrOrNull(env.TOKEN_FACTORY), addrOrNull(env.TOKEN_ADAPTER), addrOrNull(env.TOKEN_FORMATS), tokenSweeper(env), adapterToken, ...swapTargets(env)].map((a) => a?.toLowerCase()).filter(Boolean));
+  const allowed = new Set([env.CREDITS, addrOrNull(env.STATEMENTS), env.FACTORY, env.SWEEPER, addrOrNull(env.FORMATS), addrOrNull(env.TOKEN_FACTORY), addrOrNull(env.TOKEN_ADAPTER), addrOrNull(env.TOKEN_FORMATS), tokenSweeper(env), adapterToken, addrOrNull(env.CC_CORE), ...swapTargets(env)].map((a) => a?.toLowerCase()).filter(Boolean));
   const clean: { jsonrpc: string; id: unknown; method: string; params: unknown[] }[] = [];
   // Targets outside `allowed`, by the call that first names each. They are checked together below (Credits' art
   // contract once, each batch address once, in parallel), not one call at a time.

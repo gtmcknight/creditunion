@@ -43,6 +43,8 @@ export type Config = {
   tokenFormats?: Address | null;
   /// The token factory's own Sweeper: buys deposit into token unions through it.
   tokenSweeper?: Address | null;
+  /// $CC's engine, which bids ETH for Credits by score: the homepage box's Credits to ETH.
+  ccCore?: Address | null;
   /// BALANCE and its Uniswap pool, for Buy and Sell on /tokens: the token, the pool's settings beyond ETH and the token,
   /// and our slice of each swap's output. Null until the vars name the token.
   balance?: { token: Address; pool: { fee: number; tickSpacing: number; hooks: Address }; feeBps: number; feeTo: Address | null } | null;
