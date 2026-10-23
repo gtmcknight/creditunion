@@ -552,7 +552,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   /// The left side: the batch's sheet, unless the way in is Uniswap (or you're selling).
   const viaSheet = () => {
     const v = viewNow();
-    return (v === 'credits' || v === 'out' || v === 'buy') && !(v === 'buy' && (wayNow() === 'pool' || wayNow() === 'statement'));
+    return (v === 'credits' || v === 'out' || v === 'buy') && !(v === 'buy' && (wayNow() === 'pool' || wayNow() === 'statement')) && !(v === 'credits' && convertNow());
   };
   const lands = () => `Lands when the batch fills${isOpen ? '' : ' and trading opens'}`;
 
@@ -952,6 +952,14 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     ...(iv.approved ? [] : [{ address: config.credits, abi: creditsAbi, functionName: 'setApprovalForAll', args: [x.vault, true] } as const]),
     { address: x.vault, abi: IV_ABI, functionName: 'sell', args: [x.batch, x.ids, x.amount, account!] } as const,
   ];
+  /// Convert's two ways when the vault can pay: now, from it (the default), or when the batch fills, as before.
+  let convertWay: 'now' | 'batch' = 'now';
+  /// Whether Convert goes through the vault this time: it can pay for the Credits picked, and now is the way picked.
+  const convertNow = () => {
+    if (convertWay !== 'now') return false;
+    const here = new Set(ownedHere().map(String));
+    return !!ivFor([...picks].filter((id) => here.has(id)).map(BigInt));
+  };
   /// The vault is a way to sell only once it holds $BALANCE to pay with.
   const ivLive = () => !!config.instantVault && (iv.stock ?? 0n) > 0n;
   /// The way Credits to ETH goes: the vault then Uniswap, or $CC's bid. Picked by what pays more, until tapped.
@@ -1538,10 +1546,21 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const tenths = mine.reduce((a, id) => a + t(id), 0);
     if (config.instantVault && iv.stock === null) void readIV().then(() => viewNow() === 'credits' && app.isConnected && creditsSync());
     // Paid now by the vault when it can (the same amount the batch would pay), else when the batch fills.
-    const inst = ivFor(mine);
-    setGet(inst ? Number(inst.amount / 10n ** 16n) / 100 : tenths ? est(tenths) : 0, paletteOf(lane()));
-    setText('route', tenths ? (inst ? `Paid now · ${feeLine(tenths)}` : feeLine(tenths)) : '');
+    const can = ivFor(mine);
+    const inst = can && convertWay === 'now' ? can : null;
+    const amt = tenths ? est(tenths) : 0;
+    setGet(amt, paletteOf(lane()));
+    setText('route', tenths && !can ? feeLine(tenths) : '');
     setText('tk-gettitle', inst ? 'You get' : 'You’ll get');
+    // When the vault can pay, the two ways side by side: the same amount, now or when the batch fills.
+    const left80 = Math.max(0, 80 - (curOf(lane())?.s.count ?? 0) - mine.length); // after yours, as the batch box counts
+    setText(
+      'alt',
+      can
+        ? `<div class="tk-ways" role="radiogroup" aria-label="When you're paid"><button type="button" class="tk-way" role="radio" data-convert="now" aria-checked="${!!inst}"><span><b>Now</b><span class="muted small">Credit Union pays you · Fees included</span></span><span class="num">${whole(amt)}</span></button><button type="button" class="tk-way" role="radio" data-convert="batch" aria-checked="${!inst}"><span><b>When the batch fills</b><span class="muted small">${left80} to go · take them back until then</span></span><span class="num">${whole(amt)}</span></button></div>`
+        : '',
+    );
+    showLeft();
     // How many wallet confirmations it takes: 40 Credits a transaction, the open batch's room first, then new batches.
     let txs = 0;
     for (let left = mine.length, room = 80 - (curOf(lane())?.s.count ?? 80); left > 0; txs++) {
@@ -1556,7 +1575,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     if (all) all.textContent = mine.length ? 'Clear' : 'Select all';
     setText('n-sel', mine.length ? `${mine.length} of ${ownedHere().length} · rated ${pts(tenths)}` : `Pick from your ${ownedHere().length}`);
     if (inst) setText('tk-sure', ''), setText('tk-bfee', '');
-    setGo(!account ? 'Convert my Credits' : mine.length ? `Convert ${plural(mine.length)}${inst ? ' · paid now' : trade?.open || converting ? '' : ' · converts when it opens'}` : 'Pick Credits', !account || mine.length > 0);
+    setGo(!account ? 'Convert my Credits' : mine.length ? (inst ? `Get ${whole(amt)} ${TOKEN} now` : `Convert ${plural(mine.length)}${trade?.open || converting ? '' : ' · converts when it opens'}`) : 'Pick Credits', !account || mine.length > 0);
     showLeft();
     drawSheet();
   }
@@ -1706,6 +1725,12 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
       },
       { signal: drawn.signal },
     );
+    document.getElementById('alt')?.addEventListener('click', (e) => {
+      const w = (e.target as HTMLElement).closest<HTMLElement>('[data-convert]')?.dataset.convert as 'now' | 'batch' | undefined;
+      if (!w || viewNow() !== 'credits') return;
+      convertWay = w;
+      creditsSync();
+    });
     $$<HTMLElement>('.tk-way[data-sell]', app).forEach((b) =>
       b.addEventListener('click', () => {
         sellWay = b.dataset.sell as 'vault' | 'cc';
@@ -1981,7 +2006,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
       }
       // Convert, paid now: the vault takes them into the batch and pays their $BALANCE in the same transaction.
       const nowIds = [...picks].filter((id) => ownedHere().some((x) => String(x) === id)).map(BigInt);
-      const now = v === 'credits' ? ivFor(nowIds) : null;
+      const now = v === 'credits' && convertWay === 'now' ? ivFor(nowIds) : null;
       if (now)
         return run(
           go,
