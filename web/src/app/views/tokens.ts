@@ -1038,19 +1038,14 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     setText('n-sel', !account || !owned.length ? '' : mine.length ? `${mine.length} of ${owned.length} · rated ${pts(picked)}` : `Pick from your ${owned.length}`);
     const all = document.getElementById('pick-all');
     if (all) all.textContent = mine.length ? 'Clear' : 'Select all';
-    const left = mine.length - take.length;
     const vaultShort = ivLive() && mine.length > 0 && (inst?.ids.length ?? 0) < mine.length;
-    // The picks the chosen way leaves out are faded, so the note can point at them instead of counting.
+    // The picks the chosen way leaves out are faded, and said in red under them, next to the art it's about.
     const sold = new Set((way === 'vault' ? (inst?.ids ?? []) : way === 'cc' ? take : []).map(String));
     const out = eth > 0n ? mine.filter((id) => !sold.has(String(id))).length : 0;
     $$<HTMLElement>('#picker .pick', app).forEach((p) => p.classList.toggle('left', out > 0 && picks.has(p.dataset.id!) && !sold.has(p.dataset.id!)));
-    const faded = out === 1 ? 'The faded Credit can’t sell here now. List it on OpenSea.' : `The ${out} faded Credits can’t sell here now. List them on OpenSea.`;
-    setText(
-      'fees',
-      way === 'vault'
-        ? vaultShort ? faded : ''
-        : vaultShort && !ccEth ? 'Credit Union can’t pay for these right now. List them on OpenSea.' : !cc.live || way !== 'cc' ? '' : left > 0 ? faded : '',
-    );
+    const os = document.getElementById('sc-os')?.getAttribute('href') ?? 'https://opensea.io';
+    if (out) setText('n-sel', `<span class="tk-short">${out} can’t sell now · <a href="${os}" target="_blank" rel="noopener">List ${out === 1 ? 'it' : 'them'} on OpenSea ↗</a></span>`);
+    setText('fees', way !== 'vault' && vaultShort && !ccEth ? 'Credit Union can’t pay for these right now. List them on OpenSea.' : '');
     // With no instant sale for these, the button is the next best thing: listing them on OpenSea.
     if ((!cc.live && !ivLive()) || (account && mine.length && !inst && !ccEth && (!ivLive() || iv.stock !== null))) return setGo(account ? 'List on OpenSea' : 'Sell my Credits', true);
     const n = way === 'vault' ? (inst?.ids.length ?? 0) : take.length;
