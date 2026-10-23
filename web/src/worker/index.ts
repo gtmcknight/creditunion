@@ -96,6 +96,9 @@ interface Env {
   /// $CC swaps controllers: V1 then V2). Set only with a SWEEPER and TOKEN_SWEEPER that have sweepEvery and buyEvery:
   /// every Buy then offers the pile's Credits too, and the swap box's Credits to ETH sells at its bid.
   CC_CORE?: string;
+  /// Credit Union's InstantVault: pays $BALANCE now for Credits it puts in a token union in its own name (the swap
+  /// box's instant Credits to $BALANCE and to ETH). Unset: Credits wait for their batch as before.
+  INSTANT_VAULT?: string;
   /// BALANCE's Uniswap pool for /tokens Buy and Sell: the token, the pool's fee, tick spacing and hooks (the launch picks
   /// them), and our slice of each swap's output (bps, capped at 5%) and where it goes. Unset: no Buy or Sell.
   BALANCE_TOKEN?: string;
@@ -448,6 +451,7 @@ const publicConfig = (env: Env) => ({
   tokenFormats: addrOrNull(env.TOKEN_FORMATS),
   tokenSweeper: env.OPENSEA_API_KEY ? tokenSweeper(env) : null,
   ccCore: addrOrNull(env.CC_CORE),
+  instantVault: addrOrNull(env.INSTANT_VAULT),
   balance: balanceConfig(env),
   ...(localRpc(env) ? { fork: true } : {}),
 });
@@ -3148,7 +3152,7 @@ async function rpc(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
   // The token the adapter converts into is readable as soon as the adapter is named (balances, its launch gate), not
   // only once BALANCE_TOKEN is set.
   const adapterToken = await tokenOf(env, ctx);
-  const allowed = new Set([env.CREDITS, addrOrNull(env.STATEMENTS), env.FACTORY, env.SWEEPER, addrOrNull(env.FORMATS), addrOrNull(env.TOKEN_FACTORY), addrOrNull(env.TOKEN_ADAPTER), addrOrNull(env.TOKEN_FORMATS), tokenSweeper(env), adapterToken, addrOrNull(env.CC_CORE), ...swapTargets(env), ...(localRpc(env) ? [SEAPORT_ADDR] : [])].map((a) => a?.toLowerCase()).filter(Boolean));
+  const allowed = new Set([env.CREDITS, addrOrNull(env.STATEMENTS), env.FACTORY, env.SWEEPER, addrOrNull(env.FORMATS), addrOrNull(env.TOKEN_FACTORY), addrOrNull(env.TOKEN_ADAPTER), addrOrNull(env.TOKEN_FORMATS), tokenSweeper(env), adapterToken, addrOrNull(env.CC_CORE), addrOrNull(env.INSTANT_VAULT), ...swapTargets(env), ...(localRpc(env) ? [SEAPORT_ADDR] : [])].map((a) => a?.toLowerCase()).filter(Boolean));
   const clean: { jsonrpc: string; id: unknown; method: string; params: unknown[] }[] = [];
   // Targets outside `allowed`, by the call that first names each. They are checked together below (Credits' art
   // contract once, each batch address once, in parallel), not one call at a time.

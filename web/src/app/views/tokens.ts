@@ -898,7 +898,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
           <div class="tk-gethead"><h2 class="form-title">You get</h2></div>
           <section class="rule">
             <div class="tk-get tk-panel"><span class="num tk-out" id="sc-get">0</span>${pickChip('to')}<span class="tk-usd" id="sc-sub"></span></div>
-            <div class="tk-lines term-desc"><div class="tk-ways" role="radiogroup" aria-label="Way to sell">${cc.live ? '<button type="button" class="tk-way" role="radio" aria-checked="false"><span><b>$CC bid</b><span class="muted small">Instant · No fee</span></span><span class="num" id="sc-way">—</span></button>' : ''}<a class="tk-way" href="${os}" target="_blank" rel="noopener" id="sc-os"><span><b>List on OpenSea</b><span class="muted small">Your price, when someone buys</span></span><span class="num muted">↗</span></a>${cc.live ? '' : `<button type="button" class="tk-way" data-pair="credit:balance"><span><b>Convert to ${TOKEN}</b><span class="muted small">Then sell it on Uniswap</span></span><span class="num muted">→</span></button>`}</div><p id="fees"></p></div>
+            <div class="tk-lines term-desc"><div class="tk-ways" role="radiogroup" aria-label="Way to sell">${config.instantVault ? '<button type="button" class="tk-way" role="radio" aria-checked="false" data-sell="vault"><span><b>Credit Union</b><span class="muted small">Instant · Fees included</span></span><span class="num" id="sc-vault">—</span></button>' : ''}${cc.live ? '<button type="button" class="tk-way" role="radio" aria-checked="false" data-sell="cc"><span><b>$CC bid</b><span class="muted small">Instant · No fee</span></span><span class="num" id="sc-way">—</span></button>' : ''}<a class="tk-way" href="${os}" target="_blank" rel="noopener" id="sc-os"><span><b>List on OpenSea</b><span class="muted small">Your price, when someone buys</span></span><span class="num muted">↗</span></a>${cc.live || config.instantVault ? '' : `<button type="button" class="tk-way" data-pair="credit:balance"><span><b>Convert to ${TOKEN}</b><span class="muted small">Then sell it on Uniswap</span></span><span class="num muted">→</span></button>`}</div><p id="fees"></p></div>
           </section>
           <div class="submit">${goHtml('Pick Credits')}${sureHtml()}</div>`;
   }
@@ -923,6 +923,39 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
       cc.approved = ok;
       ids.forEach((id, i) => cc.bids.set(String(id), bids[i]));
     })().catch(() => {}));
+  /// Credit Union's InstantVault, read once a visit (again after a sale): the $BALANCE it can pay out now, and whether
+  /// it may take this wallet's Credits yet.
+  const iv: { stock: bigint | null; approved: boolean; read: Promise<void> | null } = { stock: null, approved: false, read: null };
+  const IV_ABI = parseAbi(['function stock() view returns (uint256)', 'function sell(address batch, uint256[] ids, uint256 minOut, address to) returns (uint256)']);
+  const readIV = () =>
+    (iv.read ??= (async () => {
+      const v = config.instantVault;
+      if (!v) return;
+      const [stock, ok] = await Promise.all([
+        pub.readContract({ address: v, abi: IV_ABI, functionName: 'stock' }) as Promise<bigint>,
+        account ? (pub.readContract({ address: config.credits, abi: creditsAbi, functionName: 'isApprovedForAll', args: [account, v] }) as Promise<boolean>) : Promise.resolve(false),
+      ]);
+      iv.stock = stock;
+      iv.approved = ok;
+    })().catch(() => {}));
+  /// What the vault pays now for `ids` going into this color's batch filling now: that batch's own payout (its
+  /// fees off, one $BALANCE a point), when there's a vault, a batch with room for all of them, and the $BALANCE to pay.
+  const ivFor = (ids: bigint[]) => {
+    const v = config.instantVault, b = curOf(lane());
+    if (!v || !b || !ids.length || iv.stock === null || 80 - b.s.count < ids.length) return null;
+    const tenths = ids.reduce((a, id) => a + t(id), 0);
+    const amount = (BigInt(tenths) * 10n ** 17n * BigInt(10_000 - b.s.protocolFeeBps - b.s.creatorFeeBps)) / 10_000n;
+    return amount > 0n && amount <= iv.stock ? { vault: v, batch: b.s.address, ids, amount } : null;
+  };
+  /// A sale to the vault, as calls: its leave to take your Credits (once), then the sale, paid to you.
+  const ivCalls = (x: NonNullable<ReturnType<typeof ivFor>>) => [
+    ...(iv.approved ? [] : [{ address: config.credits, abi: creditsAbi, functionName: 'setApprovalForAll', args: [x.vault, true] } as const]),
+    { address: x.vault, abi: IV_ABI, functionName: 'sell', args: [x.batch, x.ids, x.amount, account!] } as const,
+  ];
+  /// The way Credits to ETH goes: the vault then Uniswap, or $CC's bid. Picked by what pays more, until tapped.
+  let sellWay: 'vault' | 'cc' | null = null;
+  let ivEth: { key: string; eth: bigint } | null = null;
+
   /// The Credits picked that $CC can pay for: the best bids first, while its pot lasts.
   const ccSale = () => {
     const mine = [...owned].filter((id) => picks.has(String(id))).sort((x, y) => Number((cc.bids.get(String(y)) ?? 0n) - (cc.bids.get(String(x)) ?? 0n)));
@@ -941,12 +974,30 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     await readCC();
     if (!app.isConnected || viewNow() !== 'sellc') return;
     if (fresh && (account || !cc.live)) return void draw(); // the row now sorts by bid, and $CC shows only if it's bidding
-    const { mine, take, eth } = ccSale();
+    await readIV();
+    if (!app.isConnected || viewNow() !== 'sellc') return;
+    const { mine, take, eth: ccEth } = ccSale();
+    // The vault's way: what it pays for all of them, sold on Uniswap (a beat after picking stops, priced again per pick).
+    const inst = ivFor(mine);
+    const key = inst ? `${inst.batch}|${inst.amount}` : '';
+    if (inst && m && trade?.open && ivEth?.key !== key) {
+      const run = ++quoteRun;
+      await wait(250);
+      if (run !== quoteRun) return;
+      const q = await swapQuote(m, false, inst.amount);
+      if (run !== quoteRun || !app.isConnected) return;
+      ivEth = { key, eth: q?.net ?? 0n };
+    }
+    const vEth = inst && ivEth?.key === key ? ivEth.eth : 0n;
+    const best: 'vault' | 'cc' | null = vEth || ccEth ? (vEth >= ccEth ? 'vault' : 'cc') : null;
+    const way = sellWay && (sellWay === 'vault' ? vEth : ccEth) ? sellWay : best;
+    const eth = way === 'vault' ? vEth : way === 'cc' ? ccEth : 0n;
     setText('sc-get', eth ? ethNum(eth, 4) : '0');
-    setText('sc-way', eth ? `${ethNum(eth, 4)} ETH` : '—');
-    document.querySelector('.tk-way[role="radio"]')?.setAttribute('aria-checked', String(eth > 0n)); // chosen once there's a sale
+    setText('sc-vault', vEth ? `${ethNum(vEth, 4)} ETH` : '—');
+    setText('sc-way', ccEth ? `${ethNum(ccEth, 4)} ETH` : '—');
+    $$<HTMLElement>('.tk-way[data-sell]', app).forEach((b) => b.setAttribute('aria-checked', String(b.dataset.sell === way && eth > 0n)));
     // What that is per rating point.
-    const tenths = take.reduce((a, id) => a + t(id), 0);
+    const tenths = (way === 'vault' ? mine : take).reduce((a, id) => a + t(id), 0);
     const per = (wei: bigint, tn: number) => (tn ? ethNum((wei * 10_000n) / BigInt(tn), 4) : '');
     setText('sc-sub', eth ? [dollars(Number(formatEther(eth))), `${per(eth, tenths)} ETH per 1,000 rating`].filter(Boolean).join(' · ') : '');
     const picked = mine.reduce((a, id) => a + t(id), 0);
@@ -954,10 +1005,12 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const all = document.getElementById('pick-all');
     if (all) all.textContent = mine.length ? 'Clear' : 'Select all';
     const left = mine.length - take.length;
-    setText('fees', cc.pot === null ? '' : !cc.live ? '' : !take.length && mine.length ? '$CC has no bid for these right now.' : left > 0 ? `$CC can take ${plural(take.length)} of these now. List the rest on OpenSea.` : '');
-    // With no instant sale, the button is the next best thing: listing them on OpenSea.
-    if (!cc.live) return setGo(account ? 'List on OpenSea' : 'Sell my Credits', true);
-    setGo(!account ? 'Sell my Credits' : take.length ? `Sell ${plural(take.length)} · ${ethNum(eth, 4)} ETH` : mine.length ? 'No bid right now' : 'Pick Credits', !account || take.length > 0);
+    const vaultShort = !!config.instantVault && mine.length > 0 && !inst;
+    setText('fees', way === 'vault' ? 'Paid in $BALANCE now and sold on Uniswap · Two confirmations the first time' : vaultShort && !ccEth ? 'More than Credit Union can pay for right now. Pick fewer, or list them on OpenSea.' : !cc.live || way !== 'cc' ? '' : left > 0 ? `$CC can take ${plural(take.length)} of these now. List the rest on OpenSea.` : '');
+    // With no instant sale at all, the button is the next best thing: listing them on OpenSea.
+    if (!cc.live && !config.instantVault) return setGo(account ? 'List on OpenSea' : 'Sell my Credits', true);
+    const n = way === 'vault' ? mine.length : take.length;
+    setGo(!account ? 'Sell my Credits' : n && eth ? `Sell ${plural(n)} · ${ethNum(eth, 4)} ETH` : mine.length ? 'No price right now' : 'Pick Credits', !account || (n > 0 && eth > 0n));
   }
   /// Your Statements picked to redeem (all that redeem now, until you pick).
   const sPicks = new Set<string>();
@@ -1479,9 +1532,12 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const here = new Set(ownedHere().map(String));
     const mine = [...picks].filter((id) => here.has(id)).map(BigInt);
     const tenths = mine.reduce((a, id) => a + t(id), 0);
-    setGet(tenths ? est(tenths) : 0, paletteOf(lane()));
-    setText('route', tenths ? feeLine(tenths) : '');
-    setText('tk-gettitle', 'You’ll get');
+    if (config.instantVault && iv.stock === null) void readIV().then(() => viewNow() === 'credits' && app.isConnected && creditsSync());
+    // Paid now by the vault when it can (the same amount the batch would pay), else when the batch fills.
+    const inst = ivFor(mine);
+    setGet(inst ? Number(inst.amount / 10n ** 16n) / 100 : tenths ? est(tenths) : 0, paletteOf(lane()));
+    setText('route', tenths ? (inst ? `Paid now · ${feeLine(tenths)}` : feeLine(tenths)) : '');
+    setText('tk-gettitle', inst ? 'You get' : 'You’ll get');
     // How many wallet confirmations it takes: 40 Credits a transaction, the open batch's room first, then new batches.
     let txs = 0;
     for (let left = mine.length, room = 80 - (curOf(lane())?.s.count ?? 80); left > 0; txs++) {
@@ -1495,7 +1551,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const all = document.getElementById('pick-all');
     if (all) all.textContent = mine.length ? 'Clear' : 'Select all';
     setText('n-sel', mine.length ? `${mine.length} of ${ownedHere().length} · rated ${pts(tenths)}` : `Pick from your ${ownedHere().length}`);
-    setGo(!account ? 'Convert my Credits' : mine.length ? `Convert ${plural(mine.length)}${trade?.open || converting ? '' : ' · converts when it opens'}` : 'Pick Credits', !account || mine.length > 0);
+    if (inst) setText('tk-sure', ''), setText('tk-bfee', '');
+    setGo(!account ? 'Convert my Credits' : mine.length ? `Convert ${plural(mine.length)}${inst ? ' · paid now' : trade?.open || converting ? '' : ' · converts when it opens'}` : 'Pick Credits', !account || mine.length > 0);
     showLeft();
     drawSheet();
   }
@@ -1645,6 +1702,12 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
       },
       { signal: drawn.signal },
     );
+    $$<HTMLElement>('.tk-way[data-sell]', app).forEach((b) =>
+      b.addEventListener('click', () => {
+        sellWay = b.dataset.sell as 'vault' | 'cc';
+        void sellcSync();
+      }),
+    );
     $$<HTMLElement>('[data-pair]', app).forEach((x) =>
       x.addEventListener('click', () => {
         const [a, b] = x.dataset.pair!.split(':') as [Asset, Asset];
@@ -1743,7 +1806,29 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
       const v = viewNow(), l = lane(), wei = amountIn();
       // Sell the picked Credits $CC pays for: let its engine take Credits (once), then one sale at no less than 98% of
       // its bid now (a bid only moves a little between this read and the block).
-      if (v === 'sellc' && !cc.live) return void document.getElementById('sc-os')?.click();
+      if (v === 'sellc' && !cc.live && !config.instantVault) return void document.getElementById('sc-os')?.click();
+      const mineSell = [...owned].filter((id) => picks.has(String(id)));
+      const inst = v === 'sellc' ? ivFor(mineSell) : null;
+      const vaultWay = inst && (sellWay === 'vault' || (sellWay !== 'cc' && (ivEth?.eth ?? 0n) >= ccSale().eth));
+      if (v === 'sellc' && inst && vaultWay) {
+        return run(
+          go,
+          `Selling ${plural(inst.ids.length)}…`,
+          async () => {
+            // Paid in $BALANCE by the vault, then that $BALANCE sold on Uniswap: one confirmation where the wallet
+            // takes a batch, else each in turn.
+            const q = await swapQuote(m!, false, inst.amount);
+            if (!q) throw new Error('No price on Uniswap right now. Try again in a moment.');
+            const calls = [...ivCalls(inst), ...(await sellCalls(m!, account!, inst.amount, q.net))];
+            if (await canBatch()) await sendBatch(calls, note);
+            else for (const c of calls) await send(c, note);
+            inst.ids.forEach((id) => picks.delete(String(id)));
+            iv.read = null;
+            ivEth = null;
+          },
+          `Sold ${plural(inst.ids.length)} for about ${ethNum(ivEth?.eth ?? 0n, 4)} ETH.`,
+        );
+      }
       if (v === 'sellc') {
         const { take, eth } = ccSale();
         const core = config.ccCore;
@@ -1890,6 +1975,22 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
           split ? 'Done. The Uniswap part is in; the batch part converts when it fills.' : `Done. Yours lands when the batch fills${isOpen ? '' : `, ${whenShort(tradesAt)} at the earliest`}.`,
         );
       }
+      // Convert, paid now: the vault takes them into the batch and pays their $BALANCE in the same transaction.
+      const nowIds = [...picks].filter((id) => ownedHere().some((x) => String(x) === id)).map(BigInt);
+      const now = v === 'credits' ? ivFor(nowIds) : null;
+      if (now)
+        return run(
+          go,
+          `Converting ${plural(now.ids.length)}…`,
+          async () => {
+            const calls = ivCalls(now);
+            if (calls.length > 1 && (await canBatch())) await sendBatch(calls, note);
+            else for (const c of calls) await send(c, note);
+            picks.clear();
+            iv.read = null;
+          },
+          `Done. ${Number(formatUnits(now.amount, 18)).toLocaleString('en-US', { maximumFractionDigits: 0 })} ${TOKEN} is in your wallet.`,
+        );
       return run(
         go,
         `Adding ${plural([...picks].filter((id) => ownedHere().some((x) => String(x) === id)).length)}…`,
