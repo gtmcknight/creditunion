@@ -1691,7 +1691,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     document.getElementById('amt-max')?.addEventListener('click', () => {
       if (!amt) return;
       // Down to 4 places, so it fits the box; what's left behind is under 0.0001.
-      if (viewNow() === 'sell') typed = formatUnits(tokenHeld, m!.decimals).replace(/(\.\d{4})\d+$/, '$1');
+      if (paysToken()) typed = formatUnits(tokenHeld, m!.decimals).replace(/(\.\d{4})\d+$/, '$1'); // Sell, or art bought with BALANCE
       else {
         if (ethHeld === null) return;
         const v = ethHeld > GAS_KEEP ? ethHeld - GAS_KEEP : 0n;
