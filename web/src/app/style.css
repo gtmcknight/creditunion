@@ -10069,7 +10069,7 @@ dialog.how .how-tile img.st { height: 84%; }
 .tk-form > .tk-modes { margin: 0; }
 .tk-form > .tk-gethead { margin-top: 24px; height: 28px; }
 .design-form.tk-form > .rule, .design-form.tk-form .tk-gethead + .rule { padding: 0; margin-top: 10px; gap: 10px; border: 0; }
-.tk-form > .rule > .tk-lines:not(:has(p:not(:empty))) , .tk-form > .rule > .tk-ethrow:has(#amt-line:empty) { display: none; }
+.tk-form > .rule > .tk-lines:not(:has(p:not(:empty), .tk-way)) , .tk-form > .rule > .tk-ethrow:has(#amt-line:empty) { display: none; }
 .tk-form .tk-lines p { margin: 0; }
 .tk-form > .submit { padding-top: 0; margin-top: 24px; }
 .tk-form .tk-eth { margin-bottom: 0; }
