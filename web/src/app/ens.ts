@@ -19,6 +19,11 @@ export function ens(a: Address): Promise<Ens> {
     known.set(k, KEEPER.name!.toLowerCase());
     p = Promise.resolve(KEEPER);
   }
+  if (!p && k === config?.instantVault?.toLowerCase()) {
+    // Ours too: the vault that pays for Credits now and holds them in batches until they convert.
+    known.set(k, VAULT.name!.toLowerCase());
+    p = Promise.resolve(VAULT);
+  }
   if (!p) {
     p = new Promise<Ens>((done) => {
       if (!asking) {
@@ -33,6 +38,7 @@ export function ens(a: Address): Promise<Ens> {
 }
 let asking: Map<string, (e: Ens) => void> | null = null;
 const KEEPER: Ens = { name: 'Credit Union keeper', avatar: '/favicon.svg' };
+const VAULT: Ens = { name: 'Credit Union vault', avatar: '/favicon.svg' };
 async function ask() {
   const all = asking!;
   asking = null;

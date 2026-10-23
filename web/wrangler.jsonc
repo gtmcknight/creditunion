@@ -31,6 +31,8 @@
     "TOKEN_SWEEPER": "0xa93d702e4f9878f8af413049a3428f151fc5a65c",
     // $CC's engine Core (cc.artcoins.art): both Sweepers buy from its pile through whatever controller it names then.
     "CC_CORE": "0xcdb1889ae12074d750CD9B8531B692015465e0dD",
+    // Credit Union's InstantVault (Oct 22): pays $BALANCE now for Credits it puts in a token union. Admin: the Safe.
+    "INSTANT_VAULT": "0x0619972F1B63AfC804FE9F66107186F82F943bEe",
     // The adapter that converts full batches into BALANCE (the token factory's assembler), and BALANCE itself.
     "TOKEN_ADAPTER": "0xe6492DCCB96D1468302843AEc42Bb39f0FD7BD1D",
     // Our keeper's wallet (convert-tokens.mjs on the Mac mini): it converts full batches and pays members, gas only.

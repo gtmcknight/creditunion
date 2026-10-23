@@ -898,7 +898,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
           <div class="tk-gethead"><h2 class="form-title">You get</h2></div>
           <section class="rule">
             <div class="tk-get tk-panel"><span class="num tk-out" id="sc-get">0</span>${pickChip('to')}<span class="tk-usd" id="sc-sub"></span></div>
-            <div class="tk-lines term-desc"><div class="tk-ways" role="radiogroup" aria-label="Way to sell">${config.instantVault ? '<button type="button" class="tk-way" role="radio" aria-checked="false" data-sell="vault"><span><b>Credit Union</b><span class="muted small">Instant · Fees included</span></span><span class="num" id="sc-vault">—</span></button>' : ''}${cc.live ? '<button type="button" class="tk-way" role="radio" aria-checked="false" data-sell="cc"><span><b>$CC bid</b><span class="muted small">Instant · No fee</span></span><span class="num" id="sc-way">—</span></button>' : ''}<a class="tk-way" href="${os}" target="_blank" rel="noopener" id="sc-os"><span><b>List on OpenSea</b><span class="muted small">Your price, when someone buys</span></span><span class="num muted">↗</span></a>${cc.live || config.instantVault ? '' : `<button type="button" class="tk-way" data-pair="credit:balance"><span><b>Convert to ${TOKEN}</b><span class="muted small">Then sell it on Uniswap</span></span><span class="num muted">→</span></button>`}</div><p id="fees"></p></div>
+            <div class="tk-lines term-desc"><div class="tk-ways" role="radiogroup" aria-label="Way to sell">${ivLive() ? '<button type="button" class="tk-way" role="radio" aria-checked="false" data-sell="vault"><span><b>Credit Union</b><span class="muted small">Instant · Fees included</span></span><span class="num" id="sc-vault">—</span></button>' : ''}${cc.live ? '<button type="button" class="tk-way" role="radio" aria-checked="false" data-sell="cc"><span><b>$CC bid</b><span class="muted small">Instant · No fee</span></span><span class="num" id="sc-way">—</span></button>' : ''}<a class="tk-way" href="${os}" target="_blank" rel="noopener" id="sc-os"><span><b>List on OpenSea</b><span class="muted small">Your price, when someone buys</span></span><span class="num muted">↗</span></a>${cc.live || ivLive() ? '' : `<button type="button" class="tk-way" data-pair="credit:balance"><span><b>Convert to ${TOKEN}</b><span class="muted small">Then sell it on Uniswap</span></span><span class="num muted">→</span></button>`}</div><p id="fees"></p></div>
           </section>
           <div class="submit">${goHtml('Pick Credits')}${sureHtml()}</div>`;
   }
@@ -952,6 +952,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     ...(iv.approved ? [] : [{ address: config.credits, abi: creditsAbi, functionName: 'setApprovalForAll', args: [x.vault, true] } as const]),
     { address: x.vault, abi: IV_ABI, functionName: 'sell', args: [x.batch, x.ids, x.amount, account!] } as const,
   ];
+  /// The vault is a way to sell only once it holds $BALANCE to pay with.
+  const ivLive = () => !!config.instantVault && (iv.stock ?? 0n) > 0n;
   /// The way Credits to ETH goes: the vault then Uniswap, or $CC's bid. Picked by what pays more, until tapped.
   let sellWay: 'vault' | 'cc' | null = null;
   let ivEth: { key: string; eth: bigint } | null = null;
@@ -974,8 +976,10 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     await readCC();
     if (!app.isConnected || viewNow() !== 'sellc') return;
     if (fresh && (account || !cc.live)) return void draw(); // the row now sorts by bid, and $CC shows only if it's bidding
+    const ivFresh = config.instantVault && iv.stock === null;
     await readIV();
     if (!app.isConnected || viewNow() !== 'sellc') return;
+    if (ivFresh && ivLive()) return void draw(); // its route shows once it's known to have $BALANCE
     const { mine, take, eth: ccEth } = ccSale();
     // The vault's way: what it pays for all of them, sold on Uniswap (a beat after picking stops, priced again per pick).
     const inst = ivFor(mine);
@@ -1005,10 +1009,10 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const all = document.getElementById('pick-all');
     if (all) all.textContent = mine.length ? 'Clear' : 'Select all';
     const left = mine.length - take.length;
-    const vaultShort = !!config.instantVault && mine.length > 0 && !inst;
+    const vaultShort = ivLive() && mine.length > 0 && !inst;
     setText('fees', way === 'vault' ? 'Paid in $BALANCE now and sold on Uniswap · Two confirmations the first time' : vaultShort && !ccEth ? 'More than Credit Union can pay for right now. Pick fewer, or list them on OpenSea.' : !cc.live || way !== 'cc' ? '' : left > 0 ? `$CC can take ${plural(take.length)} of these now. List the rest on OpenSea.` : '');
     // With no instant sale at all, the button is the next best thing: listing them on OpenSea.
-    if (!cc.live && !config.instantVault) return setGo(account ? 'List on OpenSea' : 'Sell my Credits', true);
+    if (!cc.live && !ivLive()) return setGo(account ? 'List on OpenSea' : 'Sell my Credits', true);
     const n = way === 'vault' ? mine.length : take.length;
     setGo(!account ? 'Sell my Credits' : n && eth ? `Sell ${plural(n)} · ${ethNum(eth, 4)} ETH` : mine.length ? 'No price right now' : 'Pick Credits', !account || (n > 0 && eth > 0n));
   }
@@ -1806,7 +1810,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
       const v = viewNow(), l = lane(), wei = amountIn();
       // Sell the picked Credits $CC pays for: let its engine take Credits (once), then one sale at no less than 98% of
       // its bid now (a bid only moves a little between this read and the block).
-      if (v === 'sellc' && !cc.live && !config.instantVault) return void document.getElementById('sc-os')?.click();
+      if (v === 'sellc' && !cc.live && !ivLive()) return void document.getElementById('sc-os')?.click();
       const mineSell = [...owned].filter((id) => picks.has(String(id)));
       const inst = v === 'sellc' ? ivFor(mineSell) : null;
       const vaultWay = inst && (sellWay === 'vault' || (sellWay !== 'cc' && (ivEth?.eth ?? 0n) >= ccSale().eth));
