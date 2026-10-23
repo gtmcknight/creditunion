@@ -10195,12 +10195,14 @@ dialog.how .how-tile img.st { height: 84%; }
    from it, and the flip on the seam between Pay and You get. */
 .tk-side { position: relative; }
 .tk-eth > .tk-side, .tk-get.tk-panel > .tk-side { grid-column: 2; grid-row: 1; justify-self: end; align-self: center; }
-.tk-chip { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px 0 6px; border: 0; border-radius: 20px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line-strong); font: inherit; font-size: 15px; font-weight: 500; color: var(--fg); white-space: nowrap; cursor: pointer; transition: box-shadow 150ms var(--ease), transform 150ms var(--ease); }
+.tk-chip { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px 0 6px; border: 0; border-radius: 10px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line-strong); font: inherit; font-size: 15px; font-weight: 500; color: var(--fg); white-space: nowrap; cursor: pointer; transition: box-shadow 150ms var(--ease), transform 150ms var(--ease); }
 .tk-chip .tk-aicon { width: 28px; height: 28px; border-radius: 14px; }
 .tk-chip .tk-aicon.tk-ethi svg { width: 16px; height: 16px; }
 /* Each in its own shape: a Credit square, a Statement its portrait page (76:95), the coins round. */
-.tk-amenu .tk-aicon.sq, .tk-chip .tk-aicon.sq { border-radius: 2px; }
-.tk-amenu .tk-aicon.tall, .tk-chip .tk-aicon.tall { width: 22px; margin: 0 3px; border-radius: 2px; }
+.tk-amenu .tk-aicon.sq, .tk-chip .tk-aicon.sq { border-radius: 4px; }
+.tk-amenu .tk-aicon.tall, .tk-chip .tk-aicon.tall { width: 22px; margin-right: 6px; border-radius: 3px; }
+/* The chip's corners curve with its picture's: a 6px inset all round, so radius 10 around an icon of radius 4. */
+.tk-gethead .tk-side .tk-chip { padding-left: 4px; border-radius: 8px; }
 .tk-aicon.tall img.st { object-fit: cover; }
 .tk-chip::after { content: ''; width: 6px; height: 6px; margin-left: 2px; border: solid var(--muted); border-width: 0 1.5px 1.5px 0; rotate: 45deg; translate: 0 -2px; transition: rotate 150ms var(--ease); }
 .tk-chip:hover, .tk-chip[aria-expanded='true'] { box-shadow: inset 0 0 0 1px var(--fg); }
@@ -10215,7 +10217,7 @@ dialog.how .how-tile img.st { height: 84%; }
 .tk-flipwrap { position: relative; z-index: 3; height: 0; }
 .tk-flipwrap .tk-flip { bottom: auto; top: 4px; }
 @media (prefers-reduced-motion: reduce) { .tk-flip, .tk-chip, .tk-chip::after { transition: none; } .tk-flip:hover { rotate: none; } }
-@media (max-width: 420px) { .tk-chip { font-size: 14px; padding-right: 10px; } .tk-chip .tk-aicon { width: 24px; height: 24px; } .tk-chip .tk-aicon.tall { width: 19px; margin: 0 2.5px; } }
+@media (max-width: 420px) { .tk-chip { font-size: 14px; padding: 0 10px 0 8px; } .tk-chip .tk-aicon { width: 24px; height: 24px; } .tk-chip .tk-aicon.tall { width: 19px; margin-right: 5px; } }
 /* Every pair the same frame: Pay and You get one height, the lines under You get a set height, so the button never
    moves as you switch. What you'd give from your wallet (Credits, Statements) is a row on the Pay panel. */
 .tk-card .tk-eth, .tk-card .tk-get.tk-panel { height: 108px; min-height: 0; }
