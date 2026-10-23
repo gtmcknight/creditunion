@@ -1040,16 +1040,20 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     if (all) all.textContent = mine.length ? 'Clear' : 'Select all';
     const left = mine.length - take.length;
     const vaultShort = ivLive() && mine.length > 0 && (inst?.ids.length ?? 0) < mine.length;
-    const nv = inst?.ids.length ?? 0;
+    // The picks the chosen way leaves out are faded, so the note can point at them instead of counting.
+    const sold = new Set((way === 'vault' ? (inst?.ids ?? []) : way === 'cc' ? take : []).map(String));
+    const out = eth > 0n ? mine.filter((id) => !sold.has(String(id))).length : 0;
+    $$<HTMLElement>('#picker .pick', app).forEach((p) => p.classList.toggle('left', out > 0 && picks.has(p.dataset.id!) && !sold.has(p.dataset.id!)));
+    const faded = out === 1 ? 'The faded Credit can’t sell here now. List it on OpenSea.' : `The ${out} faded Credits can’t sell here now. List them on OpenSea.`;
     setText(
       'fees',
       way === 'vault'
-        ? vaultShort ? `Credit Union can pay for ${nv} of these now. List the rest on OpenSea.` : ''
-        : vaultShort && !ccEth ? 'Credit Union can’t pay for these right now. List them on OpenSea.' : !cc.live || way !== 'cc' ? '' : left > 0 ? `$CC can take ${plural(take.length)} of these now. List the rest on OpenSea.` : '',
+        ? vaultShort ? faded : ''
+        : vaultShort && !ccEth ? 'Credit Union can’t pay for these right now. List them on OpenSea.' : !cc.live || way !== 'cc' ? '' : left > 0 ? faded : '',
     );
     // With no instant sale for these, the button is the next best thing: listing them on OpenSea.
     if ((!cc.live && !ivLive()) || (account && mine.length && !inst && !ccEth && (!ivLive() || iv.stock !== null))) return setGo(account ? 'List on OpenSea' : 'Sell my Credits', true);
-    const n = way === 'vault' ? mine.length : take.length;
+    const n = way === 'vault' ? (inst?.ids.length ?? 0) : take.length;
     setGo(!account ? 'Sell my Credits' : n && eth ? `Sell ${plural(n)} · ${ethNum(eth, 4)} ETH` : mine.length ? 'No price right now' : 'Pick Credits', !account || (n > 0 && eth > 0n));
   }
   /// Your Statements picked to redeem (all that redeem now, until you pick).

@@ -10230,6 +10230,7 @@ dialog.how .how-tile img.st { height: 84%; }
 .tk-strip .pick.st { width: 36px; height: 45px; aspect-ratio: auto; background: none; }
 .tk-strip .pick.st img { object-fit: contain; }
 .tk-strip .pick.off { opacity: 0.4; cursor: not-allowed; }
+.tk-strip .pick.left { opacity: var(--tile-off); } /* picked, but the way chosen can't take it now */
 .tk-picks .tk-usd { grid-column: 1; }
 /* The ways in, one line each, so two fit the lines' height. */
 .tk-way { padding: 8px 12px; }
