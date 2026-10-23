@@ -24,6 +24,14 @@ export async function overprintsStanding(): Promise<{ items: Standing[]; total: 
   return { items, total: d.total ?? items.length };
 }
 
+/// Every Statement still standing, newest first (Statements → All).
+export async function allStanding(): Promise<Standing[]> {
+  const r = await fetch('/statements/all.json');
+  const d = (await r.json()) as { items?: Standing[]; error?: string };
+  if (!r.ok || !d.items) throw new Error(d.error ?? 'Statements unavailable.');
+  return d.items;
+}
+
 /// Paper stacked behind an overprinted Statement's drawing, an edge for each page past the first (five at most, so the
 /// stack stays inside the grid's gap).
 const stack = (pages: number) =>

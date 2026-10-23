@@ -6,7 +6,7 @@ export const CSP = [
   "script-src 'self' https://static.cloudflareinsights.com", // Cloudflare Web Analytics beacon
   "style-src 'self' 'unsafe-inline'", // inline style attributes size the sheets
   "font-src 'self'",
-  "img-src 'self' data: blob: https://metadata.ens.domains", // blob: a picture uploaded on /create or /printer
+  "img-src 'self' data: blob: https://metadata.ens.domains", // blob: a picture uploaded on /create
   "connect-src 'self' https://cloudflareinsights.com",
   "frame-ancestors 'none'",
   "base-uri 'none'",

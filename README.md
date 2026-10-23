@@ -13,7 +13,7 @@ A Statement takes 80 of Jack Butcher's [Credits](https://jack.art/credits). Cred
 <tr>
 <td width="33%" valign="top"><img src="docs/shop.svg" alt="Shop Credits"><br><b><a href="https://creditunion.fun/credits">Shop Credits</a></b><br>Every Credit for sale on OpenSea, FWA and CreditStrategy, in one list.</td>
 <td width="33%" valign="top"><img src="docs/bid.svg" alt="Bid on Statements"><br><b><a href="https://creditunion.fun/statements">Bid on Statements</a></b><br>Bid on live auctions, several at once, or buy a listed Statement.</td>
-<td width="33%" valign="top"><img src="docs/design.svg" alt="Design a Statement"><br><b>Design a Statement</b><br><a href="https://creditunion.fun/create">Paint it by trait</a>, <a href="https://creditunion.fun/printer">draw a picture with friends</a>, or <a href="https://creditunion.fun/make">burn 80 of your own</a>.</td>
+<td width="33%" valign="top"><img src="docs/design.svg" alt="Design a Statement"><br><b>Design a Statement</b><br><a href="https://creditunion.fun/create">Paint it by trait or draw a picture</a>, or <a href="https://creditunion.fun/make">burn 80 of your own</a>.</td>
 </tr>
 </table>
 
@@ -209,7 +209,7 @@ pnpm dev
 
 Contract addresses, the chain and the $BALANCE pool settings live in `wrangler.jsonc` `vars`; override them in `.dev.vars` to point the site at a local chain. After changing contracts, run `forge build`, then `pnpm abi` to regenerate `src/app/abi.ts`. `pnpm build` fails if the ABI is stale.
 
-The contracts are the only source of truth. The Worker caches their reads in a Durable Object, so every visitor shares one read, keeps the listings book, and stores Printer plans in KV. Nothing it stores can move Credits or ETH.
+The contracts are the only source of truth. The Worker caches their reads in a Durable Object, so every visitor shares one read, and keeps the listings book and $BALANCE price record in KV. Nothing it stores can move Credits or ETH.
 
 #### Endpoints
 
@@ -228,7 +228,7 @@ The main ones; the full set is the router in `src/worker/index.ts`.
 | `/opensea/listed`, `/opensea/credit/:id`, `/opensea/buyquote` | every Credit for sale, cheapest first (OpenSea, FWA, CreditStrategy); one Credit's cheapest listing; a price for the ones picked |
 | `/opensea/listings`, `/opensea/quote` | listings that fit a union, and signed Seaport orders for the Sweeper |
 | `/market.json`, `/market-top.json` | the listings book, kept live each minute, and its cheapest cut for the Balance page |
-| `/plans/*`, `/pictures/*`, `/placed/*`, `/locks/*` | Printer plans, picture unions' cards and spots, buy locks while a picture fills |
+| `/pictures/*`, `/placed/*`, `/locks/*` | Picture unions' cards and spots, buy locks while a picture fills |
 | `/bids/:party`, `/owner/:id`, `/ens/:address`, `/burns` | a union's bids, a Credit's holder, an ENS name and avatar, burning's state and the keeper's address |
 | `/og/...` | link-preview cards |
 

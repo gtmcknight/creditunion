@@ -12,7 +12,7 @@ type View = { t0: number; t1: number; lo: number; hi: number; v: number };
 type Els = { path: SVGPathElement; base: SVGLineElement; hair: SVGLineElement; dot: SVGCircleElement; pulse: SVGCircleElement; num: HTMLElement; change: HTMLElement };
 const ORDER = ['1H', '1D', '1W', 'All'];
 const SINCE: Record<string, string> = { '1H': 'past hour', '1D': 'past day', '1W': 'past week', All: 'since open' };
-const H = 150;
+let H = 150; // shorter on the homepage, beside the swap box
 const PAD = 10;
 const EASE = 0.14; // of the way to the new state each frame: settled in about half a second
 
@@ -139,8 +139,8 @@ function build(ranges: string[]) {
       <line class="pc-base" x1="0" x2="${W}"/>
       <path clip-path="url(#pc-clip)"/>
       <line class="pc-hair" y1="0" y2="${H}" style="display: none"/>
-      <circle class="pc-pulse" r="3"/>
-      <circle class="pc-dot" r="3"/>
+      <circle class="pc-pulse" r="2.5"/>
+      <circle class="pc-dot" r="2.5"/>
     </svg>
     ${ranges.length > 1 ? `<div class="pc-ranges">${ranges.map((r) => `<button type="button" data-range="${r}"${r === range ? ' aria-pressed="true"' : ''}>${r}</button>`).join('')}</div>` : ''}`;
   const q = <T extends Element>(s: string) => h.querySelector<T>(s)!;
@@ -184,7 +184,8 @@ function update() {
   const vs = pts.map((p) => p[1]);
   goal = { t0: pts[0][0], t1: pts[pts.length - 1][0], lo: Math.min(...vs), hi: Math.max(...vs), v: pts[pts.length - 1][1] };
   W = Math.max(200, h.clientWidth || 340);
-  const key = `${range}|${ranges.join()}|${W}`;
+  H = h.closest('.home') ? 80 : 150;
+  const key = `${range}|${ranges.join()}|${W}|${H}`;
   if (key !== built) (built = key), build(ranges);
   if (!view || viewKey !== `${range}|${W}` || still.matches) {
     view = { ...goal };

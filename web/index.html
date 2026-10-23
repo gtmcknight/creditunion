@@ -33,38 +33,39 @@
   <main id="app"></main>
   <footer class="site-foot">
     <div class="foot-inner">
-      <div class="foot-brand">
-        <a href="/" class="foot-logo">Credit Union</a>
-        <p>Made by <a href="https://x.com/taylor_" target="_blank" rel="noopener">@taylor_</a> and <a href="https://x.com/bigvibessss" target="_blank" rel="noopener">@bigvibessss</a></p>
-        <div class="foot-actions"><a class="gh-btn" href="https://github.com/gtmcknight/creditunion" target="_blank" rel="noopener"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>Open source on GitHub</span></a></div>
-      </div>
-      <nav class="foot-col" aria-label="Credit Union">
-        <h3>Credit Union</h3>
-        <a href="/credits">Credits</a>
-        <a href="/statements">Statements</a>
-        <a href="/balance">Balance</a>
+      <!-- By asset, each its ways in and out, all on this site; Jack's own site is linked from the line below. -->
+      <nav class="foot-col" aria-label="Credits">
+        <h3><span class="fi" aria-hidden="true"><img src="/art/0x97630aa70ab14ed9883b41dafccbc11349723043/17.svg" alt=""></span>Credits</h3>
+        <a href="/?from=eth&amp;to=credit">Buy</a>
+        <a href="/?from=credit&amp;to=eth">Sell</a>
+        <a href="/credits">All Credits</a>
+        <a href="/create">Pool into a Statement</a>
+      </nav>
+      <nav class="foot-col" aria-label="Statements">
+        <h3><span class="fi" aria-hidden="true"><img class="st" src="/statement/1.svg" alt=""></span>Statements</h3>
+        <a href="/?from=eth&amp;to=statement">Buy</a>
+        <a href="/?from=statement&amp;to=balance">Redeem</a>
+        <a href="/statements/all">All Statements</a>
         <a href="/unions">Credit Unions</a>
       </nav>
-      <nav class="foot-col" aria-label="More">
-        <h3 aria-hidden="true">&nbsp;</h3>
-        <a href="/create">Start a Credit Union</a>
+      <nav class="foot-col" aria-label="$BALANCE">
+        <h3><span class="fi fi-t" aria-hidden="true"><i style="background:#00b5e2"></i><i style="background:#e4007c"></i><i style="background:#ffd100"></i><i style="background:#111"></i></span>$BALANCE</h3>
+        <a href="/?from=eth&amp;to=balance">Buy</a>
+        <a href="/?from=balance&amp;to=eth">Sell</a>
+        <a href="/?from=credit&amp;to=balance">Convert Credits</a>
+      </nav>
+      <nav class="foot-col" aria-label="Credit Union">
+        <h3><span class="fi fi-cu" aria-hidden="true"><svg class="fi-mark" viewBox="0 0 9 8" width="18" height="16" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true"><rect x="0" y="7" width="9" height="1"/><rect x="1" y="4" width="1" height="3" fill="#00b5e2"/><rect x="3" y="4" width="1" height="3" fill="#e4007c"/><rect x="5" y="4" width="1" height="3" fill="#ffd100"/><rect x="7" y="4" width="1" height="3"/><rect x="0" y="2" width="9" height="1"/><rect x="2" y="1" width="5" height="1"/><rect x="4" y="0" width="1" height="1"/></svg></span>Credit Union</h3>
         <a href="/docs">Docs</a>
         <a href="/activity">Activity</a>
+        <a href="/me">Your page</a>
         <a href="/font">Font</a>
-      </nav>
-      <nav class="foot-col" aria-label="Jack Butcher">
-        <h3>Jack Butcher</h3>
-        <!-- His official links (x.com/jackbutcher/status/2113370900510945533, 2026-10-22): the exchange and each collection on OpenSea. Bids: his prints for the BALANCE auction's bidders. -->
-        <a href="https://jack.art/exchange/" target="_blank" rel="noopener"><span class="fi fi-x" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M5.5 2.5v10m0 0-3-3m3 3 3-3M10.5 13.5v-10m0 0-3 3m3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Exchange</a>
-        <a href="https://opensea.io/collection/credits" target="_blank" rel="noopener"><span class="fi" aria-hidden="true"><img src="/art/0x97630aa70ab14ed9883b41dafccbc11349723043/17.svg" alt=""></span>Credits</a>
-        <a href="https://opensea.io/collection/statements" target="_blank" rel="noopener"><span class="fi" aria-hidden="true"><img class="st" src="/statement/1.svg" alt=""></span>Statements</a>
-        <a href="https://opensea.io/collection/balances" target="_blank" rel="noopener"><span class="fi fi-b" aria-hidden="true"><i style="background:#00b5e2"></i><i style="background:#e4007c"></i><i style="background:#ffd100"></i></span>Balances</a>
-        <a href="https://opensea.io/collection/bids-561065072" target="_blank" rel="noopener"><span class="fi" aria-hidden="true"><img class="st" src="/marks/bids.svg" alt=""></span>Bids</a>
-        <a href="https://opensea.io/token/ethereum/0x3620540c994433d7b4a628c46d2ed5f92572ea07/" target="_blank" rel="noopener"><span class="fi fi-t" aria-hidden="true"><i style="background:#00b5e2"></i><i style="background:#e4007c"></i><i style="background:#ffd100"></i><i style="background:#111"></i></span>$BALANCE</a>
       </nav>
     </div>
     <div class="foot-bottom">
-      <p class="foot-note">Credit Union is an independent project, not made by or affiliated with Jack Butcher.<br>It’s experimental software. Use it at your own risk; nothing here is financial advice.</p>
+      <a href="/" class="foot-mark" aria-label="Credit Union"><svg class="mark" viewBox="0 0 9 8" width="45" height="40" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true"><rect class="wipe" x="0" y="7" width="9" height="1"/><rect class="rise" x="1" y="4" width="1" height="3" fill="#00b5e2" style="--d:133ms"/><rect class="rise" x="3" y="4" width="1" height="3" fill="#e4007c" style="--d:200ms"/><rect class="rise" x="5" y="4" width="1" height="3" fill="#ffd100" style="--d:267ms"/><rect class="rise" x="7" y="4" width="1" height="3" style="--d:333ms"/><rect class="open" x="0" y="2" width="9" height="1" style="--d:367ms"/><rect class="open" x="2" y="1" width="5" height="1" style="--d:467ms"/><rect class="open" x="4" y="0" width="1" height="1" style="--d:567ms"/></svg></a>
+      <p>Made by <a href="https://x.com/taylor_" target="_blank" rel="noopener">@taylor_</a> and <a href="https://x.com/bigvibessss" target="_blank" rel="noopener">@bigvibessss</a>.<br>Independent, not affiliated with <a href="https://jack.art" target="_blank" rel="noopener">Jack Butcher</a>. Experimental software, not financial advice.</p>
+      <a class="gh-btn" href="https://github.com/gtmcknight/creditunion" target="_blank" rel="noopener"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>Open source on GitHub</span></a>
       <button type="button" class="eye-btn" id="magic-eye" aria-label="Magic eye" title="Magic eye"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg></button>
     </div>
   </footer>

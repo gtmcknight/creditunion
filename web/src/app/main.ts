@@ -27,7 +27,6 @@ window.addEventListener('vite:preloadError', (e) => {
   }
   location.reload();
 });
-import { printer } from './views/printer';
 import { credit } from './views/credit';
 import { traitPage } from './views/trait';
 import { timePage } from './views/time';
@@ -44,7 +43,7 @@ let retried: string | null = null;
 /// Real paths: / (how it works and live activity), /docs, /statements (Buy) and /unions (Make), /credits, /balance, /create, /union/0x…, /credit/123, /mint, /me,
 /// trait pages /palette/CMYK, /eights/3, /print/slip, /weight/sparse, and /time?from=&to=, /rating, /bits. Pages keep their old
 /// internal names (party, parties). Old #/ links and old paths (/party, /parties, /new, /b, /docs, /how) still land.
-const LEGACY: Record<string, string> = { union: 'party', unions: 'parties', new: 'create', b: 'party', faq: 'docs', how: '', about: '', tokens: 'balance' };
+const LEGACY: Record<string, string> = { union: 'party', unions: 'parties', new: 'create', b: 'party', faq: 'docs', how: '', about: '', tokens: 'balance', printer: '' };
 function pagePath(): string[] {
   const parts = location.pathname.replace(/^\/+|\/+$/g, '').split('/');
   parts[0] = LEGACY[parts[0]] ?? parts[0];
@@ -123,7 +122,6 @@ async function route() {
     else if (page === 'member' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await profile(app, route, arg as Address);
     else if (page === 'create') await create(app);
     else if (page === 'make') await (await import('./views/make')).make(app);
-    else if (page === 'printer' && (!arg || arg === 'mine' || /^[A-Za-z0-9]{10}$/.test(arg))) await printer(app, arg, route);
     else if (page === 'credit') await credit(app, arg ?? '');
     else if (page === 'lab') await (await import('./views/lab')).lab(app);
     else if (page === 'font') (await import('./views/font')).fontPage(app);
@@ -423,18 +421,27 @@ function siteTicker(page: string) {
   if (was && !tickerEl.hidden) document.getElementById('site-ticker')?.dispatchEvent(new Event('refresh'));
 }
 
-// The mark builds once on load and again on hover; a hover mid-build lets it finish.
-{
-  const mark = document.querySelector<SVGElement>('.logo .mark');
+// The mark builds again on hover (a hover mid-build lets it finish): the header's once on load, the footer's each
+// time it comes into view, signing off the page (out of view it's taken down again, so a page still loading, with the
+// footer showing for a moment, doesn't spend it).
+for (const mark of document.querySelectorAll<SVGElement>('.logo .mark, .foot-mark .mark')) {
   let building = false;
   const build = () => {
-    if (!mark || building) return;
+    if (building) return;
     building = true;
     mark.classList.remove('build');
     void mark.getBoundingClientRect();
     mark.classList.add('build');
     setTimeout(() => (building = false), 800);
   };
-  build();
-  mark?.closest('a')?.addEventListener('pointerenter', build);
+  if (mark.closest('.logo')) build();
+  else {
+    mark.classList.add('unbuilt');
+    new IntersectionObserver(([e]) => {
+      if (!e.isIntersecting) return void mark.classList.add('unbuilt');
+      mark.classList.remove('unbuilt');
+      build();
+    }, { threshold: 0.6 }).observe(mark);
+  }
+  mark.closest('a')?.addEventListener('pointerenter', build);
 }

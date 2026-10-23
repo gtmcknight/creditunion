@@ -4979,26 +4979,13 @@ a.who:hover .who-name {
 }
 .foot-inner {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 32px;
   padding-top: 40px;
   border-top: 1px solid var(--line);
 }
 .site-foot p {
   margin: 0;
-}
-.foot-brand {
-  display: grid;
-  align-content: start;
-  justify-items: start;
-  gap: 10px;
-}
-.foot-logo {
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  color: var(--fg);
-  text-decoration: none;
 }
 .foot-col {
   display: grid;
@@ -5019,41 +5006,10 @@ a.who:hover .who-name {
 .site-foot a:hover {
   color: var(--fg);
 }
-.site-foot .foot-brand p a {
-  color: var(--fg);
-}
-.gh-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 32px;
-  margin-top: 6px;
-  padding: 0 12px;
-  border-radius: var(--r);
-  box-shadow: inset 0 0 0 1px var(--line-strong);
-  font-weight: 500;
-}
-.site-foot .gh-btn {
-  color: var(--fg);
-}
-.gh-btn svg {
-  width: 16px;
-  height: 16px;
-}
-.gh-btn:hover {
-  box-shadow: inset 0 0 0 1px var(--fg);
-}
-.site-foot .foot-note {
-  margin-top: 40px;
-  font-size: 14px;
-  color: var(--muted);
-}
 @media (max-width: 720px) {
   .foot-inner {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-  .foot-brand {
-    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 40px;
   }
 }
 
@@ -5126,9 +5082,6 @@ a.who:hover .who-name {
   padding: 0;
   font-size: 13px;
 }
-.site-foot .foot-logo {
-  color: var(--fg);
-}
 
 /* Risk line under buttons that move Credits or ETH. */
 .risk-note {
@@ -5136,9 +5089,6 @@ a.who:hover .who-name {
   font-size: 12px;
   line-height: 1.4;
   color: var(--muted);
-}
-.site-foot .foot-note {
-  line-height: 1.6;
 }
 /* The buy status leads the pane note only while the Buy tab is showing. */
 [data-pane='buy'][hidden] ~ .pane-note :is(#buy-line, .buy-how) {
@@ -5170,15 +5120,6 @@ a.who:hover .who-name {
 }
 
 /* Footer: GitHub and the magic eye side by side. */
-.foot-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-}
-.foot-actions .gh-btn {
-  margin-top: 0;
-}
 .eye-btn {
   display: grid;
   place-items: center;
@@ -5273,15 +5214,61 @@ a.who:hover .who-name {
 .foot-bottom {
   display: flex;
   justify-content: space-between;
-  align-items: flex-end;
+  align-items: center;
   gap: 24px;
-  margin-top: 40px;
+  margin-top: 48px;
 }
-.site-foot .foot-bottom .foot-note {
-  margin-top: 0;
+.site-foot .foot-bottom a {
+  color: var(--fg);
+}
+.site-foot .foot-mark {
+  display: block;
+  flex: none;
+  color: var(--fg);
+  line-height: 0;
+}
+.foot-mark .mark { display: block; }
+.mark.unbuilt rect { opacity: 0; } /* held until it scrolls into view, then built */
+.foot-bottom p {
+  flex: 1;
+}
+.gh-btn {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--r);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  font-weight: 500;
+}
+.site-foot .gh-btn {
+  color: var(--fg);
+}
+.gh-btn svg {
+  width: 16px;
+  height: 16px;
+}
+.site-foot .gh-btn {
+  transition: background-color 150ms var(--ease), box-shadow 150ms var(--ease);
+}
+.site-foot .gh-btn:hover {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--fg);
+}
+.gh-btn:active {
+  scale: 0.97;
 }
 .foot-bottom .eye-btn {
   flex: none;
+  margin-right: -7px; /* the icon, not its 32px target, on the column's right edge */
+}
+@media (max-width: 720px) {
+  /* The mark, the badge and the eye on one line; what it is under them, full width. */
+  .foot-bottom { flex-wrap: wrap; row-gap: 16px; }
+  .foot-bottom p { flex-basis: 100%; order: 1; }
+  .foot-bottom .gh-btn { margin-left: auto; }
 }
 
 /* Play sits top right on the page; the magic eye covers the wall inside the expanded frame. */
@@ -6675,8 +6662,6 @@ dialog.eligible::backdrop {
 .main-nav { margin-left: 4px; }
 /* The mark speaks the nav's language: full ink on the homepage, muted elsewhere, full again on hover. */
 .logo .mark { transition: opacity 150ms var(--ease); }
-.logo:not([aria-current]) .mark { opacity: 0.45; }
-.logo:hover .mark { opacity: 1; }
 /* Sort: one quiet menu button in the page bar, with the native picker underneath. */
 .sort-pick { position: relative; }
 .sort-pick.idle { visibility: hidden; } /* a tab with nothing to sort keeps the bar's height */
@@ -9820,6 +9805,14 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 /* The token on the right of each panel: icon and name, same place in both. */
 .tk-eth .tk-unit, .tk-get.tk-panel .tk-unit { grid-column: 2; grid-row: 1; justify-self: end; align-self: center; display: inline-flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 500; } /* centered on the number in both panels */
 .tk-unit .sw-ink { flex: none; }
+.tk-out .tk-of { color: var(--muted); }
+/* The unit in both panels at one fixed spot, centred on the number's line (16px in, 24px down), whatever the panel
+   holds or loads later: the same size, weight and grey in Pay and You get. */
+.tk-form .tk-eth, .tk-form .tk-get.tk-panel { position: relative; }
+/* Pay and You get as one panel: the same padding, a 52px first line for the number (or art) centred on it, and the
+   second line (what it's worth, what it uses, its rating) the same 8px under it, so both read on the same lines. */
+.tk-form .tk-eth.tk-eth, .tk-form .tk-get.tk-panel { grid-template-rows: minmax(52px, auto) auto; align-content: start; align-items: center; row-gap: 8px; padding: 14px 16px; }
+.tk-form .tk-eth > .tk-unit.tk-unit-name, .tk-form .tk-get.tk-panel > .tk-unit.tk-unit-name { position: absolute; grid-area: auto; top: 24px; right: 16px; line-height: 26px; font-size: 17px; font-weight: 500; color: var(--muted); }
 /* Both panels the same height; both titles the same distance above them. */
 .tk-eth, .tk-get.tk-panel { min-height: 108px; box-sizing: border-box; align-content: center; }
 .tk-ethrow:has(#amt-line:empty) { display: none; }
@@ -9886,12 +9879,18 @@ dialog.st-export .share-preview { aspect-ratio: 4 / 5; width: min(100%, 440px); 
 .tk-layout .tk-card { margin: 0; max-width: none; }
 /* The right column: the batch you'd join, its sheet as the picture and the count as its caption. */
 .tk-right { display: grid; gap: 40px; align-content: start; align-self: stretch; padding-left: 28px; border-left: 1px solid var(--line); }
+.tokens.home .tk-right { align-content: space-between; gap: 24px; padding-top: 0; border-left: 0; } /* level with the pair at the top and the button at the bottom; open beside the box */
+main.in:has(> .tokens.home) { padding-bottom: 64px; } /* the box's space above, again below */ /* level with the Pay panel's top, ending level with the button */
+.tokens.home .pc-line { height: 80px; }
 .tk-right:not(:has(#tk-batch-home .tk-batch:not([hidden]))):not(:has(.pc:not(:empty):not([hidden]))) { display: none; }
 /* The market cap, atop the right column: now (or under the pointer), its change over the range, the line, the ranges. */
 .pc:empty { display: none; }
-.pc-head { display: grid; grid-template-columns: auto 1fr; align-items: baseline; column-gap: 8px; row-gap: 2px; margin-bottom: 14px; }
+.pc-head { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 10px; row-gap: 0; margin-bottom: 14px; } /* the cap, then its label over the day's change beside it */
 .pc-label { font-size: 13px; color: var(--muted); }
-.pc-change { grid-column: 1 / -1; }
+.pc-price { grid-row: 1 / 3; }
+.pc-label, .pc-change { grid-column: 2; line-height: 1.3; }
+.pc-label { align-self: end; }
+.pc-change { align-self: start; }
 .pc-price { font-size: 28px; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .pc-change { font-size: 13px; color: var(--muted); }
 .pc-change.up { color: var(--ok); }
@@ -10072,7 +10071,7 @@ dialog.how .how-tile img.st { height: 84%; }
 .design-form.tk-form > .rule, .design-form.tk-form .tk-gethead + .rule { padding: 0; margin-top: 10px; gap: 10px; border: 0; }
 .tk-form > .rule > .tk-lines:not(:has(p:not(:empty), .tk-way)) , .tk-form > .rule > .tk-ethrow:has(#amt-line:empty) { display: none; }
 .tk-form .tk-lines p { margin: 0; }
-.tk-form > .submit { padding-top: 0; margin-top: 24px; }
+.tk-form > .submit { padding-top: 0; margin-top: 12px; } /* the button sits under the routes as the routes sit under You get */
 .tk-form .tk-eth { margin-bottom: 0; }
 
 /* /font: Receipt. Everything set in the font sits on paper, black by default. Type sizes are multiples of 10px so
@@ -10192,6 +10191,39 @@ dialog.how .how-tile img.st { height: 84%; }
 .sp-key > span { display: inline-flex; align-items: center; gap: 6px; }
 .sp-key i { width: 8px; height: 8px; border-radius: 2px; }
 .sp-key .num { color: var(--fg); }
+/* Under the bar, its key: each kind with how many there are and its share of all rating, then what 1,000 rating
+   costs that way with its premium over $BALANCE under it. A row is that buy. */
+#tk-costs { gap: 0; }
+#tk-costs .sp-bar { height: 20px; margin: 8px 0 16px; }
+#tk-costs .sp-head { margin: 0 0 10px; }
+.sp-marks { display: flex; gap: 2px; }
+.sp-marks > span { display: flex; align-items: center; height: 20px; min-width: 20px; }
+.sp-marks .tk-aicon { width: 20px; height: 20px; border-radius: 4px; }
+.sp-marks .tk-aicon.sq img { scale: 1.35; }
+.sp-marks .tk-aicon.tall { width: 20px; margin: 0; }
+.sp-marks .tk-aicon.tall img.st { object-fit: cover; scale: 1.25; }
+.sp-marks .tk-aicon.tk-inks { width: 18px; height: 18px; margin: 0 1px; border-radius: 50%; }
+#tk-costs .sp-bar > span { display: flex; align-items: center; min-width: 0; overflow: hidden; border-radius: 3px; }
+#tk-costs .sp-bar .num { padding: 0 5px; font-size: 10.5px; font-weight: 500; white-space: nowrap; }
+#tk-costs .sp-c .num { color: var(--fg); }
+#tk-costs :is(.sp-s, .sp-b) .num { color: var(--bg); }
+#tk-costs .sp-s { justify-content: center; }
+#tk-costs .sp-s .num { padding: 0; letter-spacing: -0.02em; } /* the narrow one: its figure centred, no inset */
+.cost-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; column-gap: 10px; width: 100%; padding: 8px 0; border: 0; border-top: 1px solid var(--line); background: none; font: inherit; font-size: 14px; color: var(--muted); text-align: left; cursor: pointer; }
+.cost-name, .cost-price { display: grid; gap: 1px; min-width: 0; }
+.cost-price { text-align: right; }
+.cost-name b, .cost-price b { font-weight: 400; color: var(--fg); }
+.cost-row:hover .cost-name b { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-strong); }
+.cost-name .num, .cost-tag { font-size: 12px; color: var(--muted); }
+.cost-tag.under { color: var(--ok); }
+.cost-headrow { border-top: 0; padding: 0 0 6px; font-size: 12px; cursor: default; } /* its labels over the names and the prices */
+.cost-headrow > span:last-child { text-align: right; }
+/* One 20px footprint each: the two kinds of art as squares cropped to the art, $BALANCE as its circle a step smaller. */
+.cost-row .tk-aicon { width: 20px; height: 20px; border-radius: 4px; }
+.cost-row .tk-aicon.sq img { scale: 1.35; }
+.cost-row .tk-aicon.tall { width: 20px; margin: 0; }
+.cost-row .tk-aicon.tall img.st { object-fit: cover; scale: 1.25; }
+.cost-row .tk-aicon.tk-inks { width: 18px; height: 18px; margin: 0 1px; border-radius: 50%; }
 /* The pair on the panels: each side's picker where its unit goes (its mark, name and a chevron), a menu of the others
    from it, and the flip on the seam between Pay and You get. */
 .tk-side { position: relative; }
@@ -10211,12 +10243,34 @@ dialog.how .how-tile img.st { height: 84%; }
 .tk-chip[aria-expanded='true']::after { rotate: 225deg; translate: 0 2px; }
 .tk-chip:focus { outline: none; }
 .tk-chip:focus-visible { box-shadow: inset 0 0 0 2px var(--fg); }
+/* The homepage's pair above the box, on one line: what you give and what you get as two chips (each opens the
+   four), the flip between. The box below follows it. */
+.tk-pair { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tk-pair .tk-side { position: relative; flex: 1; min-width: 0; }
+.tk-pair .tk-pairchip { width: 100%; height: 44px; gap: 10px; padding: 0 14px 0 8px; border-radius: var(--r); } /* the box's own corners, as its panels and button */
+.tk-pair .tk-pairchip::after { margin-left: auto; }
+.tk-pair .tk-pairchip .tk-aicon { width: 28px; height: 28px; border-radius: 5px; }
+.tk-pair .tk-pairchip .tk-aicon.sq img { scale: 1.35; }
+.tk-pair .tk-pairchip .tk-aicon.tall { width: 28px; margin: 0; }
+.tk-pair .tk-pairchip .tk-aicon.tall img.st { object-fit: cover; scale: 1.25; }
+.tk-pair .tk-pairchip .tk-aicon.tk-inks, .tk-pair .tk-pairchip .tk-aicon.tk-ethi { width: 26px; height: 26px; margin: 0 1px; border-radius: 50%; }
+.tk-pairtxt { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+.tk-pair .tk-flip { position: static; translate: none; flex: none; width: 32px; height: 32px; box-shadow: none; color: var(--muted); }
+.tk-pair .tk-flip:hover { color: var(--fg); }
+.tk-pair .tk-amenu { left: 0; right: auto; width: 100%; }
+.tk-form > .tk-pair + .tk-gethead { margin-top: 24px; }
+@media (max-width: 520px) {
+  .tk-pair .tk-pairchip { gap: 8px; padding: 0 10px 0 7px; }
+  .tk-pair .tk-pairchip .tk-aicon { width: 24px; height: 24px; }
+  .tk-pair .tk-pairchip .tk-aicon.tk-inks, .tk-pair .tk-pairchip .tk-aicon.tk-ethi { width: 22px; height: 22px; }
+  .tk-pairtxt { font-size: 15px; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .tk-pair .tk-flip { width: 24px; }
+}
+@media (max-width: 360px) { .tk-pair .tk-pairchip .tk-aicon { display: none; } .tk-pair .tk-pairchip { padding-left: 10px; } } /* the narrowest phones: the names, whole */
 .tk-amenu { left: auto; right: 0; min-width: 264px; padding: 4px; }
 .tk-amenu ul { margin: 0; padding: 0; list-style: none; }
 .tk-amenu > .link { display: block; margin: 4px 10px 6px; }
 .tk-gethead .tk-side .tk-chip { height: 36px; }
-.tk-flipwrap { position: relative; z-index: 3; height: 0; }
-.tk-flipwrap .tk-flip { bottom: auto; top: 4px; }
 @media (prefers-reduced-motion: reduce) { .tk-flip, .tk-chip, .tk-chip::after { transition: none; } .tk-flip:hover { rotate: none; } }
 @media (max-width: 420px) { .tk-chip { font-size: 14px; padding: 0 10px 0 8px; } .tk-chip .tk-aicon { width: 24px; height: 24px; } .tk-chip .tk-aicon.tall { width: 19px; margin-right: 5px; } }
 /* Every pair the same frame: Pay and You get one height, the lines under You get a set height, so the button never
@@ -10240,6 +10294,11 @@ dialog.how .how-tile img.st { height: 84%; }
 .tk-way { padding: 8px 16px; } /* text on the panels' 16px line */
 .tk-form .tk-lines > p { padding-inline: 16px; }
 .tk-form .tk-lines > p:has(.tk-ways) { padding-inline: 0; }
+/* What the box has to say (a warning, a limit, a shortcut) is one row in the routes' frame, under them, never a loose
+   line between the panels: a warning in red, anything else quiet. */
+.tk-card .tk-form > .rule > .tk-lines.term-desc { gap: 8px; }
+.tk-form .tk-lines > :is(#amt-line, #fees) { order: 1; padding: 9px 16px; border-radius: var(--r); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--err) 40%, transparent); color: var(--err); font-size: 13px; line-height: 1.4; }
+.tk-form .tk-lines > :is(#amt-line, #fees):has(.link, .tk-info) { box-shadow: inset 0 0 0 1px var(--line); color: var(--muted); }
 .tk-way .muted { flex-basis: auto; }
 .tk-way > span:first-child { flex-wrap: nowrap; overflow: hidden; }
 .tk-way .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -10286,9 +10345,9 @@ dialog.how .how-tile img.st { height: 84%; }
 /* The homepage's wall: a shorter band than it was, so the box still starts on the first screen; the line under it. */
 .tokens .home-hero { margin: -9px 0 0; } /* over the bar's rule and gap: the bar's text sits halfway between the header line and the wall */
 .home-hero .wall-band { margin: 0; }
-.home-hero .wall-frame { height: clamp(220px, 22vw, 300px); }
-.home-lede { margin: 16px 0 0; max-width: none; font-size: 17px; text-wrap: balance; }
-@media (max-width: 760px) { .home-hero .wall-frame { height: 190px; } .home-hero .hero-text h1 { font-size: min(7.4vw, 30px); } }
+.home-hero .wall-frame { height: clamp(120px, 11vw, 150px); }
+.home-hero .hero-text h1 { font-size: clamp(20px, 2.9vw, 40px); }
+@media (max-width: 760px) { .home-hero .wall-frame { height: 104px; } .home-hero .hero-text { top: auto; bottom: 10px; translate: none; } .home-hero .hero-text h1 { font-size: 3.9vw; } } /* one line, under the Play button */
 .tk-steps { font-size: 17px; }
 .tk-ways.idle .tk-way { cursor: default; }
 div.tk-way { cursor: default; }
@@ -10316,22 +10375,24 @@ a.tk-way { text-decoration: none; box-sizing: border-box; }
 .tk-card .tk-picks { align-content: start; padding-top: 16px; padding-bottom: 12px; }
 /* The box's one rhythm: 10 from a title to its panel, a 44 band between Pay and You get with the flip centred in it,
    12 from You get to its routes, 8 between routes, 24 to the button. */
-.tk-card .tk-flipwrap { height: 44px; display: flex; align-items: center; justify-content: center; }
-.tk-card .tk-flipwrap .tk-flip { position: static; translate: none; }
-.tk-card .tk-flipwrap + .tk-gethead { margin-top: 0; }
 .tk-card .tk-form > .rule > .tk-lines.term-desc { padding-top: 2px; }
 .tk-card .tk-lines .tk-ways { margin-top: 0; gap: 8px; }
 /* Jack's links in the footer, each with its mark: the art itself, BALANCE's inks, the exchange's arrows. */
 .foot-col a:has(.fi) { display: inline-flex; align-items: center; gap: 8px; }
+.foot-col h3:has(.fi) { display: flex; align-items: center; gap: 8px; }
+/* The headings' marks as the sidebar's table draws them: the art in 20px squares cropped to it, $BALANCE's circle a step smaller in the same slot. */
+.foot-col h3 .fi { width: 20px; height: 20px; border-radius: 4px; }
+.foot-col h3 .fi img { scale: 1.35; }
+.foot-col h3 .fi img.st { object-fit: cover; scale: 1.25; }
+.foot-col h3 .fi-t { width: 18px; height: 18px; margin: 0 1px; border-radius: 50%; }
+.foot-col h3 .fi-cu { width: 20px; }
 .fi { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 3px; overflow: hidden; background: #fff; box-shadow: 0 0 0 1px var(--img-outline); }
 .fi img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .fi img.st { object-fit: contain; }
-.fi-x { background: none; box-shadow: none; color: var(--muted); }
-.fi-x svg { width: 14px; height: 14px; }
 .fi-t { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; border-radius: 50%; }
-.fi-t i, .fi-b i { display: block; width: 100%; height: 100%; }
-.fi-b { grid-auto-flow: column; grid-template-rows: 1fr; gap: 1px; padding: 5px 2px; box-sizing: border-box; }
-.fi-b i { height: 6px; }
+.fi-t i { display: block; width: 100%; height: 100%; }
+.fi-cu { background: none; box-shadow: none; color: var(--fg); }
+.fi-cu svg { width: 16px; height: auto; }
 /* The route that's chosen reads as chosen without shouting: the panels' own fill and hairline, its name bold as before.
    The others sit on the page with a hairline; nothing is chosen until there's an amount. */
 .tk-card .tk-way { box-shadow: inset 0 0 0 1px var(--line); }

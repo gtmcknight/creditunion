@@ -93,3 +93,30 @@ export async function overprintsOf(c: PublicClient, statements: Address, count =
   });
   return { items, total: all.length };
 }
+
+/// Every Statement still standing (held by someone other than the token: one handed in for $BALANCE goes to it), the
+/// newest first, each with its pages, rating and format, for Statements → All.
+export async function standingOf(c: PublicClient, statements: Address, token: Address | null): Promise<{ items: Overprint[]; total: number }> {
+  const supply = Number(await c.readContract({ address: statements, abi: READ, functionName: 'supply' }));
+  const ids = Array.from({ length: supply }, (_, i) => BigInt(supply - i));
+  const reads = await c.multicall({
+    contracts: ids.flatMap((id) => [{ address: statements, abi: READ, functionName: 'historyLength', args: [id] } as const, { address: statements, abi: READ, functionName: 'ownerOf', args: [id] } as const]),
+    allowFailure: true,
+    batchSize: 0,
+    multicallAddress: MULTICALL,
+  });
+  const standing = ids
+    .map((id, i) => ({ id, pages: reads[2 * i].status === 'success' ? Number(reads[2 * i].result) : 0, owner: reads[2 * i + 1] }))
+    .filter((x) => x.owner.status === 'success' && (!token || String(x.owner.result).toLowerCase() !== token.toLowerCase()));
+  const more = await c.multicall({
+    contracts: standing.flatMap((x) => [{ address: statements, abi: READ, functionName: 'creditScoreOf', args: [x.id] } as const, { address: statements, abi: READ, functionName: 'formatOf', args: [x.id] } as const]),
+    allowFailure: true,
+    batchSize: 0,
+    multicallAddress: MULTICALL,
+  });
+  const items = standing.map((x, i) => {
+    const sc = more[2 * i], f = more[2 * i + 1];
+    return { id: x.id.toString(), pages: Math.max(1, x.pages), rating: sc.status === 'success' ? Number((sc.result as bigint) / 10_000n) : null, format: f.status === 'success' ? Number(f.result) : null };
+  });
+  return { items, total: items.length };
+}

@@ -6,7 +6,7 @@
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/rpc", "/unions.json", "/token-batches.json", "/passes", "/bids/*", "/activity", "/activity.json", "/live", "/ratings", "/edition/*", "/art/*", "/statement/*", "/balance-art/*", "/balance", "/balances/*", "/config.json", "/opensea/*", "/ens", "/ens/*", "/avatar/*", "/owner/*", "/", "/parties", "/about", "/about/*", "/docs", "/docs/*", "/how", "/how/*", "/faq", "/auctions", "/create", "/unions", "/union/*", "/party/*", "/b/*", "/mint", "/og", "/og/party/*", "/og/sample/*", "/me", "/member/*", "/credit/*", "/og/credit/*", "/credits", "/palette", "/palette/*", "/eights", "/eights/*", "/print", "/print/*", "/weight", "/weight/*", "/time", "/rating", "/bits", "/*.bin", "/wall/*", "/plans", "/plans/*", "/pictures/*", "/placed/*", "/allowlist/*", "/market/*", "/statements/*", "/locks/*", "/printer", "/printer/*", "/font", "/market.json", "/market-top.json", "/burns"]
+    "run_worker_first": ["/rpc", "/unions.json", "/token-batches.json", "/passes", "/bids/*", "/activity", "/activity.json", "/live", "/ratings", "/edition/*", "/art/*", "/statement/*", "/balance-art/*", "/balance", "/balances/*", "/config.json", "/opensea/*", "/ens", "/ens/*", "/avatar/*", "/owner/*", "/", "/parties", "/about", "/about/*", "/docs", "/docs/*", "/how", "/how/*", "/faq", "/auctions", "/create", "/unions", "/union/*", "/party/*", "/b/*", "/mint", "/og", "/og/party/*", "/og/sample/*", "/me", "/member/*", "/credit/*", "/og/credit/*", "/credits", "/palette", "/palette/*", "/eights", "/eights/*", "/print", "/print/*", "/weight", "/weight/*", "/time", "/rating", "/bits", "/*.bin", "/wall/*", "/pictures/*", "/placed/*", "/allowlist/*", "/market/*", "/statements/*", "/locks/*", "/font", "/market.json", "/market-top.json", "/burns"]
   },
   // Public config served at /config.json. Secrets (`wrangler secret put <NAME>`): RPC_URL, OPENSEA_API_KEY, and optionally
   // OPENSEA_API_KEY_2 (a spare when the first is rate limited), ENS_RPC, KEEPER_KEY (the keeper's gas-only key).
@@ -55,7 +55,7 @@
     { "pattern": "eighty.fun", "custom_domain": true },
     { "pattern": "eighty.rhps.fun", "custom_domain": true }
   ],
-  // Printer plans and the listings book (/printer): `wrangler kv namespace create PLANS`, then put its id here.
+  // The listings book and $BALANCE's price record: `wrangler kv namespace create PLANS`, then put its id here.
   // Buy locks for Picture unions (src/worker/locks.ts); the market book (market.ts); the chain read once for the site (ChainBook, index.ts).
   "durable_objects": { "bindings": [{ "name": "LOCKS", "class_name": "BuyLocks" }, { "name": "MARKET", "class_name": "MarketBook" }, { "name": "CHAIN", "class_name": "ChainBook" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BuyLocks"] }, { "tag": "v2", "new_sqlite_classes": ["MarketBook"] }, { "tag": "v3", "new_sqlite_classes": ["ChainBook"] }],
@@ -64,7 +64,7 @@
   // Every minute: the market book (market.ts); every 5th, the keeper (keeper.ts), once `wrangler secret put KEEPER_KEY`.
   "triggers": { "crons": ["* * * * *"] },
   // Per-IP rate limits (Workers Rate Limiting API). Keys are cf-connecting-ip. RL_RPC counts JSON-RPC calls, not requests;
-  // RL_FILL counts the listings /opensea/buyquote prices (two 40-Credit Printer buys a minute).
+  // RL_FILL counts the listings /opensea/buyquote prices (two 40-Credit buys a minute).
   "unsafe": {
     "bindings": [
       { "name": "RL_RPC", "type": "ratelimit", "namespace_id": "8001", "simple": { "limit": 1200, "period": 60 } },

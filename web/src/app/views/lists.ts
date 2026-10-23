@@ -8,7 +8,7 @@ import { pictureFit } from '../picture-fit';
 import { editionArt, examples, fillGhosts, hasPlan, planGhosts, registerDeposits, registerFilter } from '../ghosts';
 import type { Address } from 'viem';
 import { clock, errText, eth, esc, openModal, pageHead, same, sheet, startsAt, statementArt, timeLeft, toast, until } from '../ui';
-import { buyListed, listings, overprintsStanding, OVERPRINTS, stackStyle, type ForSale, type Standing } from './statements';
+import { allStanding, buyListed, listings, overprintsStanding, OVERPRINTS, stackStyle, type ForSale, type Standing } from './statements';
 import { TRAIT_KINDS, parseTrait, type TraitValue } from '../../shared/trait';
 import { creditsOf, takes } from './trait';
 import { drawStill, primeInks, showStill } from '../directions';
@@ -482,7 +482,7 @@ function auctionTable(items: Listed[], stage: 'live' | 'upcoming' | 'sold') {
 
 const PARTY_STATES = new Set(['Open', 'Full', 'Expired']);
 // Multibid has no tab: only an outbid alert opens it (/statements/multibid).
-const STAGES = [['live', 'For sale'], ['auction', 'Auction'], ['sold', 'Sold'], ['multibid', 'Multibid']] as const;
+const STAGES = [['live', 'For sale'], ['auction', 'Auction'], ['sold', 'Sold'], ['all', 'All'], ['multibid', 'Multibid']] as const;
 type Stage = (typeof STAGES)[number][0];
 /// Auction is what you can bid on here now; an auction whose clock ran out is sold, waiting for anyone to settle it.
 const stageOf = (b: Listed): Stage => (b.s.state === 'Settled' || (b.s.highBid && Date.now() / 1000 >= b.s.auctionEnd) ? 'sold' : 'auction');
@@ -629,9 +629,18 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
     let sales: ForSale[] | null = null, salesErr = '';
     let overprints = false; // only Statements with others overprinted onto them
     let standing: Standing[] | null = null, standingTotal = 0; // the overprints not for sale, when none are
+    let everyOne: Standing[] | null = null, everyErr = ''; // All: every Statement still standing, read with the page
     try {
       overprints = localStorage.getItem('cu-statements-overprints') === '1';
     } catch {}
+    // All's count shows on its tab from the start, so its Statements are read with the page.
+    if (tab === 'auctions') {
+      everyOne = [];
+      allStanding().then(
+        (xs) => ((everyOne = xs), document.getElementById('batches') === el && draw()),
+        (e) => ((everyOne = null), (everyErr = errText(e)), document.getElementById('batches') === el && draw()),
+      );
+    }
     if (tab === 'auctions')
       listings().then(
         (xs) => ((sales = xs), document.getElementById('batches') === el && draw()),
@@ -768,7 +777,8 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       // For sale: OpenSea's listings (a Statement at auction here isn't listed); Auction: the unions at auction here.
       const forSale: Sale[] = (sales ?? []).filter((x) => !liveNow.some((b) => b.s.statementId.toString() === x.id)).map((x): Sale => ({ x }));
       const atAuction: Sale[] = liveNow.map((b): Sale => ({ b }));
-      const nLive = document.getElementById('n-live'), nAuction = document.getElementById('n-auction'), nSold = document.getElementById('n-sold');
+      const nLive = document.getElementById('n-live'), nAuction = document.getElementById('n-auction'), nSold = document.getElementById('n-sold'), nAll = document.getElementById('n-all');
+      if (nAll) nAll.textContent = everyOne ? String(everyOne.length) : '';
       if (nLive) nLive.textContent = sales === null ? '' : String(forSale.length);
       if (nAuction) nAuction.textContent = String(atAuction.length);
       if (nSold) nSold.textContent = String(sold.length);
@@ -784,6 +794,23 @@ export async function lists(app: HTMLElement, tab: HomeTab = 'parties') {
       }
       const vp = app.querySelector<HTMLElement>('.view-pick');
       if (vp) vp.hidden = pick !== 'sold';
+      // All: every Statement still standing, newest first, each on its own page; one for sale shows its price and Buy.
+      // It has one order, so the sort menu steps aside as on Multibid.
+      if (pick === 'all') {
+        shownStage = pick;
+        app.querySelector<HTMLElement>('.sort-pick')?.classList.add('idle');
+        const listed = new Map((sales ?? []).map((x) => [x.id, x]));
+        const html = everyErr
+          ? `<p class="muted">Statements couldn’t be read: ${esc(everyErr)}</p>`
+          : !everyOne?.length
+            ? '<p class="muted">Reading Statements…</p>'
+            : `<div class="grid">${everyOne.map((x) => listingCard(listed.get(x.id) ?? x, made)).join('')}</div>`;
+        const fresh = morph(el, html);
+        hydrate(el);
+        drawPictures(el, fresh);
+        fillGhosts(el);
+        return;
+      }
       // Multibid keeps itself current (its picks and amounts survive the reads), so it's drawn once.
       // Multibid sorts from its own column names, so the menu steps aside (keeping its place, so the tabs don't move).
       if (pick === 'multibid') {
