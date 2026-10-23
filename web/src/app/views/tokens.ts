@@ -1573,14 +1573,16 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
             ? 'Bought on OpenSea, most rating per ETH first · Fees included.'
             : 'Bought on OpenSea, the most rating per ETH it covers.'
         : selling
-          ? `Sells on Uniswap for at least ${ethNum(eth, 3)} ETH, then buys on OpenSea · Fees included.`
+          ? `Sells on Uniswap for at least ${ethNum(eth, 3)} ETH, then buys on OpenSea · Fees included${rest}.`
           : to === 'credit'
             ? `From OpenSea, most rating per ETH first · Fees included${rest}`
             : `From OpenSea, most rating per ETH first · ${ethNum(spent, 3)} ETH${rest}`,
     );
     const short = selling ? !!account && amt > tokenHeld : ethHeld !== null && amt > ethHeld;
     const loading = market === 'loading' && to === 'credit';
-    setText('amt-line', '');
+    // Paid in BALANCE, say when the art converts back to less of it than it uses: the buyer's cost, named plainly.
+    const used = selling && n && eth ? Number(formatUnits((amt * spent) / eth, m!.decimals)) : 0;
+    setText('amt-line', used > (tenths / 10) * 1.02 ? `${to === 'credit' ? 'Credits' : 'Statements'} cost more than ${TOKEN} right now: about ${whole(used)} of yours buys ${whole(tenths / 10)}.` : '');
     setGo(
       !amt
         ? 'Enter an amount'
@@ -1828,6 +1830,15 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     );
     const amt = document.getElementById('amt') as HTMLInputElement | null;
     amt?.addEventListener('input', () => {
+      // Numbers only: a comma reads as the decimal point, anything else that isn't a digit or the first point drops.
+      const raw = amt.value, at = amt.selectionStart ?? raw.length;
+      const clean = (v: string) => v.replace(/,/g, '.').replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1');
+      const v = clean(raw);
+      if (v !== raw) {
+        const caret = clean(raw.slice(0, at)).length;
+        amt.value = v;
+        amt.setSelectionRange(caret, caret);
+      }
       typed = amt.value;
       $$<HTMLButtonElement>('.tk-q', app).forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.amt === typed.trim())));
       paint();
