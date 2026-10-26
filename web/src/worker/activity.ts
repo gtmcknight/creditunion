@@ -8,7 +8,7 @@ import { getAddress, parseAbi, parseEventLogs, type Address, type Hex, type Publ
 import { POOL_MANAGER, SITE_TAG, UNIVERSAL_ROUTER } from '../shared/v4swap';
 
 export type Activity = {
-  kind: 'started' | 'deposited' | 'withdrew' | 'burned' | 'converted' | 'bid' | 'won' | 'claimed' | 'bought' | 'sold' | 'redeemed' | 'swapped';
+  kind: 'started' | 'deposited' | 'withdrew' | 'burned' | 'converted' | 'bid' | 'won' | 'claimed' | 'bought' | 'sold' | 'redeemed' | 'swapped' | 'minted' | 'melted';
   who: Address;
   union?: Address;
   name?: string;
@@ -18,7 +18,8 @@ export type Activity = {
   eth?: string; // wei
   intoUnion?: boolean; // a buy that went straight into a union (Sweeper.Swept)
   side?: 'buy' | 'sell'; // a swap: bought $BALANCE with ETH, or sold it for ETH
-  balance?: string; // $BALANCE, wei: a swap's, a sale's to the vault, a redeem's
+  bar?: number; // a Bar minted or melted
+  balance?: string; // $BALANCE, wei: a swap's, a sale's to the vault, a redeem's, what a Bar holds
   block: number;
   time: number;
   tx: Hex;
@@ -327,5 +328,36 @@ export async function readSaleActivity(
   const items = [...newest.map((x) => ({ ...x, time: times.get(x.block) ?? 0 })), ...st.items];
   st = { v: 1, last, items };
   await cache.put(stateKey, Response.json(st, { headers: { 'cache-control': 'public, max-age=86400' } }));
+  return items;
+}
+
+const BAR_EVENTS = parseAbi([
+  'event Minted(uint256 indexed id, address indexed to, address vault, uint256 amount)',
+  'event Melted(uint256 indexed id, address indexed owner, uint256 amount)',
+]);
+type BarState = { v: 1; last: number; items: Activity[] };
+
+/// Bars minted and melted, newest first, scanned forward from where the last scan stopped like readActivity. Every
+/// mint and melt on the edition, whichever site it came from: the window is one day, and the feed shows it moving.
+export async function readBarActivity(c: PublicClient, cache: Cache, stateKey: string, cfg: { edition: Address; from: bigint }): Promise<Activity[]> {
+  const hit = await cache.match(stateKey);
+  const st: BarState = hit ? ((await hit.json()) as BarState) : { v: 1, last: Number(cfg.from) - 1, items: [] };
+  const head = await c.getBlockNumber();
+  const fresh: Omit<Activity, 'time'>[] = [];
+  for (let f = BigInt(st.last + 1); f <= head; f += WINDOW) {
+    const t = f + WINDOW - 1n > head ? head : f + WINDOW - 1n;
+    for (const l of await c.getLogs({ address: cfg.edition, events: BAR_EVENTS, fromBlock: f, toBlock: t })) {
+      const a = l.args as { id: bigint; to?: Address; owner?: Address; amount: bigint };
+      const minted = l.eventName === 'Minted';
+      fresh.push({ kind: minted ? 'minted' : 'melted', who: (minted ? a.to : a.owner)!, bar: Number(a.id), balance: String(a.amount), block: Number(l.blockNumber), tx: l.transactionHash!, i: l.logIndex! });
+    }
+  }
+  const newest = fresh.sort((a, b) => b.block - a.block || b.i - a.i);
+  const times = new Map<number, number>();
+  const blocks = [...new Set(newest.map((x) => x.block))];
+  await Promise.all(blocks.slice(0, EXACT).map(async (n) => times.set(n, Number((await c.getBlock({ blockNumber: BigInt(n) })).timestamp))));
+  if (blocks.length > EXACT) for (const n of blocks.slice(EXACT)) times.set(n, times.get(blocks[0])! - (blocks[0] - n) * SLOT);
+  const items = [...newest.map((x) => ({ ...x, time: times.get(x.block) ?? 0 })), ...st.items];
+  await cache.put(stateKey, Response.json({ v: 1, last: Number(head), items } satisfies BarState, { headers: { 'cache-control': 'public, max-age=86400' } }));
   return items;
 }

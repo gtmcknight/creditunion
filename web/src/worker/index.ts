@@ -15,7 +15,7 @@
 /// Every response carries the security headers in `secure()` (headers.ts; the build copies them into _headers for
 /// what the asset layer serves on its own).
 import { DurableObject } from 'cloudflare:workers';
-import { ETH, PERMIT2, POOL_MANAGER, UNIVERSAL_ROUTER, V4_QUOTER } from '../shared/v4swap';
+import { ETH, PERMIT2, POOL_MANAGER, UNIVERSAL_ROUTER, V4_QUOTER, ethPool } from '../shared/v4swap';
 import { BaseError, ContractFunctionRevertedError, ccipRequest, createPublicClient, decodeFunctionData, encodeAbiParameters, fallback, hexToBytes, http, keccak256, parseAbiParameters, toHex, type Address, type Hex, parseAbi, parseAbiItem } from 'viem';
 import { mainnet } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -27,14 +27,15 @@ import { cacheStore, confirmListing, marketListings, type FwaListing } from './f
 import { confirmStrategy, strategyAbi, strategyListings } from './strategy';
 import { inks, ratings, loadTable } from './ratings';
 import { buyStatement, buyStatements, MAX_STATEMENTS, statementsForSale } from './statements-market';
-import { barsForSale, barsOwned } from './bars-market';
+import { barHoldings, barsForSale, barsOwned } from './bars-market';
+import { meltKeep } from './melt-keeper';
 import { livesOf, overprintsOf, standingOf } from './statement-history';
 import { load, loadScores, match, predicate, type Rules } from './match';
 import { cardFor, creditCard, creditsCard, partyCard, rangeCard, ruleLine, timeCard, traitCard, withCard, type Filter } from './og';
 import { parseTrait } from '../shared/trait';
 import { drawCredit, drawUnion, sample, type CreditFacts, type UnionCard } from './card';
 import { printOf, type Rect } from './print';
-import { readActivity, readSaleActivity, readSwapActivity, type Activity } from './activity';
+import { readActivity, readBarActivity, readSaleActivity, readSwapActivity, type Activity } from './activity';
 import { keyOf, ruleFor } from '../shared/layout';
 import { ALWAYS, CSP, HSTS } from './headers';
 import { fromJson, toJson } from '../shared/json';
@@ -115,6 +116,10 @@ interface Env {
   BAR_ROUTER?: string;
   BARS_SLUG?: string;
   BARS_FROM_BLOCK?: string;
+  /// The melt keeper's own wallet (secret): buys Bars listed below the $BALANCE inside, melts and sells, and keeps
+  /// what that makes. MELT_MIN_PROFIT_WEI is the least worth a transaction after gas (default 0.002 ETH).
+  MELT_KEEPER_KEY?: string;
+  MELT_MIN_PROFIT_WEI?: string;
   /// CreditStrategy (nftstrategy.fun) on mainnet: the Credits it holds for sale are a third Buy Credits source.
   /// Empty to turn it off.
   STRATEGY?: string;
@@ -341,6 +346,23 @@ const handler = {
     if (new Date(_event.scheduledTime).getUTCMinutes() === 0) ctx.waitUntil(recordBalance(env).catch((e) => console.error('[balance] record failed', safeError(e))));
     // The keeper runs every 5 minutes, as before.
     if (new Date(_event.scheduledTime).getUTCMinutes() % 5 !== 0) return;
+    const bars = barsConfig(env), pool = balanceConfig(env);
+    if (env.MELT_KEEPER_KEY && bars && pool && env.OPENSEA_API_KEY && env.BARS_SLUG) {
+      const osKey = env.OPENSEA_API_KEY, slug = env.BARS_SLUG;
+      ctx.waitUntil(
+        meltKeep({
+          key: env.MELT_KEEPER_KEY,
+          chainId: Number(env.CHAIN_ID),
+          transport: rpcTransport(env),
+          router: bars.router,
+          pool: ethPool(pool.token, pool.pool),
+          maxGwei: Number(env.KEEPER_MAX_GWEI) || 20,
+          minProfit: BigInt(env.MELT_MIN_PROFIT_WEI ?? '2000000000000000'),
+          listings: async () => barsForSale(osKey, slug, bars.edition, await barHoldings(client(env) as never, bars.edition, BigInt(bars.fromBlock))) as never,
+          fill: (l) => fillFor(osKey, l.hash, l.protocol, bars.router),
+        }).catch((e) => console.error('[melt] run failed', safeError(e))),
+      );
+    }
     if (!env.KEEPER_KEY) return;
     ctx.waitUntil(
       keep({
@@ -414,14 +436,16 @@ async function activityItems(env: Env, store: Cache, stateKey: string): Promise<
   const bal = balanceConfig(env);
   const poolId = bal && keccak256(encodeAbiParameters(parseAbiParameters('address, address, uint24, int24, address'), [ETH, bal.token, bal.pool.fee, bal.pool.tickSpacing, bal.pool.hooks]));
   const vault = addrOrNull(env.INSTANT_VAULT), statements = addrOrNull(env.STATEMENTS);
-  // Token unions, the swap box's swaps and the sales keep their own scan states; the lists merge newest first.
-  const [main, more, swaps, sales] = await Promise.all([
+  const bars = barsConfig(env);
+  // Token unions, the swap box's swaps, the sales and Bars keep their own scan states; the lists merge newest first.
+  const [main, more, swaps, sales, barRows] = await Promise.all([
     readActivity(c as never, store, stateKey, { ...cfg, factory: env.FACTORY, sweeper: hasSweeper(env) ? env.SWEEPER : null }),
     tokens ? readActivity(c as never, store, `${stateKey}/tokens/${tokens.toLowerCase()}/from-deploy`, { ...cfg, from: env.CHAIN_ID === '1' ? TOKEN_ACTIVITY_FROM : cfg.from, factory: tokens, sweeper: tokenSweeper(env) }) : Promise.resolve([]),
     bal && poolId ? readSwapActivity(c as never, store, `${stateKey}/swaps/${poolId}`, { poolId, token: bal.token, feeBps: bal.feeBps, from: env.CHAIN_ID === '1' ? SWAP_ACTIVITY_FROM : cfg.from }).catch(() => []) : Promise.resolve([]),
     vault || statements
       ? readSaleActivity(c as never, store, `${stateKey}/sales`, { vault, statements, token: bal?.token ?? null, from: env.CHAIN_ID === '1' ? SALE_ACTIVITY_FROM : cfg.from, tagged: env.CHAIN_ID === '1' ? TAGGED_ACTIVITY_FROM : cfg.from }).catch(() => [])
       : Promise.resolve([]),
+    bars ? readBarActivity(c as never, store, `${stateKey}/bars/${bars.edition}`, { edition: bars.edition, from: BigInt(bars.fromBlock) }).catch(() => []) : Promise.resolve([]),
   ]);
   // A token batch's burn converts it into BALANCE: said so, not as a Statement made.
   const converts = more.map((x) => (x.kind === 'burned' ? { ...x, kind: 'converted' as const } : x));
@@ -433,6 +457,7 @@ async function activityItems(env: Env, store: Cache, stateKey: string): Promise<
     ...converts.filter((x) => !(x.kind === 'deposited' && sold.has(x.tx))),
     ...swaps,
     ...sales.map((x) => (x.union ? { ...x, name: names.get(x.union.toLowerCase()) ?? x.name } : x)),
+    ...barRows,
   ];
   const items = extra.length ? [...main, ...extra].sort((a, b) => b.block - a.block || b.i - a.i) : main;
   // A plan's union stays out of Activity until it fills.
@@ -1285,17 +1310,20 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       return Response.json({ error: safeError(e) }, { status: 502 });
     }
   }
-  // Bars listed on OpenSea, cheapest first, each with the $BALANCE inside it (the swap box's ETH to a Bar).
+  // Bars listed on OpenSea, cheapest first, each with the $BALANCE inside it (the swap box's ETH to a Bar), and how
+  // many Bars are live.
   if (url.pathname === '/market/bars.json') {
     const cfg = barsConfig(env);
-    if (!cfg || !env.OPENSEA_API_KEY || !env.BARS_SLUG) return Response.json({ items: [] });
+    if (!cfg) return Response.json({ items: [], live: 0 });
     const key = new Request(`${url.origin}/market/bars.json`);
     const hit = await caches.default.match(key);
     if (hit) return hit;
     if (await limited(env.RL_MISC, req)) return text('slow down', 429);
     try {
-      const items = await barsForSale(env.OPENSEA_API_KEY, env.BARS_SLUG, cfg.edition, client(env) as never, BigInt(cfg.fromBlock));
-      const res = Response.json({ items, at: Date.now() }, { headers: { 'cache-control': 'public, max-age=60' } });
+      // How many Bars are live (minted, not melted) whether or not OpenSea is set up; the listings need it.
+      const holds = await barHoldings(client(env) as never, cfg.edition, BigInt(cfg.fromBlock));
+      const items = env.OPENSEA_API_KEY && env.BARS_SLUG ? await barsForSale(env.OPENSEA_API_KEY, env.BARS_SLUG, cfg.edition, holds) : [];
+      const res = Response.json({ items, live: holds.size, at: Date.now() }, { headers: { 'cache-control': 'public, max-age=60' } });
       ctx.waitUntil(caches.default.put(key, res.clone()));
       return res;
     } catch (e) {

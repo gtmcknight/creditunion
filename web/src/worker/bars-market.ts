@@ -20,8 +20,9 @@ export async function barHoldings(c: PublicClient, edition: Address, fromBlock: 
   return out;
 }
 
-/// Listed Bars, cheapest first, up to two pages, each with what it holds. One the logs don't know is left out.
-export async function barsForSale(key: string, slug: string, edition: Address, c: PublicClient, fromBlock: bigint): Promise<BarForSale[]> {
+/// Listed Bars, cheapest first, up to two pages, each with what it holds (`holds`, from barHoldings). One the logs
+/// don't know is left out.
+export async function barsForSale(key: string, slug: string, edition: Address, holds: Map<string, bigint>): Promise<BarForSale[]> {
   const out: Listing[] = [];
   let next = '';
   for (let i = 0; i < 2; i++) {
@@ -30,7 +31,6 @@ export async function barsForSale(key: string, slug: string, edition: Address, c
     if (!pg.next) break;
     next = pg.next;
   }
-  const holds = await barHoldings(c, edition, fromBlock);
   return out.filter((l) => holds.has(l.id)).map((l) => ({ ...l, holds: holds.get(l.id)!.toString() }));
 }
 

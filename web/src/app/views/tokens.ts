@@ -106,7 +106,7 @@ function mostRating(ls: Listing[], wei: bigint, cost: (x: Listing) => bigint) {
   return { out, spent: out.reduce((a, x) => a + cost(x), 0n) };
 }
 /// The way a buy goes: BALANCE's Uniswap pool, or Credits swept into a batch.
-type Route = 'pool' | 'batch' | 'statement';
+type Route = 'pool' | 'batch' | 'statement' | 'bar';
 
 const plural = (n: number) => `${n} Credit${n === 1 ? '' : 's'}`;
 const pts = (tenths: number) => (tenths / 10).toLocaleString('en-US', { maximumFractionDigits: 1 });
@@ -183,7 +183,7 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let owedLast: { who: string; n: number } | null = null;
 
 /// The homepage says what this is before the box: what you can do here, in plain words.
-const HOME_HEAD = `<section class="hero home-hero" id="home-hero"><div id="wall"></div><div class="hero-text"><h1><span>Swap Credits, Statements and ${TOKEN}.</span></h1></div></section>`;
+const homeHead = () => `<section class="hero home-hero" id="home-hero"><div id="wall"></div><div class="hero-text"><h1><span>Swap Credits, Statements, ${config.bars ? 'Bars ' : ''}and ${TOKEN}.</span></h1></div></section>`;
 /// Draws `put` into the page and keeps the homepage's wall of Credits as it was (it's alive: redrawing it would start it
 /// over), mounting it the first time.
 function keepHero(app: HTMLElement, put: () => void) {
@@ -231,7 +231,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   if (previewJoined && !joined) joined = { batch: '', lane: laneKey, at: Date.now() };
   // The page’s frame at once (its title, where the launch line goes and the card), filled in as the chain is read.
   keepHero(app, () => (app.innerHTML = `<section class="tokens">
-      ${atHome ? HOME_HEAD : `<header class="create-head"><h1>Get ${TOKEN}${Date.now() < TRADES_PLANNED ? ' before it trades' : ''}</h1></header>`}
+      ${atHome ? homeHead() : `<header class="create-head"><h1>Get ${TOKEN}${Date.now() < TRADES_PLANNED ? ' before it trades' : ''}</h1></header>`}
       <p class="tk-when">&nbsp;</p>
       <div class="tk-layout"><section class="tk-card tk-wait" aria-busy="true"></section></div>
     </section>`));
@@ -524,6 +524,19 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   const stmtFor = (wei: bigint) =>
     stmts.filter((y) => BigInt(y.price) <= wei).reduce<ForSale | null>((a, y) => (!a || y.rating! / Number(BigInt(y.price)) > a.rating! / Number(BigInt(a.price)) ? y : a), null);
   let st: ForSale | null = null;
+  /// The listed Bars `wei` buys and melts for the most $BALANCE: the most inside per ETH first while each fits, up to
+  /// ten, the router's fee in.
+  const barsFor = (wei: bigint) => {
+    const ONE = 10n ** 18n, cost = (x: (typeof barsListed)[number]) => BigInt(x.price) + (BigInt(x.price) * bw.fee) / 10_000n;
+    const ls: typeof barsListed = [];
+    let spent = 0n, holds = 0n;
+    for (const x of [...barsListed].sort((a, b) => Number((BigInt(b.holds) * ONE) / BigInt(b.price) - (BigInt(a.holds) * ONE) / BigInt(a.price)))) {
+      if (ls.length >= 10) break;
+      if (spent + cost(x) <= wei) ls.push(x), (spent += cost(x)), (holds += BigInt(x.holds));
+    }
+    return ls.length ? { ls, cost: spent, holds, left: null as { eth: bigint; net: bigint } | null } : null;
+  };
+  let barBuy: ReturnType<typeof barsFor> = null;
   /// The Statements this wallet holds, each with its rating: the Convert tab offers to redeem them.
   let myStmts: { id: bigint; rating: number; ready?: boolean }[] = [];
   const ST_ABI = parseAbi(['function approve(address,uint256)']);
@@ -555,25 +568,29 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   /// once a visit and again after a mint or melt, only once the Worker names the edition.
   let myBars: { id: bigint; holds: bigint }[] = [];
   let barsListed: { id: string; price: string; hash: string; protocol: string; holds: string }[] = [];
-  const bw = { open: false, end: 0, fee: 100n, read: false };
+  /// The window, the router's fee, the number the next mint takes (null if the edition doesn't say) and how many are live.
+  const bw = { open: false, end: 0, fee: 100n, read: false, next: null as bigint | null, live: 0 };
   /// Your Bars picked to melt (all of them, until you pick).
   const barPicks = new Set<string>();
   let barPicked = false;
-  const BARS_ABI = parseAbi(['function isOpen() view returns (bool)', 'function mintEnd() view returns (uint64)', 'function mint(address to, uint256 amount) returns (uint256)', 'function melt(uint256 id)']);
+  const BARS_ABI = parseAbi(['function minted() view returns (uint256)', 'function isOpen() view returns (bool)', 'function mintEnd() view returns (uint64)', 'function mint(address to, uint256 amount) returns (uint256)', 'function melt(uint256 id)']);
   const readBars = async () => {
     const b = config.bars;
     if (!b) return;
     const json = <T,>(path: string, empty: T) => fetch(path).then((r) => (r.ok ? (r.json() as Promise<T>) : empty)).catch(() => empty);
-    const [mine, listed, open, end, fee] = await Promise.all([
+    const [mine, listed, open, end, fee, minted] = await Promise.all([
       account ? json<{ items?: { id: string; holds: string }[] }>(`/market/bars/owned/${account}.json`, {}) : Promise.resolve({ items: [] }),
-      json<{ items?: typeof barsListed }>('/market/bars.json', {}),
+      json<{ items?: typeof barsListed; live?: number }>('/market/bars.json', {}),
       (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'isOpen' }) as Promise<boolean>).catch(() => false),
       (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'mintEnd' }) as Promise<bigint>).then(Number).catch(() => 0),
       (pub.readContract({ address: b.router, abi: barRouterAbi, functionName: 'feeBps' }) as Promise<bigint>).catch(() => 100n),
+      (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'minted' }) as Promise<bigint>).catch(() => null),
     ]);
     myBars = (mine.items ?? []).map((x) => ({ id: BigInt(x.id), holds: BigInt(x.holds) }));
     barsListed = listed.items ?? [];
-    Object.assign(bw, { open, end: end * 1000, fee, read: true });
+    Object.assign(bw, { open, end: end * 1000, fee, read: true, next: minted === null ? null : minted + 1n, live: listed.live ?? 0 });
+    if (app.querySelector('.tk-form') && viewNow() === 'buy') paint();
+    void fillCosts();
     for (const id of [...barPicks]) if (!myBars.some((x) => String(x.id) === id)) barPicks.delete(id);
     if (app.querySelector('.tk-form') && (from === 'bar' || to === 'bar')) draw();
   };
@@ -587,7 +604,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   /// The left side: the batch's sheet, unless the way in is Uniswap (or you're selling).
   const viaSheet = () => {
     const v = viewNow();
-    return (v === 'credits' || v === 'out' || v === 'buy') && !(v === 'buy' && (wayNow() === 'pool' || wayNow() === 'statement' || !!buyNow())) && !(v === 'credits' && convertNow());
+    return (v === 'credits' || v === 'out' || v === 'buy') && !(v === 'buy' && (wayNow() === 'pool' || wayNow() === 'statement' || wayNow() === 'bar' || !!buyNow())) && !(v === 'credits' && convertNow());
   };
   const lands = () => `Lands when the batch fills${isOpen ? '' : ' and trading opens'}`;
 
@@ -1229,10 +1246,13 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     if (!host.isConnected) return;
     const share = (v: number) => (sup?.total ? `${((v / sup.total) * 100).toFixed(1)}%` : '');
     const count = (v: number | undefined) => (v == null ? '' : v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v.toLocaleString('en-US'));
+    // A Bar holds $BALANCE one for one, so its price per 1,000 inside reads beside the rest (the cheapest listed).
+    const barCost = barsListed.reduce((a, x) => Math.min(a, (Number(BigInt(x.price)) / 1e18) * (1e21 / Number(BigInt(x.holds)))), Infinity);
     const rows: [string, Asset, string, number, number][] = [
       ['Credits', 'credit', count(sup?.creditsLeft), sup?.credits ?? 0, cred],
       ['Statements', 'statement', count(sup?.standing), sup?.statements ?? 0, st === Infinity ? 0 : st],
       [TOKEN, 'balance', count(sup?.balance), sup?.balance ?? 0, (bp?.price?.eth ?? 0) * 1000],
+      ...(config.bars && bw.live ? ([['Bars', 'bar', count(bw.live), 0, barCost === Infinity ? 0 : barCost]] as [string, Asset, string, number, number][]) : []),
     ];
     // Credits by #17 (the footer's), whose ink fills its grid, so the icon sits centered whoever's looking.
     // Art converts into $BALANCE and not back, so $BALANCE is the floor: each kind of art's price says its premium over
@@ -1245,7 +1265,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     };
     // The bar of where all rating sits, titled, each part's icon above where it starts and its share inside it, then the
     // table that says the rest.
-    const parts = rows.map(([n, a, , part]) => ({ n, a, pc: sup?.total ? (part / sup.total) * 100 : 0 }));
+    const parts = rows.slice(0, 3).map(([n, a, , part]) => ({ n, a, pc: sup?.total ? (part / sup.total) * 100 : 0 })); // Bars hold $BALANCE: not a part of their own
     const bar = sup?.total
       ? `<p class="sp-head">Total supply <span class="num">${(sup.total / 1e6).toFixed(2)}M</span></p><div class="sp-marks" aria-hidden="true">${parts.map((x) => `<span style="flex:${x.pc.toFixed(3)}">${x.a === 'credit' ? `<span class="tk-aicon sq"><img src="${art(17n)}" alt=""></span>` : assetIcon(x.a)}</span>`).join('')}</div><div class="sp-bar" role="img" aria-label="${parts.map((x) => `${x.n} ${x.pc.toFixed(1)}%`).join(', ')}">${parts.map((x, i) => `<span class="${['sp-c', 'sp-s', 'sp-b'][i]}" style="flex:${x.pc.toFixed(3)}"><span class="num">${x.pc.toFixed(1)}%</span></span>`).join('')}</div>`
       : '';
@@ -1324,7 +1344,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     kept.clear();
     keepHero(app, () => (app.innerHTML = `
     <section class="tokens${atHome ? ' home' : ''}">
-      ${atHome ? HOME_HEAD : `<header class="create-head"><h1>Get ${TOKEN}${isOpen && !previewSoon ? '' : ' before it trades'}</h1></header>`}
+      ${atHome ? homeHead() : `<header class="create-head"><h1>Get ${TOKEN}${isOpen && !previewSoon ? '' : ' before it trades'}</h1></header>`}
       ${whenLine}
       <div class="tk-layout">
       <section class="tk-card">
@@ -1382,15 +1402,23 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     if (config.instantVault && iv.stock === null) void readIV().then(() => void (viewNow() === 'buy' && app.isConnected && buySync()));
     const b = sweeps && market === 'ready' ? viaBatch(wei, laneKey, capOf(lane())) : null;
     const left = b?.out.length && poolOk() && wei - b.spent >= DUST ? wei - b.spent : 0n;
-    let q: bigint | null = null, qLeft: bigint | null = null;
+    // Listed Bars melted (Mixed only: their colours are anyone's), and what the ETH they leave buys on Uniswap.
+    barBuy = lane().ink < 0 && bw.read ? barsFor(wei) : null;
+    const barLeft = barBuy && poolOk() && wei - barBuy.cost >= DUST ? wei - barBuy.cost : 0n;
+    let q: bigint | null = null, qLeft: bigint | null = null, qBarLeft: bigint | null = null;
     if (wei && poolOk()) {
       const go = document.getElementById('go') as HTMLButtonElement | null;
       if (go && !busy) go.disabled = true;
       await wait(250);
       if (run !== quoteRun) return;
-      [q, qLeft] = await Promise.all([swapQuote(m!, true, wei).then((r) => r?.net ?? null), left ? swapQuote(m!, true, left).then((r) => r?.net ?? null) : null]);
+      [q, qLeft, qBarLeft] = await Promise.all([
+        swapQuote(m!, true, wei).then((r) => r?.net ?? null),
+        left ? swapQuote(m!, true, left).then((r) => r?.net ?? null) : null,
+        barLeft ? swapQuote(m!, true, barLeft).then((r) => r?.net ?? null) : null,
+      ]);
       if (run !== quoteRun || !app.isConnected) return;
     }
+    if (barBuy) barBuy.left = qBarLeft !== null ? { eth: barLeft, net: qBarLeft } : null;
     paintBuy(wei, b, q, qLeft !== null ? left : 0n, qLeft);
   }
   function paintBuy(wei: bigint, b: ReturnType<typeof viaBatch> | null, q: bigint | null, left: bigint, qLeft: bigint | null) {
@@ -1401,10 +1429,13 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const batchWins = hasBatch && (!poolN || withBatch > poolN * WAIT_EDGE);
     st = lane().ink < 0 ? stmtFor(wei) : null; // a pure colour comes only through its batch
     const stN = st ? st.rating! : 0;
+    // Listed Bars bought and melted (worked out in buySync), with what the rest of the ETH buys on Uniswap.
+    const barN = barBuy ? Number(formatUnits(barBuy.holds, 18)) + tok(barBuy.left?.net ?? null) : 0;
+    const barPaid = barBuy ? barBuy.cost + (barBuy.left?.eth ?? 0n) : 0n;
     // The ways, each with what it gets. A batch has to beat instant by 3%, a Statement by 1%.
-    const ways = ([['pool', poolN], ['batch', withBatch], ['statement', stN]] as [Route, number][]).filter(([, n]) => n > 0);
+    const ways = ([['pool', poolN], ['batch', withBatch], ['statement', stN], ['bar', barN]] as [Route, number][]).filter(([, n]) => n > 0);
     // Compared per ETH spent (a Statement may use only part of the amount); each way that isn't instant pays its edge.
-    const spentOn = (r: Route) => Number(formatUnits(r === 'statement' ? BigInt(st!.price) : r === 'batch' ? b!.spent + left : wei, 18)) || 1;
+    const spentOn = (r: Route) => Number(formatUnits(r === 'statement' ? BigInt(st!.price) : r === 'bar' ? barPaid : r === 'batch' ? b!.spent + left : wei, 18)) || 1;
     // Through Credits the vault pays for now, nothing waits, so it competes with Uniswap as it is.
     const instant = !!b && !(leftN > 0) && !!ivFor(b.out.map((x) => BigInt(x.id)));
     const score = ([r, n]: [Route, number]) => n / spentOn(r) / (r === 'batch' && !instant ? WAIT_EDGE : r === 'statement' ? BATCH_EDGE : 1);
@@ -1417,12 +1448,12 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const batchPal = paletteOf(lane()), pPal = poolPal ?? EVEN;
     // You get, in the colors it comes in: a split mixes the batch's and the pool's by amount.
     setGet(
-      route === 'batch' ? withBatch : route === 'pool' ? poolN : route === 'statement' ? stN : 0,
-      split ? (batchPal.map((v, i) => (v * b!.tokens + pPal[i] * leftN) / withBatch) as Palette) : route === 'pool' || (!route && way === 'pool') ? pPal : batchPal,
+      route === 'batch' ? withBatch : route === 'pool' ? poolN : route === 'statement' ? stN : route === 'bar' ? barN : 0,
+      split ? (batchPal.map((v, i) => (v * b!.tokens + pPal[i] * leftN) / withBatch) as Palette) : route === 'pool' || route === 'bar' || (!route && way === 'pool') ? pPal : batchPal,
     );
     // What a BALANCE costs on the pool's way or a Statement's (a batch's line says its fees are in), then how it arrives.
-    const gets = route === 'batch' ? withBatch : route === 'pool' ? poolN : route === 'statement' ? stN : 0;
-    const paid = route === 'statement' ? BigInt(st!.price) : route === 'batch' ? b!.spent + (split ? left : 0n) : wei;
+    const gets = route === 'batch' ? withBatch : route === 'pool' ? poolN : route === 'statement' ? stN : route === 'bar' ? barN : 0;
+    const paid = route === 'statement' ? BigInt(st!.price) : route === 'bar' ? barPaid : route === 'batch' ? b!.spent + (split ? left : 0n) : wei;
     const per = paid && gets ? Number(formatUnits(paid, 18)) / gets : 0;
     // To four decimals, as the chart writes the market price beside it: the gap between them is fees and the price moving.
     const rate = per ? `${usd ? usdPrice(per * usd) : `${per.toPrecision(3)} ETH`} each` : '';
@@ -1457,6 +1488,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
       pool: ['Uniswap', 'Instant · Fees included'],
       batch: ['Credits', instant ? 'Now · Fees included' : 'When the batch fills · Fees included'],
       statement: [st ? `Statement #${st.id}` : 'Statement', `On OpenSea · ${trade?.open ? 'redeems at once' : `redeems when ${TOKEN} opens`}`],
+      bar: [`${barBuy?.ls.length === 1 ? `Bar #${barBuy.ls[0].id}` : `${barBuy?.ls.length ?? 0} Bars`}${barBuy?.left ? ' + Uniswap' : ''}`, 'On OpenSea, melted at once · Fees included'],
     };
     const box = document.getElementById('tk-batch'), home = document.getElementById('tk-batch-home');
     if (box && home && box.parentElement !== home) home.append(box);
@@ -1514,14 +1546,14 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
               ? `<span class="tk-info">${MAX_BUY} Credits at most per buy</span>`
               : '',
     );
-    const cost = route === 'batch' ? b!.spent + (split ? left : 0n) : route === 'statement' ? BigInt(st!.price) : wei;
+    const cost = route === 'batch' ? b!.spent + (split ? left : 0n) : route === 'statement' ? BigInt(st!.price) : route === 'bar' ? barPaid : wei;
     const short = ethHeld !== null && cost > ethHeld;
     setGo(
       !wei
         ? idleGo()
         : short
           ? 'Not enough ETH'
-          : route === 'batch'
+          : route === 'batch' || route === 'bar'
             ? `Get ${sym()}`
             : route === 'pool'
               ? `Get ${sym()}`
@@ -1733,6 +1765,13 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   /// all. Listed: the Bar with the most $BALANCE inside per ETH that the amount covers. The way with more inside per
   /// ETH is picked, until you tap the other.
   let barPlan: { way: 'mint' | 'listed'; amount: bigint; value: bigint; listing?: (typeof barsListed)[number] } | null = null;
+  /// How long minting stays open, counting down: "5h 12m", "12m".
+  const closesIn = () => {
+    const ms = bw.end - Date.now();
+    if (ms <= 0) return '0m';
+    const h = Math.floor(ms / 3_600_000), mn = Math.floor((ms % 3_600_000) / 60_000);
+    return `${h ? `${h}h ` : ''}${mn}m`;
+  };
   let barWay: 'mint' | 'listed' | null = null;
   async function barSync() {
     const amt = amountIn(), eth = from === 'eth', run = ++quoteRun;
@@ -1759,14 +1798,16 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     if (way === 'mint') barPlan = { way, amount: mintHolds, value: amt };
     if (way === 'listed' && listing) barPlan = { way, amount: BigInt(listing.holds), value: BigInt(listing.price), listing };
     const holds = barPlan?.amount ?? 0n;
-    setText('bar-get', `${holds ? `<span class="tk-stack"><img src="${barArtSrc(barPlan?.listing?.id ?? 'NEW')}" alt=""></span>` : ''}<span class="num tk-out">${holds ? whole(Number(formatUnits(holds, 18))) : '0'}</span>`);
-    setText('route', !holds ? '' : barPlan!.listing ? `Bar #${barPlan!.listing.id} · ${TOKEN} inside, melts back anytime` : `A new Bar · ${TOKEN} inside, melts back anytime`);
+    const num = barPlan?.listing?.id ?? (bw.next !== null ? String(bw.next) : '');
+    setText('bar-get', `${holds ? `<span class="tk-stack"><img src="${barArtSrc(num || 'NEW')}" alt=""></span>` : ''}<span class="num tk-out">${holds ? whole(Number(formatUnits(holds, 18))) : '0'}</span>`);
+    // A mint takes the next number unless someone mints first, so it says so.
+    setText('route', !holds ? '' : barPlan!.listing ? `Bar #${barPlan!.listing.id} · ${TOKEN} inside, melts back anytime` : `${num ? `Bar #${num} or later` : 'A new Bar'} · ${TOKEN} inside, melts back anytime`);
     setText('amt-usd', eth ? dollars(Number(formatEther(amt))) : '');
     const rows: string[] = [];
     const radio = (k: 'mint' | 'listed', name: string, sub: string, right: string) =>
       `<button type="button" class="tk-way" role="radio" data-barway="${k}" aria-checked="${way === k}"><span><b>${name}</b><span class="muted small">${sub}</span></span><span class="num">${right}</span></button>`;
-    if (bw.open) rows.push(radio('mint', 'Mint', `Closes ${whenShort(bw.end)} · ${eth ? 'Fees included' : 'Your ink, no fee'}`, mintHolds ? `${whole(Number(formatUnits(mintHolds, 18)))} inside` : '—'));
-    if (eth && listing) rows.push(radio('listed', `Bar #${listing.id}`, `OpenSea · ${ethNum(BigInt(listing.price), 4)} ETH`, `${whole(Number(formatUnits(BigInt(listing.holds), 18)))} inside`));
+    if (bw.open) rows.push(radio('mint', 'Mint', `${closesIn()} left · ${eth ? 'Fees included' : 'Your ink, no fee'}`, mintHolds ? whole(Number(formatUnits(mintHolds, 18))) : '—'));
+    if (eth && listing) rows.push(radio('listed', `Bar #${listing.id}`, `OpenSea · ${ethNum(BigInt(listing.price), 4)} ETH`, whole(Number(formatUnits(BigInt(listing.holds), 18)))));
     setText('bar-ways', rows.join(''));
     const closed = bw.read && !bw.open;
     setText('amt-line', closed && !eth ? 'Minting has closed. Listed Bars take ETH.' : closed && eth && amt && !listing && barsListed.length ? 'Not enough for a listed Bar.' : '');
@@ -2394,6 +2435,29 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
           draw();
         });
       }
+      // Listed Bars bought and melted in one call through the router: the $BALANCE inside comes to you, all of them or none.
+      if (v === 'buy' && route === 'bar' && barBuy && config.bars) {
+        const p = barBuy, router = config.bars.router;
+        return run(
+          go,
+          'Buying…',
+          async () => {
+            const r = await fetch('/market/bars/buy-many', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ listings: p.ls.map((x) => ({ hash: x.hash, protocol: x.protocol })), buyer: account, melt: true }) });
+            const q = (await r.json()) as { orders?: unknown[]; value?: string; error?: string };
+            if (!r.ok || !q.orders || !q.value) throw new Error(q.error ?? 'Those Bars can’t be bought right now.');
+            if (q.orders.length < p.ls.length) throw new Error('Some of those Bars just sold. Try again.');
+            const value = BigInt(q.value) + (BigInt(q.value) * bw.fee) / 10_000n;
+            await send({ address: router, abi: barRouterAbi, functionName: 'meltForBalance', args: [q.orders, BigInt(p.ls.length), p.holds, bw.fee], value }, note);
+            barsListed = barsListed.filter((x) => !p.ls.includes(x));
+            if (!p.left) return;
+            // The rest of the ETH on Uniswap, priced again now the first part has landed.
+            const r2 = await swapQuote(m!, true, p.left.eth);
+            if (!r2) throw new Error(`The Bars part went through: ${tokAmt(p.holds)} ${sym()} is in your wallet. Uniswap has no price right now; try the rest again in a moment.`);
+            await send(await buyCall(m!, p.left.eth, r2.net), note);
+          },
+          `Bought ${sym()}.`,
+        );
+      }
       if (v === 'buy' && route === 'pool')
         return run(
           go,
@@ -2539,6 +2603,11 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
       barWay = w;
       void barSync();
     });
+    // Minting's countdown and price keep up while the box is open on it.
+    if (viewNow() === 'bar' && bw.open) {
+      const tick = setInterval(() => !busy && document.visibilityState === 'visible' && void barSync(), 60_000);
+      drawn.signal.addEventListener('abort', () => clearInterval(tick));
+    }
     document.getElementById('bar-picker')?.addEventListener('click', (e) => {
       const el = (e.target as HTMLElement).closest<HTMLElement>('.pick');
       if (!el) return;

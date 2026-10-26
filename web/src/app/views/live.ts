@@ -1,4 +1,5 @@
 import type { Address, Hex } from 'viem';
+import { barArtSrc } from '../../shared/bars';
 import { onReturn } from '../visible';
 import { explorer, session } from '../chain';
 import { hydrate, who } from '../ens';
@@ -6,8 +7,9 @@ import { art, esc, eth, pageHead, same } from '../ui';
 
 /// /activity.json's rows (worker/activity.ts).
 type Item = {
-  kind: 'started' | 'deposited' | 'withdrew' | 'burned' | 'converted' | 'bid' | 'won' | 'claimed' | 'bought' | 'sold' | 'redeemed' | 'swapped';
+  kind: 'started' | 'deposited' | 'withdrew' | 'burned' | 'converted' | 'bid' | 'won' | 'claimed' | 'bought' | 'sold' | 'redeemed' | 'swapped' | 'minted' | 'melted';
   who: Address;
+  bar?: number;
   union?: Address;
   name?: string;
   ids?: number[];
@@ -74,6 +76,10 @@ function what(x: Item, here = false) {
       return here ? `got ${e}` : `got ${e} from ${u}`; // settling pays members; a claim only follows a failed send
     case 'swapped':
       return `${x.side === 'buy' ? 'bought' : 'sold'} ${balanceOf(x.balance ?? '0')} for ${e}`;
+    case 'minted':
+      return `minted Bar #${x.bar} with ${balanceOf(x.balance ?? '0')}`;
+    case 'melted':
+      return `melted Bar #${x.bar} for ${balanceOf(x.balance ?? '0')}`;
   }
 }
 
@@ -147,7 +153,9 @@ function row(x: Item, o: { here?: boolean; who?: boolean } = {}) {
   const me = session.account && same(x.who, session.account) ? '<span class="tag you">You</span>' : '';
   // Credits only: a Statement goes by its words, since a redeemed one's art is Jack's blank WITHDRAWN card.
   const ids = x.ids ?? [];
-  const thumbs = ids.length
+  const thumbs = x.bar
+    ? `<span class="live-art"><img src="${barArtSrc(String(x.bar))}" alt="" title="Bar #${x.bar}" loading="lazy" decoding="async"></span>`
+    : ids.length
     ? `<span class="live-art">${ids
         .slice(0, THUMBS)
         .map((id) => `<a href="/credit/${id}" title="Credit #${id}"><img src="${art(id)}" alt="" loading="lazy" decoding="async"></a>`)
