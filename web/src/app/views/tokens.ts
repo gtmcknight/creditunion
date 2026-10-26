@@ -9,7 +9,8 @@
 /// (scripts/convert-tokens.mjs); Claim is the fallback.
 import { erc20Abi, formatEther, formatUnits, parseEther, parseUnits, zeroAddress, type Address, type Hex } from 'viem';
 import { parseAbi } from 'viem';
-import { batchAbi, creditsAbi, factoryAbi, sweeperAbi, tokenAdapterAbi } from '../abi';
+import { barRouterAbi, batchAbi, creditsAbi, factoryAbi, sweeperAbi, tokenAdapterAbi } from '../abi';
+import { barArtSrc } from '../../shared/bars';
 import { balanceSvg, PURE, type Palette } from '../balance-art';
 import { canBatch, config, pub, send, sendBatch, sendSteps, session, type Call as TxCall } from '../chain';
 import { bin } from '../bins';
@@ -125,18 +126,22 @@ const shown = new Map<string, number>();
 /// What the box does: Buy with ETH, Sell on Uniswap, Convert your own Credits in a batch, Redeem a Statement, buy art
 /// (Credits or a Statement) with ETH or BALANCE, say the way between two that take more than one step, or Withdraw
 /// yours from a batch. Kept while you move around the page.
-type View = 'buy' | 'sell' | 'credits' | 'out' | 'redeem' | 'art' | 'via' | 'sellc';
+type View = 'buy' | 'sell' | 'credits' | 'out' | 'redeem' | 'art' | 'via' | 'sellc' | 'bar' | 'melt';
 let view: View = 'buy' as View;
-/// The four things the box goes between: Jack's three, and ETH, which pays for them or comes out of them.
-type Asset = 'credit' | 'statement' | 'balance' | 'eth';
-const ASSETS: Asset[] = ['credit', 'statement', 'balance', 'eth'];
+/// The things the box goes between: Jack's three, his Bars once the Worker names the edition, and ETH, which pays for
+/// them or comes out of them.
+type Asset = 'credit' | 'statement' | 'balance' | 'bar' | 'eth';
+const assets = (): Asset[] => (config.bars ? ['credit', 'statement', 'balance', 'bar', 'eth'] : ['credit', 'statement', 'balance', 'eth']);
 /// The box's two sides: what you give and what you get. The view follows from them.
 let from: Asset = 'eth';
 let to: Asset = 'balance';
 /// A Statement redeemed on its way to Credits or ETH: what the BALANCE goes into next.
 let then: Asset | null = null;
 const viewFor = (a: Asset, b: Asset): View =>
-  a === 'eth' && b === 'balance' ? 'buy'
+  b === 'bar' && (a === 'eth' || a === 'balance') ? 'bar'
+  : a === 'bar' && (b === 'balance' || b === 'eth') ? 'melt'
+  : a === 'bar' || b === 'bar' ? 'via'
+  : a === 'eth' && b === 'balance' ? 'buy'
   : a === 'balance' && b === 'eth' ? 'sell'
   : a === 'credit' && b === 'balance' ? 'credits'
   : a === 'statement' && b === 'balance' ? 'redeem'
@@ -210,7 +215,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   // A link to a pair (?from=balance&to=credit) opens the box on it.
   const af = q.get('from') as Asset | null, at = q.get('to') as Asset | null;
   const ownPair = (a: Asset, b: Asset) => where === 'home' || b === 'balance' || (a === 'balance' && b === 'eth');
-  if (af && at && af !== at && ASSETS.includes(af) && ASSETS.includes(at) && ownPair(af, at) && (!landed || af !== from || at !== to)) {
+  if (af && at && af !== at && assets().includes(af) && assets().includes(at) && ownPair(af, at) && (!landed || af !== from || at !== to)) {
     // (A link to another pair, from the footer say, moves the box even after the first visit has landed.)
     setPair(af, at);
     if (af === 'statement' && (at === 'eth' || at === 'credit')) then = at;
@@ -426,7 +431,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   /// spend ETH (no Sweeper, no pool for this color) Buy is your Credits.
   const viewNow = (): typeof view => {
     // BALANCE moves only once it trades: until then a side that sells it says the way.
-    if ((view === 'sell' || (view === 'art' && from === 'balance')) && !trade?.open) return 'via';
+    if ((view === 'sell' || view === 'melt' || ((view === 'art' || view === 'bar') && from === 'balance')) && !trade?.open) return 'via';
     // A Statement to ETH or Credits is the redeem, chained on: the box opens on it rather than on a page saying the way.
     if (view === 'via' && from === 'statement' && chainOn()) return 'redeem';
     const v = view === 'out' && !outHere().length ? 'buy' : view;
@@ -443,7 +448,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     })
     .catch(() => {});
   /// Whether the amount typed is BALANCE (a sale, or art bought with it) rather than ETH.
-  const paysToken = () => viewNow() === 'sell' || (viewNow() === 'art' && from === 'balance');
+  const paysToken = () => viewNow() === 'sell' || ((viewNow() === 'art' || viewNow() === 'bar') && from === 'balance');
   const amountIn = (): bigint => {
     try {
       return paysToken() ? parseUnits(typed.trim() || '0', m!.decimals) : parseEther(typed.trim() || '0');
@@ -546,6 +551,33 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   /// The contract a Statement redeems in: the token itself, named by the pool vars or by the adapter.
   const vaultOf = async (): Promise<Address | null> =>
     m?.token ?? (config.tokenAdapter ? ((await pub.readContract({ address: config.tokenAdapter, abi: tokenAdapterAbi, functionName: 'token' })) as Address) : null);
+  /// Bars: yours with the $BALANCE inside each, those listed on OpenSea, and the mint window and the router's fee. Read
+  /// once a visit and again after a mint or melt, only once the Worker names the edition.
+  let myBars: { id: bigint; holds: bigint }[] = [];
+  let barsListed: { id: string; price: string; hash: string; protocol: string; holds: string }[] = [];
+  const bw = { open: false, end: 0, fee: 100n, read: false };
+  /// Your Bars picked to melt (all of them, until you pick).
+  const barPicks = new Set<string>();
+  let barPicked = false;
+  const BARS_ABI = parseAbi(['function isOpen() view returns (bool)', 'function mintEnd() view returns (uint64)', 'function mint(address to, uint256 amount) returns (uint256)', 'function melt(uint256 id)']);
+  const readBars = async () => {
+    const b = config.bars;
+    if (!b) return;
+    const json = <T,>(path: string, empty: T) => fetch(path).then((r) => (r.ok ? (r.json() as Promise<T>) : empty)).catch(() => empty);
+    const [mine, listed, open, end, fee] = await Promise.all([
+      account ? json<{ items?: { id: string; holds: string }[] }>(`/market/bars/owned/${account}.json`, {}) : Promise.resolve({ items: [] }),
+      json<{ items?: typeof barsListed }>('/market/bars.json', {}),
+      (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'isOpen' }) as Promise<boolean>).catch(() => false),
+      (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'mintEnd' }) as Promise<bigint>).then(Number).catch(() => 0),
+      (pub.readContract({ address: b.router, abi: barRouterAbi, functionName: 'feeBps' }) as Promise<bigint>).catch(() => 100n),
+    ]);
+    myBars = (mine.items ?? []).map((x) => ({ id: BigInt(x.id), holds: BigInt(x.holds) }));
+    barsListed = listed.items ?? [];
+    Object.assign(bw, { open, end: end * 1000, fee, read: true });
+    for (const id of [...barPicks]) if (!myBars.some((x) => String(x.id) === id)) barPicks.delete(id);
+    if (app.querySelector('.tk-form') && (from === 'bar' || to === 'bar')) draw();
+  };
+  void readBars();
   let restMixed: Route | null = null;
   const restWay = (): Route | null => (!poolOk() ? (sweeps ? 'batch' : null) : !sweeps ? 'pool' : restMixed);
   /// The way it goes; with nothing typed, or while neither way can say (prices loading, too little), the way it would.
@@ -717,7 +749,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
         ? `<button type="button" class="tk-unit" data-how title="What is ${TOKEN}?"><span class="sw-ink tk-coin">${swatch(lane())}</span>${esc(sym())}</button>`
         : `<span class="tk-unit">${a === 'eth' ? ETH_ICON : assetIcon(a)}${assetName(a)}</span>`;
     // All four on both sides: the other side's swaps the two (choose), so any start is a tap away.
-    const opts = ASSETS.map((x) => `<li role="option" tabindex="-1" data-asset="${x}" aria-selected="${x === a}"><span class="tk-opt">${assetIcon(x)}<span class="tk-aname"><b>${assetName(x)}</b><span class="muted small" data-hint>${x === (k === 'from' ? to : from) ? 'Swaps the two sides' : k === 'from' ? have(x) : how(from, x)}</span></span></span></li>`)
+    const opts = assets().map((x) => `<li role="option" tabindex="-1" data-asset="${x}" aria-selected="${x === a}"><span class="tk-opt">${assetIcon(x)}<span class="tk-aname"><b>${assetName(x)}</b><span class="muted small" data-hint>${x === (k === 'from' ? to : from) ? 'Swaps the two sides' : k === 'from' ? have(x) : how(from, x)}</span></span></span></li>`)
       .join('');
     return `<div class="tk-side" data-side="${k}"><button type="button" class="tk-chip" aria-haspopup="listbox" aria-expanded="false" aria-label="${k === 'from' ? 'Pay with' : 'Get'} ${assetName(a)}">${assetIcon(a)}<span>${assetName(a)}</span></button><div class="sort-menu tk-amenu" hidden><ul role="listbox" aria-label="${k === 'from' ? 'Pay with' : 'Get'}">${opts}</ul><button type="button" class="link small" data-how>What is ${TOKEN}?</button></div></div>`;
   };
@@ -726,13 +758,13 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   const pairIcon = (a: Asset) => (a === 'credit' ? `<span class="tk-aicon sq"><img src="${art(17n)}" alt=""></span>` : assetIcon(a));
   const pairSide = (k: 'from' | 'to') => {
     const a = k === 'from' ? from : to;
-    const opts = ASSETS.map((x) => `<li role="option" tabindex="-1" data-asset="${x}" aria-selected="${x === a}"><span class="tk-opt">${assetIcon(x)}<span class="tk-aname"><b>${assetName(x)}</b><span class="muted small" data-hint>${x === (k === 'from' ? to : from) ? 'Swaps the two sides' : k === 'from' ? have(x) : how(from, x)}</span></span></span></li>`)
+    const opts = assets().map((x) => `<li role="option" tabindex="-1" data-asset="${x}" aria-selected="${x === a}"><span class="tk-opt">${assetIcon(x)}<span class="tk-aname"><b>${assetName(x)}</b><span class="muted small" data-hint>${x === (k === 'from' ? to : from) ? 'Swaps the two sides' : k === 'from' ? have(x) : how(from, x)}</span></span></span></li>`)
       .join('');
     return `<div class="tk-side" data-side="${k}"><button type="button" class="tk-chip tk-pairchip" aria-haspopup="listbox" aria-expanded="false" aria-label="${k === 'from' ? 'From' : 'To'}: ${assetName(a)}">${pairIcon(a)}<b class="tk-pairtxt">${assetName(a)}</b></button><div class="sort-menu tk-amenu" hidden><ul role="listbox" aria-label="${k === 'from' ? 'From' : 'To'}">${opts}</ul><button type="button" class="link small" data-how>What is ${TOKEN}?</button></div></div>`;
   };
   const pairHtml = () =>
     !atHome ? '' : `<div class="tk-pair">${pairSide('from')}<button type="button" class="tk-flip" id="tk-flip" aria-label="Flip: ${assetName(to)} to ${assetName(from)}" title="Flip (F)"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M2.5 5.5h10m0 0-3-3m3 3-3 3M13.5 10.5h-10m0 0 3-3m-3 3 3 3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>${pairSide('to')}</div>`;
-  const assetName = (a: Asset) => (a === 'credit' ? 'Credits' : a === 'statement' ? 'Statement' : a === 'balance' ? TOKEN : 'ETH');
+  const assetName = (a: Asset) => (a === 'credit' ? 'Credits' : a === 'statement' ? 'Statement' : a === 'balance' ? TOKEN : a === 'bar' ? 'Bar' : 'ETH');
   /// Each one as itself: your best Credit (else a cyan one), Statement #1 (Union Jack, the first one made here),
   /// BALANCE's four inks, ETH's diamond.
   const creditIcon = [...owned].sort((x, y) => t(y) - t(x))[0] ?? BigInt(inks.findIndex((x) => x === 1) + 1);
@@ -743,7 +775,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
         ? `<span class="tk-aicon tall"><img class="st" src="/statement/${myStmts[0]?.id ?? 1}.svg" alt=""></span>`
         : a === 'balance'
           ? `<span class="tk-aicon tk-inks">${INK.map((c) => `<i style="background:${c}"></i>`).join('')}</span>`
-          : `<span class="tk-aicon tk-ethi">${ETH_ICON}</span>`;
+          : a === 'bar'
+            ? `<span class="tk-aicon sq"><img src="${barArtSrc(String(myBars[0]?.id ?? 1n))}" alt=""></span>`
+            : `<span class="tk-aicon tk-ethi">${ETH_ICON}</span>`;
   /// How `a` becomes `b`, in a few words: the To menu says it beside each.
   const how = (a: Asset, b: Asset) => {
     const v = viewFor(a, b);
@@ -754,13 +788,17 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     if (v === 'redeem') return 'Redeem at once';
     if (v === 'art') return a === 'eth' ? 'OpenSea' : 'Uniswap, then OpenSea';
     if (v === 'sellc') return cc.live ? 'Instant, at $CC’s bid' : 'List on OpenSea';
+    if (v === 'bar') return !bw.open ? (a === 'eth' ? 'OpenSea' : 'Minting closed') : a === 'eth' ? 'Mint, or OpenSea' : 'Mint, keeps your ink';
+    if (v === 'melt') return b === 'balance' ? 'Melt at once' : 'Melt, then Uniswap';
+    if (a === 'bar') return 'Melt, then swap';
+    if (b === 'bar') return a === 'credit' ? 'Convert, then mint' : 'Redeem, then mint';
     if (a === 'credit') return b === 'statement' ? '80 in a Credit Union' : 'Convert, then sell';
     return 'Redeem, then swap';
   };
   /// What you hold of it, once a wallet is connected.
   const have = (a: Asset) => {
     if (!account) return '';
-    const n = a === 'credit' ? owned.length : a === 'statement' ? myStmts.length : -1;
+    const n = a === 'credit' ? owned.length : a === 'statement' ? myStmts.length : a === 'bar' ? myBars.length : -1;
     if (n >= 0) return n ? `You have ${n.toLocaleString('en-US')}` : 'None yet';
     if (a === 'balance') return tokenHeld ? `You have ${tokAmt(tokenHeld)}` : 'None yet';
     return ethHeld !== null ? `You have ${ethNum(ethHeld, 3)}` : '';
@@ -794,7 +832,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const v = viewNow();
     return v === 'buy' ? `Buy ${TOKEN}` : v === 'sell' ? `Sell ${TOKEN}` : v === 'credits' ? 'Convert Credits' : v === 'sellc' ? 'Sell Credits'
       : v === 'redeem' ? (chainOn() ? `Redeem for ${then === 'eth' ? 'ETH' : 'Credits'}` : 'Redeem Statements')
-      : v === 'art' ? (to === 'statement' ? 'Buy a Statement' : 'Buy Credits') : 'Enter an amount';
+      : v === 'art' ? (to === 'statement' ? 'Buy a Statement' : 'Buy Credits')
+      : v === 'bar' ? 'Get a Bar' : v === 'melt' ? (to === 'eth' ? 'Melt for ETH' : 'Melt Bars') : 'Enter an amount';
   };
   const goHtml = (label: string) => `<button type="button" class="btn primary block" id="go"${account ? '' : ' data-connect'} disabled>${label}</button>`;
   const linkHtml = (to: typeof view, text: string) => (text ? `<p class="hint center"><button type="button" class="link small" data-view="${to}">${text}</button></p>` : '');
@@ -875,6 +914,38 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
             <div class="tk-lines term-desc"><p id="amt-line"></p><p id="route2"></p><p id="fees"></p></div>
           </section>
           <div class="submit">${goHtml(idleGo())}${sureHtml()}</div>`;
+  /// ETH or $BALANCE into a Bar: Pay, then the Bar (its barcode and the $BALANCE inside), and the ways: mint a new one
+  /// while the window's open, or (with ETH) buy one listed on OpenSea.
+  const barHtml = () => `${payHtml(from === 'balance')}
+          <div class="tk-gethead"><h2 class="form-title">You get</h2></div>
+          <section class="rule">
+            <div class="tk-get tk-panel"><span class="tk-getrow" id="bar-get"><span class="num tk-out">0</span></span>${pickChip('to')}<span class="tk-usd" id="route"></span></div>
+            <div class="tk-lines term-desc"><div class="tk-ways" role="radiogroup" aria-label="Way to get a Bar" id="bar-ways"></div><p id="amt-line"></p></div>
+          </section>
+          <div class="submit">${goHtml(idleGo())}${sureHtml()}</div>`;
+  /// A Bar as a tile: its barcode on white paper, the $BALANCE inside under it.
+  const barTile = (x: { id: bigint; holds: bigint }) =>
+    `<button type="button" class="pick" data-bar="${x.id}" aria-pressed="${barPicks.has(String(x.id))}" aria-label="Bar #${x.id}" title="Bar #${x.id} · ${tokAmt(x.holds)} ${TOKEN} inside"><img src="${barArtSrc(String(x.id))}" alt="" loading="lazy"><span class="pick-id num">${whole(Number(formatUnits(x.holds, 18)))}</span></button>`;
+  /// Your Bars to melt: a row to pick from (all of them, picked), what they hold, and the one way.
+  function meltHtml() {
+    return `
+          <div class="tk-gethead"><h2 class="form-title">Pay</h2></div>
+          <section class="rule">
+            <div class="tk-eth tk-picks">${
+              !account
+                ? '<span class="tk-none muted">Any Bars you own</span>'
+                : myBars.length
+                  ? `<div class="tk-strip capt" id="bar-picker">${myBars.map(barTile).join('')}</div>`
+                  : '<span class="tk-none muted">None in this wallet</span>'
+            }${pickChip('from')}<span class="tk-usd" id="n-sel"></span></div>
+          </section>
+          <div class="tk-gethead"><h2 class="form-title">You get</h2></div>
+          <section class="rule">
+            <div class="tk-get tk-panel"><span class="num tk-out" id="m-get">0</span>${pickChip('to')}<span class="tk-usd" id="m-how"></span></div>
+            <div class="tk-lines term-desc">${to === 'balance' ? oneWay('Melt', 'At once · No fee') : oneWay('Melt, then Uniswap', 'Fees included')}</div>
+          </section>
+          <div class="submit">${goHtml(idleGo())}${sureHtml()}</div>`;
+  }
   /// Your Statements as a row to pick from (all that redeem now, picked), what they come to, and one button that
   /// redeems them through Jack's contract.
   function redeemHtml() {
@@ -1104,6 +1175,12 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const [steps, text, btn]: [[Asset, string][], string, string] =
       tok && from === 'balance'
         ? [[['balance', '']], `${TOKEN} trades once it opens.`, '']
+        : from === 'bar'
+          ? [[['bar', ''], ['balance', 'Melt'], ['eth', 'sell on Uniswap'], [to, 'buy on OpenSea']], `Melting has no fee. Then the ${TOKEN} is typed in for you.`, '<button type="button" class="btn primary block" data-pair="bar:balance">Melt first</button>']
+        : to === 'bar' && from === 'credit'
+          ? [[['credit', ''], ['balance', 'Convert'], ['bar', 'mint']], `Convert to ${TOKEN}, then mint a Bar with it.`, `<button type="button" class="btn primary block" data-pair="credit:balance">Convert to ${TOKEN}</button>`]
+        : to === 'bar'
+          ? [[['statement', ''], ['balance', 'Redeem'], ['bar', 'mint']], `Redeeming has no fee. Then mint a Bar with the ${TOKEN}.`, '<button type="button" class="btn primary block" data-pair="statement:balance">Redeem first</button>']
         : from === 'credit' && to === 'statement'
           ? [[['credit', ''], ['statement', 'Pool 80 in a Credit Union']], '80 Credits make a Statement. Fill it with other holders, or with your own.', '<a class="btn primary block" href="/create">Start a Credit Union</a>']
           : from === 'credit'
@@ -1113,7 +1190,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
                 trade?.open ? `Redeeming has no fee. It all goes in one go.` : `Redeeming has no fee. Then the ${TOKEN} is typed in for you.`,
                 `<button type="button" class="btn primary block" data-pair="statement:balance" data-then="${to}">${trade?.open ? `Redeem for ${to === 'eth' ? 'ETH' : 'Credits'}` : 'Redeem first'}</button>`,
               ];
-    const held = !account ? '' : from === 'credit' ? owned.length : from === 'statement' ? myStmts.length : from === 'balance' ? tokAmt(tokenHeld) : ethHeld !== null ? ethNum(ethHeld, 3) : '';
+    const held = !account ? '' : from === 'credit' ? owned.length : from === 'statement' ? myStmts.length : from === 'bar' ? myBars.length : from === 'balance' ? tokAmt(tokenHeld) : ethHeld !== null ? ethNum(ethHeld, 3) : '';
     return `
           <div class="tk-gethead"><h2 class="form-title">Pay</h2></div>
           <section class="rule">
@@ -1254,7 +1331,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
         ${yoursBox}
         <form class="design-form tk-form" novalidate style="${inkVar(l)}">
           ${tabsHtml()}${pairHtml()}
-          ${v === 'sell' ? sellHtml() : v === 'credits' ? creditsHtml() : v === 'out' ? outHtml() : v === 'redeem' ? redeemHtml() : v === 'art' ? artHtml() : v === 'via' ? viaHtml() : v === 'sellc' ? sellcHtml() : buyHtml()}
+          ${v === 'sell' ? sellHtml() : v === 'credits' ? creditsHtml() : v === 'out' ? outHtml() : v === 'redeem' ? redeemHtml() : v === 'art' ? artHtml() : v === 'via' ? viaHtml() : v === 'sellc' ? sellcHtml() : v === 'bar' ? barHtml() : v === 'melt' ? meltHtml() : buyHtml()}
         </form>
       </section>
       <div class="tk-right">${isOpen ? '<div class="pc" id="tk-chart"></div>' : ''}<div id="tk-batch-home">${v === 'buy' || v === 'credits' ? batchHtml() : ''}</div>${isOpen ? '<div class="sp" id="tk-costs"></div>' : ''}</div>
@@ -1290,6 +1367,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     else if (v === 'out') outSync();
     else if (v === 'redeem') redeemSync(), showLeft();
     else if (v === 'sellc') void sellcSync(), showLeft();
+    else if (v === 'bar') void barSync();
+    else if (v === 'melt') void meltSync();
     else showLeft();
   }
 
@@ -1545,7 +1624,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const eth = from === 'eth' ? amt : from === 'balance' && amt && m && trade?.open ? ((await swapQuote(m, false, amt))?.net ?? 0n) : 0n;
     if (run !== hintRun || menu.hidden) return;
     const minSt = stmts.reduce<bigint | null>((a, y) => (a === null || BigInt(y.price) < a ? BigInt(y.price) : a), null);
-    for (const x of ASSETS) {
+    for (const x of assets()) {
       if (x === from) continue;
       if (x === 'credit' && eth && market === 'ready') {
         const n = credFor(eth).cred.length;
@@ -1647,6 +1726,78 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
                 : `Not enough for a ${to === 'credit' ? 'Credit' : 'Statement'}`,
       !!amt && !short && n > 0,
     );
+  }
+
+  /// A Bar for ETH or $BALANCE. Minting: ETH buys the $BALANCE inside on Uniswap (our fee on the ETH that swap spends,
+  /// 1% kept back for the price to move; the router returns what's left), or your own $BALANCE goes in as it is, ink and
+  /// all. Listed: the Bar with the most $BALANCE inside per ETH that the amount covers. The way with more inside per
+  /// ETH is picked, until you tap the other.
+  let barPlan: { way: 'mint' | 'listed'; amount: bigint; value: bigint; listing?: (typeof barsListed)[number] } | null = null;
+  let barWay: 'mint' | 'listed' | null = null;
+  async function barSync() {
+    const amt = amountIn(), eth = from === 'eth', run = ++quoteRun;
+    showLeft();
+    barPlan = null;
+    const ONE = 10n ** 18n;
+    let mintHolds = 0n;
+    if (bw.open && amt) {
+      if (!eth) mintHolds = amt;
+      else {
+        await wait(250);
+        if (run !== quoteRun) return;
+        const q = await swapQuote(m!, true, (amt * 10_000n) / (10_000n + bw.fee));
+        if (run !== quoteRun || !app.isConnected) return;
+        mintHolds = q ? (((q.out * 99n) / 100n) / ONE) * ONE : 0n; // whole $BALANCE
+      }
+    }
+    if (mintHolds < ONE) mintHolds = 0n; // the edition's minimum
+    const per = (x: (typeof barsListed)[number]) => (BigInt(x.holds) * ONE) / BigInt(x.price || '1');
+    const listing = eth && amt ? (barsListed.filter((x) => BigInt(x.price) <= amt).sort((x, y) => (per(y) > per(x) ? 1 : per(y) < per(x) ? -1 : 0))[0] ?? null) : null;
+    const mintPer = mintHolds && amt ? (mintHolds * ONE) / amt : 0n;
+    const best: 'mint' | 'listed' | null = mintHolds || listing ? (listing && (!mintHolds || per(listing) > mintPer) ? 'listed' : 'mint') : null;
+    const way = barWay === 'listed' && listing ? 'listed' : barWay === 'mint' && mintHolds ? 'mint' : best;
+    if (way === 'mint') barPlan = { way, amount: mintHolds, value: amt };
+    if (way === 'listed' && listing) barPlan = { way, amount: BigInt(listing.holds), value: BigInt(listing.price), listing };
+    const holds = barPlan?.amount ?? 0n;
+    setText('bar-get', `${holds ? `<span class="tk-stack"><img src="${barArtSrc(barPlan?.listing?.id ?? 'NEW')}" alt=""></span>` : ''}<span class="num tk-out">${holds ? whole(Number(formatUnits(holds, 18))) : '0'}</span>`);
+    setText('route', !holds ? '' : barPlan!.listing ? `Bar #${barPlan!.listing.id} · ${TOKEN} inside, melts back anytime` : `A new Bar · ${TOKEN} inside, melts back anytime`);
+    setText('amt-usd', eth ? dollars(Number(formatEther(amt))) : '');
+    const rows: string[] = [];
+    const radio = (k: 'mint' | 'listed', name: string, sub: string, right: string) =>
+      `<button type="button" class="tk-way" role="radio" data-barway="${k}" aria-checked="${way === k}"><span><b>${name}</b><span class="muted small">${sub}</span></span><span class="num">${right}</span></button>`;
+    if (bw.open) rows.push(radio('mint', 'Mint', `Closes ${whenShort(bw.end)} · ${eth ? 'Fees included' : 'Your ink, no fee'}`, mintHolds ? `${whole(Number(formatUnits(mintHolds, 18)))} inside` : '—'));
+    if (eth && listing) rows.push(radio('listed', `Bar #${listing.id}`, `OpenSea · ${ethNum(BigInt(listing.price), 4)} ETH`, `${whole(Number(formatUnits(BigInt(listing.holds), 18)))} inside`));
+    setText('bar-ways', rows.join(''));
+    const closed = bw.read && !bw.open;
+    setText('amt-line', closed && !eth ? 'Minting has closed. Listed Bars take ETH.' : closed && eth && amt && !listing && barsListed.length ? 'Not enough for a listed Bar.' : '');
+    const short = eth ? ethHeld !== null && amt > ethHeld : !!account && amt > tokenHeld;
+    setGo(
+      !amt ? idleGo() : short ? `Not enough ${eth ? 'ETH' : sym()}` : !barPlan ? (closed && !eth ? 'Minting closed' : eth ? 'Not enough for a Bar' : `At least 1 ${TOKEN}`) : barPlan.listing ? `Get Bar #${barPlan.listing.id}` : `Mint a Bar · ${whole(Number(formatUnits(holds, 18)))} ${TOKEN}`,
+      !!barPlan && !short,
+    );
+  }
+  /// Your Bars picked to melt: the $BALANCE they hold, or what it sells for.
+  async function meltSync() {
+    if (!barPicked) for (const x of myBars) barPicks.add(String(x.id));
+    const mine = myBars.filter((x) => barPicks.has(String(x.id)));
+    const total = mine.reduce((a, x) => a + x.holds, 0n);
+    $$<HTMLElement>('#bar-picker .pick', app).forEach((p) => p.setAttribute('aria-pressed', String(barPicks.has(p.dataset.bar!))));
+    setText('n-sel', !account || !myBars.length ? '' : mine.length ? `${mine.length} of ${myBars.length} · ${tokAmt(total)} ${TOKEN} inside` : `Pick from your ${myBars.length}`);
+    const what = mine.length === 1 ? `Bar #${mine[0].id}` : `${mine.length} Bars`;
+    const label = !account ? 'Melt my Bars' : !mine.length ? (myBars.length ? idleGo() : 'Get a Bar') : `Melt ${what}`;
+    showLeft();
+    if (to === 'balance') {
+      setText('m-get', tokAmt(total));
+      setText('m-how', total ? 'One for one, the ink it holds' : '');
+      return setGo(label, !account || mine.length > 0 || !myBars.length);
+    }
+    const run = ++quoteRun;
+    setGo(mine.length ? 'Pricing…' : label, !account || !myBars.length);
+    const q = total ? await swapQuote(m!, false, total) : null;
+    if (run !== quoteRun || !app.isConnected) return;
+    setText('m-get', q ? ethNum(q.net, 4) : '0');
+    setText('m-how', total ? `Via ${tokAmt(total)} ${TOKEN}${q ? ` · ${dollars(Number(formatEther(q.net)))}` : ''}` : '');
+    setGo(mine.length && !q ? 'No price right now' : mine.length ? `Melt ${what} for ETH` : label, !account || !myBars.length || (mine.length > 0 && !!q));
   }
 
   /// Your Credits picked: what they pay out, which of them would pay their own color, and the button.
@@ -2119,6 +2270,63 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
           chainOn() ? '' : 'Redeemed.',
         );
       }
+      // A Bar: minted through the router with ETH, minted from your own $BALANCE (its leave to the edition first), or a
+      // listed one bought straight to your wallet.
+      if (v === 'bar' && barPlan && config.bars) {
+        const p = barPlan, b = config.bars;
+        return run(
+          go,
+          p.listing ? 'Buying…' : 'Minting…',
+          async () => {
+            const steps: Step[] = [];
+            if (p.listing) {
+              const r = await fetch('/market/bars/buy-many', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ listings: [{ hash: p.listing.hash, protocol: p.listing.protocol }], buyer: account }) });
+              const tx = (await r.json()) as { to?: Address; data?: Hex; value?: string; error?: string };
+              if (!r.ok || !tx.to || !tx.data || !tx.value) throw new Error(tx.error ?? 'That Bar can’t be bought right now.');
+              steps.push({ to: tx.to, data: tx.data, value: BigInt(tx.value) });
+            } else if (from === 'eth') steps.push({ address: b.router, abi: barRouterAbi, functionName: 'mint', args: [account!, p.amount, bw.fee], value: p.value });
+            else {
+              const allowed = (await pub.readContract({ address: m!.token, abi: erc20Abi, functionName: 'allowance', args: [account!, b.edition] })) as bigint;
+              if (allowed < p.amount) steps.push({ address: m!.token, abi: erc20Abi, functionName: 'approve', args: [b.edition, p.amount] });
+              steps.push({ address: b.edition, abi: BARS_ABI, functionName: 'mint', args: [account!, p.amount] });
+            }
+            const got = toMe(await sendSteps(steps, note, stepOf(go)), b.edition);
+            if (p.listing) barsListed = barsListed.filter((x) => x.id !== p.listing!.id);
+            if (got.length) toast(`Bar #${got[got.length - 1]} is yours, ${tokAmt(p.amount)} ${TOKEN} inside.`, 'ok', 8000);
+            await readBars();
+          },
+          '',
+        );
+      }
+      // Melt the Bars picked, each returning its $BALANCE; to ETH, that $BALANCE sold on Uniswap in the same set.
+      if (v === 'melt' && config.bars) {
+        if (!myBars.length) return goPair('eth', 'bar'); // none to melt: the button is the way to get one
+        const mine = myBars.filter((x) => barPicks.has(String(x.id)));
+        if (!mine.length) return;
+        const total = mine.reduce((a, x) => a + x.holds, 0n), edition = config.bars.edition;
+        return run(
+          go,
+          'Melting…',
+          async () => {
+            const steps: Step[] = mine.map((x) => ({ address: edition, abi: BARS_ABI, functionName: 'melt', args: [x.id] }));
+            let net = 0n;
+            if (to === 'eth') {
+              const q = await swapQuote(m!, false, total);
+              if (!q) throw new Error('No price right now. Try again in a moment.');
+              net = q.net;
+              steps.push(...(await sellCalls(m!, account!, total, q.net)));
+            }
+            const batch = await canBatch();
+            await sendSteps(steps, note, stepOf(go)).catch((e) => {
+              throw new Error(to === 'eth' && !batch ? `${errText(e)} Any Bars that melted left their ${TOKEN} in your wallet.` : errText(e));
+            });
+            mine.forEach((x) => barPicks.delete(String(x.id)));
+            toast(to === 'eth' ? `Melted for about ${ethNum(net, 4)} ETH.` : `Melted. ${tokAmt(total)} ${TOKEN} is in your wallet.`, 'ok', 8000);
+            await readBars();
+          },
+          '',
+        );
+      }
       if (v === 'art' && artPlan) {
         const p = artPlan, selling = from === 'balance';
         return run(
@@ -2324,6 +2532,20 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
       sPicked = true;
       sPicks.has(id) ? sPicks.delete(id) : sPicks.add(id);
       redeemSync();
+    });
+    document.getElementById('bar-ways')?.addEventListener('click', (e) => {
+      const w = (e.target as HTMLElement).closest<HTMLElement>('[data-barway]')?.dataset.barway as 'mint' | 'listed' | undefined;
+      if (!w) return;
+      barWay = w;
+      void barSync();
+    });
+    document.getElementById('bar-picker')?.addEventListener('click', (e) => {
+      const el = (e.target as HTMLElement).closest<HTMLElement>('.pick');
+      if (!el) return;
+      const id = el.dataset.bar!;
+      barPicked = true;
+      barPicks.has(id) ? barPicks.delete(id) : barPicks.add(id);
+      void meltSync();
     });
     document.getElementById('how-color')?.addEventListener('click', howColor);
     $$<HTMLElement>('[data-how]', app).forEach((x) => x.addEventListener('click', howBalance));

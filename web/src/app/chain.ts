@@ -51,6 +51,9 @@ export type Config = {
   /// BALANCE and its Uniswap pool, for Buy and Sell on /tokens: the token, the pool's settings beyond ETH and the token,
   /// and our slice of each swap's output. Null until the vars name the token.
   balance?: { token: Address; pool: { fee: number; tickSpacing: number; hooks: Address }; feeBps: number; feeTo: Address | null } | null;
+  /// The Bars edition, BarRouter and the block the edition was deployed at: Bar in the swap box. Null until the vars
+  /// name them.
+  bars?: { edition: Address; router: Address; fromBlock: string } | null;
   /// The Worker reads a local copy of mainnet (RPC_URL on localhost): sends check the wallet is on it too.
   fork?: boolean;
 };

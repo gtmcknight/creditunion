@@ -2,10 +2,10 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {BarRouter, IPoolManager} from "../src/BarRouter.sol";
 import {IBars} from "../src/interfaces/IBars.sol";
+import {StandInBars} from "../src/mocks/StandInBars.sol";
 import {
     AdvancedOrder,
     ConsiderationItem,
@@ -16,33 +16,6 @@ import {
     OrderParameters,
     OrderType
 } from "../src/interfaces/ISeaport.sol";
-
-/// @dev A Bars edition reduced to what the router relies on: mint takes `amount` $BALANCE from the caller into the
-///      edition and mints to `to`; melt (owner only) burns the Bar and returns exactly that amount.
-contract StandInBars is ERC721 {
-    IERC20 public immutable balance;
-    uint256 public minted;
-    mapping(uint256 => uint256) public amountOf;
-
-    constructor(IERC20 balance_) ERC721("Bars", "BARS") {
-        balance = balance_;
-    }
-
-    function mint(address to, uint256 amount) external returns (uint256 id) {
-        id = ++minted;
-        amountOf[id] = amount;
-        balance.transferFrom(msg.sender, address(this), amount);
-        _mint(to, id);
-    }
-
-    function melt(uint256 id) external {
-        require(ownerOf(id) == msg.sender, "Only owner");
-        uint256 amount = amountOf[id];
-        delete amountOf[id];
-        _burn(id);
-        balance.transfer(msg.sender, amount);
-    }
-}
 
 /// @notice Against mainnet: the real $BALANCE, its v4 pool and Seaport 1.6, with a stand-in edition.
 ///         MAINNET_RPC=<url> forge test --match-path test/BarRouter.fork.t.sol
@@ -63,7 +36,7 @@ contract BarRouterForkTest is Test {
     function setUp() public {
         vm.createSelectFork(vm.envOr("MAINNET_RPC", string("https://ethereum-rpc.publicnode.com")));
         seller = vm.addr(sellerKey);
-        bars = new StandInBars(BALANCE);
+        bars = new StandInBars(BALANCE, uint64(block.timestamp), uint64(block.timestamp + 1 days));
         router = new BarRouter(IBars(address(bars)), BALANCE, POOL_MANAGER, SEAPORT, fee, 100, 3000, 30, LBP_HOOK);
         vm.deal(buyer, 100 ether);
         vm.deal(keeper, 100 ether);

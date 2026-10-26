@@ -99,12 +99,13 @@ const FULFILL_MANY = [
 /// The most Statements one buy fills (about 150k gas each).
 export const MAX_STATEMENTS = 10;
 
-/// Several Statements in one transaction from the buyer's wallet, each to the buyer: every listing's signed order for
-/// them, one offer item and its consideration items fulfilled on their own (no aggregation across sellers), and the
-/// ETH all of them ask. Listings OpenSea no longer has drop out here; any that sell before the block, there.
-export async function buyStatements(key: string, picks: { hash: string; protocol: string }[], buyer: Address) {
+/// Several Statements (or Bars: `what` names them) in one transaction from the buyer's wallet, each to the buyer: every
+/// listing's signed order for them, one offer item and its consideration items fulfilled on their own (no aggregation
+/// across sellers), and the ETH all of them ask. Listings OpenSea no longer has drop out here; any that sell before the
+/// block, there.
+export async function buyStatements(key: string, picks: { hash: string; protocol: string }[], buyer: Address, what = 'Statements') {
   const fills = (await Promise.all(picks.map((x) => fillFor(key, x.hash, x.protocol, buyer).catch(() => null)))).filter((f): f is NonNullable<typeof f> => !!f);
-  if (!fills.length) throw new Error('Those Statements just sold. Pick again.');
+  if (!fills.length) throw new Error(`Those ${what} just sold. Pick again.`);
   const orders = fills.map((f) => f.order);
   const offer = orders.map((_, i) => [{ orderIndex: BigInt(i), itemIndex: 0n }]);
   const consideration = orders.flatMap((o, i) => (o.parameters.consideration as unknown[]).map((_, j) => [{ orderIndex: BigInt(i), itemIndex: BigInt(j) }]));

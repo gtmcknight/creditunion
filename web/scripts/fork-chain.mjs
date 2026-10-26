@@ -7,6 +7,7 @@
 //   node scripts/fork-chain.mjs --warp 24           move the clock 24 hours on (auctions end, burn hours run out)
 //   node scripts/fork-chain.mjs --tokens            deploy token unions as stage 1 (pooling only, no adapter)
 //   node scripts/fork-chain.mjs --tokens --vault    …and stage 2: a test vault + TokenAdapter, active (30 min warped)
+//   node scripts/fork-chain.mjs --bars              a stand-in Bars edition open 24h, BarRouter, and two Bars in the test wallet
 // Env: ANVIL_PORT (8549) MIRROR (the mirror's URL, default http://localhost:5310/).
 import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -17,7 +18,7 @@ import { parseArgs } from 'node:util';
 import { createPublicClient, encodeFunctionData, formatEther, http } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi } from '../src/app/abi.ts';
 
-const { values: opt } = parseArgs({ options: { credits: { type: 'string', default: '0' }, warp: { type: 'string', default: '0' }, tokens: { type: 'boolean', default: false }, vault: { type: 'boolean', default: false } } });
+const { values: opt } = parseArgs({ options: { credits: { type: 'string', default: '0' }, warp: { type: 'string', default: '0' }, tokens: { type: 'boolean', default: false }, vault: { type: 'boolean', default: false }, bars: { type: 'boolean', default: false } } });
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CONTRACTS = join(WEB, '..', 'contracts');
 const PORT = Number(process.env.ANVIL_PORT ?? 8549);
@@ -123,6 +124,22 @@ if (opt.tokens) {
     await send(ACCOUNTS[0], tokenVars.TOKEN_FACTORY, factoryAbi, 'activateAssembler');
     log('token unions, stage 2: test vault', tokenVars.VAULT, 'adapter', tokenVars.TOKEN_ADAPTER, 'active');
   }
+}
+if (opt.bars) {
+  const out = execFileSync('forge', ['script', 'script/DeployBars.s.sol', '--rpc-url', RPC, '--unlocked', '--sender', ACCOUNTS[0], '--broadcast', '--slow'], {
+    cwd: CONTRACTS,
+    env: { ...process.env, PATH, FORK: 'true', FEE_RECIPIENT: ACCOUNTS[0] },
+    encoding: 'utf8',
+  });
+  for (const [, k, v] of out.matchAll(/^\s*(BARS_EDITION|BAR_ROUTER)\s+(0x[0-9a-fA-F]{40})/gm)) tokenVars[k] = v;
+  tokenVars.BARS_FROM_BLOCK = String(await pub.getBlockNumber());
+  // Two Bars in the test wallet, bought through the router like anyone's: 1,000 and 250 $BALANCE inside.
+  const mintAbi = [{ type: 'function', name: 'mint', stateMutability: 'payable', inputs: [{ type: 'address' }, { type: 'uint256' }, { type: 'uint256' }], outputs: [{ type: 'uint256' }] }];
+  for (const n of [1000n, 250n]) {
+    const hash = await pub.request({ method: 'eth_sendTransaction', params: [{ from: WALLET, to: tokenVars.BAR_ROUTER, value: '0x' + (10n ** 18n).toString(16), data: encodeFunctionData({ abi: mintAbi, functionName: 'mint', args: [WALLET, n * 10n ** 18n, 500n] }) }] });
+    if ((await pub.waitForTransactionReceipt({ hash })).status !== 'success') throw new Error('minting a test Bar reverted');
+  }
+  log('bars: stand-in edition', tokenVars.BARS_EDITION, 'router', tokenVars.BAR_ROUTER, '· 2 Bars in the test wallet');
 }
 log('unions on this copy:');
 await listUnions();

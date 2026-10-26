@@ -12,3 +12,5 @@ burn included. None of it is deployed to mainnet or meant to be.
 The real adapter is `src/StatementAdapter.sol`, live on mainnet at `0x6CAEb9953bA8625226345CF39F93541CE53AbFd2`
 since Oct 1 2026 and permanent. It burns into Jack's Statements contract at
 `0x75Edd94b7e49b3bD5C8047b91F165A5e265a069b`. See [ADAPTER.md](../../ADAPTER.md).
+- `StandInBars.sol` is **not** the real Bars edition. It holds each Bar's $BALANCE itself and opens a mint window, so
+  `BarRouter` and the site can be tried on a local copy of mainnet before the real edition exists.

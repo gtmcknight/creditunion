@@ -21,12 +21,13 @@ import { mainnet } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { normalize } from 'viem/ens';
 import { batchAbi, creditsAbi, creditArtAbi, factoryAbi, sweeperAbi, tokenAdapterAbi, unionFormatsAbi } from '../app/abi';
-import { setSpareKey, best, bestOrder, bestPage, events, quote, scan, type Cand, type Extra, type Listing } from './opensea';
+import { setSpareKey, best, bestOrder, bestPage, events, fillFor, quote, scan, type Cand, type Extra, type Listing } from './opensea';
 import type { Row } from './market';
 import { cacheStore, confirmListing, marketListings, type FwaListing } from './fwa';
 import { confirmStrategy, strategyAbi, strategyListings } from './strategy';
 import { inks, ratings, loadTable } from './ratings';
 import { buyStatement, buyStatements, MAX_STATEMENTS, statementsForSale } from './statements-market';
+import { barsForSale, barsOwned } from './bars-market';
 import { livesOf, overprintsOf, standingOf } from './statement-history';
 import { load, loadScores, match, predicate, type Rules } from './match';
 import { cardFor, creditCard, creditsCard, partyCard, rangeCard, ruleLine, timeCard, traitCard, withCard, type Filter } from './og';
@@ -107,6 +108,13 @@ interface Env {
   BALANCE_POOL_HOOKS?: string;
   SWAP_FEE_BPS?: string;
   SWAP_FEE_TO?: string;
+  /// The Bars edition (a Bar holds the $BALANCE deposited at its mint and melts back into it), BarRouter (a Bar from
+  /// ETH, and listed Bars melted for their $BALANCE), the edition's OpenSea slug and the block it was deployed at.
+  /// Unset: no Bars in the swap box.
+  BARS_EDITION?: string;
+  BAR_ROUTER?: string;
+  BARS_SLUG?: string;
+  BARS_FROM_BLOCK?: string;
   /// CreditStrategy (nftstrategy.fun) on mainnet: the Credits it holds for sale are a third Buy Credits source.
   /// Empty to turn it off.
   STRATEGY?: string;
@@ -475,8 +483,16 @@ const publicConfig = (env: Env) => ({
   ccCore: addrOrNull(env.CC_CORE),
   instantVault: addrOrNull(env.INSTANT_VAULT),
   balance: balanceConfig(env),
+  bars: barsConfig(env),
   ...(localRpc(env) ? { fork: true } : {}),
 });
+
+/// Bars for the swap box, once BARS_EDITION and BAR_ROUTER name them (and $BALANCE trades, which minting needs).
+function barsConfig(env: Env) {
+  const edition = addrOrNull(env.BARS_EDITION), router = addrOrNull(env.BAR_ROUTER);
+  if (!edition || !router || !addrOrNull(env.BALANCE_TOKEN)) return null;
+  return { edition: edition.toLowerCase() as Address, router: router.toLowerCase() as Address, fromBlock: String(Number(env.BARS_FROM_BLOCK ?? 0) || 0) };
+}
 
 /// BALANCE and its pool for /tokens Buy and Sell, once BALANCE_TOKEN names it; our slice only with somewhere to send it.
 function balanceConfig(env: Env) {
@@ -1265,6 +1281,58 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       const res = Response.json({ items, at: Date.now() }, { headers: { 'cache-control': 'public, max-age=60' } });
       ctx.waitUntil(caches.default.put(key, res.clone()));
       return res;
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502 });
+    }
+  }
+  // Bars listed on OpenSea, cheapest first, each with the $BALANCE inside it (the swap box's ETH to a Bar).
+  if (url.pathname === '/market/bars.json') {
+    const cfg = barsConfig(env);
+    if (!cfg || !env.OPENSEA_API_KEY || !env.BARS_SLUG) return Response.json({ items: [] });
+    const key = new Request(`${url.origin}/market/bars.json`);
+    const hit = await caches.default.match(key);
+    if (hit) return hit;
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    try {
+      const items = await barsForSale(env.OPENSEA_API_KEY, env.BARS_SLUG, cfg.edition, client(env) as never, BigInt(cfg.fromBlock));
+      const res = Response.json({ items, at: Date.now() }, { headers: { 'cache-control': 'public, max-age=60' } });
+      ctx.waitUntil(caches.default.put(key, res.clone()));
+      return res;
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502 });
+    }
+  }
+  // The Bars a wallet holds and the $BALANCE in each (the swap box's Bar to $BALANCE or ETH). Not cached: it changes
+  // with every melt.
+  const ownedBars = url.pathname.match(/^\/market\/bars\/owned\/(0x[0-9a-fA-F]{40})\.json$/);
+  if (ownedBars) {
+    const cfg = barsConfig(env);
+    if (!cfg) return Response.json({ items: [] });
+    if (await limited(env.RL_MISC, req)) return text('slow down', 429);
+    try {
+      return Response.json({ items: await barsOwned(client(env) as never, cfg.edition, BigInt(cfg.fromBlock), ownedBars[1] as Address) }, { headers: { 'cache-control': 'no-store' } });
+    } catch (e) {
+      return Response.json({ error: safeError(e) }, { status: 502 });
+    }
+  }
+  // Buying listed Bars: to the buyer's wallet (Seaport, as Statements are bought), or, with `router`, filled for the
+  // router so it melts them in the same call (the orders come back for the page to hand to it).
+  if (url.pathname === '/market/bars/buy-many') {
+    if (req.method !== 'POST' || !sameSite(req)) return text('forbidden', 403);
+    const cfg = barsConfig(env);
+    if (!cfg || !env.OPENSEA_API_KEY) return text('Bars are not configured', 501);
+    if (await limited(env.RL_QUOTE, req)) return text('slow down', 429);
+    try {
+      const b = JSON.parse((await readBody(req, 8_000)) ?? '') as { listings?: { hash?: unknown; protocol?: unknown }[]; buyer?: unknown; melt?: unknown };
+      const buyer = /^0x[0-9a-fA-F]{40}$/.test(String(b.buyer ?? '')) ? (String(b.buyer) as Address) : null;
+      const picks = (Array.isArray(b.listings) ? b.listings : []).map((l) => ({ hash: String(l.hash ?? ''), protocol: String(l.protocol ?? '') }));
+      if (!buyer || !picks.length || picks.length > MAX_STATEMENTS || picks.some((p) => !/^0x[0-9a-fA-F]{64}$/.test(p.hash) || !/^0x[0-9a-fA-F]{40}$/.test(p.protocol))) return text('bad request', 400);
+      if (b.melt) {
+        const fills = (await Promise.all(picks.map((x) => fillFor(env.OPENSEA_API_KEY!, x.hash, x.protocol, cfg.router).catch(() => null)))).filter((f): f is NonNullable<typeof f> => !!f);
+        if (!fills.length) throw new Error('Those Bars just sold. Pick again.');
+        return Response.json({ orders: fills.map((f) => f.order), value: fills.reduce((a, f) => a + f.value, 0n).toString() }, { headers: { 'cache-control': 'no-store' } });
+      }
+      return Response.json(await buyStatements(env.OPENSEA_API_KEY, picks, buyer, 'Bars'), { headers: { 'cache-control': 'no-store' } });
     } catch (e) {
       return Response.json({ error: safeError(e) }, { status: 502 });
     }
@@ -3051,7 +3119,7 @@ async function rpc(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
   // The token the adapter converts into is readable as soon as the adapter is named (balances, its launch gate), not
   // only once BALANCE_TOKEN is set.
   const adapterToken = await tokenOf(env, ctx);
-  const allowed = new Set([env.CREDITS, addrOrNull(env.STATEMENTS), env.FACTORY, env.SWEEPER, addrOrNull(env.FORMATS), addrOrNull(env.TOKEN_FACTORY), addrOrNull(env.TOKEN_ADAPTER), addrOrNull(env.TOKEN_FORMATS), tokenSweeper(env), adapterToken, addrOrNull(env.CC_CORE), addrOrNull(env.INSTANT_VAULT), ...swapTargets(env), ...(localRpc(env) ? [SEAPORT_ADDR] : [])].map((a) => a?.toLowerCase()).filter(Boolean));
+  const allowed = new Set([env.CREDITS, addrOrNull(env.STATEMENTS), env.FACTORY, env.SWEEPER, addrOrNull(env.FORMATS), addrOrNull(env.TOKEN_FACTORY), addrOrNull(env.TOKEN_ADAPTER), addrOrNull(env.TOKEN_FORMATS), tokenSweeper(env), adapterToken, addrOrNull(env.CC_CORE), addrOrNull(env.INSTANT_VAULT), addrOrNull(env.BARS_EDITION), addrOrNull(env.BAR_ROUTER), ...swapTargets(env), ...(localRpc(env) ? [SEAPORT_ADDR] : [])].map((a) => a?.toLowerCase()).filter(Boolean));
   const clean: { jsonrpc: string; id: unknown; method: string; params: unknown[] }[] = [];
   // Targets outside `allowed`, by the call that first names each. They are checked together below (Credits' art
   // contract once, each batch address once, in parallel), not one call at a time.
