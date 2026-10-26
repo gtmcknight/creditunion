@@ -40,7 +40,8 @@ interface IPoolManager {
 
 /// @title BarRouter
 /// @notice Bars from ETH, in one transaction each way:
-///         - `mint`: buy exactly the $BALANCE a Bar should hold in the ETH/$BALANCE pool and mint the Bar to you.
+///         - `mint`: buy exactly the $BALANCE a Bar should hold in the ETH/$BALANCE pool and mint the Bar to you
+///           (`mintCount` for an edition where each Bar's number sets what it holds).
 ///         - `meltForBalance`: buy Bars listed on Seaport, melt them, and send you the $BALANCE that was inside.
 ///         - `meltForEth`: the same, then sell that $BALANCE in the pool; reverts unless you end with more ETH than
 ///           you sent, by at least `minProfit`.
@@ -130,6 +131,24 @@ contract BarRouter is ReentrancyGuardTransient {
         balance.forceApprove(address(bars), amount);
         id = bars.mint(to, amount);
         emit Minted(msg.sender, to, id, amount, spent, fee);
+        _settle(fee, msg.value - spent);
+    }
+
+    /// @notice For an edition priced by count (each Bar holds a fixed amount set by its number): buy exactly what the next
+    ///         `quantity` Bars take and mint them to `to`. msg.value is the most you pay, fee included; the rest comes
+    ///         back.
+    /// @return first The first id minted.
+    function mintCount(address to, uint256 quantity, uint256 maxFeeBps) external payable nonReentrant returns (uint256 first) {
+        if (feeBps > maxFeeBps) revert FeeChanged(feeBps);
+        if (quantity == 0) revert ZeroAmount();
+        uint256 amount = bars.priceOf(quantity);
+        uint256 spent = abi.decode(poolManager.unlock(abi.encode(true, amount, msg.value)), (uint256));
+        uint256 fee = spent * feeBps / 10_000;
+        if (spent + fee > msg.value) revert Underpaid(spent + fee);
+
+        balance.forceApprove(address(bars), amount);
+        first = bars.mint(to, quantity);
+        emit Minted(msg.sender, to, first, amount, spent, fee);
         _settle(fee, msg.value - spent);
     }
 

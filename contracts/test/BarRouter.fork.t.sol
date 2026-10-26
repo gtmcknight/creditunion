@@ -36,7 +36,7 @@ contract BarRouterForkTest is Test {
     function setUp() public {
         vm.createSelectFork(vm.envOr("MAINNET_RPC", string("https://ethereum-rpc.publicnode.com")));
         seller = vm.addr(sellerKey);
-        bars = new StandInBars(BALANCE, uint64(block.timestamp), uint64(block.timestamp + 1 days));
+        bars = new StandInBars(BALANCE, uint64(block.timestamp), uint64(block.timestamp + 1 days), 0);
         router = new BarRouter(IBars(address(bars)), BALANCE, POOL_MANAGER, SEAPORT, fee, 100, 3000, 30, LBP_HOOK);
         vm.deal(buyer, 100 ether);
         vm.deal(keeper, 100 ether);
@@ -184,5 +184,16 @@ contract BarRouterForkTest is Test {
     function test_OnlyThePoolManagerCallsBack() public {
         vm.expectRevert(BarRouter.NotPoolManager.selector);
         router.unlockCallback(abi.encode(true, 1, 1));
+    }
+
+    function test_MintCountOnACountPricedEdition() public {
+        StandInBars byCount = new StandInBars(BALANCE, uint64(block.timestamp), uint64(block.timestamp + 1 days), 369e18);
+        BarRouter r = new BarRouter(IBars(address(byCount)), BALANCE, POOL_MANAGER, SEAPORT, fee, 100, 3000, 30, LBP_HOOK);
+        vm.prank(buyer);
+        uint256 first = r.mintCount{value: 50 ether}(buyer, 3, 500);
+        assertEq(first, 1);
+        assertEq(byCount.amountOf(3), 3 * 369e18);
+        assertEq(byCount.ownerOf(3), buyer);
+        assertEq(BALANCE.balanceOf(address(r)), 0);
     }
 }

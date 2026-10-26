@@ -10,7 +10,8 @@
 import { erc20Abi, formatEther, formatUnits, parseEther, parseUnits, zeroAddress, type Address, type Hex } from 'viem';
 import { parseAbi } from 'viem';
 import { barRouterAbi, batchAbi, creditsAbi, factoryAbi, sweeperAbi, tokenAdapterAbi } from '../abi';
-import { barArtSrc } from '../../shared/bars';
+import { barArtSrc, mintQuoteArgs, mintValue, quoterExactOutAbi } from '../../shared/bars';
+import { V4_QUOTER } from '../../shared/v4swap';
 import { balanceSvg, PURE, type Palette } from '../balance-art';
 import { canBatch, config, pub, send, sendBatch, sendSteps, session, type Call as TxCall } from '../chain';
 import { bin } from '../bins';
@@ -569,26 +570,29 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   let myBars: { id: bigint; holds: bigint }[] = [];
   let barsListed: { id: string; price: string; hash: string; protocol: string; holds: string }[] = [];
   /// The window, the router's fee, the number the next mint takes (null if the edition doesn't say) and how many are live.
-  const bw = { open: false, end: 0, fee: 100n, read: false, next: null as bigint | null, live: 0 };
+  /// `step`: an edition priced by count (Bar #n holds n × step, mint takes how many), whose next Bar holds `price`.
+  const bw = { open: false, end: 0, fee: 100n, read: false, next: null as bigint | null, live: 0, step: 0n, price: 0n };
   /// Your Bars picked to melt (all of them, until you pick).
   const barPicks = new Set<string>();
   let barPicked = false;
-  const BARS_ABI = parseAbi(['function minted() view returns (uint256)', 'function isOpen() view returns (bool)', 'function mintEnd() view returns (uint64)', 'function mint(address to, uint256 amount) returns (uint256)', 'function melt(uint256 id)']);
+  const BARS_ABI = parseAbi(['function step() view returns (uint256)', 'function priceOf(uint256) view returns (uint256)', 'function minted() view returns (uint256)', 'function isOpen() view returns (bool)', 'function mintEnd() view returns (uint64)', 'function mint(address to, uint256 amount) returns (uint256)', 'function melt(uint256 id)']);
   const readBars = async () => {
     const b = config.bars;
     if (!b) return;
     const json = <T,>(path: string, empty: T) => fetch(path).then((r) => (r.ok ? (r.json() as Promise<T>) : empty)).catch(() => empty);
-    const [mine, listed, open, end, fee, minted] = await Promise.all([
+    const [mine, listed, open, end, fee, minted, step] = await Promise.all([
       account ? json<{ items?: { id: string; holds: string }[] }>(`/market/bars/owned/${account}.json`, {}) : Promise.resolve({ items: [] }),
       json<{ items?: typeof barsListed; live?: number }>('/market/bars.json', {}),
       (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'isOpen' }) as Promise<boolean>).catch(() => false),
       (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'mintEnd' }) as Promise<bigint>).then(Number).catch(() => 0),
       (pub.readContract({ address: b.router, abi: barRouterAbi, functionName: 'feeBps' }) as Promise<bigint>).catch(() => 100n),
       (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'minted' }) as Promise<bigint>).catch(() => null),
+      (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'step' }) as Promise<bigint>).catch(() => 0n),
     ]);
+    const price = step ? ((await pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'priceOf', args: [1n] }).catch(() => 0n)) as bigint) : 0n;
     myBars = (mine.items ?? []).map((x) => ({ id: BigInt(x.id), holds: BigInt(x.holds) }));
     barsListed = listed.items ?? [];
-    Object.assign(bw, { open, end: end * 1000, fee, read: true, next: minted === null ? null : minted + 1n, live: listed.live ?? 0 });
+    Object.assign(bw, { open, end: end * 1000, fee, read: true, next: minted === null ? null : minted + 1n, live: listed.live ?? 0, step, price });
     if (app.querySelector('.tk-form') && viewNow() === 'buy') paint();
     void fillCosts();
     for (const id of [...barPicks]) if (!myBars.some((x) => String(x.id) === id)) barPicks.delete(id);
@@ -1778,8 +1782,20 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     showLeft();
     barPlan = null;
     const ONE = 10n ** 18n;
-    let mintHolds = 0n;
-    if (bw.open && amt) {
+    let mintHolds = 0n, mintEth = amt, mintNeed = 0n;
+    if (bw.open && bw.step && bw.price) {
+      // Priced by count: the next Bar holds a set amount; ETH buys exactly that on Uniswap, our fee and 1% room on top.
+      if (!eth) mintHolds = amt >= bw.price ? bw.price : 0n;
+      else {
+        await wait(250);
+        if (run !== quoteRun) return;
+        const q = await pub.simulateContract({ address: V4_QUOTER, abi: quoterExactOutAbi, functionName: 'quoteExactOutputSingle', args: mintQuoteArgs(m!.key, bw.price) }).then((r) => r.result[0], () => 0n);
+        if (run !== quoteRun || !app.isConnected) return;
+        mintNeed = q ? mintValue(q, Number(bw.fee), 100) : 0n;
+        mintEth = mintNeed;
+        mintHolds = mintNeed && amt >= mintNeed ? bw.price : 0n;
+      }
+    } else if (bw.open && amt) {
       if (!eth) mintHolds = amt;
       else {
         await wait(250);
@@ -1792,28 +1808,39 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     if (mintHolds < ONE) mintHolds = 0n; // the edition's minimum
     const per = (x: (typeof barsListed)[number]) => (BigInt(x.holds) * ONE) / BigInt(x.price || '1');
     const listing = eth && amt ? (barsListed.filter((x) => BigInt(x.price) <= amt).sort((x, y) => (per(y) > per(x) ? 1 : per(y) < per(x) ? -1 : 0))[0] ?? null) : null;
-    const mintPer = mintHolds && amt ? (mintHolds * ONE) / amt : 0n;
+    const mintPer = mintHolds && mintEth ? (mintHolds * ONE) / mintEth : 0n;
     const best: 'mint' | 'listed' | null = mintHolds || listing ? (listing && (!mintHolds || per(listing) > mintPer) ? 'listed' : 'mint') : null;
     const way = barWay === 'listed' && listing ? 'listed' : barWay === 'mint' && mintHolds ? 'mint' : best;
-    if (way === 'mint') barPlan = { way, amount: mintHolds, value: amt };
+    if (way === 'mint') barPlan = { way, amount: mintHolds, value: bw.step && eth ? mintNeed : amt }; // by count, send what it takes, not all that's typed
     if (way === 'listed' && listing) barPlan = { way, amount: BigInt(listing.holds), value: BigInt(listing.price), listing };
     const holds = barPlan?.amount ?? 0n;
     const num = barPlan?.listing?.id ?? (bw.next !== null ? String(bw.next) : '');
     setText('bar-get', `${holds ? `<span class="tk-stack"><img src="${barArtSrc(num || 'NEW')}" alt=""></span>` : ''}<span class="num tk-out">${holds ? whole(Number(formatUnits(holds, 18))) : '0'}</span>`);
     // A mint takes the next number unless someone mints first, so it says so.
-    setText('route', !holds ? '' : barPlan!.listing ? `Bar #${barPlan!.listing.id} · ${TOKEN} inside, melts back anytime` : `${num ? `Bar #${num} or later` : 'A new Bar'} · ${TOKEN} inside, melts back anytime`);
+    setText('route', !holds ? '' : barPlan!.listing ? `Bar #${barPlan!.listing.id} · ${TOKEN} inside, melts back anytime` : `${num ? `Bar #${num}${bw.step ? '' : ' or later'}` : 'A new Bar'} · ${TOKEN} inside, melts back anytime`);
+    // By count, a mint someone lands first raises the price, and this one reverts rather than paying more.
+    setText('tk-sure', barPlan?.way === 'mint' && bw.step && num ? `If someone mints #${num} first, nothing is spent but gas.` : '');
     setText('amt-usd', eth ? dollars(Number(formatEther(amt))) : '');
     const rows: string[] = [];
     const radio = (k: 'mint' | 'listed', name: string, sub: string, right: string) =>
       `<button type="button" class="tk-way" role="radio" data-barway="${k}" aria-checked="${way === k}"><span><b>${name}</b><span class="muted small">${sub}</span></span><span class="num">${right}</span></button>`;
-    if (bw.open) rows.push(radio('mint', 'Mint', `${closesIn()} left · ${eth ? 'Fees included' : 'Your ink, no fee'}`, mintHolds ? whole(Number(formatUnits(mintHolds, 18))) : '—'));
+    const mintShows = mintHolds || (bw.step ? bw.price : 0n);
+    if (bw.open) rows.push(radio('mint', 'Mint', `${closesIn()} left · ${eth ? 'Fees included' : 'Your ink, no fee'}`, mintShows ? whole(Number(formatUnits(mintShows, 18))) : '—'));
     if (eth && listing) rows.push(radio('listed', `Bar #${listing.id}`, `OpenSea · ${ethNum(BigInt(listing.price), 4)} ETH`, whole(Number(formatUnits(BigInt(listing.holds), 18)))));
     setText('bar-ways', rows.join(''));
     const closed = bw.read && !bw.open;
-    setText('amt-line', closed && !eth ? 'Minting has closed. Listed Bars take ETH.' : closed && eth && amt && !listing && barsListed.length ? 'Not enough for a listed Bar.' : '');
+    // By count, a mint takes a set amount: too little says what it takes, a tap away.
+    const minMint = bw.open && bw.step && !mintHolds ? (eth ? mintNeed : bw.price) : 0n;
+    setText(
+      'amt-line',
+      closed && !eth ? 'Minting has closed. Listed Bars take ETH.'
+      : closed && eth && amt && !listing && barsListed.length ? 'Not enough for a listed Bar.'
+      : minMint && amt && !listing ? `<button type="button" class="link small" id="amt-min" data-amt="${eth ? ethNum(minMint, 4, true) : formatUnits(minMint, 18)}">Bar #${bw.next ?? ''} takes ${eth ? `${ethNum(minMint, 4, true)} ETH` : `${tokAmt(minMint)} ${TOKEN}`}</button>`
+      : '',
+    );
     const short = eth ? ethHeld !== null && amt > ethHeld : !!account && amt > tokenHeld;
     setGo(
-      !amt ? idleGo() : short ? `Not enough ${eth ? 'ETH' : sym()}` : !barPlan ? (closed && !eth ? 'Minting closed' : eth ? 'Not enough for a Bar' : `At least 1 ${TOKEN}`) : barPlan.listing ? `Get Bar #${barPlan.listing.id}` : `Mint a Bar · ${whole(Number(formatUnits(holds, 18)))} ${TOKEN}`,
+      !amt ? idleGo() : short ? `Not enough ${eth ? 'ETH' : sym()}` : !barPlan ? (closed && !eth ? 'Minting closed' : eth || bw.step ? `Not enough for ${bw.step && bw.next ? `Bar #${bw.next}` : 'a Bar'}` : `At least 1 ${TOKEN}`) : barPlan.listing ? `Get Bar #${barPlan.listing.id}` : bw.step && eth && num ? `Mint Bar #${num} · ${ethNum(mintNeed, 4)} ETH` : `Mint a Bar · ${whole(Number(formatUnits(holds, 18)))} ${TOKEN}`,
       !!barPlan && !short,
     );
   }
@@ -2325,11 +2352,12 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
               const tx = (await r.json()) as { to?: Address; data?: Hex; value?: string; error?: string };
               if (!r.ok || !tx.to || !tx.data || !tx.value) throw new Error(tx.error ?? 'That Bar can’t be bought right now.');
               steps.push({ to: tx.to, data: tx.data, value: BigInt(tx.value) });
-            } else if (from === 'eth') steps.push({ address: b.router, abi: barRouterAbi, functionName: 'mint', args: [account!, p.amount, bw.fee], value: p.value });
+            } else if (from === 'eth') steps.push(bw.step ? { address: b.router, abi: barRouterAbi, functionName: 'mintCount', args: [account!, 1n, bw.fee], value: p.value } : { address: b.router, abi: barRouterAbi, functionName: 'mint', args: [account!, p.amount, bw.fee], value: p.value });
             else {
               const allowed = (await pub.readContract({ address: m!.token, abi: erc20Abi, functionName: 'allowance', args: [account!, b.edition] })) as bigint;
               if (allowed < p.amount) steps.push({ address: m!.token, abi: erc20Abi, functionName: 'approve', args: [b.edition, p.amount] });
-              steps.push({ address: b.edition, abi: BARS_ABI, functionName: 'mint', args: [account!, p.amount] });
+              // By count the edition reads its second word as how many: one Bar, holding what its number sets.
+              steps.push({ address: b.edition, abi: BARS_ABI, functionName: 'mint', args: [account!, bw.step ? 1n : p.amount] });
             }
             const got = toMe(await sendSteps(steps, note, stepOf(go)), b.edition);
             if (p.listing) barsListed = barsListed.filter((x) => x.id !== p.listing!.id);
