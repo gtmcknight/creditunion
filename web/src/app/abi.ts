@@ -5873,3 +5873,801 @@ export const tokenAdapterAbi = [
   }
 ] as const;
 
+export const barRouterAbi = [
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "bars_",
+        "type": "address",
+        "internalType": "contract IBars"
+      },
+      {
+        "name": "balance_",
+        "type": "address",
+        "internalType": "contract IERC20"
+      },
+      {
+        "name": "poolManager_",
+        "type": "address",
+        "internalType": "contract IPoolManager"
+      },
+      {
+        "name": "seaport_",
+        "type": "address",
+        "internalType": "contract ISeaport"
+      },
+      {
+        "name": "feeRecipient_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "feeBps_",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "poolFee_",
+        "type": "uint24",
+        "internalType": "uint24"
+      },
+      {
+        "name": "tickSpacing_",
+        "type": "int24",
+        "internalType": "int24"
+      },
+      {
+        "name": "hooks_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "receive",
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "MAX_FEE_BPS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "balance",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IERC20"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "bars",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IBars"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "feeBps",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "feeRecipient",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "hooks",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "meltForBalance",
+    "inputs": [
+      {
+        "name": "orders",
+        "type": "tuple[]",
+        "internalType": "struct AdvancedOrder[]",
+        "components": [
+          {
+            "name": "parameters",
+            "type": "tuple",
+            "internalType": "struct OrderParameters",
+            "components": [
+              {
+                "name": "offerer",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "zone",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "offer",
+                "type": "tuple[]",
+                "internalType": "struct OfferItem[]",
+                "components": [
+                  {
+                    "name": "itemType",
+                    "type": "uint8",
+                    "internalType": "enum ItemType"
+                  },
+                  {
+                    "name": "token",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "identifierOrCriteria",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "startAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "endAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  }
+                ]
+              },
+              {
+                "name": "consideration",
+                "type": "tuple[]",
+                "internalType": "struct ConsiderationItem[]",
+                "components": [
+                  {
+                    "name": "itemType",
+                    "type": "uint8",
+                    "internalType": "enum ItemType"
+                  },
+                  {
+                    "name": "token",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "identifierOrCriteria",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "startAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "endAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "recipient",
+                    "type": "address",
+                    "internalType": "address payable"
+                  }
+                ]
+              },
+              {
+                "name": "orderType",
+                "type": "uint8",
+                "internalType": "enum OrderType"
+              },
+              {
+                "name": "startTime",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "endTime",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "zoneHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "salt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "conduitKey",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "totalOriginalConsiderationItems",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "numerator",
+            "type": "uint120",
+            "internalType": "uint120"
+          },
+          {
+            "name": "denominator",
+            "type": "uint120",
+            "internalType": "uint120"
+          },
+          {
+            "name": "signature",
+            "type": "bytes",
+            "internalType": "bytes"
+          },
+          {
+            "name": "extraData",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      },
+      {
+        "name": "minBought",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "minBalance",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxFeeBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "balanceOut",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "meltForEth",
+    "inputs": [
+      {
+        "name": "orders",
+        "type": "tuple[]",
+        "internalType": "struct AdvancedOrder[]",
+        "components": [
+          {
+            "name": "parameters",
+            "type": "tuple",
+            "internalType": "struct OrderParameters",
+            "components": [
+              {
+                "name": "offerer",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "zone",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "offer",
+                "type": "tuple[]",
+                "internalType": "struct OfferItem[]",
+                "components": [
+                  {
+                    "name": "itemType",
+                    "type": "uint8",
+                    "internalType": "enum ItemType"
+                  },
+                  {
+                    "name": "token",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "identifierOrCriteria",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "startAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "endAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  }
+                ]
+              },
+              {
+                "name": "consideration",
+                "type": "tuple[]",
+                "internalType": "struct ConsiderationItem[]",
+                "components": [
+                  {
+                    "name": "itemType",
+                    "type": "uint8",
+                    "internalType": "enum ItemType"
+                  },
+                  {
+                    "name": "token",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "identifierOrCriteria",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "startAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "endAmount",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "recipient",
+                    "type": "address",
+                    "internalType": "address payable"
+                  }
+                ]
+              },
+              {
+                "name": "orderType",
+                "type": "uint8",
+                "internalType": "enum OrderType"
+              },
+              {
+                "name": "startTime",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "endTime",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "zoneHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "salt",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "conduitKey",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "totalOriginalConsiderationItems",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "numerator",
+            "type": "uint120",
+            "internalType": "uint120"
+          },
+          {
+            "name": "denominator",
+            "type": "uint120",
+            "internalType": "uint120"
+          },
+          {
+            "name": "signature",
+            "type": "bytes",
+            "internalType": "bytes"
+          },
+          {
+            "name": "extraData",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      },
+      {
+        "name": "minBought",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "minProfit",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "ethBack",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "mint",
+    "inputs": [
+      {
+        "name": "to",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxFeeBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "id",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "poolFee",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint24",
+        "internalType": "uint24"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "poolManager",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IPoolManager"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "seaport",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract ISeaport"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "setFee",
+    "inputs": [
+      {
+        "name": "feeBps_",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "tickSpacing",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "int24",
+        "internalType": "int24"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "unlockCallback",
+    "inputs": [
+      {
+        "name": "data",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "event",
+    "name": "FeeSet",
+    "inputs": [
+      {
+        "name": "feeBps",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Melted",
+    "inputs": [
+      {
+        "name": "buyer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "bars",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "spent",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "balanceOut",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "ethOut",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Minted",
+    "inputs": [
+      {
+        "name": "buyer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "to",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "id",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "spent",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "fee",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "FeeChanged",
+    "inputs": [
+      {
+        "name": "feeBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "FeeTooHigh",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoProfit",
+    "inputs": [
+      {
+        "name": "ethBack",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "NotABar",
+    "inputs": [
+      {
+        "name": "orderIndex",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "NotFeeRecipient",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotPoolManager",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PaymentFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ReentrancyGuardReentrantCall",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SafeERC20FailedOperation",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TooFewBought",
+    "inputs": [
+      {
+        "name": "bought",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TooLittleBalance",
+    "inputs": [
+      {
+        "name": "balanceOut",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Underpaid",
+    "inputs": [
+      {
+        "name": "needed",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ZeroAmount",
+    "inputs": []
+  }
+] as const;
+
