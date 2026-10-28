@@ -6,7 +6,7 @@ import { art, esc, eth, pageHead, same } from '../ui';
 
 /// /activity.json's rows (worker/activity.ts).
 type Item = {
-  kind: 'started' | 'deposited' | 'withdrew' | 'burned' | 'converted' | 'bid' | 'won' | 'claimed' | 'bought';
+  kind: 'started' | 'deposited' | 'withdrew' | 'burned' | 'converted' | 'bid' | 'won' | 'claimed' | 'bought' | 'swapped';
   who: Address;
   union?: Address;
   name?: string;
@@ -14,6 +14,8 @@ type Item = {
   count?: number;
   eth?: string;
   intoUnion?: boolean;
+  side?: 'buy' | 'sell';
+  balance?: string;
   time: number;
   tx: Hex;
   i: number;
@@ -27,6 +29,11 @@ const THUMBS = 6;
 
 const keyOf = (x: Item) => `${x.tx}:${x.i}:${x.kind}`;
 const credits = (n: number) => `${n} ${n === 1 ? 'Credit' : 'Credits'}`;
+/// $BALANCE from wei: whole tokens with separators, two decimals under 10.
+const balanceOf = (wei: string) => {
+  const n = Number(BigInt(wei) / 10n ** 12n) / 1e6;
+  return `${n >= 10 ? Math.round(n).toLocaleString('en-US') : n.toLocaleString('en-US', { maximumFractionDigits: 2 })} $BALANCE`;
+};
 
 function ago(t: number) {
   const d = Math.max(0, Math.floor(Date.now() / 1000 - t));
@@ -57,6 +64,8 @@ function what(x: Item, here = false) {
       return here ? `won the Statement for ${e}` : `won ${u} for ${e}`;
     case 'claimed':
       return here ? `got ${e}` : `got ${e} from ${u}`; // settling pays members; a claim only follows a failed send
+    case 'swapped':
+      return `${x.side === 'buy' ? 'bought' : 'sold'} ${balanceOf(x.balance ?? '0')} for ${e}`;
   }
 }
 
@@ -145,7 +154,7 @@ function row(x: Item, o: { here?: boolean; who?: boolean } = {}) {
   </li>`;
 }
 
-/// /activity: every deposit, withdrawal, buy, new union, burn, bid, sale and claim, newest first. New rows slide in at
+/// /activity: every deposit, withdrawal, buy, new union, burn, bid, sale, claim and swap box swap, newest first. New rows slide in at
 /// the top every 20 seconds; if you've scrolled down, the page holds still under you.
 export async function live(app: HTMLElement) {
   // The old Leaderboard tab's link lands here too.

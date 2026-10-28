@@ -10,6 +10,9 @@ export const V4_QUOTER: Address = '0x52f0e24d1c21c8a0cb1e5a5dd6198556bd9e1203';
 export const ETH: Address = '0x0000000000000000000000000000000000000000';
 /// v4's one PoolManager: every pool's tokens sit here, so to a token it's one holding address.
 export const POOL_MANAGER: Address = '0x000000000004444c5dc75cB358380D2e3dE08A90';
+/// Ours, on the end of the swap box's Uniswap calls, so Activity can tell its swaps from everyone else's: an ERC-8021
+/// attribution tag (the code "creditunion", its length, schema 0, the marker). Contracts ignore trailing calldata.
+export const SITE_TAG: Hex = '0x637265646974756e696f6e0b0080218021802180218021802180218021';
 
 export type PoolKey = { currency0: Address; currency1: Address; fee: number; tickSpacing: number; hooks: Address };
 /// The pool's settings beyond its two currencies, as the launch picks them.

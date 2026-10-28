@@ -33,7 +33,7 @@ import { cardFor, creditCard, creditsCard, partyCard, rangeCard, ruleLine, timeC
 import { parseTrait } from '../shared/trait';
 import { drawCredit, drawUnion, sample, type CreditFacts, type UnionCard } from './card';
 import { printOf, type Rect } from './print';
-import { readActivity, type Activity } from './activity';
+import { readActivity, readSwapActivity, type Activity } from './activity';
 import { keyOf, ruleFor } from '../shared/layout';
 import { ALWAYS, CSP, HSTS } from './headers';
 import { fromJson, toJson } from '../shared/json';
@@ -137,6 +137,8 @@ const MAX_RPC_BATCH = 50;
 const ACTIVITY_FROM = 26_072_342n;
 /// The token factory's deploy block (2026-10-14): its activity scan starts there, not at the first factory's.
 const TOKEN_ACTIVITY_FROM = 26_193_327n;
+/// Swap box swaps carry SITE_TAG from 2026-10-28 on; their scan starts just before.
+const SWAP_ACTIVITY_FROM = 26_293_000n;
 /// Credits ever minted; ids outside 1..SUPPLY are refused before any RPC.
 const SUPPLY = 122_154;
 const inSupply = (id: number) => Number.isInteger(id) && id >= 1 && id <= SUPPLY;
@@ -397,14 +399,17 @@ async function activityItems(env: Env, store: Cache, stateKey: string): Promise<
   const from = env.CHAIN_ID === '1' ? ACTIVITY_FROM : (await c.getBlockNumber()) - 100_000n;
   const cfg = { credits: env.CREDITS, from: from < 0n ? 0n : from };
   const tokens = addrOrNull(env.TOKEN_FACTORY);
-  // Token unions keep their own scan state; both lists merge newest first.
-  const [main, more] = await Promise.all([
+  const bal = balanceConfig(env);
+  const poolId = bal && keccak256(encodeAbiParameters(parseAbiParameters('address, address, uint24, int24, address'), [ETH, bal.token, bal.pool.fee, bal.pool.tickSpacing, bal.pool.hooks]));
+  // Token unions and the swap box's swaps keep their own scan states; the lists merge newest first.
+  const [main, more, swaps] = await Promise.all([
     readActivity(c as never, store, stateKey, { ...cfg, factory: env.FACTORY, sweeper: hasSweeper(env) ? env.SWEEPER : null }),
     tokens ? readActivity(c as never, store, `${stateKey}/tokens/${tokens.toLowerCase()}/from-deploy`, { ...cfg, from: env.CHAIN_ID === '1' ? TOKEN_ACTIVITY_FROM : cfg.from, factory: tokens, sweeper: tokenSweeper(env) }) : Promise.resolve([]),
+    bal && poolId ? readSwapActivity(c as never, store, `${stateKey}/swaps/${poolId}`, { poolId, token: bal.token, feeBps: bal.feeBps, from: env.CHAIN_ID === '1' ? SWAP_ACTIVITY_FROM : cfg.from }).catch(() => []) : Promise.resolve([]),
   ]);
   // A token batch's burn converts it into BALANCE: said so, not as a Statement made.
   const converts = more.map((x) => (x.kind === 'burned' ? { ...x, kind: 'converted' as const } : x));
-  const items = converts.length ? [...main, ...converts].sort((a, b) => b.block - a.block || b.i - a.i) : main;
+  const items = converts.length || swaps.length ? [...main, ...converts, ...swaps].sort((a, b) => b.block - a.block || b.i - a.i) : main;
   // A plan's union stays out of Activity until it fills.
   const hidden = await hiddenUnions(env);
   const filling = new Set<string>();

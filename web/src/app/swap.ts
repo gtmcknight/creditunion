@@ -2,8 +2,8 @@
 /// Uniswap's Universal Router (encoding in shared/v4swap.ts) with our fee taken as a slice of what comes out. Selling
 /// pulls BALANCE through Permit2, approved once. Off until the Worker names the token (BALANCE_TOKEN), and greyed until
 /// the token's transfer lock opens (its transfersOpenBlock).
-import { erc20Abi, maxUint160, maxUint256, type Address } from 'viem';
-import { PERMIT2, POOL_MANAGER, UNIVERSAL_ROUTER, V4_QUOTER, afterFee, ethPool, permit2Abi, quoterAbi, routerAbi, swapArgs, type PoolKey } from '../shared/v4swap';
+import { erc20Abi, maxUint160, maxUint256, type Address, type Hex } from 'viem';
+import { PERMIT2, POOL_MANAGER, SITE_TAG, UNIVERSAL_ROUTER, V4_QUOTER, afterFee, ethPool, permit2Abi, quoterAbi, routerAbi, swapArgs, type PoolKey } from '../shared/v4swap';
 import { config, pub } from './chain';
 
 export type Market = { token: Address; key: PoolKey; decimals: number; symbol: string; feeBps: number; feeTo: Address | null; opensAt: bigint | null };
@@ -77,7 +77,7 @@ const floor = (net: bigint, bps = SLIPPAGE_BPS) => (net * (10_000n - bps)) / 10_
 
 /// The router call for a buy of `ethIn`, reverting under the quote less slippage.
 export const buyCall = async (m: Market, ethIn: bigint, net: bigint) =>
-  ({ address: UNIVERSAL_ROUTER, abi: routerAbi, functionName: 'execute', args: swapArgs({ key: m.key, buy: true, amountIn: ethIn, minOut: floor(net), feeBps: m.feeBps, feeTo: m.feeTo, deadline: await deadline() }), value: ethIn }) as const;
+  ({ address: UNIVERSAL_ROUTER, abi: routerAbi, functionName: 'execute', args: swapArgs({ key: m.key, buy: true, amountIn: ethIn, minOut: floor(net), feeBps: m.feeBps, feeTo: m.feeTo, deadline: await deadline() }), value: ethIn, dataSuffix: SITE_TAG }) as const;
 
 /// The calls a sell of `amountIn` needs, in order: the token's approval to Permit2 and Permit2's to the router when
 /// either is short (once), then the swap.
@@ -87,10 +87,10 @@ export async function sellCalls(m: Market, owner: Address, amountIn: bigint, net
     pub.readContract({ address: PERMIT2, abi: permit2Abi, functionName: 'allowance', args: [owner, m.token, UNIVERSAL_ROUTER] }) as Promise<readonly [bigint, number, number]>,
   ]);
   const now = Math.floor(Date.now() / 1000);
-  const calls: { address: Address; abi: readonly unknown[]; functionName: string; args: readonly unknown[] }[] = [];
+  const calls: { address: Address; abi: readonly unknown[]; functionName: string; args: readonly unknown[]; dataSuffix?: Hex }[] = [];
   if (erc < amountIn) calls.push({ address: m.token, abi: erc20Abi, functionName: 'approve', args: [PERMIT2, maxUint256] } as const);
   if (allowed < amountIn || Number(expires) < now + 60) calls.push({ address: PERMIT2, abi: permit2Abi, functionName: 'approve', args: [m.token, UNIVERSAL_ROUTER, maxUint160, now + APPROVAL_DAYS * 86_400] } as const);
-  calls.push({ address: UNIVERSAL_ROUTER, abi: routerAbi, functionName: 'execute', args: swapArgs({ key: m.key, buy: false, amountIn, minOut: floor(net, SELL_SLIPPAGE_BPS), feeBps: m.feeBps, feeTo: m.feeTo, deadline: await deadline() }) } as const);
+  calls.push({ address: UNIVERSAL_ROUTER, abi: routerAbi, functionName: 'execute', args: swapArgs({ key: m.key, buy: false, amountIn, minOut: floor(net, SELL_SLIPPAGE_BPS), feeBps: m.feeBps, feeTo: m.feeTo, deadline: await deadline() }), dataSuffix: SITE_TAG } as const);
   return calls;
 }
 

@@ -215,7 +215,7 @@ const settled = () => txDone.forEach((f) => f());
 
 /// Simulate, send, wait. Simulation surfaces the contract's revert reason before the wallet opens.
 export async function send(
-  req: { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[]; value?: bigint; gas?: bigint },
+  req: { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[]; value?: bigint; gas?: bigint; dataSuffix?: Hex },
   onHash?: (h: Hash) => void,
 ) {
   if (!session.wallet || !session.account || !session.provider) throw new Error('Connect a wallet first.');
@@ -316,7 +316,7 @@ export function canBatch(): Promise<boolean> {
 }
 
 /// A contract call, or a transaction already encoded elsewhere (a Seaport fill the Worker built).
-export type Call = { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[]; value?: bigint } | Raw;
+export type Call = { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[]; value?: bigint; dataSuffix?: Hex } | Raw;
 export type Raw = { to: Address; data: Hex; value?: bigint };
 const isRaw = (c: Call): c is Raw => 'data' in c;
 
@@ -352,7 +352,7 @@ export async function sendBatch(calls: Call[], onSubmit?: (id: string) => void) 
     account: session.account,
     chain,
     forceAtomic: true,
-    calls: calls.map((c) => (isRaw(c) ? { to: c.to, data: c.data, value: c.value } : { to: c.address, abi: c.abi, functionName: c.functionName, args: c.args, value: c.value })) as never,
+    calls: calls.map((c) => (isRaw(c) ? { to: c.to, data: c.data, value: c.value } : { to: c.address, abi: c.abi, functionName: c.functionName, args: c.args, value: c.value, dataSuffix: c.dataSuffix })) as never,
   });
   onSubmit?.(id);
   try {
