@@ -19,6 +19,7 @@ import { buyListed, listings, type ForSale } from './statements';
 import { priceChart, usdPrice } from './price-chart';
 import { editionArt, registerDeposits } from '../ghosts';
 import { buyCall, inkPalette, launchGate, market as swapMarket, opened, poolPalette, quote as swapQuote, sellCalls, SELL_SLIPPAGE_BPS } from '../swap';
+import { SITE_TAG } from '../../shared/v4swap';
 import { balanceArt, balanceHref, balanceSrc, converted, type BalanceArt } from '../tokens';
 import { INK } from '../traits';
 import { $$, art, errText, esc, ethNum, openModal, same, sheet, toast } from '../ui';
@@ -2062,11 +2063,12 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
           async () => {
             const vault = await vaultOf();
             if (!vault || !config.statements) throw new Error(`${TOKEN} isn't live yet.`);
-            // Every pick's approve and withdraw as one set of steps: one confirmation where the wallet takes a batch.
+            // Every pick's approve and withdraw as one set of steps: one confirmation where the wallet takes a batch. The
+            // withdraw carries SITE_TAG, so Activity shows the redeem.
             const qs = (await Promise.all(mine.map((x) => pub.readContract({ address: vault, abi: VAULT_ABI, functionName: 'quote', args: [x.id] })))) as bigint[];
             const steps = mine.flatMap((x, i) => [
               { address: config.statements!, abi: ST_ABI, functionName: 'approve', args: [vault, x.id] },
-              { address: vault, abi: VAULT_ABI, functionName: 'withdraw', args: [x.id, qs[i]] },
+              { address: vault, abi: VAULT_ABI, functionName: 'withdraw', args: [x.id, qs[i]], dataSuffix: SITE_TAG },
             ]);
             const got = qs.reduce((a, q) => a + q, 0n);
             // Through to ETH or Credits: the sale of what redeems, and the buy, in the same set.

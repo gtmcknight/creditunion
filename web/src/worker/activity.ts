@@ -2,21 +2,23 @@
 /// started (factory), deposits, withdrawals, burns into a Statement, bids, sales and claims (each union), and
 /// Credits bought through the Sweeper. Scanned forward from where the last scan stopped, so a refresh reads only
 /// the new blocks; the scan state lives in the colo cache and a cold one rescans from the factory's deploy block.
-/// Swaps made in the swap box come from their own scan (readSwapActivity).
-import { getAddress, parseAbi, type Address, type Hex, type PublicClient } from 'viem';
+/// Swaps made in the swap box come from their own scan (readSwapActivity), and so do sales to the InstantVault and
+/// the site's Statement buys and redeems (readSaleActivity).
+import { getAddress, parseAbi, parseEventLogs, type Address, type Hex, type PublicClient } from 'viem';
 import { POOL_MANAGER, SITE_TAG, UNIVERSAL_ROUTER } from '../shared/v4swap';
 
 export type Activity = {
-  kind: 'started' | 'deposited' | 'withdrew' | 'burned' | 'converted' | 'bid' | 'won' | 'claimed' | 'bought' | 'swapped';
+  kind: 'started' | 'deposited' | 'withdrew' | 'burned' | 'converted' | 'bid' | 'won' | 'claimed' | 'bought' | 'sold' | 'redeemed' | 'swapped';
   who: Address;
   union?: Address;
   name?: string;
-  ids?: number[]; // Credits moved (deposits, withdrawals, buys)
+  ids?: number[]; // Credits moved (deposits, withdrawals, buys, sales to the vault)
+  statements?: number[]; // Statements bought or redeemed
   count?: number;
   eth?: string; // wei
   intoUnion?: boolean; // a buy that went straight into a union (Sweeper.Swept)
   side?: 'buy' | 'sell'; // a swap: bought $BALANCE with ETH, or sold it for ETH
-  balance?: string; // a swap's $BALANCE, wei
+  balance?: string; // $BALANCE, wei: a swap's, a sale's to the vault, a redeem's
   block: number;
   time: number;
   tx: Hex;
@@ -219,6 +221,105 @@ export async function readSwapActivity(
     const balance = buy ? net(l.amount1) : -l.amount1;
     fresh.push({ kind: 'swapped', who: getAddress(who), side: buy ? 'buy' : 'sell', eth: String(eth), balance: String(balance), block: l.block, tx: l.tx, i: l.i });
   }
+
+  const newest = fresh.sort((a, b) => b.block - a.block || b.i - a.i);
+  const times = new Map<number, number>();
+  await Promise.all([...new Set(newest.map((x) => x.block))].map(async (n) => times.set(n, Number((await c.getBlock({ blockNumber: BigInt(n) })).timestamp))));
+  const items = [...newest.map((x) => ({ ...x, time: times.get(x.block) ?? 0 })), ...st.items];
+  st = { v: 1, last, items };
+  await cache.put(stateKey, Response.json(st, { headers: { 'cache-control': 'public, max-age=86400' } }));
+  return items;
+}
+
+const VAULT_EVENTS = parseAbi(['event Sold(address indexed seller, address indexed batch, address indexed to, uint256[] ids, uint256 paid)']);
+const NFT_EVENTS = parseAbi(['event Transfer(address indexed from, address indexed to, uint256 indexed id)']);
+const SEAPORT_EVENTS = parseAbi([
+  'event OrderFulfilled(bytes32 orderHash, address indexed offerer, address indexed zone, address recipient, (uint8 itemType, address token, uint256 identifier, uint256 amount)[] offer, (uint8 itemType, address token, uint256 identifier, uint256 amount, address recipient)[] consideration)',
+]);
+type SaleState = { v: 1; last: number; items: Activity[] };
+
+/// Credits sold to the InstantVault for $BALANCE (its Sold events: every sale is one made on the site), and
+/// Statements bought on OpenSea or redeemed for $BALANCE from the site: Statement transfers in transactions that carry
+/// SITE_TAG, read from `tagged` on, when the site began tagging them. A buy is the ETH its Seaport order asked; a
+/// redeem, the $BALANCE the token paid that wallet. One row per transaction and wallet. Scanned forward like
+/// readSwapActivity; when a transaction can't be read, the scan keeps what it had and tries those blocks again.
+export async function readSaleActivity(
+  c: PublicClient,
+  cache: Cache,
+  stateKey: string,
+  cfg: { vault: Address | null; statements: Address | null; token: Address | null; from: bigint; tagged: bigint },
+): Promise<Activity[]> {
+  const hit = await cache.match(stateKey);
+  let st: SaleState = hit ? ((await hit.json()) as SaleState) : { v: 1, last: Number(cfg.from) - 1, items: [] };
+  if (st.v !== 1) st = { v: 1, last: Number(cfg.from) - 1, items: [] };
+  const head = await c.getBlockNumber();
+  let fresh: Omit<Activity, 'time'>[] = [];
+  let moves: { tx: Hex; block: number; i: number; from: Address; to: Address; id: number }[] = [];
+  for (let f = BigInt(st.last + 1); f <= head; f += WINDOW) {
+    const t = f + WINDOW - 1n > head ? head : f + WINDOW - 1n;
+    const s = f > cfg.tagged ? f : cfg.tagged;
+    const [sold, moved] = await Promise.all([
+      cfg.vault ? c.getLogs({ address: cfg.vault, event: VAULT_EVENTS[0], fromBlock: f, toBlock: t }) : Promise.resolve([]),
+      cfg.statements && s <= t ? c.getLogs({ address: cfg.statements, event: NFT_EVENTS[0], fromBlock: s, toBlock: t }) : Promise.resolve([]),
+    ]);
+    for (const l of sold) {
+      const a = l.args as { seller: Address; batch: Address; ids: readonly bigint[]; paid: bigint };
+      const ids = a.ids.map(Number);
+      fresh.push({ kind: 'sold', who: a.seller, union: a.batch, ids, count: ids.length, balance: String(a.paid), block: Number(l.blockNumber), tx: l.transactionHash!, i: l.logIndex! });
+    }
+    // A Statement's mint is its union's burn, which readActivity has.
+    for (const l of moved) {
+      const a = l.args as { from: Address; to: Address; id: bigint };
+      if (BigInt(a.from) !== 0n) moves.push({ tx: l.transactionHash!, block: Number(l.blockNumber), i: l.logIndex!, from: a.from, to: a.to, id: Number(a.id) });
+    }
+  }
+  // Oldest first, SWAP_READS transactions at most, as readSwapActivity: past that, the scan ends before that block.
+  moves.sort((a, b) => a.block - b.block || a.i - b.i);
+  let last = Number(head);
+  const txs = [...new Set(moves.map((m) => m.tx))];
+  if (txs.length > SWAP_READS) {
+    const stop = moves.find((m) => m.tx === txs[SWAP_READS])!.block;
+    if (stop > st.last + 1) {
+      moves = moves.filter((m) => m.block < stop);
+      fresh = fresh.filter((x) => x.block < stop);
+      last = stop - 1;
+    }
+  }
+  const read = await Promise.all([...new Set(moves.map((m) => m.tx))].map(async (hash) => [hash, await c.getTransaction({ hash }).catch(() => null)] as const));
+  if (read.some(([, tx]) => !tx)) return st.items;
+  const ours = read.filter(([, tx]) => tx!.input.toLowerCase().includes(TAG)).map(([hash]) => hash);
+  const receipts = new Map(await Promise.all(ours.map(async (hash) => [hash, await c.getTransactionReceipt({ hash }).catch(() => null)] as const)));
+  if ([...receipts.values()].some((r) => !r)) return st.items;
+
+  const token = cfg.token?.toLowerCase(), statements = cfg.statements?.toLowerCase();
+  const rows = new Map<string, Omit<Activity, 'time'>>();
+  for (const m of moves) {
+    const r = receipts.get(m.tx);
+    if (!r) continue; // not the site's
+    const redeem = m.to.toLowerCase() === token;
+    const who = getAddress(redeem ? m.from : m.to), me = who.toLowerCase();
+    // A buy: the ETH in the Seaport order that sold this Statement (its seller's, OpenSea's and the creator's cuts).
+    let eth = 0n;
+    if (!redeem) {
+      const order = parseEventLogs({ abi: SEAPORT_EVENTS, logs: r.logs }).find((o) => o.args.offer.some((x) => x.token.toLowerCase() === statements && x.identifier === BigInt(m.id)));
+      if (!order) continue; // moved some other way
+      eth = order.args.consideration.reduce((a, x) => (x.itemType === 0 ? a + x.amount : a), 0n);
+    }
+    const key = `${m.tx}:${redeem}:${me}`;
+    let row = rows.get(key);
+    if (!row) {
+      // A redeem: what the token sent this wallet in that transaction.
+      const paid = redeem
+        ? r.logs.reduce((a, x) => (x.address.toLowerCase() === token && x.topics[0] === TRANSFER && x.topics.length === 3 && `0x${x.topics[1]!.slice(26)}` === token && `0x${x.topics[2]!.slice(26)}` === me ? a + BigInt(x.data) : a), 0n)
+        : 0n;
+      row = { kind: redeem ? 'redeemed' : 'bought', who, statements: [], ...(redeem ? { balance: String(paid) } : { eth: '0' }), block: m.block, tx: m.tx, i: m.i };
+      rows.set(key, row);
+    }
+    row.statements!.push(m.id);
+    row.count = row.statements!.length;
+    if (!redeem) row.eth = String(BigInt(row.eth!) + eth);
+  }
+  fresh.push(...rows.values());
 
   const newest = fresh.sort((a, b) => b.block - a.block || b.i - a.i);
   const times = new Map<number, number>();

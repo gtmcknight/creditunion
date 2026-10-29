@@ -6,11 +6,12 @@ import { art, esc, eth, pageHead, same } from '../ui';
 
 /// /activity.json's rows (worker/activity.ts).
 type Item = {
-  kind: 'started' | 'deposited' | 'withdrew' | 'burned' | 'converted' | 'bid' | 'won' | 'claimed' | 'bought' | 'swapped';
+  kind: 'started' | 'deposited' | 'withdrew' | 'burned' | 'converted' | 'bid' | 'won' | 'claimed' | 'bought' | 'sold' | 'redeemed' | 'swapped';
   who: Address;
   union?: Address;
   name?: string;
   ids?: number[];
+  statements?: number[];
   count?: number;
   eth?: string;
   intoUnion?: boolean;
@@ -29,6 +30,8 @@ const THUMBS = 6;
 
 const keyOf = (x: Item) => `${x.tx}:${x.i}:${x.kind}`;
 const credits = (n: number) => `${n} ${n === 1 ? 'Credit' : 'Credits'}`;
+/// One Statement by its number, linked; more by how many.
+const statements = (ids: number[]) => (ids.length === 1 ? `<a href="/statement/${ids[0]}">Statement #${ids[0]}</a>` : `${ids.length} Statements`);
 /// $BALANCE from wei: whole tokens with separators, two decimals under 10.
 const balanceOf = (wei: string) => {
   const n = Number(BigInt(wei) / 10n ** 12n) / 1e6;
@@ -53,7 +56,12 @@ function what(x: Item, here = false) {
     case 'withdrew':
       return here ? `withdrew ${credits(n)}` : `withdrew ${credits(n)} from ${u}`;
     case 'bought':
+      if (x.statements) return `bought ${statements(x.statements)} for ${e}`;
       return x.intoUnion && !here ? `bought ${credits(n)} into ${u} for ${e}` : `bought ${credits(n)} for ${e}`;
+    case 'sold':
+      return `sold ${credits(n)} for ${balanceOf(x.balance ?? '0')}`;
+    case 'redeemed':
+      return `redeemed ${statements(x.statements ?? [])} for ${balanceOf(x.balance ?? '0')}`;
     case 'burned':
       return here ? 'burned 80 Credits into a Statement' : `burned ${u} into a Statement`;
     case 'converted':
@@ -137,6 +145,7 @@ export async function activityFold(union: Address, bid?: { who: Address; wei: bi
 
 function row(x: Item, o: { here?: boolean; who?: boolean } = {}) {
   const me = session.account && same(x.who, session.account) ? '<span class="tag you">You</span>' : '';
+  // Credits only: a Statement goes by its words, since a redeemed one's art is Jack's blank WITHDRAWN card.
   const ids = x.ids ?? [];
   const thumbs = ids.length
     ? `<span class="live-art">${ids
@@ -154,7 +163,7 @@ function row(x: Item, o: { here?: boolean; who?: boolean } = {}) {
   </li>`;
 }
 
-/// /activity: every deposit, withdrawal, buy, new union, burn, bid, sale, claim and swap box swap, newest first. New rows slide in at
+/// /activity: every deposit, withdrawal, buy, new union, burn, bid, sale, claim, redeem and swap box swap, newest first. New rows slide in at
 /// the top every 20 seconds; if you've scrolled down, the page holds still under you.
 export async function live(app: HTMLElement) {
   // The old Leaderboard tab's link lands here too.

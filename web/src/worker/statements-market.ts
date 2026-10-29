@@ -1,8 +1,10 @@
 /// The Statements for sale (Market → Statements): OpenSea's listings of the Statements contract, each with its Credit
 /// Rating and format as the contract states them, and the call that buys one straight from the buyer's wallet
-/// (Seaport's fulfillAdvancedOrder, no Sweeper: a Statement is bought one at a time).
-import { encodeFunctionData, type Address, type PublicClient } from 'viem';
+/// (Seaport's fulfillAdvancedOrder, no Sweeper: a Statement is bought one at a time). Every call ends in SITE_TAG, so
+/// Activity can tell the site's buys from everyone else's.
+import { concat, encodeFunctionData, type Address, type PublicClient } from 'viem';
 import { sweeperAbi } from '../app/abi';
+import { SITE_TAG } from '../shared/v4swap';
 import { bestPage, fillFor, type Listing } from './opensea';
 
 const SEAPORT: Address = '0x0000000000000068F116a894984e2DB1123eB395';
@@ -107,12 +109,12 @@ export async function buyStatements(key: string, picks: { hash: string; protocol
   const offer = orders.map((_, i) => [{ orderIndex: BigInt(i), itemIndex: 0n }]);
   const consideration = orders.flatMap((o, i) => (o.parameters.consideration as unknown[]).map((_, j) => [{ orderIndex: BigInt(i), itemIndex: BigInt(j) }]));
   const value = fills.reduce((a, f) => a + f.value, 0n);
-  const data = encodeFunctionData({ abi: FULFILL_MANY, functionName: 'fulfillAvailableAdvancedOrders', args: [orders as never, [], offer, consideration, `0x${'0'.repeat(64)}`, buyer, BigInt(orders.length)] });
+  const data = concat([encodeFunctionData({ abi: FULFILL_MANY, functionName: 'fulfillAvailableAdvancedOrders', args: [orders as never, [], offer, consideration, `0x${'0'.repeat(64)}`, buyer, BigInt(orders.length)] }), SITE_TAG]);
   return { to: SEAPORT, data, value: value.toString(), n: orders.length };
 }
 
 export async function buyStatement(key: string, hash: string, protocol: string, buyer: Address) {
   const { order, value } = await fillFor(key, hash, protocol, buyer);
-  const data = encodeFunctionData({ abi: FULFILL, functionName: 'fulfillAdvancedOrder', args: [order as never, [], `0x${'0'.repeat(64)}`, buyer] });
+  const data = concat([encodeFunctionData({ abi: FULFILL, functionName: 'fulfillAdvancedOrder', args: [order as never, [], `0x${'0'.repeat(64)}`, buyer] }), SITE_TAG]);
   return { to: SEAPORT, data, value: value.toString() };
 }

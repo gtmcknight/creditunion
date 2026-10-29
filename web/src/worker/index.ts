@@ -33,7 +33,7 @@ import { cardFor, creditCard, creditsCard, partyCard, rangeCard, ruleLine, timeC
 import { parseTrait } from '../shared/trait';
 import { drawCredit, drawUnion, sample, type CreditFacts, type UnionCard } from './card';
 import { printOf, type Rect } from './print';
-import { readActivity, readSwapActivity, type Activity } from './activity';
+import { readActivity, readSaleActivity, readSwapActivity, type Activity } from './activity';
 import { keyOf, ruleFor } from '../shared/layout';
 import { ALWAYS, CSP, HSTS } from './headers';
 import { fromJson, toJson } from '../shared/json';
@@ -139,6 +139,10 @@ const ACTIVITY_FROM = 26_072_342n;
 const TOKEN_ACTIVITY_FROM = 26_193_327n;
 /// Swap box swaps carry SITE_TAG from 2026-10-28 on; their scan starts just before.
 const SWAP_ACTIVITY_FROM = 26_293_000n;
+/// The InstantVault's deploy block (2026-10-22): its sales are read from here.
+const SALE_ACTIVITY_FROM = 26_252_590n;
+/// Statement buys and redeems carry SITE_TAG from 2026-10-29 on; their scan starts just before.
+const TAGGED_ACTIVITY_FROM = 26_298_900n;
 /// Credits ever minted; ids outside 1..SUPPLY are refused before any RPC.
 const SUPPLY = 122_154;
 const inSupply = (id: number) => Number.isInteger(id) && id >= 1 && id <= SUPPLY;
@@ -401,15 +405,28 @@ async function activityItems(env: Env, store: Cache, stateKey: string): Promise<
   const tokens = addrOrNull(env.TOKEN_FACTORY);
   const bal = balanceConfig(env);
   const poolId = bal && keccak256(encodeAbiParameters(parseAbiParameters('address, address, uint24, int24, address'), [ETH, bal.token, bal.pool.fee, bal.pool.tickSpacing, bal.pool.hooks]));
-  // Token unions and the swap box's swaps keep their own scan states; the lists merge newest first.
-  const [main, more, swaps] = await Promise.all([
+  const vault = addrOrNull(env.INSTANT_VAULT), statements = addrOrNull(env.STATEMENTS);
+  // Token unions, the swap box's swaps and the sales keep their own scan states; the lists merge newest first.
+  const [main, more, swaps, sales] = await Promise.all([
     readActivity(c as never, store, stateKey, { ...cfg, factory: env.FACTORY, sweeper: hasSweeper(env) ? env.SWEEPER : null }),
     tokens ? readActivity(c as never, store, `${stateKey}/tokens/${tokens.toLowerCase()}/from-deploy`, { ...cfg, from: env.CHAIN_ID === '1' ? TOKEN_ACTIVITY_FROM : cfg.from, factory: tokens, sweeper: tokenSweeper(env) }) : Promise.resolve([]),
     bal && poolId ? readSwapActivity(c as never, store, `${stateKey}/swaps/${poolId}`, { poolId, token: bal.token, feeBps: bal.feeBps, from: env.CHAIN_ID === '1' ? SWAP_ACTIVITY_FROM : cfg.from }).catch(() => []) : Promise.resolve([]),
+    vault || statements
+      ? readSaleActivity(c as never, store, `${stateKey}/sales`, { vault, statements, token: bal?.token ?? null, from: env.CHAIN_ID === '1' ? SALE_ACTIVITY_FROM : cfg.from, tagged: env.CHAIN_ID === '1' ? TAGGED_ACTIVITY_FROM : cfg.from }).catch(() => [])
+      : Promise.resolve([]),
   ]);
   // A token batch's burn converts it into BALANCE: said so, not as a Statement made.
   const converts = more.map((x) => (x.kind === 'burned' ? { ...x, kind: 'converted' as const } : x));
-  const items = converts.length || swaps.length ? [...main, ...converts, ...swaps].sort((a, b) => b.block - a.block || b.i - a.i) : main;
+  // A sale to the InstantVault puts its Credits in a union in the vault's name: the sale says so once, as the seller's,
+  // with the union's name.
+  const sold = new Set(sales.flatMap((x) => (x.kind === 'sold' ? [x.tx] : [])));
+  const names = new Map(more.flatMap((x) => (x.union && x.name ? [[x.union.toLowerCase(), x.name] as const] : [])));
+  const extra = [
+    ...converts.filter((x) => !(x.kind === 'deposited' && sold.has(x.tx))),
+    ...swaps,
+    ...sales.map((x) => (x.union ? { ...x, name: names.get(x.union.toLowerCase()) ?? x.name } : x)),
+  ];
+  const items = extra.length ? [...main, ...extra].sort((a, b) => b.block - a.block || b.i - a.i) : main;
   // A plan's union stays out of Activity until it fills.
   const hidden = await hiddenUnions(env);
   const filling = new Set<string>();
@@ -1626,10 +1643,11 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       const limit = Math.min(Math.max(Number(q.get('limit')) || 100, 1), 1000);
       const part: FeedPart = q.has('bids') || kind === 'bid' ? 'bids' : q.has('last') || union || member || after || kind || limit > RECENT_ROWS ? 'all' : 'recent';
       const all = await activityAll(env, url, ctx, part);
-      // ?last: when each union last took a Credit (a deposit, or a buy straight into it): { union: unix seconds }.
+      // ?last: when each union last took a Credit (a deposit, a buy straight into it, or a sale to the vault, which puts
+      // the Credits in it): { union: unix seconds }.
       if (q.has('last')) {
         const last: Record<string, number> = {};
-        for (const x of all) if (x.union && x.time && (x.kind === 'deposited' || (x.kind === 'bought' && x.intoUnion))) last[x.union.toLowerCase()] ??= x.time;
+        for (const x of all) if (x.union && x.time && (x.kind === 'deposited' || x.kind === 'sold' || (x.kind === 'bought' && x.intoUnion))) last[x.union.toLowerCase()] ??= x.time;
         return Response.json({ last }, { headers: { 'cache-control': 'public, max-age=15' } });
       }
       // ?bids: how many bids each union's auction has taken: { union: count }.
