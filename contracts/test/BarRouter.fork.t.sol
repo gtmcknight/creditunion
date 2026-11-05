@@ -36,7 +36,7 @@ contract BarRouterForkTest is Test {
     function setUp() public {
         vm.createSelectFork(vm.envOr("MAINNET_RPC", string("https://ethereum-rpc.publicnode.com")));
         seller = vm.addr(sellerKey);
-        bars = new StandInBars(BALANCE, uint64(block.timestamp), uint64(block.timestamp + 1 days), 0);
+        bars = new StandInBars(BALANCE, uint64(block.timestamp), uint64(block.timestamp + 8 days));
         router = new BarRouter(IBars(address(bars)), BALANCE, POOL_MANAGER, SEAPORT, fee, 100, 3000, 30, LBP_HOOK);
         vm.deal(buyer, 100 ether);
         vm.deal(keeper, 100 ether);
@@ -45,10 +45,22 @@ contract BarRouterForkTest is Test {
         bars.setApprovalForAll(address(SEAPORT), true);
     }
 
-    /// @dev The seller mints a Bar holding `amount` through the router, so it can list it.
-    function _sellerBar(uint256 amount) internal returns (uint256 id) {
+    /// @dev The seller mints the next Bar through the router, so it can list it once melting opens.
+    function _sellerBar() internal returns (uint256 id) {
+        uint256 quoted = bars.priceOf(1);
         vm.prank(seller);
-        id = router.mint{value: 50 ether}(seller, amount, 500);
+        id = router.mint{value: 50 ether}(seller, 1, 500, quoted);
+    }
+
+    /// @dev What Bars #1 to #n hold between them, each in its own vault.
+    function _inVaults(uint256 n) internal view returns (uint256 total) {
+        for (uint256 id = 1; id <= n; ++id) total += BALANCE.balanceOf(address(bars.vaultOf(id)));
+    }
+
+    /// @dev Mints the seller Bars #1 to #n, then closes the window so they can melt.
+    function _sellerBars(uint256 n) internal {
+        for (uint256 i; i < n; ++i) _sellerBar();
+        vm.warp(bars.mintEnd());
     }
 
     function _listing(uint256 id, uint256 price) internal view returns (AdvancedOrder memory o) {
@@ -86,14 +98,16 @@ contract BarRouterForkTest is Test {
         orders[0] = o;
     }
 
-    function test_MintBuysExactlyTheAmountAndRefunds() public {
-        uint256 amount = 369e18;
+    function test_MintBuysExactlyWhatTheBarsHoldAndRefunds() public {
+        uint256 quoted = bars.priceOf(3);
+        assertEq(quoted, 6e18); // #1 + #2 + #3
         uint256 dust = address(router).balance;
         vm.prank(buyer);
-        uint256 id = router.mint{value: 50 ether}(buyer, amount, 500);
+        uint256 first = router.mint{value: 50 ether}(buyer, 3, 500, quoted);
 
-        assertEq(bars.ownerOf(id), buyer);
-        assertEq(bars.amountOf(id), amount);
+        assertEq(first, 1);
+        assertEq(bars.ownerOf(3), buyer);
+        assertEq(_inVaults(3), 6e18);
         assertEq(BALANCE.balanceOf(address(router)), 0);
         uint256 paid = 100 ether - buyer.balance;
         assertGt(paid, 0);
@@ -104,7 +118,7 @@ contract BarRouterForkTest is Test {
     function test_MintRevertsWhenUnderpaid() public {
         vm.prank(buyer);
         vm.expectRevert();
-        router.mint{value: 1 wei}(buyer, 369e18, 500);
+        router.mint{value: 1 wei}(buyer, 1, 500, 1e18);
     }
 
     function test_MintRefusesARaisedFee() public {
@@ -112,13 +126,54 @@ contract BarRouterForkTest is Test {
         router.setFee(200);
         vm.prank(buyer);
         vm.expectRevert(abi.encodeWithSelector(BarRouter.FeeChanged.selector, 200));
-        router.mint{value: 50 ether}(buyer, 369e18, 100);
+        router.mint{value: 50 ether}(buyer, 1, 100, 1e18);
+    }
+
+    /// A mint that lands first makes the quoted number dearer; the late one spends nothing, whatever ETH it sent.
+    function test_MintRevertsWhenSomeoneMintsFirst() public {
+        uint256 quoted = bars.priceOf(1);
+        _sellerBar();
+        uint256 dearer = bars.priceOf(1);
+        vm.prank(buyer);
+        vm.expectRevert(abi.encodeWithSelector(BarRouter.PriceChanged.selector, dearer));
+        router.mint{value: 50 ether}(buyer, 1, 500, quoted);
+    }
+
+    /// With room in the cap, a mint someone lands first takes the next number instead, and pays only for that one.
+    function test_MintTakesTheNextNumberWithinTheCap() public {
+        uint256 quoted = bars.priceOf(1);
+        _sellerBar();
+        vm.prank(buyer);
+        uint256 id = router.mint{value: 50 ether}(buyer, 1, 500, quoted + 100e18);
+        assertEq(id, 2);
+        assertEq(bars.ownerOf(2), buyer);
+        assertEq(_inVaults(2), 3e18); // #1 and #2
+        assertEq(BALANCE.balanceOf(address(router)), 0);
+    }
+
+    function test_MintRevertsAfterTheWindow() public {
+        vm.warp(bars.mintEnd());
+        vm.prank(buyer);
+        vm.expectRevert(bytes("Not open"));
+        router.mint{value: 50 ether}(buyer, 1, 500, 1e18);
+    }
+
+    /// Melting opens when minting closes; a listed Bar can't be bought and melted before.
+    function test_MeltsRevertWhileMintingIsOpen() public {
+        uint256 id = _sellerBar();
+        AdvancedOrder[] memory orders = _one(_listing(id, 1 wei));
+        vm.prank(keeper);
+        vm.expectRevert(BarRouter.MeltClosed.selector);
+        router.meltForEth{value: 1 wei}(orders, 1, 0);
+        vm.prank(buyer);
+        vm.expectRevert(BarRouter.MeltClosed.selector);
+        router.meltForBalance{value: 1 wei}(orders, 1, 0, 500);
     }
 
     function test_MeltForEthProfitsOnACheapListing() public {
-        uint256 id = _sellerBar(1_000e18);
-        uint256 price = 0.0001 ether;
-        AdvancedOrder[] memory orders = _one(_listing(id, price));
+        _sellerBars(10);
+        uint256 price = 10 wei;
+        AdvancedOrder[] memory orders = _one(_listing(10, price));
         uint256 before = keeper.balance;
         vm.prank(keeper);
         uint256 back = router.meltForEth{value: price}(orders, 1, 1);
@@ -126,42 +181,60 @@ contract BarRouterForkTest is Test {
         assertGt(back, price);
         assertEq(keeper.balance, before - price + back);
         vm.expectRevert();
-        bars.ownerOf(id); // melted
+        bars.ownerOf(10); // melted
         assertEq(BALANCE.balanceOf(address(router)), 0);
     }
 
     function test_MeltForEthRevertsAboveBacking() public {
-        uint256 id = _sellerBar(10e18);
+        _sellerBars(1);
         uint256 price = 90 ether;
-        AdvancedOrder[] memory orders = _one(_listing(id, price));
+        AdvancedOrder[] memory orders = _one(_listing(1, price));
         vm.prank(keeper);
         vm.expectRevert(); // NoProfit, and the whole buy unwinds
         router.meltForEth{value: price}(orders, 1, 0);
-        assertEq(bars.ownerOf(id), seller);
+        assertEq(bars.ownerOf(1), seller);
     }
 
     function test_MeltForBalanceDeliversTheDeposit() public {
-        uint256 id = _sellerBar(500e18);
+        _sellerBars(5);
         uint256 price = 0.01 ether;
-        AdvancedOrder[] memory orders = _one(_listing(id, price));
+        AdvancedOrder[] memory orders = _one(_listing(5, price));
         uint256 feeBefore = fee.balance;
         vm.prank(buyer);
-        uint256 out = router.meltForBalance{value: price + price / 100}(orders, 1, 500e18, 500);
+        uint256 out = router.meltForBalance{value: price + price / 100}(orders, 1, 5e18, 500);
 
-        assertEq(out, 500e18);
-        assertEq(BALANCE.balanceOf(buyer), 500e18);
+        assertEq(out, 5e18);
+        assertEq(BALANCE.balanceOf(buyer), 5e18);
         assertEq(fee.balance - feeBefore, price / 100);
     }
 
+    /// A melt hands over everything in the Bar's vault, so $BALANCE someone sent to it comes out too.
+    function test_MeltForBalanceDeliversWhatTheVaultHolds() public {
+        _sellerBars(5);
+        uint256 price = 0.01 ether;
+        AdvancedOrder[] memory five = _one(_listing(5, price));
+        AdvancedOrder[] memory four = _one(_listing(4, price));
+        address vault = address(bars.vaultOf(4));
+        vm.prank(buyer);
+        router.meltForBalance{value: price + price / 100}(five, 1, 5e18, 500);
+        vm.prank(buyer);
+        BALANCE.transfer(vault, 2e18);
+
+        vm.prank(buyer);
+        uint256 out = router.meltForBalance{value: price + price / 100}(four, 1, 6e18, 500);
+        assertEq(out, 6e18);
+        assertEq(BALANCE.balanceOf(buyer), 9e18);
+        assertEq(BALANCE.balanceOf(vault), 0);
+    }
+
     function test_SkipsASoldListingAndEnforcesMin() public {
-        uint256 a = _sellerBar(100e18);
-        uint256 b = _sellerBar(100e18);
+        _sellerBars(2);
         AdvancedOrder[] memory orders = new AdvancedOrder[](2);
-        orders[0] = _listing(a, 0.001 ether);
-        orders[1] = _listing(b, 0.001 ether);
+        orders[0] = _listing(1, 0.001 ether);
+        orders[1] = _listing(2, 0.001 ether);
         AdvancedOrder[] memory first = _one(orders[0]);
-        vm.prank(keeper);
-        router.meltForEth{value: 0.001 ether}(first, 1, 0);
+        vm.prank(buyer);
+        router.meltForBalance{value: 0.01 ether}(first, 1, 0, 500);
 
         vm.prank(buyer);
         vm.expectRevert(abi.encodeWithSelector(BarRouter.TooFewBought.selector, 1));
@@ -169,12 +242,34 @@ contract BarRouterForkTest is Test {
 
         vm.prank(buyer);
         uint256 out = router.meltForBalance{value: 0.01 ether}(orders, 1, 0, 500);
-        assertEq(out, 100e18);
+        assertEq(out, 2e18);
+    }
+
+    /// A melted or moved Bar's listing is still a live order to Seaport; its transfer would revert the whole fill.
+    function test_SkipsAListingWhoseBarWasMeltedOrMoved() public {
+        _sellerBars(3);
+        AdvancedOrder[] memory orders = new AdvancedOrder[](3);
+        orders[0] = _listing(1, 0.001 ether);
+        orders[1] = _listing(2, 0.001 ether);
+        orders[2] = _listing(3, 0.001 ether);
+        vm.startPrank(seller);
+        bars.melt(1);
+        bars.transferFrom(seller, keeper, 2);
+        vm.stopPrank();
+
+        vm.prank(buyer);
+        vm.expectRevert(abi.encodeWithSelector(BarRouter.TooFewBought.selector, 1));
+        router.meltForBalance{value: 0.01 ether}(orders, 2, 0, 500);
+
+        vm.prank(buyer);
+        uint256 out = router.meltForBalance{value: 0.01 ether}(orders, 1, 0, 500);
+        assertEq(out, 3e18);
+        assertEq(bars.ownerOf(2), keeper);
     }
 
     function test_RejectsAnythingButABar() public {
-        uint256 id = _sellerBar(10e18);
-        AdvancedOrder[] memory orders = _one(_listing(id, 0.001 ether));
+        _sellerBars(1);
+        AdvancedOrder[] memory orders = _one(_listing(1, 0.001 ether));
         orders[0].parameters.offer[0].token = address(0x1234);
         vm.prank(keeper);
         vm.expectRevert(abi.encodeWithSelector(BarRouter.NotABar.selector, 0));
@@ -184,16 +279,5 @@ contract BarRouterForkTest is Test {
     function test_OnlyThePoolManagerCallsBack() public {
         vm.expectRevert(BarRouter.NotPoolManager.selector);
         router.unlockCallback(abi.encode(true, 1, 1));
-    }
-
-    function test_MintCountOnACountPricedEdition() public {
-        StandInBars byCount = new StandInBars(BALANCE, uint64(block.timestamp), uint64(block.timestamp + 1 days), 369e18);
-        BarRouter r = new BarRouter(IBars(address(byCount)), BALANCE, POOL_MANAGER, SEAPORT, fee, 100, 3000, 30, LBP_HOOK);
-        vm.prank(buyer);
-        uint256 first = r.mintCount{value: 50 ether}(buyer, 3, 500);
-        assertEq(first, 1);
-        assertEq(byCount.amountOf(3), 3 * 369e18);
-        assertEq(byCount.ownerOf(3), buyer);
-        assertEq(BALANCE.balanceOf(address(r)), 0);
     }
 }

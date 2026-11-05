@@ -10,7 +10,7 @@ import {StandInBars} from "../src/mocks/StandInBars.sol";
 
 /// @notice BarRouter against a Bars edition: BARS names the real one; without it (local copies of mainnet only) a
 ///         stand-in edition opens for WINDOW_HOURS (24) from now, priced by count when STEP (wei per number) is set.
-///         FEE_RECIPIENT takes the router's fee, FEE_BPS (100).
+///         FEE_RECIPIENT takes the router's fee, FEE_BPS (0; it can raise it later with setFee, up to 5%).
 ///     FEE_RECIPIENT=… BARS=… forge script script/DeployBars.s.sol --rpc-url $MAINNET_RPC --account deployer --broadcast
 contract DeployBars is Script {
     IERC20 constant BALANCE = IERC20(0x3620540c994433D7B4a628C46d2ED5F92572eA07);
@@ -24,10 +24,10 @@ contract DeployBars is Script {
         if (bars == address(0)) {
             require(block.chainid == 1 && vm.envOr("FORK", false), "BARS, or FORK=true on a local copy");
             uint64 start = uint64(block.timestamp);
-            bars = address(new StandInBars(BALANCE, start, start + uint64(vm.envOr("WINDOW_HOURS", uint256(24)) * 1 hours), vm.envOr("STEP", uint256(0))));
+            bars = address(new StandInBars(BALANCE, start, start + uint64(vm.envOr("WINDOW_HOURS", uint256(192)) * 1 hours)));
         }
         BarRouter router = new BarRouter(
-            IBars(bars), BALANCE, POOL_MANAGER, SEAPORT, vm.envAddress("FEE_RECIPIENT"), vm.envOr("FEE_BPS", uint256(100)), 3000, 30, LBP_HOOK
+            IBars(bars), BALANCE, POOL_MANAGER, SEAPORT, vm.envAddress("FEE_RECIPIENT"), vm.envOr("FEE_BPS", uint256(0)), 3000, 30, LBP_HOOK
         );
         vm.stopBroadcast();
         console2.log("BARS_EDITION", bars);

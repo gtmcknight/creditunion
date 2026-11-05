@@ -7,11 +7,14 @@
 //   node scripts/fork-chain.mjs --warp 24           move the clock 24 hours on (auctions end, burn hours run out)
 //   node scripts/fork-chain.mjs --tokens            deploy token unions as stage 1 (pooling only, no adapter)
 //   node scripts/fork-chain.mjs --tokens --vault    …and stage 2: a test vault + TokenAdapter, active (30 min warped)
-//   node scripts/fork-chain.mjs --bars              a stand-in Bars edition open 24h, BarRouter, and two Bars in the test wallet
-//   node scripts/fork-chain.mjs --bars --by-count   …priced by count instead: Bar #n holds n × 369 $BALANCE
+//   node scripts/fork-chain.mjs --bars              a stand-in Bars edition open 8 days (Bar #n holds n $BALANCE), BarRouter,
+//                                                   and Bars #1 and #2 in the test wallet
+//   node scripts/fork-chain.mjs --bars --melt       …then the clock past the window: minting closed, melting open
+//                                                   (with BAR_BUYER_SRC=<path to its .sol, from contracts/>, --bars also
+//                                                   deploys the edition's own ETH checkout as BAR_BUYER)
 // Env: ANVIL_PORT (8549) MIRROR (the mirror's URL, default http://localhost:5310/).
 import { execFileSync, spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,7 +22,7 @@ import { parseArgs } from 'node:util';
 import { createPublicClient, encodeFunctionData, formatEther, http } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi } from '../src/app/abi.ts';
 
-const { values: opt } = parseArgs({ options: { credits: { type: 'string', default: '0' }, warp: { type: 'string', default: '0' }, tokens: { type: 'boolean', default: false }, vault: { type: 'boolean', default: false }, bars: { type: 'boolean', default: false }, 'by-count': { type: 'boolean', default: false } } });
+const { values: opt } = parseArgs({ options: { credits: { type: 'string', default: '0' }, warp: { type: 'string', default: '0' }, tokens: { type: 'boolean', default: false }, vault: { type: 'boolean', default: false }, bars: { type: 'boolean', default: false }, melt: { type: 'boolean', default: false } } });
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CONTRACTS = join(WEB, '..', 'contracts');
 const PORT = Number(process.env.ANVIL_PORT ?? 8549);
@@ -129,20 +132,30 @@ if (opt.tokens) {
 if (opt.bars) {
   const out = execFileSync('forge', ['script', 'script/DeployBars.s.sol', '--rpc-url', RPC, '--unlocked', '--sender', ACCOUNTS[0], '--broadcast', '--slow'], {
     cwd: CONTRACTS,
-    env: { ...process.env, PATH, FORK: 'true', FEE_RECIPIENT: ACCOUNTS[0], ...(opt['by-count'] ? { STEP: String(369n * 10n ** 18n) } : {}) },
+    env: { ...process.env, PATH, FORK: 'true', FEE_RECIPIENT: ACCOUNTS[0] },
     encoding: 'utf8',
   });
   for (const [, k, v] of out.matchAll(/^\s*(BARS_EDITION|BAR_ROUTER)\s+(0x[0-9a-fA-F]{40})/gm)) tokenVars[k] = v;
   tokenVars.BARS_FROM_BLOCK = String(await pub.getBlockNumber());
-  // Two Bars in the test wallet, bought through the router like anyone's: 1,000 and 250 $BALANCE inside (by count:
-  // #1 and #2, 369 and 738).
-  const fn = opt['by-count'] ? 'mintCount' : 'mint';
-  const mintAbi = [{ type: 'function', name: fn, stateMutability: 'payable', inputs: [{ type: 'address' }, { type: 'uint256' }, { type: 'uint256' }], outputs: [{ type: 'uint256' }] }];
-  for (const n of opt['by-count'] ? [1n, 1n] : [1000n * 10n ** 18n, 250n * 10n ** 18n]) {
-    const hash = await pub.request({ method: 'eth_sendTransaction', params: [{ from: WALLET, to: tokenVars.BAR_ROUTER, value: '0x' + (10n ** 18n).toString(16), data: encodeFunctionData({ abi: mintAbi, functionName: fn, args: [WALLET, n, 500n] }) }] });
+  // Bars #1 and #2 in the test wallet, bought through the router like anyone's; any cap will do for the test wallet.
+  const mintAbi = [{ type: 'function', name: 'mint', stateMutability: 'payable', inputs: [{ type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }], outputs: [{ type: 'uint256' }] }];
+  for (let i = 0; i < 2; i++) {
+    const hash = await pub.request({ method: 'eth_sendTransaction', params: [{ from: WALLET, to: tokenVars.BAR_ROUTER, value: '0x' + (10n ** 18n).toString(16), data: encodeFunctionData({ abi: mintAbi, functionName: 'mint', args: [WALLET, 1n, 500n, 2n ** 256n - 1n] }) }] });
     if ((await pub.waitForTransactionReceipt({ hash })).status !== 'success') throw new Error('minting a test Bar reverted');
   }
-  log('bars: stand-in edition', tokenVars.BARS_EDITION, 'router', tokenVars.BAR_ROUTER, '· 2 Bars in the test wallet');
+  // The edition's own fee-free ETH checkout, against this stand-in: ETH mints in the box go through it.
+  const buyerSrc = process.env.BAR_BUYER_SRC;
+  if (buyerSrc && existsSync(join(CONTRACTS, buyerSrc))) {
+    const made = execFileSync('forge', ['create', `${buyerSrc}:BarBuyer`, '--rpc-url', RPC, '--unlocked', '--from', ACCOUNTS[0], '--broadcast', '--constructor-args', tokenVars.BARS_EDITION], { cwd: CONTRACTS, env: { ...process.env, PATH }, encoding: 'utf8' });
+    const at = made.match(/Deployed to:\s*(0x[0-9a-fA-F]{40})/);
+    if (at) tokenVars.BAR_BUYER = at[1];
+  }
+  if (opt.melt) {
+    await rpc('evm_increaseTime', [8 * 24 * 3600]);
+    await rpc('evm_mine', []);
+    log('bars: clock moved 8 days on, melting open');
+  }
+  log('bars: stand-in edition', tokenVars.BARS_EDITION, 'router', tokenVars.BAR_ROUTER, tokenVars.BAR_BUYER ? `checkout ${tokenVars.BAR_BUYER}` : '(no checkout)', '· 2 Bars in the test wallet');
 }
 log('unions on this copy:');
 await listUnions();

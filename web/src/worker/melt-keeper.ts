@@ -3,7 +3,7 @@
 /// which reverts unless the wallet ends with more ETH than it sent. So a run either makes money or costs only the gas
 /// of a call that never lands: every call is simulated first, and nothing is sent while its last one is pending or
 /// gas is over its cap. The key is its own wallet (not KEEPER_KEY's): it fronts the listings' ETH and keeps the profit.
-import { createPublicClient, createWalletClient, type Address, type Hex, type Transport } from 'viem';
+import { createPublicClient, createWalletClient, parseAbi, type Address, type Hex, type Transport } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { mainnet } from 'viem/chains';
 import { barRouterAbi } from '../app/abi';
@@ -22,6 +22,8 @@ export async function meltKeep(o: {
   chainId: number;
   transport: Transport;
   router: Address;
+  /// The edition: nothing melts until its mint window closes.
+  edition: Address;
   pool: PoolKey;
   maxGwei: number;
   /// Least profit worth a transaction, after gas.
@@ -41,6 +43,7 @@ export async function meltKeep(o: {
     c.getBalance({ address: account.address }),
   ]);
   if (nonce > landed) return console.log('[melt] waiting for its last transaction');
+  if (!(await c.readContract({ address: o.edition, abi: parseAbi(['function isMeltOpen() view returns (bool)']), functionName: 'isMeltOpen' }).catch(() => false))) return;
   const base = block.baseFeePerGas ?? 0n;
   if (base > BigInt(Math.round(o.maxGwei * 1e9))) return console.warn(`[melt] gas at ${base} wei, over the ${o.maxGwei} gwei cap`);
 

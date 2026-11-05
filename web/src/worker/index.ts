@@ -109,11 +109,13 @@ interface Env {
   BALANCE_POOL_HOOKS?: string;
   SWAP_FEE_BPS?: string;
   SWAP_FEE_TO?: string;
-  /// The Bars edition (a Bar holds the $BALANCE deposited at its mint and melts back into it), BarRouter (a Bar from
-  /// ETH, and listed Bars melted for their $BALANCE), the edition's OpenSea slug and the block it was deployed at.
+  /// The Bars edition (a Bar keeps its $BALANCE in its own vault and melts back into everything there), BarRouter (a Bar
+  /// from ETH, and listed Bars melted for their $BALANCE), the edition's OpenSea slug and the block it was deployed at.
+  /// BAR_BUYER is the edition's own fee-free ETH checkout; once set, ETH mints go through it instead of the router.
   /// Unset: no Bars in the swap box.
   BARS_EDITION?: string;
   BAR_ROUTER?: string;
+  BAR_BUYER?: string;
   BARS_SLUG?: string;
   BARS_FROM_BLOCK?: string;
   /// The melt keeper's own wallet (secret): buys Bars listed below the $BALANCE inside, melts and sells, and keeps
@@ -355,6 +357,7 @@ const handler = {
           chainId: Number(env.CHAIN_ID),
           transport: rpcTransport(env),
           router: bars.router,
+          edition: bars.edition,
           pool: ethPool(pool.token, pool.pool),
           maxGwei: Number(env.KEEPER_MAX_GWEI) || 20,
           minProfit: BigInt(env.MELT_MIN_PROFIT_WEI ?? '2000000000000000'),
@@ -516,7 +519,8 @@ const publicConfig = (env: Env) => ({
 function barsConfig(env: Env) {
   const edition = addrOrNull(env.BARS_EDITION), router = addrOrNull(env.BAR_ROUTER);
   if (!edition || !router || !addrOrNull(env.BALANCE_TOKEN)) return null;
-  return { edition: edition.toLowerCase() as Address, router: router.toLowerCase() as Address, fromBlock: String(Number(env.BARS_FROM_BLOCK ?? 0) || 0) };
+  const buyer = addrOrNull(env.BAR_BUYER);
+  return { edition: edition.toLowerCase() as Address, router: router.toLowerCase() as Address, buyer: buyer ? (buyer.toLowerCase() as Address) : null, fromBlock: String(Number(env.BARS_FROM_BLOCK ?? 0) || 0) };
 }
 
 /// BALANCE and its pool for /tokens Buy and Sell, once BALANCE_TOKEN names it; our slice only with somewhere to send it.

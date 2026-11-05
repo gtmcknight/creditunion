@@ -53,7 +53,7 @@ export type Config = {
   balance?: { token: Address; pool: { fee: number; tickSpacing: number; hooks: Address }; feeBps: number; feeTo: Address | null } | null;
   /// The Bars edition, BarRouter and the block the edition was deployed at: Bar in the swap box. Null until the vars
   /// name them.
-  bars?: { edition: Address; router: Address; fromBlock: string } | null;
+  bars?: { edition: Address; router: Address; buyer?: Address | null; fromBlock: string } | null;
   /// The Worker reads a local copy of mainnet (RPC_URL on localhost): sends check the wallet is on it too.
   fork?: boolean;
 };

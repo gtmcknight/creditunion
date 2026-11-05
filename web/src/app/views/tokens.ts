@@ -570,29 +570,40 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   let myBars: { id: bigint; holds: bigint }[] = [];
   let barsListed: { id: string; price: string; hash: string; protocol: string; holds: string }[] = [];
   /// The window, the router's fee, the number the next mint takes (null if the edition doesn't say) and how many are live.
-  /// `step`: an edition priced by count (Bar #n holds n × step, mint takes how many), whose next Bar holds `price`.
-  const bw = { open: false, end: 0, fee: 100n, read: false, next: null as bigint | null, live: 0, step: 0n, price: 0n };
+  /// `step`: Bar #n holds n × step, so the next Bar holds `price`. Melting opens when minting closes (`meltOpen`).
+  const bw = { open: false, end: 0, fee: 100n, read: false, next: null as bigint | null, live: 0, step: 0n, price: 0n, meltOpen: false };
+  /// When melting opens, as "Nov 5".
+  const meltsFrom = () => new Date(bw.end).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const meltLine = () => (bw.meltOpen ? 'melts back anytime' : `melts back from ${meltsFrom()}`);
+  const meltShut = () => bw.read && !bw.meltOpen;
   /// Your Bars picked to melt (all of them, until you pick).
   const barPicks = new Set<string>();
   let barPicked = false;
-  const BARS_ABI = parseAbi(['function step() view returns (uint256)', 'function priceOf(uint256) view returns (uint256)', 'function minted() view returns (uint256)', 'function isOpen() view returns (bool)', 'function mintEnd() view returns (uint64)', 'function mint(address to, uint256 amount) returns (uint256)', 'function melt(uint256 id)']);
+  /// The edition's own ETH checkout (BAR_BUYER): the same pool, no fee of ours; mints to the caller, unused ETH back.
+  const BUYER_ABI = parseAbi(['function buyAndMint(uint256 maxQuantity, uint256 maxBalance, uint256 deadline) payable returns (uint256 first, uint256 quantity, uint256 total, uint256 ethSpent)']);
+  /// Our fee on an ETH mint: none through the edition's checkout, the router's otherwise.
+  const mintFee = () => (config.bars?.buyer ? 0 : Number(bw.fee));
+  const BARS_ABI = parseAbi(['function STEP() view returns (uint256)', 'function priceOf(uint256) view returns (uint256)', 'function minted() view returns (uint256)', 'function isOpen() view returns (bool)', 'function isMeltOpen() view returns (bool)', 'function mintEnd() view returns (uint64)', 'function mintUpTo(address to, uint256 maxQuantity, uint256 maxTotal) returns (uint256 first, uint256 quantity, uint256 total)', 'function meltBatch(uint256[] ids) returns (uint256)']);
+  /// How many numbers a mint may move on when others land first. Bar #N holds N, so at most SLACK more $BALANCE.
+  const SLACK = 100n;
   const readBars = async () => {
     const b = config.bars;
     if (!b) return;
     const json = <T,>(path: string, empty: T) => fetch(path).then((r) => (r.ok ? (r.json() as Promise<T>) : empty)).catch(() => empty);
-    const [mine, listed, open, end, fee, minted, step] = await Promise.all([
+    const [mine, listed, open, end, fee, minted, step, meltOpen] = await Promise.all([
       account ? json<{ items?: { id: string; holds: string }[] }>(`/market/bars/owned/${account}.json`, {}) : Promise.resolve({ items: [] }),
       json<{ items?: typeof barsListed; live?: number }>('/market/bars.json', {}),
       (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'isOpen' }) as Promise<boolean>).catch(() => false),
       (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'mintEnd' }) as Promise<bigint>).then(Number).catch(() => 0),
       (pub.readContract({ address: b.router, abi: barRouterAbi, functionName: 'feeBps' }) as Promise<bigint>).catch(() => 100n),
       (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'minted' }) as Promise<bigint>).catch(() => null),
-      (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'step' }) as Promise<bigint>).catch(() => 0n),
+      (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'STEP' }) as Promise<bigint>).catch(() => 0n),
+      (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'isMeltOpen' }) as Promise<boolean>).catch(() => false),
     ]);
-    const price = step ? ((await pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'priceOf', args: [1n] }).catch(() => 0n)) as bigint) : 0n;
+    const price = step && open ? ((await pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'priceOf', args: [1n] }).catch(() => 0n)) as bigint) : 0n;
     myBars = (mine.items ?? []).map((x) => ({ id: BigInt(x.id), holds: BigInt(x.holds) }));
     barsListed = listed.items ?? [];
-    Object.assign(bw, { open, end: end * 1000, fee, read: true, next: minted === null ? null : minted + 1n, live: listed.live ?? 0, step, price });
+    Object.assign(bw, { open, end: end * 1000, fee, read: true, next: minted === null ? null : minted + 1n, live: listed.live ?? 0, step, price, meltOpen });
     if (app.querySelector('.tk-form') && viewNow() === 'buy') paint();
     void fillCosts();
     for (const id of [...barPicks]) if (!myBars.some((x) => String(x.id) === id)) barPicks.delete(id);
@@ -963,7 +974,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
           <div class="tk-gethead"><h2 class="form-title">You get</h2></div>
           <section class="rule">
             <div class="tk-get tk-panel"><span class="num tk-out" id="m-get">0</span>${pickChip('to')}<span class="tk-usd" id="m-how"></span></div>
-            <div class="tk-lines term-desc">${to === 'balance' ? oneWay('Melt', 'At once · No fee') : oneWay('Melt, then Uniswap', 'Fees included')}</div>
+            <div class="tk-lines term-desc">${to === 'balance' ? oneWay('Melt', `${meltShut() ? 'After minting closes' : 'At once'} · No fee`) : oneWay('Melt, then Uniswap', 'Fees included')}</div>
           </section>
           <div class="submit">${goHtml(idleGo())}${sureHtml()}</div>`;
   }
@@ -1407,7 +1418,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const b = sweeps && market === 'ready' ? viaBatch(wei, laneKey, capOf(lane())) : null;
     const left = b?.out.length && poolOk() && wei - b.spent >= DUST ? wei - b.spent : 0n;
     // Listed Bars melted (Mixed only: their colours are anyone's), and what the ETH they leave buys on Uniswap.
-    barBuy = lane().ink < 0 && bw.read ? barsFor(wei) : null;
+    barBuy = lane().ink < 0 && bw.meltOpen ? barsFor(wei) : null;
     const barLeft = barBuy && poolOk() && wei - barBuy.cost >= DUST ? wei - barBuy.cost : 0n;
     let q: bigint | null = null, qLeft: bigint | null = null, qBarLeft: bigint | null = null;
     if (wei && poolOk()) {
@@ -1768,12 +1779,14 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   /// 1% kept back for the price to move; the router returns what's left), or your own $BALANCE goes in as it is, ink and
   /// all. Listed: the Bar with the most $BALANCE inside per ETH that the amount covers. The way with more inside per
   /// ETH is picked, until you tap the other.
-  let barPlan: { way: 'mint' | 'listed'; amount: bigint; value: bigint; listing?: (typeof barsListed)[number] } | null = null;
-  /// How long minting stays open, counting down: "5h 12m", "12m".
+  /// `cap`: the most $BALANCE a mint may take (a later number, when others land first).
+  let barPlan: { way: 'mint' | 'listed'; amount: bigint; value: bigint; cap: bigint; listing?: (typeof barsListed)[number] } | null = null;
+  /// How long minting stays open, counting down: "7d 23h", "5h 12m", "12m".
   const closesIn = () => {
     const ms = bw.end - Date.now();
     if (ms <= 0) return '0m';
     const h = Math.floor(ms / 3_600_000), mn = Math.floor((ms % 3_600_000) / 60_000);
+    if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
     return `${h ? `${h}h ` : ''}${mn}m`;
   };
   let barWay: 'mint' | 'listed' | null = null;
@@ -1782,50 +1795,46 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     showLeft();
     barPlan = null;
     const ONE = 10n ** 18n;
-    let mintHolds = 0n, mintEth = amt, mintNeed = 0n;
+    let mintHolds = 0n, mintEth = amt, mintNeed = 0n, mintSend = 0n;
+    // A mint takes whatever number is next when it lands, up to SLACK numbers on from the one quoted.
+    const capBal = bw.price + SLACK * bw.step;
     if (bw.open && bw.step && bw.price) {
-      // Priced by count: the next Bar holds a set amount; ETH buys exactly that on Uniswap, our fee and 1% room on top.
+      // The next Bar holds a set amount; ETH buys exactly that on Uniswap, any fee of ours and 1% room on top.
       if (!eth) mintHolds = amt >= bw.price ? bw.price : 0n;
       else {
         await wait(250);
         if (run !== quoteRun) return;
-        const q = await pub.simulateContract({ address: V4_QUOTER, abi: quoterExactOutAbi, functionName: 'quoteExactOutputSingle', args: mintQuoteArgs(m!.key, bw.price) }).then((r) => r.result[0], () => 0n);
+        const quote = (x: bigint) => pub.simulateContract({ address: V4_QUOTER, abi: quoterExactOutAbi, functionName: 'quoteExactOutputSingle', args: mintQuoteArgs(m!.key, x) }).then((r) => r.result[0], () => 0n);
+        const [q, qCap] = await Promise.all([quote(bw.price), quote(capBal)]);
         if (run !== quoteRun || !app.isConnected) return;
-        mintNeed = q ? mintValue(q, Number(bw.fee), 100) : 0n;
+        mintNeed = q ? mintValue(q, mintFee(), 100) : 0n;
         mintEth = mintNeed;
         mintHolds = mintNeed && amt >= mintNeed ? bw.price : 0n;
-      }
-    } else if (bw.open && amt) {
-      if (!eth) mintHolds = amt;
-      else {
-        await wait(250);
-        if (run !== quoteRun) return;
-        const q = await swapQuote(m!, true, (amt * 10_000n) / (10_000n + bw.fee));
-        if (run !== quoteRun || !app.isConnected) return;
-        mintHolds = q ? (((q.out * 99n) / 100n) / ONE) * ONE : 0n; // whole $BALANCE
+        // Sent: enough for a later number too, never more than what's typed. What isn't used comes back.
+        const capEth = qCap ? mintValue(qCap, mintFee(), 100) : mintNeed;
+        mintSend = amt < capEth ? amt : capEth;
       }
     }
-    if (mintHolds < ONE) mintHolds = 0n; // the edition's minimum
     const per = (x: (typeof barsListed)[number]) => (BigInt(x.holds) * ONE) / BigInt(x.price || '1');
     const listing = eth && amt ? (barsListed.filter((x) => BigInt(x.price) <= amt).sort((x, y) => (per(y) > per(x) ? 1 : per(y) < per(x) ? -1 : 0))[0] ?? null) : null;
     const mintPer = mintHolds && mintEth ? (mintHolds * ONE) / mintEth : 0n;
     const best: 'mint' | 'listed' | null = mintHolds || listing ? (listing && (!mintHolds || per(listing) > mintPer) ? 'listed' : 'mint') : null;
     const way = barWay === 'listed' && listing ? 'listed' : barWay === 'mint' && mintHolds ? 'mint' : best;
-    if (way === 'mint') barPlan = { way, amount: mintHolds, value: bw.step && eth ? mintNeed : amt }; // by count, send what it takes, not all that's typed
-    if (way === 'listed' && listing) barPlan = { way, amount: BigInt(listing.holds), value: BigInt(listing.price), listing };
+    if (way === 'mint') barPlan = { way, amount: mintHolds, value: eth ? mintSend : amt, cap: eth || amt > capBal ? capBal : amt };
+    if (way === 'listed' && listing) barPlan = { way, amount: BigInt(listing.holds), value: BigInt(listing.price), cap: 0n, listing };
     const holds = barPlan?.amount ?? 0n;
     const num = barPlan?.listing?.id ?? (bw.next !== null ? String(bw.next) : '');
     setText('bar-get', `${holds ? `<span class="tk-stack"><img src="${barArtSrc(num || 'NEW')}" alt=""></span>` : ''}<span class="num tk-out">${holds ? whole(Number(formatUnits(holds, 18))) : '0'}</span>`);
     // A mint takes the next number unless someone mints first, so it says so.
-    setText('route', !holds ? '' : barPlan!.listing ? `Bar #${barPlan!.listing.id} · ${TOKEN} inside, melts back anytime` : `${num ? `Bar #${num}${bw.step ? '' : ' or later'}` : 'A new Bar'} · ${TOKEN} inside, melts back anytime`);
-    // By count, a mint someone lands first raises the price, and this one reverts rather than paying more.
-    setText('tk-sure', barPlan?.way === 'mint' && bw.step && num ? `If someone mints #${num} first, nothing is spent but gas.` : '');
+    setText('route', !holds ? '' : barPlan!.listing ? `Bar #${barPlan!.listing.id} · ${TOKEN} inside, ${meltLine()}` : `${num ? `Bar #${num}` : 'A new Bar'} · ${TOKEN} inside, ${meltLine()}`);
+    // A mint someone lands first moves this one to the next number.
+    setText('tk-sure', barPlan?.way === 'mint' && num ? `If someone takes #${num} first, you get the next one.${eth ? ' Unused ETH comes back.' : ''}` : '');
     setText('amt-usd', eth ? dollars(Number(formatEther(amt))) : '');
     const rows: string[] = [];
     const radio = (k: 'mint' | 'listed', name: string, sub: string, right: string) =>
       `<button type="button" class="tk-way" role="radio" data-barway="${k}" aria-checked="${way === k}"><span><b>${name}</b><span class="muted small">${sub}</span></span><span class="num">${right}</span></button>`;
     const mintShows = mintHolds || (bw.step ? bw.price : 0n);
-    if (bw.open) rows.push(radio('mint', 'Mint', `${closesIn()} left · ${eth ? 'Fees included' : 'Your ink, no fee'}`, mintShows ? whole(Number(formatUnits(mintShows, 18))) : '—'));
+    if (bw.open) rows.push(radio('mint', 'Mint', `${closesIn()} left · ${eth ? (config.bars?.buyer ? 'Uniswap fee included' : 'Fees included') : 'Your ink, no fee'}`, mintShows ? whole(Number(formatUnits(mintShows, 18))) : '—'));
     if (eth && listing) rows.push(radio('listed', `Bar #${listing.id}`, `OpenSea · ${ethNum(BigInt(listing.price), 4)} ETH`, whole(Number(formatUnits(BigInt(listing.holds), 18)))));
     setText('bar-ways', rows.join(''));
     const closed = bw.read && !bw.open;
@@ -1854,17 +1863,20 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const what = mine.length === 1 ? `Bar #${mine[0].id}` : `${mine.length} Bars`;
     const label = !account ? 'Melt my Bars' : !mine.length ? (myBars.length ? idleGo() : 'Get a Bar') : `Melt ${what}`;
     showLeft();
+    // Until minting closes, the box shows what you'd get and the button says when.
+    const shut = meltShut() && myBars.length > 0;
     if (to === 'balance') {
       setText('m-get', tokAmt(total));
       setText('m-how', total ? 'One for one, the ink it holds' : '');
-      return setGo(label, !account || mine.length > 0 || !myBars.length);
+      return shut ? setGo(`Melts from ${meltsFrom()}`, false) : setGo(label, !account || mine.length > 0 || !myBars.length);
     }
     const run = ++quoteRun;
-    setGo(mine.length ? 'Pricing…' : label, !account || !myBars.length);
+    setGo(shut ? `Melts from ${meltsFrom()}` : mine.length ? 'Pricing…' : label, !shut && (!account || !myBars.length));
     const q = total ? await swapQuote(m!, false, total) : null;
     if (run !== quoteRun || !app.isConnected) return;
     setText('m-get', q ? ethNum(q.net, 4) : '0');
     setText('m-how', total ? `Via ${tokAmt(total)} ${TOKEN}${q ? ` · ${dollars(Number(formatEther(q.net)))}` : ''}` : '');
+    if (shut) return;
     setGo(mine.length && !q ? 'No price right now' : mine.length ? `Melt ${what} for ETH` : label, !account || !myBars.length || (mine.length > 0 && !!q));
   }
 
@@ -2338,7 +2350,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
           chainOn() ? '' : 'Redeemed.',
         );
       }
-      // A Bar: minted through the router with ETH, minted from your own $BALANCE (its leave to the edition first), or a
+      // A Bar: minted with ETH (the edition's checkout, else the router), minted from your own $BALANCE (its leave to the edition first), or a
       // listed one bought straight to your wallet.
       if (v === 'bar' && barPlan && config.bars) {
         const p = barPlan, b = config.bars;
@@ -2352,16 +2364,19 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
               const tx = (await r.json()) as { to?: Address; data?: Hex; value?: string; error?: string };
               if (!r.ok || !tx.to || !tx.data || !tx.value) throw new Error(tx.error ?? 'That Bar can’t be bought right now.');
               steps.push({ to: tx.to, data: tx.data, value: BigInt(tx.value) });
-            } else if (from === 'eth') steps.push(bw.step ? { address: b.router, abi: barRouterAbi, functionName: 'mintCount', args: [account!, 1n, bw.fee], value: p.value } : { address: b.router, abi: barRouterAbi, functionName: 'mint', args: [account!, p.amount, bw.fee], value: p.value });
+            } else if (from === 'eth' && b.buyer) steps.push({ address: b.buyer, abi: BUYER_ABI, functionName: 'buyAndMint', args: [1n, p.cap, BigInt(Math.floor(Date.now() / 1000) + 1200)], value: p.value });
+            else if (from === 'eth') steps.push({ address: b.router, abi: barRouterAbi, functionName: 'mint', args: [account!, 1n, bw.fee, p.cap], value: p.value });
             else {
               const allowed = (await pub.readContract({ address: m!.token, abi: erc20Abi, functionName: 'allowance', args: [account!, b.edition] })) as bigint;
-              if (allowed < p.amount) steps.push({ address: m!.token, abi: erc20Abi, functionName: 'approve', args: [b.edition, p.amount] });
-              // By count the edition reads its second word as how many: one Bar, holding what its number sets.
-              steps.push({ address: b.edition, abi: BARS_ABI, functionName: 'mint', args: [account!, bw.step ? 1n : p.amount] });
+              if (allowed < p.cap) steps.push({ address: m!.token, abi: erc20Abi, functionName: 'approve', args: [b.edition, p.cap] });
+              // One Bar, whichever number is next when it lands, taking at most the cap.
+              steps.push({ address: b.edition, abi: BARS_ABI, functionName: 'mintUpTo', args: [account!, 1n, p.cap] });
             }
             const got = toMe(await sendSteps(steps, note, stepOf(go)), b.edition);
             if (p.listing) barsListed = barsListed.filter((x) => x.id !== p.listing!.id);
-            if (got.length) toast(`Bar #${got[got.length - 1]} is yours, ${tokAmt(p.amount)} ${TOKEN} inside.`, 'ok', 8000);
+            const id = got[got.length - 1];
+            if (id) toast(`Bar #${id} is yours, ${tokAmt(p.listing ? p.amount : BigInt(id) * bw.step)} ${TOKEN} inside.`, 'ok', 8000);
+            else if (!p.listing) toast('Others minted past your limit, so no Bar this time. Only gas was spent.', 'info', 8000);
             await readBars();
           },
           '',
@@ -2377,7 +2392,8 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
           go,
           'Melting…',
           async () => {
-            const steps: Step[] = mine.map((x) => ({ address: edition, abi: BARS_ABI, functionName: 'melt', args: [x.id] }));
+            const steps: Step[] = [];
+            for (let i = 0; i < mine.length; i += 10) steps.push({ address: edition, abi: BARS_ABI, functionName: 'meltBatch', args: [mine.slice(i, i + 10).map((x) => x.id)] });
             let net = 0n;
             if (to === 'eth') {
               const q = await swapQuote(m!, false, total);

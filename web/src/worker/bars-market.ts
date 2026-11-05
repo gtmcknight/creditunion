@@ -1,6 +1,6 @@
-/// The Bars for sale: OpenSea's listings of the Bars edition, each with the $BALANCE inside it as the edition's own
-/// Minted and Melted logs say (a melted Bar is gone, so it is never listed as holding anything).
-import { parseAbiItem, type Address, type PublicClient } from 'viem';
+/// The Bars for sale: OpenSea's listings of the Bars edition, each with the $BALANCE inside it: what its vault holds now
+/// (the edition's Minted logs name each Bar's vault, and a melted Bar is gone, so it is never listed as holding anything).
+import { erc20Abi, parseAbi, parseAbiItem, type Address, type PublicClient } from 'viem';
 import { bestPage, type Listing } from './opensea';
 
 const MINTED = parseAbiItem('event Minted(uint256 indexed id, address indexed to, address vault, uint256 amount)');
@@ -8,15 +8,25 @@ const MELTED = parseAbiItem('event Melted(uint256 indexed id, address indexed ow
 
 export type BarForSale = Listing & { holds: string };
 
-/// Every live Bar and the $BALANCE it holds (wei), from `fromBlock` on.
+/// Every live Bar and the $BALANCE it holds (wei), from `fromBlock` on. A melt hands over everything in the Bar's vault,
+/// the deposit plus anything others sent to it, so that is what a Bar holds: its vault's balance now, or the deposit if
+/// that read fails.
 export async function barHoldings(c: PublicClient, edition: Address, fromBlock: bigint): Promise<Map<string, bigint>> {
-  const [minted, melted] = await Promise.all([
+  const [minted, melted, token] = await Promise.all([
     c.getLogs({ address: edition, event: MINTED, fromBlock, toBlock: 'latest' }),
     c.getLogs({ address: edition, event: MELTED, fromBlock, toBlock: 'latest' }),
+    c.readContract({ address: edition, abi: parseAbi(['function balance() view returns (address)']), functionName: 'balance' }).catch(() => null),
   ]);
+  const gone = new Set(melted.map((l) => String(l.args.id)));
+  const live = minted.filter((l) => l.args.id != null && l.args.amount != null && !gone.has(String(l.args.id)));
+  const held = token
+    ? await c.multicall({ contracts: live.map((l) => ({ address: token, abi: erc20Abi, functionName: 'balanceOf', args: [l.args.vault!] }) as const), allowFailure: true }).catch(() => [])
+    : [];
   const out = new Map<string, bigint>();
-  for (const l of minted) if (l.args.id != null && l.args.amount != null) out.set(String(l.args.id), l.args.amount);
-  for (const l of melted) if (l.args.id != null) out.delete(String(l.args.id));
+  live.forEach((l, i) => {
+    const r = held[i];
+    out.set(String(l.args.id), r?.status === 'success' ? (r.result as bigint) : l.args.amount!);
+  });
   return out;
 }
 

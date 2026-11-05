@@ -40,12 +40,12 @@ interface IPoolManager {
 
 /// @title BarRouter
 /// @notice Bars from ETH, in one transaction each way:
-///         - `mint`: buy exactly the $BALANCE a Bar should hold in the ETH/$BALANCE pool and mint the Bar to you
-///           (`mintCount` for an edition where each Bar's number sets what it holds).
+///         - `mint`: buy exactly the $BALANCE the next Bars hold in the ETH/$BALANCE pool and mint them to you.
 ///         - `meltForBalance`: buy Bars listed on Seaport, melt them, and send you the $BALANCE that was inside.
 ///         - `meltForEth`: the same, then sell that $BALANCE in the pool; reverts unless you end with more ETH than
 ///           you sent, by at least `minProfit`.
-///         Nothing is held between transactions. Unused ETH comes back.
+///         Nothing is held between transactions. Unused ETH comes back. Melting opens when the mint window closes;
+///         until then both melts revert MeltClosed.
 /// @dev A Bar takes the ink of the $BALANCE deposited into it, which here is the pool's mix: the router passes on the
 ///      $BALANCE the pool gave it. Minting from your own wallet keeps your own ink.
 contract BarRouter is ReentrancyGuardTransient {
@@ -69,7 +69,9 @@ contract BarRouter is ReentrancyGuardTransient {
     address public immutable hooks;
 
     event FeeSet(uint256 feeBps);
-    event Minted(address indexed buyer, address indexed to, uint256 indexed id, uint256 amount, uint256 spent, uint256 fee);
+    event Minted(
+        address indexed buyer, address indexed to, uint256 indexed id, uint256 quantity, uint256 amount, uint256 spent, uint256 fee
+    );
     event Melted(address indexed buyer, uint256 bars, uint256 spent, uint256 balanceOut, uint256 ethOut);
 
     error FeeTooHigh();
@@ -83,6 +85,9 @@ contract BarRouter is ReentrancyGuardTransient {
     error TooLittleBalance(uint256 balanceOut);
     error NoProfit(uint256 ethBack);
     error PaymentFailed();
+    error PriceChanged(uint256 amount);
+    error PartialSwap(uint256 amount);
+    error MeltClosed();
 
     constructor(
         IBars bars_,
@@ -118,37 +123,30 @@ contract BarRouter is ReentrancyGuardTransient {
 
     // ---------------------------------------------------------------- mint
 
-    /// @notice Buy exactly `amount` $BALANCE with the ETH sent and mint a Bar holding it to `to`. msg.value is the
-    ///         most you pay, fee included; the rest comes back.
+    /// @notice Buy exactly what the next `quantity` Bars hold (Bar #n holds n $BALANCE) and mint them to `to`. msg.value
+    ///         is the most you pay, fee included; the rest comes back.
     /// @param maxFeeBps The fee rate you were quoted; reverts if it has been raised since.
-    function mint(address to, uint256 amount, uint256 maxFeeBps) external payable nonReentrant returns (uint256 id) {
-        if (feeBps > maxFeeBps) revert FeeChanged(feeBps);
-        if (amount == 0) revert ZeroAmount();
-        uint256 spent = abi.decode(poolManager.unlock(abi.encode(true, amount, msg.value)), (uint256));
-        uint256 fee = spent * feeBps / 10_000;
-        if (spent + fee > msg.value) revert Underpaid(spent + fee);
-
-        balance.forceApprove(address(bars), amount);
-        id = bars.mint(to, amount);
-        emit Minted(msg.sender, to, id, amount, spent, fee);
-        _settle(fee, msg.value - spent);
-    }
-
-    /// @notice For an edition priced by count (each Bar holds a fixed amount set by its number): buy exactly what the next
-    ///         `quantity` Bars take and mint them to `to`. msg.value is the most you pay, fee included; the rest comes
-    ///         back.
+    /// @param maxAmount What those Bars took when you were quoted. A mint that lands first makes the next number dearer,
+    ///        and this reverts rather than buy it.
     /// @return first The first id minted.
-    function mintCount(address to, uint256 quantity, uint256 maxFeeBps) external payable nonReentrant returns (uint256 first) {
-        if (feeBps > maxFeeBps) revert FeeChanged(feeBps);
+    function mint(address to, uint256 quantity, uint256 maxFeeBps, uint256 maxAmount)
+        external
+        payable
+        nonReentrant
+        returns (uint256 first)
+    {
         if (quantity == 0) revert ZeroAmount();
         uint256 amount = bars.priceOf(quantity);
+        if (amount > maxAmount) revert PriceChanged(amount);
+        uint256 bps = feeBps;
+        if (bps > maxFeeBps) revert FeeChanged(bps);
         uint256 spent = abi.decode(poolManager.unlock(abi.encode(true, amount, msg.value)), (uint256));
-        uint256 fee = spent * feeBps / 10_000;
+        uint256 fee = spent * bps / 10_000;
         if (spent + fee > msg.value) revert Underpaid(spent + fee);
 
         balance.forceApprove(address(bars), amount);
-        first = bars.mint(to, quantity);
-        emit Minted(msg.sender, to, first, amount, spent, fee);
+        first = bars.mint(to, quantity, bars.minted() + 1, amount);
+        emit Minted(msg.sender, to, first, quantity, amount, spent, fee);
         _settle(fee, msg.value - spent);
     }
 
@@ -164,13 +162,14 @@ contract BarRouter is ReentrancyGuardTransient {
         nonReentrant
         returns (uint256 balanceOut)
     {
-        if (feeBps > maxFeeBps) revert FeeChanged(feeBps);
+        uint256 bps = feeBps;
+        if (bps > maxFeeBps) revert FeeChanged(bps);
         uint256 bought;
         uint256 spent;
         (bought, spent, balanceOut) = _buyAndMelt(orders, minBought);
         if (balanceOut < minBalance) revert TooLittleBalance(balanceOut);
-        uint256 fee = spent * feeBps / 10_000;
-        if (msg.value - spent < fee) revert Underpaid(spent + fee);
+        uint256 fee = spent * bps / 10_000;
+        if (spent + fee > msg.value) revert Underpaid(spent + fee);
 
         balance.safeTransfer(msg.sender, balanceOut);
         emit Melted(msg.sender, bought, spent, balanceOut, 0);
@@ -195,7 +194,9 @@ contract BarRouter is ReentrancyGuardTransient {
         if (!_send(msg.sender, ethBack)) revert PaymentFailed();
     }
 
-    /// @dev Buys what is still listed into this contract and melts each Bar bought.
+    /// @dev Buys what is still listed into this contract and melts each Bar bought. A listing whose Bar was melted or
+    ///      moved since it was signed is still a live order to Seaport, and its transfer would revert the whole fill, so
+    ///      it stays out, like the listings Seaport skips itself.
     /// @return bought How many Bars came through.
     /// @return spent What the listings cost, from Seaport's own record of what it paid out (never a balance delta, so
     ///         ETH pushed here by a seller or royalty wallet mid-call cannot distort it).
@@ -204,49 +205,72 @@ contract BarRouter is ReentrancyGuardTransient {
         internal
         returns (uint256 bought, uint256 spent, uint256 balanceOut)
     {
+        if (!bars.isMeltOpen()) revert MeltClosed();
         uint256 n = orders.length;
-        FulfillmentComponent[][] memory offerF = new FulfillmentComponent[][](n);
+        bool[] memory held = new bool[](n);
+        uint256 kept;
         uint256 nc;
         for (uint256 i; i < n; ++i) {
             OfferItem[] calldata offer = orders[i].parameters.offer;
             if (offer.length != 1 || offer[0].itemType != ItemType.ERC721 || offer[0].token != address(bars)) {
                 revert NotABar(i);
             }
-            offerF[i] = new FulfillmentComponent[](1);
-            offerF[i][0] = FulfillmentComponent(i, 0);
+            if (!_holds(orders[i].parameters.offerer, offer[0].identifierOrCriteria)) continue;
+            held[i] = true;
+            ++kept;
             nc += orders[i].parameters.consideration.length;
         }
+        if (kept < minBought || kept == 0) revert TooFewBought(kept);
+
+        AdvancedOrder[] memory live = new AdvancedOrder[](kept);
+        FulfillmentComponent[][] memory offerF = new FulfillmentComponent[][](kept);
         FulfillmentComponent[][] memory considF = new FulfillmentComponent[][](nc);
         uint256 k;
+        uint256 c;
         for (uint256 i; i < n; ++i) {
+            if (!held[i]) continue;
+            live[k] = orders[i];
+            offerF[k] = new FulfillmentComponent[](1);
+            offerF[k][0] = FulfillmentComponent(k, 0);
             uint256 m = orders[i].parameters.consideration.length;
             for (uint256 j; j < m; ++j) {
-                considF[k] = new FulfillmentComponent[](1);
-                considF[k++][0] = FulfillmentComponent(i, j);
+                considF[c] = new FulfillmentComponent[](1);
+                considF[c++][0] = FulfillmentComponent(k, j);
             }
+            ++k;
         }
 
         (bool[] memory available, Execution[] memory executions) = seaport.fulfillAvailableAdvancedOrders{
             value: msg.value
-        }(orders, new CriteriaResolver[](0), offerF, considF, bytes32(0), address(this), n);
+        }(live, new CriteriaResolver[](0), offerF, considF, bytes32(0), address(this), kept);
         for (uint256 i; i < executions.length; ++i) {
             if (executions[i].item.itemType == ItemType.NATIVE) spent += executions[i].item.amount;
         }
 
         uint256 before = balance.balanceOf(address(this));
-        for (uint256 i; i < n; ++i) {
+        for (uint256 i; i < kept; ++i) {
             if (!available[i]) continue;
-            bars.melt(orders[i].parameters.offer[0].identifierOrCriteria);
+            bars.melt(live[i].parameters.offer[0].identifierOrCriteria);
             ++bought;
         }
         if (bought < minBought || bought == 0) revert TooFewBought(bought);
         balanceOut = balance.balanceOf(address(this)) - before;
     }
 
+    /// @dev Whether `seller` still holds Bar `id`. A melted Bar has no owner, and the edition reverts.
+    function _holds(address seller, uint256 id) internal view returns (bool) {
+        try bars.ownerOf(id) returns (address owner) {
+            return owner == seller;
+        } catch {
+            return false;
+        }
+    }
+
     // ---------------------------------------------------------------- the pool
 
     /// @dev Inside `unlock`. Buying: exactly `amount` $BALANCE for ETH, paying at most `maxEth`. Selling: exactly
-    ///      `amount` $BALANCE for ETH. Both tokens land in this contract. Returns the ETH paid or received.
+    ///      `amount` $BALANCE for ETH. A pool that fills less reverts, so nothing is left here. Both tokens land in this
+    ///      contract. Returns the ETH paid or received.
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
         if (msg.sender != address(poolManager)) revert NotPoolManager();
         (bool buying, uint256 amount, uint256 maxEth) = abi.decode(data, (bool, uint256, uint256));
@@ -254,15 +278,19 @@ contract BarRouter is ReentrancyGuardTransient {
         if (buying) {
             int256 delta = poolManager.swap(key, IPoolManager.SwapParams(true, int256(amount), MIN_SQRT_PRICE + 1), "");
             uint256 eth = uint256(-int256(int128(delta >> 128)));
+            uint256 got = uint256(int256(int128(delta)));
+            if (got != amount) revert PartialSwap(got);
             if (eth > maxEth) revert Underpaid(eth);
             poolManager.settle{value: eth}();
-            poolManager.take(address(balance), address(this), uint256(int256(int128(delta))));
+            poolManager.take(address(balance), address(this), got);
             return abi.encode(eth);
         }
         int256 d = poolManager.swap(key, IPoolManager.SwapParams(false, -int256(amount), MAX_SQRT_PRICE - 1), "");
         uint256 out = uint256(int256(int128(d >> 128)));
+        uint256 sold = uint256(-int256(int128(d)));
+        if (sold != amount) revert PartialSwap(sold);
         poolManager.sync(address(balance));
-        balance.safeTransfer(address(poolManager), uint256(-int256(int128(d))));
+        balance.safeTransfer(address(poolManager), sold);
         poolManager.settle();
         poolManager.take(address(0), address(this), out);
         return abi.encode(out);

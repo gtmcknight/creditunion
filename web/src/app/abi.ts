@@ -6366,41 +6366,17 @@ export const barRouterAbi = [
         "internalType": "address"
       },
       {
-        "name": "amount",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "maxFeeBps",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "id",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "mintCount",
-    "inputs": [
-      {
-        "name": "to",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
         "name": "quantity",
         "type": "uint256",
         "internalType": "uint256"
       },
       {
         "name": "maxFeeBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxAmount",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -6571,6 +6547,12 @@ export const barRouterAbi = [
         "internalType": "uint256"
       },
       {
+        "name": "quantity",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
         "name": "amount",
         "type": "uint256",
         "indexed": false,
@@ -6609,6 +6591,11 @@ export const barRouterAbi = [
   },
   {
     "type": "error",
+    "name": "MeltClosed",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "NoProfit",
     "inputs": [
       {
@@ -6641,8 +6628,30 @@ export const barRouterAbi = [
   },
   {
     "type": "error",
+    "name": "PartialSwap",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "PaymentFailed",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PriceChanged",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",

@@ -338,7 +338,7 @@ const BAR_EVENTS = parseAbi([
 type BarState = { v: 1; last: number; items: Activity[] };
 
 /// Bars minted and melted, newest first, scanned forward from where the last scan stopped like readActivity. Every
-/// mint and melt on the edition, whichever site it came from: the window is one day, and the feed shows it moving.
+/// mint and melt on the edition, whichever site it came from: the window is eight days, and the feed shows it moving.
 export async function readBarActivity(c: PublicClient, cache: Cache, stateKey: string, cfg: { edition: Address; from: bigint }): Promise<Activity[]> {
   const hit = await cache.match(stateKey);
   const st: BarState = hit ? ((await hit.json()) as BarState) : { v: 1, last: Number(cfg.from) - 1, items: [] };
