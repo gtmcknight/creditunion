@@ -6,7 +6,7 @@
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/rpc", "/unions.json", "/token-batches.json", "/passes", "/bids/*", "/activity", "/activity.json", "/live", "/ratings", "/edition/*", "/art/*", "/statement/*", "/balance-art/*", "/balance", "/balances/*", "/config.json", "/opensea/*", "/ens", "/ens/*", "/avatar/*", "/owner/*", "/", "/parties", "/about", "/about/*", "/docs", "/docs/*", "/how", "/how/*", "/faq", "/auctions", "/create", "/unions", "/union/*", "/party/*", "/b/*", "/mint", "/og", "/og/party/*", "/og/sample/*", "/me", "/member/*", "/credit/*", "/og/credit/*", "/credits", "/palette", "/palette/*", "/eights", "/eights/*", "/print", "/print/*", "/weight", "/weight/*", "/time", "/rating", "/bits", "/*.bin", "/wall/*", "/pictures/*", "/placed/*", "/allowlist/*", "/market/*", "/statements/*", "/locks/*", "/font", "/market.json", "/market-top.json", "/burns"]
+    "run_worker_first": ["/rpc", "/unions.json", "/token-batches.json", "/passes", "/bids/*", "/activity", "/activity.json", "/live", "/ratings", "/edition/*", "/art/*", "/statement/*", "/bar/*", "/balance-art/*", "/balance", "/balances/*", "/config.json", "/opensea/*", "/ens", "/ens/*", "/avatar/*", "/owner/*", "/", "/parties", "/about", "/about/*", "/docs", "/docs/*", "/how", "/how/*", "/faq", "/auctions", "/create", "/unions", "/union/*", "/party/*", "/b/*", "/mint", "/og", "/og/party/*", "/og/sample/*", "/me", "/member/*", "/credit/*", "/og/credit/*", "/credits", "/palette", "/palette/*", "/eights", "/eights/*", "/print", "/print/*", "/weight", "/weight/*", "/time", "/rating", "/bits", "/*.bin", "/wall/*", "/pictures/*", "/placed/*", "/allowlist/*", "/market/*", "/statements/*", "/locks/*", "/font", "/market.json", "/market-top.json", "/burns"]
   },
   // Public config served at /config.json. Secrets (`wrangler secret put <NAME>`): RPC_URL, OPENSEA_API_KEY, and optionally
   // OPENSEA_API_KEY_2 (a spare when the first is rate limited), ENS_RPC, KEEPER_KEY (the keeper's gas-only key).
@@ -46,7 +46,15 @@
     "BALANCE_POOL_TICK_SPACING": "30",
     "BALANCE_POOL_HOOKS": "0x2EEF0e2a9a652d755AccAD95a24541A98B5CA000",
     "SWAP_FEE_BPS": "100",
-    "SWAP_FEE_TO": "0xFE4761e66C2A37492871d30d0e83bcBC454A7C10"
+    "SWAP_FEE_TO": "0xFE4761e66C2A37492871d30d0e83bcBC454A7C10",
+    // Bars (live Nov 11): the edition, its own fee-free ETH checkout, the block the edition was made in, its OpenSea
+    // collection, and when minting opens to everyone (Nov 14, 11:00 ET; the edition says so too). No BAR_ROUTER: ours
+    // isn't deployed, so no listed-Bar melts or keeper.
+    "BARS_EDITION": "0x7d9EdeA03dD97361c3e21389B95bc327e22752aE",
+    "BAR_BUYER": "0xd49A3720bcd150E249414fB03E14eA5D4E007384",
+    "BARS_FROM_BLOCK": "26392068",
+    "BARS_SLUG": "bars-332744069",
+    "BARS_PUBLIC_AT": "1794672000"
   },
   // creditunion.party, eighty.fun and eighty.rhps.fun are old names kept so their links still work. A fork puts its own domain here.
   "routes": [

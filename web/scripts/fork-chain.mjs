@@ -9,6 +9,7 @@
 //   node scripts/fork-chain.mjs --tokens --vault    …and stage 2: a test vault + TokenAdapter, active (30 min warped)
 //   node scripts/fork-chain.mjs --bars              a stand-in Bars edition open 8 days (Bar #n holds n $BALANCE), BarRouter,
 //                                                   and Bars #1 and #2 in the test wallet
+//   node scripts/fork-chain.mjs --bars --soon 38    …opening 38 hours from now instead: the days before a mint, no Bars yet
 //   node scripts/fork-chain.mjs --bars --melt       …then the clock past the window: minting closed, melting open
 //                                                   (with BAR_BUYER_SRC=<path to its .sol, from contracts/>, --bars also
 //                                                   deploys the edition's own ETH checkout as BAR_BUYER)
@@ -22,7 +23,7 @@ import { parseArgs } from 'node:util';
 import { createPublicClient, encodeFunctionData, formatEther, http } from 'viem';
 import { batchAbi, creditsAbi, factoryAbi } from '../src/app/abi.ts';
 
-const { values: opt } = parseArgs({ options: { credits: { type: 'string', default: '0' }, warp: { type: 'string', default: '0' }, tokens: { type: 'boolean', default: false }, vault: { type: 'boolean', default: false }, bars: { type: 'boolean', default: false }, melt: { type: 'boolean', default: false } } });
+const { values: opt } = parseArgs({ options: { credits: { type: 'string', default: '0' }, warp: { type: 'string', default: '0' }, tokens: { type: 'boolean', default: false }, vault: { type: 'boolean', default: false }, bars: { type: 'boolean', default: false }, soon: { type: 'string', default: '0' }, melt: { type: 'boolean', default: false } } });
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CONTRACTS = join(WEB, '..', 'contracts');
 const PORT = Number(process.env.ANVIL_PORT ?? 8549);
@@ -132,14 +133,15 @@ if (opt.tokens) {
 if (opt.bars) {
   const out = execFileSync('forge', ['script', 'script/DeployBars.s.sol', '--rpc-url', RPC, '--unlocked', '--sender', ACCOUNTS[0], '--broadcast', '--slow'], {
     cwd: CONTRACTS,
-    env: { ...process.env, PATH, FORK: 'true', FEE_RECIPIENT: ACCOUNTS[0] },
+    env: { ...process.env, PATH, FORK: 'true', FEE_RECIPIENT: ACCOUNTS[0], START_IN_HOURS: String(Number(opt.soon) || 0) },
     encoding: 'utf8',
   });
   for (const [, k, v] of out.matchAll(/^\s*(BARS_EDITION|BAR_ROUTER)\s+(0x[0-9a-fA-F]{40})/gm)) tokenVars[k] = v;
   tokenVars.BARS_FROM_BLOCK = String(await pub.getBlockNumber());
   // Bars #1 and #2 in the test wallet, bought through the router like anyone's; any cap will do for the test wallet.
+  // None when the edition opens later (--soon): nothing can mint yet.
   const mintAbi = [{ type: 'function', name: 'mint', stateMutability: 'payable', inputs: [{ type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }], outputs: [{ type: 'uint256' }] }];
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < (Number(opt.soon) > 0 ? 0 : 2); i++) {
     const hash = await pub.request({ method: 'eth_sendTransaction', params: [{ from: WALLET, to: tokenVars.BAR_ROUTER, value: '0x' + (10n ** 18n).toString(16), data: encodeFunctionData({ abi: mintAbi, functionName: 'mint', args: [WALLET, 1n, 500n, 2n ** 256n - 1n] }) }] });
     if ((await pub.waitForTransactionReceipt({ hash })).status !== 'success') throw new Error('minting a test Bar reverted');
   }
@@ -155,7 +157,7 @@ if (opt.bars) {
     await rpc('evm_mine', []);
     log('bars: clock moved 8 days on, melting open');
   }
-  log('bars: stand-in edition', tokenVars.BARS_EDITION, 'router', tokenVars.BAR_ROUTER, tokenVars.BAR_BUYER ? `checkout ${tokenVars.BAR_BUYER}` : '(no checkout)', '· 2 Bars in the test wallet');
+  log('bars: stand-in edition', tokenVars.BARS_EDITION, 'router', tokenVars.BAR_ROUTER, tokenVars.BAR_BUYER ? `checkout ${tokenVars.BAR_BUYER}` : '(no checkout)', Number(opt.soon) > 0 ? `· opens in ${opt.soon}h, no Bars yet` : '· 2 Bars in the test wallet');
 }
 log('unions on this copy:');
 await listUnions();

@@ -9,7 +9,8 @@ import {ISeaport} from "../src/interfaces/ISeaport.sol";
 import {StandInBars} from "../src/mocks/StandInBars.sol";
 
 /// @notice BarRouter against a Bars edition: BARS names the real one; without it (local copies of mainnet only) a
-///         stand-in edition opens for WINDOW_HOURS (24) from now, priced by count when STEP (wei per number) is set.
+///         stand-in edition opens for WINDOW_HOURS (192) from now, or from START_IN_HOURS on, or at START_AT (unix
+///         seconds): the days before a mint.
 ///         FEE_RECIPIENT takes the router's fee, FEE_BPS (0; it can raise it later with setFee, up to 5%).
 ///     FEE_RECIPIENT=… BARS=… forge script script/DeployBars.s.sol --rpc-url $MAINNET_RPC --account deployer --broadcast
 contract DeployBars is Script {
@@ -23,7 +24,7 @@ contract DeployBars is Script {
         vm.startBroadcast();
         if (bars == address(0)) {
             require(block.chainid == 1 && vm.envOr("FORK", false), "BARS, or FORK=true on a local copy");
-            uint64 start = uint64(block.timestamp);
+            uint64 start = uint64(vm.envOr("START_AT", block.timestamp + vm.envOr("START_IN_HOURS", uint256(0)) * 1 hours));
             bars = address(new StandInBars(BALANCE, start, start + uint64(vm.envOr("WINDOW_HOURS", uint256(192)) * 1 hours)));
         }
         BarRouter router = new BarRouter(

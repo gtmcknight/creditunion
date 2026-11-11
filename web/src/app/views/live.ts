@@ -1,5 +1,5 @@
 import type { Address, Hex } from 'viem';
-import { barArtSrc } from '../../shared/bars';
+import { barArt } from '../../shared/bars';
 import { onReturn } from '../visible';
 import { explorer, session } from '../chain';
 import { hydrate, who } from '../ens';
@@ -154,7 +154,7 @@ function row(x: Item, o: { here?: boolean; who?: boolean } = {}) {
   // Credits only: a Statement goes by its words, since a redeemed one's art is Jack's blank WITHDRAWN card.
   const ids = x.ids ?? [];
   const thumbs = x.bar
-    ? `<span class="live-art"><img src="${barArtSrc(String(x.bar))}" alt="" title="Bar #${x.bar}" loading="lazy" decoding="async"></span>`
+    ? `<span class="live-art"><img src="${barArt(x.bar)}" alt="" title="Bar #${x.bar}" loading="lazy" decoding="async"></span>`
     : ids.length
     ? `<span class="live-art">${ids
         .slice(0, THUMBS)

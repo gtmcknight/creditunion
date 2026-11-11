@@ -112,12 +112,16 @@ interface Env {
   /// The Bars edition (a Bar keeps its $BALANCE in its own vault and melts back into everything there), BarRouter (a Bar
   /// from ETH, and listed Bars melted for their $BALANCE), the edition's OpenSea slug and the block it was deployed at.
   /// BAR_BUYER is the edition's own fee-free ETH checkout; once set, ETH mints go through it instead of the router.
-  /// Unset: no Bars in the swap box.
+  /// BARS_EDITION alone is enough to show Bars: without a router or checkout, ETH buys listed Bars and $BALANCE mints.
+  /// BARS_PUBLIC_AT (unix seconds): until then only a wallet list can mint, so the box sends minting to the edition's
+  /// own page and mints here from that time on. Unset: anyone can mint from the start.
+  /// BARS_EDITION unset: no Bars in the swap box.
   BARS_EDITION?: string;
   BAR_ROUTER?: string;
   BAR_BUYER?: string;
   BARS_SLUG?: string;
   BARS_FROM_BLOCK?: string;
+  BARS_PUBLIC_AT?: string;
   /// The melt keeper's own wallet (secret): buys Bars listed below the $BALANCE inside, melts and sells, and keeps
   /// what that makes. MELT_MIN_PROFIT_WEI is the least worth a transaction after gas (default 0.002 ETH).
   MELT_KEEPER_KEY?: string;
@@ -349,20 +353,20 @@ const handler = {
     // The keeper runs every 5 minutes, as before.
     if (new Date(_event.scheduledTime).getUTCMinutes() % 5 !== 0) return;
     const bars = barsConfig(env), pool = balanceConfig(env);
-    if (env.MELT_KEEPER_KEY && bars && pool && env.OPENSEA_API_KEY && env.BARS_SLUG) {
-      const osKey = env.OPENSEA_API_KEY, slug = env.BARS_SLUG;
+    if (env.MELT_KEEPER_KEY && bars?.router && pool && env.OPENSEA_API_KEY && env.BARS_SLUG) {
+      const osKey = env.OPENSEA_API_KEY, slug = env.BARS_SLUG, router = bars.router;
       ctx.waitUntil(
         meltKeep({
           key: env.MELT_KEEPER_KEY,
           chainId: Number(env.CHAIN_ID),
           transport: rpcTransport(env),
-          router: bars.router,
+          router,
           edition: bars.edition,
           pool: ethPool(pool.token, pool.pool),
           maxGwei: Number(env.KEEPER_MAX_GWEI) || 20,
           minProfit: BigInt(env.MELT_MIN_PROFIT_WEI ?? '2000000000000000'),
           listings: async () => barsForSale(osKey, slug, bars.edition, await barHoldings(client(env) as never, bars.edition, BigInt(bars.fromBlock))) as never,
-          fill: (l) => fillFor(osKey, l.hash, l.protocol, bars.router),
+          fill: (l) => fillFor(osKey, l.hash, l.protocol, router),
         }).catch((e) => console.error('[melt] run failed', safeError(e))),
       );
     }
@@ -515,12 +519,19 @@ const publicConfig = (env: Env) => ({
   ...(localRpc(env) ? { fork: true } : {}),
 });
 
-/// Bars for the swap box, once BARS_EDITION and BAR_ROUTER name them (and $BALANCE trades, which minting needs).
+/// Bars for the swap box, once BARS_EDITION names the edition (and $BALANCE trades, which minting needs). The router
+/// and the edition's checkout are each optional; `publicAt` is when minting stops being for a wallet list alone.
 function barsConfig(env: Env) {
   const edition = addrOrNull(env.BARS_EDITION), router = addrOrNull(env.BAR_ROUTER);
-  if (!edition || !router || !addrOrNull(env.BALANCE_TOKEN)) return null;
+  if (!edition || !addrOrNull(env.BALANCE_TOKEN)) return null;
   const buyer = addrOrNull(env.BAR_BUYER);
-  return { edition: edition.toLowerCase() as Address, router: router.toLowerCase() as Address, buyer: buyer ? (buyer.toLowerCase() as Address) : null, fromBlock: String(Number(env.BARS_FROM_BLOCK ?? 0) || 0) };
+  return {
+    edition: edition.toLowerCase() as Address,
+    router: router ? (router.toLowerCase() as Address) : null,
+    buyer: buyer ? (buyer.toLowerCase() as Address) : null,
+    fromBlock: String(Number(env.BARS_FROM_BLOCK ?? 0) || 0),
+    publicAt: Number(env.BARS_PUBLIC_AT ?? 0) || 0,
+  };
 }
 
 /// BALANCE and its pool for /tokens Buy and Sell, once BALANCE_TOKEN names it; our slice only with somewhere to send it.
@@ -1360,7 +1371,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       const picks = (Array.isArray(b.listings) ? b.listings : []).map((l) => ({ hash: String(l.hash ?? ''), protocol: String(l.protocol ?? '') }));
       if (!buyer || !picks.length || picks.length > MAX_STATEMENTS || picks.some((p) => !/^0x[0-9a-fA-F]{64}$/.test(p.hash) || !/^0x[0-9a-fA-F]{40}$/.test(p.protocol))) return text('bad request', 400);
       if (b.melt) {
-        const fills = (await Promise.all(picks.map((x) => fillFor(env.OPENSEA_API_KEY!, x.hash, x.protocol, cfg.router).catch(() => null)))).filter((f): f is NonNullable<typeof f> => !!f);
+        const router = cfg.router;
+        if (!router) return text('Bars are not configured', 501);
+        const fills = (await Promise.all(picks.map((x) => fillFor(env.OPENSEA_API_KEY!, x.hash, x.protocol, router).catch(() => null)))).filter((f): f is NonNullable<typeof f> => !!f);
         if (!fills.length) throw new Error('Those Bars just sold. Pick again.');
         return Response.json({ orders: fills.map((f) => f.order), value: fills.reduce((a, f) => a + f.value, 0n).toString() }, { headers: { 'cache-control': 'no-store' } });
       }
@@ -1987,6 +2000,34 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext, url: URL): 
       const res = new Response('art unavailable', { status: 502, headers: { ...svgHeaders, 'cache-control': 'no-store' } });
       ctx.waitUntil(cache.put(key, new Response('art unavailable', { status: 502, headers: { ...svgHeaders, 'cache-control': 'public, max-age=10' } })));
       return res;
+    }
+  }
+
+  // /bar/<n>.svg: Bar #n as the edition draws it, framed to its number for the site's small tiles (frameBar). Fixed once
+  // minted and kept after a melt, so each data center keeps it a year. A number not made yet is a preview in the pool's
+  // colors (the mix an ETH mint through the pool deposits, as the edition's own page shows it), kept a minute.
+  const bar = url.pathname.match(/^\/bar\/([1-9]\d{0,4})\.svg$/);
+  if (bar) {
+    const cache = caches.default;
+    const n = BigInt(bar[1]);
+    const key = new Request(`${url.origin}/bar/${n}.svg`);
+    const hit = await cache.match(key);
+    if (hit) return hit;
+    const svgHeaders = { 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" };
+    const edition = addrOrNull(env.BARS_EDITION), token = addrOrNull(env.BALANCE_TOKEN);
+    if (!edition || !token || n > 10_000n) return new Response('no such Bar', { status: 404, headers: { ...svgHeaders, 'cache-control': 'public, max-age=60' } });
+    if (await limited(env.RL_ART, req)) return text('slow down', 429);
+    const c = client(env);
+    try {
+      const made = n <= ((await c.readContract({ address: edition, abi: barArtAbi, functionName: 'minted' })) as bigint);
+      const svg = made
+        ? await c.readContract({ address: edition, abi: barArtAbi, functionName: 'image', args: [n] })
+        : await c.readContract({ address: edition, abi: barArtAbi, functionName: 'art', args: [n, inkShare(await c.readContract({ address: token, abi: barArtAbi, functionName: 'inkOf', args: [POOL_MANAGER] }), n * 10n ** 18n)] });
+      const res = new Response(frameBar(svg, bar[1].length), { headers: { 'content-type': 'image/svg+xml', 'cache-control': made ? 'public, max-age=31536000, immutable' : 'public, max-age=60', ...svgHeaders } });
+      ctx.waitUntil(cache.put(key, res.clone()));
+      return res;
+    } catch {
+      return new Response('Bar unavailable', { status: 502, headers: { ...svgHeaders, 'cache-control': 'no-store' } });
     }
   }
 
@@ -3151,7 +3192,7 @@ async function rpc(req: Request, env: Env, url: URL, ctx: ExecutionContext): Pro
   // The token the adapter converts into is readable as soon as the adapter is named (balances, its launch gate), not
   // only once BALANCE_TOKEN is set.
   const adapterToken = await tokenOf(env, ctx);
-  const allowed = new Set([env.CREDITS, addrOrNull(env.STATEMENTS), env.FACTORY, env.SWEEPER, addrOrNull(env.FORMATS), addrOrNull(env.TOKEN_FACTORY), addrOrNull(env.TOKEN_ADAPTER), addrOrNull(env.TOKEN_FORMATS), tokenSweeper(env), adapterToken, addrOrNull(env.CC_CORE), addrOrNull(env.INSTANT_VAULT), addrOrNull(env.BARS_EDITION), addrOrNull(env.BAR_ROUTER), ...swapTargets(env), ...(localRpc(env) ? [SEAPORT_ADDR] : [])].map((a) => a?.toLowerCase()).filter(Boolean));
+  const allowed = new Set([env.CREDITS, addrOrNull(env.STATEMENTS), env.FACTORY, env.SWEEPER, addrOrNull(env.FORMATS), addrOrNull(env.TOKEN_FACTORY), addrOrNull(env.TOKEN_ADAPTER), addrOrNull(env.TOKEN_FORMATS), tokenSweeper(env), adapterToken, addrOrNull(env.CC_CORE), addrOrNull(env.INSTANT_VAULT), addrOrNull(env.BARS_EDITION), addrOrNull(env.BAR_ROUTER), addrOrNull(env.BAR_BUYER), ...swapTargets(env), ...(localRpc(env) ? [SEAPORT_ADDR] : [])].map((a) => a?.toLowerCase()).filter(Boolean));
   const clean: { jsonrpc: string; id: unknown; method: string; params: unknown[] }[] = [];
   // Targets outside `allowed`, by the call that first names each. They are checked together below (Credits' art
   // contract once, each batch address once, in parallel), not one call at a time.
@@ -4000,6 +4041,35 @@ function tokenOf(env: Env, ctx?: ExecutionContext): Promise<Address | null> {
       .then((a) => addrOrNull(a as string))
       .catch(() => null),
   );
+}
+/// The Bars edition's drawing as /bar/<n>.svg reads it, and BALANCE's ink: each wallet's BALANCE as a CMYK mix.
+const barArtAbi = [
+  { type: 'function', name: 'minted', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'image', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'string' }] },
+  { type: 'function', name: 'art', stateMutability: 'pure', inputs: [{ type: 'uint256' }, { type: 'uint256[4]' }], outputs: [{ type: 'string' }] },
+  { type: 'function', name: 'inkOf', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'uint256[4]' }] },
+] as const;
+/// A Bar's drawing framed to its number. The edition centres one 10-unit cell per digit on a white square at least 110
+/// units a side, which leaves a 28px tile a few specks; the frame is a square just around that row, 5 units of paper on
+/// each side. A drawing in any other shape is left as it is.
+function frameBar(svg: string, digits: number): string {
+  return svg.replace(/viewBox="0 0 (\d+) \1"/, (all, side: string) => {
+    const w = digits * 10 + 10, x = (Number(side) - w) / 2;
+    return x > 0 ? `viewBox="${x} ${x} ${w} ${w}"` : all;
+  });
+}
+/// `amount` split across the four inks in `ink`'s proportions, the remainder to the largest leftovers (as the edition's
+/// page previews a deposit). No ink at all: none, which the edition draws in black.
+function inkShare(ink: readonly bigint[], amount: bigint): readonly [bigint, bigint, bigint, bigint] {
+  const total = ink.reduce((a, b) => a + b, 0n);
+  if (ink.length !== 4 || !total) return [0n, 0n, 0n, 0n];
+  const out = ink.map((x) => (x * amount) / total), rest = ink.map((x) => (x * amount) % total);
+  for (let left = amount - out.reduce((a, b) => a + b, 0n); left > 0n; left--) {
+    const k = rest.indexOf(rest.reduce((a, b) => (b > a ? b : a)));
+    out[k]++;
+    rest[k] = -1n;
+  }
+  return [out[0], out[1], out[2], out[3]];
 }
 /// BALANCE's artwork contract (the token's artwork()), as far as the Worker reads it: which Balance a wallet holds, and
 /// its drawing. Its address never changes once read.

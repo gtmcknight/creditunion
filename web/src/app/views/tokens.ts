@@ -10,7 +10,7 @@
 import { erc20Abi, formatEther, formatUnits, parseEther, parseUnits, zeroAddress, type Address, type Hex } from 'viem';
 import { parseAbi } from 'viem';
 import { barRouterAbi, batchAbi, creditsAbi, factoryAbi, sweeperAbi, tokenAdapterAbi } from '../abi';
-import { barArtSrc, mintQuoteArgs, mintValue, quoterExactOutAbi } from '../../shared/bars';
+import { barArt, mintQuoteArgs, mintValue, quoterExactOutAbi } from '../../shared/bars';
 import { V4_QUOTER } from '../../shared/v4swap';
 import { balanceSvg, PURE, type Palette } from '../balance-art';
 import { canBatch, config, pub, send, sendBatch, sendSteps, session, type Call as TxCall } from '../chain';
@@ -571,39 +571,59 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
   let barsListed: { id: string; price: string; hash: string; protocol: string; holds: string }[] = [];
   /// The window, the router's fee, the number the next mint takes (null if the edition doesn't say) and how many are live.
   /// `step`: Bar #n holds n × step, so the next Bar holds `price`. Melting opens when minting closes (`meltOpen`).
-  const bw = { open: false, end: 0, fee: 100n, read: false, next: null as bigint | null, live: 0, step: 0n, price: 0n, meltOpen: false };
+  const bw = { open: false, start: 0, pub: 0, end: 0, fee: 100n, read: false, next: null as bigint | null, live: 0, step: 0n, price: 0n, meltOpen: false };
+  const dayOf = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   /// When melting opens, as "Nov 5".
-  const meltsFrom = () => new Date(bw.end).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const meltsFrom = () => dayOf(bw.end);
+  /// Before the window: minting opens at `start`, as "Nov 11, 11 AM" where the visitor is (minutes only off the hour).
+  const mintSoon = () => bw.read && Date.now() < bw.start;
+  const opensOn = () => {
+    const d = new Date(bw.start);
+    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', ...(d.getMinutes() ? { minute: '2-digit' as const } : {}) });
+  };
+  /// The days only a wallet list can mint (from `start` to the edition's publicStart, else the Worker's `publicAt`; the
+  /// edition's isOpen means open to everyone): a new Bar is minted on the edition's own
+  /// page, which has the list. Listed Bars are bought here all along, and minting here opens to everyone after.
+  const BARS_PAGE = 'https://jack.art/exchange/bars';
+  const listUntil = () => bw.pub || (config.bars?.publicAt ?? 0) * 1000;
+  const listOnly = () => bw.read && Date.now() >= bw.start && Date.now() < Math.min(listUntil(), bw.end);
+  /// ETH mints need the edition's checkout or our router; $BALANCE mints straight from the wallet.
+  const ethMints = () => !!(config.bars?.buyer || config.bars?.router);
   const meltLine = () => (bw.meltOpen ? 'melts back anytime' : `melts back from ${meltsFrom()}`);
   const meltShut = () => bw.read && !bw.meltOpen;
   /// Your Bars picked to melt (all of them, until you pick).
   const barPicks = new Set<string>();
   let barPicked = false;
   /// The edition's own ETH checkout (BAR_BUYER): the same pool, no fee of ours; mints to the caller, unused ETH back.
-  const BUYER_ABI = parseAbi(['function buyAndMint(uint256 maxQuantity, uint256 maxBalance, uint256 deadline) payable returns (uint256 first, uint256 quantity, uint256 total, uint256 ethSpent)']);
+  /// The ETH sent is agreed for `quotedBalance` (the number quoted): a later, dearer number may spend all of it.
+  const BUYER_ABI = parseAbi(['function buyAndMint(uint256 maxQuantity, uint256 maxBalance, uint256 quotedBalance, uint256 deadline) payable returns (uint256 first, uint256 quantity, uint256 total, uint256 ethSpent)']);
   /// Our fee on an ETH mint: none through the edition's checkout, the router's otherwise.
   const mintFee = () => (config.bars?.buyer ? 0 : Number(bw.fee));
-  const BARS_ABI = parseAbi(['function STEP() view returns (uint256)', 'function priceOf(uint256) view returns (uint256)', 'function minted() view returns (uint256)', 'function isOpen() view returns (bool)', 'function isMeltOpen() view returns (bool)', 'function mintEnd() view returns (uint64)', 'function mintUpTo(address to, uint256 maxQuantity, uint256 maxTotal) returns (uint256 first, uint256 quantity, uint256 total)', 'function meltBatch(uint256[] ids) returns (uint256)']);
+  const BARS_ABI = parseAbi(['function STEP() view returns (uint256)', 'function priceOf(uint256) view returns (uint256)', 'function minted() view returns (uint256)', 'function isOpen() view returns (bool)', 'function isMeltOpen() view returns (bool)', 'function mintStart() view returns (uint64)', 'function publicStart() view returns (uint64)', 'function mintEnd() view returns (uint64)', 'function mintUpTo(address to, uint256 maxQuantity, uint256 maxTotal) returns (uint256 first, uint256 quantity, uint256 total)', 'function meltBatch(uint256[] ids) returns (uint256)']);
   /// How many numbers a mint may move on when others land first. Bar #N holds N, so at most SLACK more $BALANCE.
   const SLACK = 100n;
   const readBars = async () => {
     const b = config.bars;
     if (!b) return;
     const json = <T,>(path: string, empty: T) => fetch(path).then((r) => (r.ok ? (r.json() as Promise<T>) : empty)).catch(() => empty);
-    const [mine, listed, open, end, fee, minted, step, meltOpen] = await Promise.all([
+    const [mine, listed, open, start, end, fee, minted, step, meltOpen, pubAt] = await Promise.all([
       account ? json<{ items?: { id: string; holds: string }[] }>(`/market/bars/owned/${account}.json`, {}) : Promise.resolve({ items: [] }),
       json<{ items?: typeof barsListed; live?: number }>('/market/bars.json', {}),
       (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'isOpen' }) as Promise<boolean>).catch(() => false),
+      (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'mintStart' }) as Promise<bigint>).then(Number).catch(() => 0),
       (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'mintEnd' }) as Promise<bigint>).then(Number).catch(() => 0),
-      (pub.readContract({ address: b.router, abi: barRouterAbi, functionName: 'feeBps' }) as Promise<bigint>).catch(() => 100n),
+      b.router ? (pub.readContract({ address: b.router, abi: barRouterAbi, functionName: 'feeBps' }) as Promise<bigint>).catch(() => 100n) : Promise.resolve(0n),
       (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'minted' }) as Promise<bigint>).catch(() => null),
       (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'STEP' }) as Promise<bigint>).catch(() => 0n),
       (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'isMeltOpen' }) as Promise<boolean>).catch(() => false),
+      // When it opens to everyone: the list-only days end. An edition without them answers nothing (the Worker's publicAt).
+      (pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'publicStart' }) as Promise<bigint>).then(Number).catch(() => 0),
     ]);
     const price = step && open ? ((await pub.readContract({ address: b.edition, abi: BARS_ABI, functionName: 'priceOf', args: [1n] }).catch(() => 0n)) as bigint) : 0n;
     myBars = (mine.items ?? []).map((x) => ({ id: BigInt(x.id), holds: BigInt(x.holds) }));
     barsListed = listed.items ?? [];
-    Object.assign(bw, { open, end: end * 1000, fee, read: true, next: minted === null ? null : minted + 1n, live: listed.live ?? 0, step, price, meltOpen });
+    // An edition that doesn't say when it starts: its window is 8 days, so that long before its end.
+    Object.assign(bw, { open, start: (start || Math.max(0, end - 8 * 86_400)) * 1000, end: end * 1000, pub: pubAt * 1000, fee, read: true, next: minted === null ? null : minted + 1n, live: listed.live ?? 0, step, price, meltOpen });
     if (app.querySelector('.tk-form') && viewNow() === 'buy') paint();
     void fillCosts();
     for (const id of [...barPicks]) if (!myBars.some((x) => String(x.id) === id)) barPicks.delete(id);
@@ -808,7 +828,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
         : a === 'balance'
           ? `<span class="tk-aicon tk-inks">${INK.map((c) => `<i style="background:${c}"></i>`).join('')}</span>`
           : a === 'bar'
-            ? `<span class="tk-aicon sq"><img src="${barArtSrc(String(myBars[0]?.id ?? 1n))}" alt=""></span>`
+            ? `<span class="tk-aicon sq"><img src="${barArt(myBars[0]?.id ?? 1n)}" alt=""></span>`
             : `<span class="tk-aicon tk-ethi">${ETH_ICON}</span>`;
   /// How `a` becomes `b`, in a few words: the To menu says it beside each.
   const how = (a: Asset, b: Asset) => {
@@ -820,7 +840,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     if (v === 'redeem') return 'Redeem at once';
     if (v === 'art') return a === 'eth' ? 'OpenSea' : 'Uniswap, then OpenSea';
     if (v === 'sellc') return cc.live ? 'Instant, at $CC’s bid' : 'List on OpenSea';
-    if (v === 'bar') return !bw.open ? (a === 'eth' ? 'OpenSea' : 'Minting closed') : a === 'eth' ? 'Mint, or OpenSea' : 'Mint, keeps your ink';
+    if (v === 'bar' && mintSoon()) return `Opens ${dayOf(bw.start)}`;
+    if (v === 'bar' && listOnly()) return a === 'eth' ? 'OpenSea' : `Mint opens ${dayOf(listUntil())}`;
+    if (v === 'bar') return !bw.open ? (a === 'eth' ? 'OpenSea' : 'Minting closed') : a === 'eth' ? (ethMints() ? 'Mint, or OpenSea' : 'OpenSea') : 'Mint, keeps your ink';
     if (v === 'melt') return b === 'balance' ? 'Melt at once' : 'Melt, then Uniswap';
     if (a === 'bar') return 'Melt, then swap';
     if (b === 'bar') return a === 'credit' ? 'Convert, then mint' : 'Redeem, then mint';
@@ -946,7 +968,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
             <div class="tk-lines term-desc"><p id="amt-line"></p><p id="route2"></p><p id="fees"></p></div>
           </section>
           <div class="submit">${goHtml(idleGo())}${sureHtml()}</div>`;
-  /// ETH or $BALANCE into a Bar: Pay, then the Bar (its barcode and the $BALANCE inside), and the ways: mint a new one
+  /// ETH or $BALANCE into a Bar: Pay, then the Bar (its art and the $BALANCE inside), and the ways: mint a new one
   /// while the window's open, or (with ETH) buy one listed on OpenSea.
   const barHtml = () => `${payHtml(from === 'balance')}
           <div class="tk-gethead"><h2 class="form-title">You get</h2></div>
@@ -955,9 +977,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
             <div class="tk-lines term-desc"><div class="tk-ways" role="radiogroup" aria-label="Way to get a Bar" id="bar-ways"></div><p id="amt-line"></p></div>
           </section>
           <div class="submit">${goHtml(idleGo())}${sureHtml()}</div>`;
-  /// A Bar as a tile: its barcode on white paper, the $BALANCE inside under it.
+  /// A Bar as a tile: its art as the edition draws it, the $BALANCE inside under it.
   const barTile = (x: { id: bigint; holds: bigint }) =>
-    `<button type="button" class="pick" data-bar="${x.id}" aria-pressed="${barPicks.has(String(x.id))}" aria-label="Bar #${x.id}" title="Bar #${x.id} · ${tokAmt(x.holds)} ${TOKEN} inside"><img src="${barArtSrc(String(x.id))}" alt="" loading="lazy"><span class="pick-id num">${whole(Number(formatUnits(x.holds, 18)))}</span></button>`;
+    `<button type="button" class="pick" data-bar="${x.id}" aria-pressed="${barPicks.has(String(x.id))}" aria-label="Bar #${x.id}" title="Bar #${x.id} · ${tokAmt(x.holds)} ${TOKEN} inside"><img src="${barArt(x.id)}" alt="" loading="lazy"><span class="pick-id num">${whole(Number(formatUnits(x.holds, 18)))}</span></button>`;
   /// Your Bars to melt: a row to pick from (all of them, picked), what they hold, and the one way.
   function meltHtml() {
     return `
@@ -1418,7 +1440,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const b = sweeps && market === 'ready' ? viaBatch(wei, laneKey, capOf(lane())) : null;
     const left = b?.out.length && poolOk() && wei - b.spent >= DUST ? wei - b.spent : 0n;
     // Listed Bars melted (Mixed only: their colours are anyone's), and what the ETH they leave buys on Uniswap.
-    barBuy = lane().ink < 0 && bw.meltOpen ? barsFor(wei) : null;
+    barBuy = lane().ink < 0 && bw.meltOpen && config.bars?.router ? barsFor(wei) : null;
     const barLeft = barBuy && poolOk() && wei - barBuy.cost >= DUST ? wei - barBuy.cost : 0n;
     let q: bigint | null = null, qLeft: bigint | null = null, qBarLeft: bigint | null = null;
     if (wei && poolOk()) {
@@ -1798,7 +1820,10 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     let mintHolds = 0n, mintEth = amt, mintNeed = 0n, mintSend = 0n;
     // A mint takes whatever number is next when it lands, up to SLACK numbers on from the one quoted.
     const capBal = bw.price + SLACK * bw.step;
-    if (bw.open && bw.step && bw.price) {
+    // Minting here: the window is open to everyone, and ETH has a checkout or router to go through.
+    const soon = mintSoon(), listDays = listOnly();
+    const mintHere = bw.open && !listDays && (!eth || ethMints());
+    if (mintHere && bw.step && bw.price) {
       // The next Bar holds a set amount; ETH buys exactly that on Uniswap, any fee of ours and 1% room on top.
       if (!eth) mintHolds = amt >= bw.price ? bw.price : 0n;
       else {
@@ -1824,7 +1849,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     if (way === 'listed' && listing) barPlan = { way, amount: BigInt(listing.holds), value: BigInt(listing.price), cap: 0n, listing };
     const holds = barPlan?.amount ?? 0n;
     const num = barPlan?.listing?.id ?? (bw.next !== null ? String(bw.next) : '');
-    setText('bar-get', `${holds ? `<span class="tk-stack"><img src="${barArtSrc(num || 'NEW')}" alt=""></span>` : ''}<span class="num tk-out">${holds ? whole(Number(formatUnits(holds, 18))) : '0'}</span>`);
+    setText('bar-get', `${holds && num ? `<span class="tk-stack"><img src="${barArt(num)}" alt=""></span>` : ''}<span class="num tk-out">${holds ? whole(Number(formatUnits(holds, 18))) : '0'}</span>`);
     // A mint takes the next number unless someone mints first, so it says so.
     setText('route', !holds ? '' : barPlan!.listing ? `Bar #${barPlan!.listing.id} · ${TOKEN} inside, ${meltLine()}` : `${num ? `Bar #${num}` : 'A new Bar'} · ${TOKEN} inside, ${meltLine()}`);
     // A mint someone lands first moves this one to the next number.
@@ -1834,23 +1859,31 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
     const radio = (k: 'mint' | 'listed', name: string, sub: string, right: string) =>
       `<button type="button" class="tk-way" role="radio" data-barway="${k}" aria-checked="${way === k}"><span><b>${name}</b><span class="muted small">${sub}</span></span><span class="num">${right}</span></button>`;
     const mintShows = mintHolds || (bw.step ? bw.price : 0n);
-    if (bw.open) rows.push(radio('mint', 'Mint', `${closesIn()} left · ${eth ? (config.bars?.buyer ? 'Uniswap fee included' : 'Fees included') : 'Your ink, no fee'}`, mintShows ? whole(Number(formatUnits(mintShows, 18))) : '—'));
+    if (mintHere) rows.push(radio('mint', 'Mint', `${closesIn()} left · ${eth ? (config.bars?.buyer ? 'Uniswap fee included' : 'Fees included') : 'Your ink, no fee'}`, mintShows ? whole(Number(formatUnits(mintShows, 18))) : '—'));
     if (eth && listing) rows.push(radio('listed', `Bar #${listing.id}`, `OpenSea · ${ethNum(BigInt(listing.price), 4)} ETH`, whole(Number(formatUnits(BigInt(listing.holds), 18)))));
+    // The wallet list's days, and the days before them: minting is on the edition's page. A row like the rest, a link out.
+    if (listDays || (soon && listUntil() > Date.now()))
+      rows.push(`<a href="${BARS_PAGE}" target="_blank" rel="noopener" class="tk-way"><span><b>Mint</b><span class="muted small">Wallet list only until ${dayOf(listUntil())}</span></span><span class="num">jack.art ↗</span></a>`);
     setText('bar-ways', rows.join(''));
-    const closed = bw.read && !bw.open;
+    const closed = bw.read && !bw.open && Date.now() >= bw.end;
+    const noListed = barsListed.length ? 'Not enough for a listed Bar' : 'No Bars listed yet';
     // By count, a mint takes a set amount: too little says what it takes, a tap away.
-    const minMint = bw.open && bw.step && !mintHolds ? (eth ? mintNeed : bw.price) : 0n;
+    const minMint = mintHere && bw.step && !mintHolds ? (eth ? mintNeed : bw.price) : 0n;
     setText(
       'amt-line',
-      closed && !eth ? 'Minting has closed. Listed Bars take ETH.'
+      soon || listDays ? ''
+      : closed && !eth ? 'Minting has closed. Listed Bars take ETH.'
       : closed && eth && amt && !listing && barsListed.length ? 'Not enough for a listed Bar.'
+      : bw.open && eth && !ethMints() && !listing ? `<button type="button" class="link small" data-swap="balance:bar">Mint with ${TOKEN} instead</button>`
       : minMint && amt && !listing ? `<button type="button" class="link small" id="amt-min" data-amt="${eth ? ethNum(minMint, 4, true) : formatUnits(minMint, 18)}">Bar #${bw.next ?? ''} takes ${eth ? `${ethNum(minMint, 4, true)} ETH` : `${tokAmt(minMint)} ${TOKEN}`}</button>`
       : '',
     );
     const short = eth ? ethHeld !== null && amt > ethHeld : !!account && amt > tokenHeld;
+    // Nothing to do here yet says when there will be: the day minting opens, or the day it opens to everyone.
+    const waits = soon ? `Opens ${opensOn()}` : listDays && !eth ? `Mint opens ${dayOf(listUntil())}` : '';
     setGo(
-      !amt ? idleGo() : short ? `Not enough ${eth ? 'ETH' : sym()}` : !barPlan ? (closed && !eth ? 'Minting closed' : eth || bw.step ? `Not enough for ${bw.step && bw.next ? `Bar #${bw.next}` : 'a Bar'}` : `At least 1 ${TOKEN}`) : barPlan.listing ? `Get Bar #${barPlan.listing.id}` : bw.step && eth && num ? `Mint Bar #${num} · ${ethNum(mintNeed, 4)} ETH` : `Mint a Bar · ${whole(Number(formatUnits(holds, 18)))} ${TOKEN}`,
-      !!barPlan && !short,
+      waits ? waits : !amt ? idleGo() : short ? `Not enough ${eth ? 'ETH' : sym()}` : !barPlan ? ((bw.open || listDays) && eth && !mintHere ? noListed : closed && !eth ? 'Minting closed' : eth || bw.step ? `Not enough for ${bw.step && bw.next ? `Bar #${bw.next}` : 'a Bar'}` : `At least 1 ${TOKEN}`) : barPlan.listing ? `Get Bar #${barPlan.listing.id}` : bw.step && eth && num ? `Mint Bar #${num} · ${ethNum(mintNeed, 4)} ETH` : `Mint a Bar · ${whole(Number(formatUnits(holds, 18)))} ${TOKEN}`,
+      !waits && !!barPlan && !short,
     );
   }
   /// Your Bars picked to melt: the $BALANCE they hold, or what it sells for.
@@ -2182,6 +2215,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
         paint();
       });
     document.getElementById('amt-line')?.addEventListener('click', (e) => {
+      // A line that offers another pair (minting with $BALANCE when ETH has no way to) switches the box to it.
+      const swap = (e.target as HTMLElement).closest<HTMLElement>('[data-swap]')?.dataset.swap;
+      if (swap) return goPair(...(swap.split(':') as [Asset, Asset]));
       const min = (e.target as HTMLElement).closest<HTMLElement>('#amt-min')?.dataset.amt;
       if (!min || !amt) return;
       typed = amt.value = min;
@@ -2364,8 +2400,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
               const tx = (await r.json()) as { to?: Address; data?: Hex; value?: string; error?: string };
               if (!r.ok || !tx.to || !tx.data || !tx.value) throw new Error(tx.error ?? 'That Bar can’t be bought right now.');
               steps.push({ to: tx.to, data: tx.data, value: BigInt(tx.value) });
-            } else if (from === 'eth' && b.buyer) steps.push({ address: b.buyer, abi: BUYER_ABI, functionName: 'buyAndMint', args: [1n, p.cap, BigInt(Math.floor(Date.now() / 1000) + 1200)], value: p.value });
-            else if (from === 'eth') steps.push({ address: b.router, abi: barRouterAbi, functionName: 'mint', args: [account!, 1n, bw.fee, p.cap], value: p.value });
+            } else if (from === 'eth' && b.buyer) steps.push({ address: b.buyer, abi: BUYER_ABI, functionName: 'buyAndMint', args: [1n, p.cap, p.amount, BigInt(Math.floor(Date.now() / 1000) + 1200)], value: p.value });
+            else if (from === 'eth' && b.router) steps.push({ address: b.router, abi: barRouterAbi, functionName: 'mint', args: [account!, 1n, bw.fee, p.cap], value: p.value });
+            else if (from === 'eth') throw new Error(`Minting takes ${TOKEN} right now.`);
             else {
               const allowed = (await pub.readContract({ address: m!.token, abi: erc20Abi, functionName: 'allowance', args: [account!, b.edition] })) as bigint;
               if (allowed < p.cap) steps.push({ address: m!.token, abi: erc20Abi, functionName: 'approve', args: [b.edition, p.cap] });
@@ -2480,7 +2517,7 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
         });
       }
       // Listed Bars bought and melted in one call through the router: the $BALANCE inside comes to you, all of them or none.
-      if (v === 'buy' && route === 'bar' && barBuy && config.bars) {
+      if (v === 'buy' && route === 'bar' && barBuy && config.bars?.router) {
         const p = barBuy, router = config.bars.router;
         return run(
           go,
@@ -2647,9 +2684,9 @@ export async function tokensPage(app: HTMLElement, rerun: () => void, where: 'ho
       barWay = w;
       void barSync();
     });
-    // Minting's countdown and price keep up while the box is open on it.
-    if (viewNow() === 'bar' && bw.open) {
-      const tick = setInterval(() => !busy && document.visibilityState === 'visible' && void barSync(), 60_000);
+    // Minting's countdown and price keep up while the box is open on it, and the box opens when minting does.
+    if (viewNow() === 'bar' && (bw.open || mintSoon() || listOnly())) {
+      const tick = setInterval(() => !busy && document.visibilityState === 'visible' && void (!bw.open && Date.now() >= bw.start && !listOnly() ? readBars() : barSync()), 60_000);
       drawn.signal.addEventListener('abort', () => clearInterval(tick));
     }
     document.getElementById('bar-picker')?.addEventListener('click', (e) => {
