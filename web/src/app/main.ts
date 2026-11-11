@@ -134,6 +134,7 @@ async function route() {
     else if (page === 'party' && /^0x[0-9a-fA-F]{40}$/.test(arg ?? '')) await party(app, arg as Address, route);
     else if (page === 'parties' || page === 'auctions') await lists(app, page);
     else if (page === 'statements') await lists(app, 'auctions');
+    else if (page === 'bars') await (await import('./views/bars')).barsPage(app);
     else home(app);
     retried = null;
   } catch (e) {
