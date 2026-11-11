@@ -433,6 +433,10 @@ async function activityAll(env: Env, url: URL, ctx: ExecutionContext, part: Feed
   return read;
 }
 
+/// Bar mints and melts in the feed: the latest few. Every one made anywhere still moves the ticker, but thousands made on
+/// the edition's own page don't push Credit Union's own sales, swaps and unions off Activity.
+const BAR_ROWS = 10;
+
 /// The feed read from the chain: the scan state lives in `store` (the colo cache, or the ChainBook's storage).
 async function activityItems(env: Env, store: Cache, stateKey: string): Promise<Activity[]> {
   const c = client(env);
@@ -464,7 +468,7 @@ async function activityItems(env: Env, store: Cache, stateKey: string): Promise<
     ...converts.filter((x) => !(x.kind === 'deposited' && sold.has(x.tx))),
     ...swaps,
     ...sales.map((x) => (x.union ? { ...x, name: names.get(x.union.toLowerCase()) ?? x.name } : x)),
-    ...barRows,
+    ...barRows.slice(0, BAR_ROWS),
   ];
   const items = extra.length ? [...main, ...extra].sort((a, b) => b.block - a.block || b.i - a.i) : main;
   // A plan's union stays out of Activity until it fills.

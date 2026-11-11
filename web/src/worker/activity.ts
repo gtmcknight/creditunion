@@ -336,9 +336,11 @@ const BAR_EVENTS = parseAbi([
   'event Melted(uint256 indexed id, address indexed owner, uint256 amount)',
 ]);
 type BarState = { v: 1; last: number; items: Activity[] };
+const BAR_KEEP = 100;
 
 /// Bars minted and melted, newest first, scanned forward from where the last scan stopped like readActivity. Every
 /// mint and melt on the edition, whichever site it came from: the window is eight days, and the feed shows it moving.
+/// The feed shows only the latest few, so the state keeps BAR_KEEP of them (up to 20,000 otherwise).
 export async function readBarActivity(c: PublicClient, cache: Cache, stateKey: string, cfg: { edition: Address; from: bigint }): Promise<Activity[]> {
   const hit = await cache.match(stateKey);
   const st: BarState = hit ? ((await hit.json()) as BarState) : { v: 1, last: Number(cfg.from) - 1, items: [] };
@@ -357,7 +359,7 @@ export async function readBarActivity(c: PublicClient, cache: Cache, stateKey: s
   const blocks = [...new Set(newest.map((x) => x.block))];
   await Promise.all(blocks.slice(0, EXACT).map(async (n) => times.set(n, Number((await c.getBlock({ blockNumber: BigInt(n) })).timestamp))));
   if (blocks.length > EXACT) for (const n of blocks.slice(EXACT)) times.set(n, times.get(blocks[0])! - (blocks[0] - n) * SLOT);
-  const items = [...newest.map((x) => ({ ...x, time: times.get(x.block) ?? 0 })), ...st.items];
+  const items = [...newest.map((x) => ({ ...x, time: times.get(x.block) ?? 0 })), ...st.items].slice(0, BAR_KEEP);
   await cache.put(stateKey, Response.json({ v: 1, last: Number(head), items } satisfies BarState, { headers: { 'cache-control': 'public, max-age=86400' } }));
   return items;
 }
