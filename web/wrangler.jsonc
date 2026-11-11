@@ -53,7 +53,7 @@
     "BARS_EDITION": "0x7d9EdeA03dD97361c3e21389B95bc327e22752aE",
     "BAR_BUYER": "0xd49A3720bcd150E249414fB03E14eA5D4E007384",
     "BARS_FROM_BLOCK": "26392068",
-    "BARS_SLUG": "bars-332744069",
+    "BARS_SLUG": "balancebars",
     "BARS_PUBLIC_AT": "1794672000"
   },
   // creditunion.party, eighty.fun and eighty.rhps.fun are old names kept so their links still work. A fork puts its own domain here.
